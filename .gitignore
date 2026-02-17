@@ -1,0 +1,8 @@
+# directories
+__pycache__
+node_modules
+tmp
+
+# files
+environment.sh
+notes.md
