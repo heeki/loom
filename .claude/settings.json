@@ -1,0 +1,18 @@
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "CLAUDE_CODE_USE_BEDROCK": "1"
+  },
+  "defaultMode": "plan",
+  "permissions":{
+    "allow": [
+      "Bash(tmux capture-pane:*)",
+      "Bash(tmux list-panes:*)",
+      "Bash(tmux send-keys:*)",
+      "Bash(tmux kill-pane:*)",
+      "Bash(do tmux:*)"
+    ],
+    "deny": []
+  },
+  "teammateMode": "auto"
+}

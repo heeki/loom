@@ -17,7 +17,8 @@
   - Commands: `uv pip install`, `uv venv`. 
   - Each agent in `agents/` should have its own `.venv` managed via `uv`.
 - Dependency Management (TypeScript): Use `npm`.
-  - Ensure `node_modules` stay within the relevant directory. 
+  - Ensure `node_modules` stay within the relevant directory.
+- Formatting JSON outputs: Prefer `jq` over `python -m json.tool`
 
 ## Coding Standards
 ### Python

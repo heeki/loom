@@ -1,8 +1,11 @@
 # directories
 __pycache__
+.pytest_cache
+.venv
 node_modules
 tmp
 
 # files
 environment.sh
+loom.db
 notes.md

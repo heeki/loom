@@ -1,1 +1,0 @@
-include etc/environment.sh
