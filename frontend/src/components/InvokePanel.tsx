@@ -26,8 +26,10 @@ export function InvokePanel({ qualifiers, sessions, isStreaming, onInvoke, onCan
   const [qualifier, setQualifier] = useState(qualifiers[0] ?? "DEFAULT");
   const [selectedSession, setSelectedSession] = useState(NEW_SESSION);
 
-  // Filter sessions that match the selected qualifier
-  const matchingSessions = sessions.filter((s) => s.qualifier === qualifier);
+  // Filter sessions that match the selected qualifier and are not expired
+  const matchingSessions = sessions.filter(
+    (s) => s.qualifier === qualifier && s.live_status !== "expired"
+  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
