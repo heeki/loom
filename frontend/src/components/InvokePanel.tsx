@@ -74,10 +74,10 @@ export function InvokePanel({ qualifiers, sessions, isStreaming, onInvoke, onCan
             )}
             <Select value={selectedSession} onValueChange={setSelectedSession}>
               <SelectTrigger className="w-80">
-                <SelectValue placeholder="New Session" />
+                <SelectValue placeholder="New session" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={NEW_SESSION}>New Session</SelectItem>
+                <SelectItem value={NEW_SESSION}>New session</SelectItem>
                 {matchingSessions.map((s) => (
                   <SelectItem key={s.session_id} value={s.session_id}>
                     <span className="font-mono text-xs">{s.session_id}</span>

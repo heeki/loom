@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,7 @@ function statusVariant(status: string | null): "default" | "secondary" | "destru
 
 export function AgentCard({ agent, onSelect, onRefresh, onDelete }: AgentCardProps) {
   const { timezone } = useTimezone();
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
 
   return (
     <Card
@@ -65,13 +67,41 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete }: AgentCardPro
         {agent.registered_at && (
           <div>Registered: {formatTimestamp(agent.registered_at, timezone)}</div>
         )}
-        <div className="flex gap-2 pt-2" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between gap-2 pt-2" onClick={(e) => e.stopPropagation()}>
           <Button size="sm" variant="outline" onClick={() => onRefresh(agent.id)}>
             Refresh
           </Button>
-          <Button size="sm" variant="destructive" onClick={() => onDelete(agent.id)}>
-            Remove
-          </Button>
+          <div className="flex gap-2">
+            {confirmingRemove ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setConfirmingRemove(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => {
+                    onDelete(agent.id);
+                    setConfirmingRemove(false);
+                  }}
+                >
+                  Confirm remove
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setConfirmingRemove(true)}
+              >
+                Remove
+              </Button>
+            )}
+          </div>
         </div>
       </CardContent>
     </Card>
