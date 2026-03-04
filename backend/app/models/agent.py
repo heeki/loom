@@ -1,7 +1,7 @@
 """Agent ORM model for storing registered AgentCore Runtime metadata."""
 import json
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean
 from sqlalchemy.orm import relationship
 from app.db import Base
 
@@ -32,11 +32,20 @@ class Agent(Base):
     log_group = Column(String, nullable=True)
     available_qualifiers = Column(Text, nullable=True)  # JSON array as text
     raw_metadata = Column(Text, nullable=True)  # Full JSON from AgentCore API
+    source = Column(String, nullable=True)  # 'register' or 'deploy'
+    deployment_status = Column(String, nullable=True)  # 'deploying', 'deployed', 'failed', 'removing'
+    execution_role_arn = Column(String, nullable=True)
+    code_uri = Column(String, nullable=True)  # S3 URI
+    config_hash = Column(String, nullable=True)
+    deployed_at = Column(DateTime, nullable=True)
     registered_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     last_refreshed_at = Column(DateTime, nullable=True)
 
-    # Relationship to invocation sessions
+    # Relationships
     sessions = relationship("InvocationSession", back_populates="agent", cascade="all, delete-orphan")
+    config_entries = relationship("ConfigEntry", back_populates="agent", cascade="all, delete-orphan")
+    credential_providers = relationship("CredentialProvider", back_populates="agent", cascade="all, delete-orphan")
+    integrations = relationship("Integration", back_populates="agent", cascade="all, delete-orphan")
 
     def get_available_qualifiers(self) -> list[str]:
         """Parse available_qualifiers from JSON text."""
@@ -76,6 +85,12 @@ class Agent(Base):
             "account_id": self.account_id,
             "log_group": self.log_group,
             "available_qualifiers": self.get_available_qualifiers(),
+            "source": self.source,
+            "deployment_status": self.deployment_status,
+            "execution_role_arn": self.execution_role_arn,
+            "code_uri": self.code_uri,
+            "config_hash": self.config_hash,
+            "deployed_at": (self.deployed_at.isoformat() + "Z") if self.deployed_at else None,
             "registered_at": (self.registered_at.isoformat() + "Z") if self.registered_at else None,
             "last_refreshed_at": (self.last_refreshed_at.isoformat() + "Z") if self.last_refreshed_at else None,
         }

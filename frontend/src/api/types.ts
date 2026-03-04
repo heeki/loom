@@ -12,10 +12,84 @@ export interface AgentResponse {
   active_session_count: number;
   registered_at: string | null;
   last_refreshed_at: string | null;
+  source: "register" | "deploy" | null;
+  deployment_status: "deploying" | "deployed" | "failed" | "removing" | null;
+  execution_role_arn: string | null;
+  code_uri: string | null;
+  config_hash: string | null;
+  deployed_at: string | null;
 }
 
 export interface AgentRegisterRequest {
   arn: string;
+}
+
+export interface AgentDeployRequest {
+  name: string;
+  code_uri: string;
+  config?: Record<string, string>;
+}
+
+// Config types
+export interface ConfigEntry {
+  id: number;
+  agent_id: number;
+  key: string;
+  value: string;
+  is_secret: boolean;
+  source: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConfigUpdateRequest {
+  entries: { key: string; value: string; is_secret: boolean }[];
+}
+
+// Credential provider types
+export interface CredentialProvider {
+  id: number;
+  agent_id: number;
+  name: string;
+  vendor: string;
+  callback_url: string;
+  scopes: string[];
+  provider_type: string;
+  created_at: string;
+}
+
+export interface CredentialProviderCreateRequest {
+  name: string;
+  vendor: string;
+  client_id: string;
+  client_secret: string;
+  auth_server_url: string;
+  scopes: string[];
+  provider_type: string;
+}
+
+// Integration types
+export interface AgentIntegration {
+  id: number;
+  agent_id: number;
+  integration_type: string;
+  integration_config: Record<string, string>;
+  credential_provider_id: number | null;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IntegrationCreateRequest {
+  integration_type: string;
+  integration_config: Record<string, string>;
+  credential_provider_id?: number;
+}
+
+export interface IntegrationUpdateRequest {
+  integration_config?: Record<string, string>;
+  credential_provider_id?: number | null;
+  enabled?: boolean;
 }
 
 // Invocation types

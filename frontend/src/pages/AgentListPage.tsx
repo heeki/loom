@@ -10,6 +10,7 @@ interface AgentListPageProps {
   loading: boolean;
   onSelectAgent: (id: number) => void;
   onRegister: (arn: string) => Promise<unknown>;
+  onDeploy?: (name: string, codeUri: string, config?: Record<string, string>) => Promise<unknown>;
   onRefresh: (id: number) => Promise<unknown>;
   onDelete: (id: number) => Promise<void>;
 }
@@ -19,20 +20,34 @@ export function AgentListPage({
   loading,
   onSelectAgent,
   onRegister,
+  onDeploy,
   onRefresh,
   onDelete,
 }: AgentListPageProps) {
-  const [registering, setRegistering] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const handleRegister = async (arn: string) => {
-    setRegistering(true);
+    setSubmitting(true);
     try {
       await onRegister(arn);
       toast.success("Agent registered");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Registration failed");
     } finally {
-      setRegistering(false);
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeploy = async (name: string, codeUri: string, config?: Record<string, string>) => {
+    if (!onDeploy) return;
+    setSubmitting(true);
+    try {
+      await onDeploy(name, codeUri, config);
+      toast.success("Agent deployment started");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Deployment failed");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -56,7 +71,11 @@ export function AgentListPage({
 
   return (
     <div className="space-y-6">
-      <AgentRegistrationForm onRegister={handleRegister} isLoading={registering} />
+      <AgentRegistrationForm
+        onRegister={handleRegister}
+        onDeploy={onDeploy ? handleDeploy : undefined}
+        isLoading={submitting}
+      />
 
       {loading ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

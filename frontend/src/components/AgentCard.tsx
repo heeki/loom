@@ -28,6 +28,23 @@ function statusVariant(status: string | null): "default" | "secondary" | "destru
   }
 }
 
+function deploymentStatusVariant(
+  status: string | null,
+): "default" | "secondary" | "destructive" | "outline" {
+  switch (status) {
+    case "deployed":
+      return "default";
+    case "deploying":
+      return "secondary";
+    case "failed":
+      return "destructive";
+    case "removing":
+      return "outline";
+    default:
+      return "outline";
+  }
+}
+
 export function AgentCard({ agent, onSelect, onRefresh, onDelete }: AgentCardProps) {
   const { timezone } = useTimezone();
   const [confirmingRemove, setConfirmingRemove] = useState(false);
@@ -42,14 +59,28 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete }: AgentCardPro
           <CardTitle className="text-sm font-medium">
             {agent.name ?? agent.runtime_id}
           </CardTitle>
-          <Badge variant={statusVariant(agent.status)}>
-            {agent.status ?? "unknown"}
-          </Badge>
+          <div className="flex items-center gap-1">
+            {agent.deployment_status && (
+              <Badge variant={deploymentStatusVariant(agent.deployment_status)}>
+                {agent.deployment_status}
+              </Badge>
+            )}
+            <Badge variant={statusVariant(agent.status)}>
+              {agent.status ?? "unknown"}
+            </Badge>
+          </div>
         </div>
-        <div className="text-xs text-muted-foreground">
-          {agent.active_session_count > 0
-            ? `${agent.active_session_count} active session(s)`
-            : "No active sessions"}
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          {agent.source && (
+            <span className="text-[10px] uppercase tracking-wide font-medium">
+              {agent.source === "deploy" ? "Deployed" : "Registered"}
+            </span>
+          )}
+          <span>
+            {agent.active_session_count > 0
+              ? `${agent.active_session_count} active session(s)`
+              : "No active sessions"}
+          </span>
         </div>
       </CardHeader>
       <CardContent className="space-y-2 text-xs text-muted-foreground">

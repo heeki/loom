@@ -67,7 +67,7 @@ function AppContent() {
     document.documentElement.classList.toggle("dark", theme === "dark");
   }, [theme]);
 
-  const { agents, loading, fetchAgents, registerAgent, refreshAgent, deleteAgent } = useAgents();
+  const { agents, loading, fetchAgents, registerAgent, deployAgent, redeployAgent, refreshAgent, deleteAgent } = useAgents();
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessionDetail, setSessionDetail] = useState<SessionResponse | null>(null);
@@ -204,6 +204,7 @@ function AppContent() {
             loading={loading}
             onSelectAgent={setSelectedAgentId}
             onRegister={registerAgent}
+            onDeploy={deployAgent}
             onRefresh={refreshAgent}
             onDelete={deleteAgent}
           />
@@ -216,6 +217,7 @@ function AppContent() {
             sessionsLoading={sessionsLoading}
             onSelectSession={setSelectedSessionId}
             onSessionsRefresh={() => void refetchSessions()}
+            onRedeploy={async (id) => { await redeployAgent(id); }}
           />
         )}
 

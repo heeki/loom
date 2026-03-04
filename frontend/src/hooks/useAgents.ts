@@ -33,6 +33,24 @@ export function useAgents() {
     [fetchAgents],
   );
 
+  const deployAgent = useCallback(
+    async (name: string, codeUri: string, config?: Record<string, string>) => {
+      const agent = await agentsApi.deployAgent({ name, code_uri: codeUri, config });
+      await fetchAgents();
+      return agent;
+    },
+    [fetchAgents],
+  );
+
+  const redeployAgent = useCallback(
+    async (id: number) => {
+      const agent = await agentsApi.redeployAgent(id);
+      await fetchAgents();
+      return agent;
+    },
+    [fetchAgents],
+  );
+
   const refreshAgent = useCallback(
     async (id: number) => {
       const agent = await agentsApi.refreshAgent(id);
@@ -50,5 +68,5 @@ export function useAgents() {
     [fetchAgents],
   );
 
-  return { agents, loading, error, fetchAgents, registerAgent, refreshAgent, deleteAgent };
+  return { agents, loading, error, fetchAgents, registerAgent, deployAgent, redeployAgent, refreshAgent, deleteAgent };
 }

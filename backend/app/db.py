@@ -58,6 +58,12 @@ def _migrate_add_columns(eng) -> None:
         ("invocations", "prompt_text", "TEXT"),
         ("invocations", "thinking_text", "TEXT"),
         ("invocations", "response_text", "TEXT"),
+        ("agents", "source", "VARCHAR"),
+        ("agents", "deployment_status", "VARCHAR"),
+        ("agents", "execution_role_arn", "VARCHAR"),
+        ("agents", "code_uri", "VARCHAR"),
+        ("agents", "config_hash", "VARCHAR"),
+        ("agents", "deployed_at", "DATETIME"),
     ]
 
     for table, column, col_type in migrations:
