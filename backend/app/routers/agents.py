@@ -1,13 +1,18 @@
 """Agent registration and management endpoints."""
+import os
 import re
+import time
 from datetime import datetime
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models.agent import Agent
+from app.models.session import InvocationSession
+from app.models.invocation import Invocation
 
 from app.services.agentcore import describe_runtime, list_runtime_endpoints
 
@@ -34,6 +39,7 @@ class AgentResponse(BaseModel):
     available_qualifiers: List[str]
     registered_at: str | None
     last_refreshed_at: str | None
+    active_session_count: int
 
 
 def parse_arn(arn: str) -> tuple[str, str, str]:
@@ -62,6 +68,45 @@ def derive_log_group(runtime_id: str, qualifier: str) -> str:
     Format: /aws/bedrock-agentcore/runtimes/{runtime_id}-{qualifier}
     """
     return f"/aws/bedrock-agentcore/runtimes/{runtime_id}-{qualifier}"
+
+
+def compute_active_session_count(agent_id: int, db: Session) -> int:
+    """
+    Count sessions that are likely still warm in AWS.
+
+    Sessions with status pending/streaming are always active.
+    For complete/error sessions, check if the most recent invocation's
+    client_done_time is within SESSION_IDLE_TIMEOUT_MINUTES of now.
+    Falls back to created_at if no client_done_time exists.
+    """
+    timeout_minutes = int(os.getenv("SESSION_IDLE_TIMEOUT_MINUTES", "15"))
+    timeout_seconds = timeout_minutes * 60
+    now_ts = time.time()
+    now_dt = datetime.utcnow()
+
+    sessions = db.query(InvocationSession).filter(
+        InvocationSession.agent_id == agent_id
+    ).all()
+
+    count = 0
+    for session in sessions:
+        if session.status in ("pending", "streaming"):
+            count += 1
+            continue
+
+        # For complete/error sessions, check recency
+        max_done_time = db.query(func.max(Invocation.client_done_time)).filter(
+            Invocation.session_id == session.session_id
+        ).scalar()
+
+        if max_done_time is not None:
+            if (now_ts - max_done_time) < timeout_seconds:
+                count += 1
+        elif session.created_at:
+            if (now_dt - session.created_at).total_seconds() < timeout_seconds:
+                count += 1
+
+    return count
 
 
 @router.post("", response_model=AgentResponse, status_code=status.HTTP_201_CREATED)
@@ -123,14 +168,17 @@ def register_agent(
     db.commit()
     db.refresh(agent)
 
-    return AgentResponse(**agent.to_dict())
+    return AgentResponse(**agent.to_dict(), active_session_count=0)
 
 
 @router.get("", response_model=List[AgentResponse])
 def list_agents(db: Session = Depends(get_db)) -> List[AgentResponse]:
     """List all registered agents."""
     agents = db.query(Agent).order_by(Agent.registered_at.desc()).all()
-    return [AgentResponse(**agent.to_dict()) for agent in agents]
+    return [
+        AgentResponse(**agent.to_dict(), active_session_count=compute_active_session_count(agent.id, db))
+        for agent in agents
+    ]
 
 
 @router.get("/{agent_id}", response_model=AgentResponse)
@@ -142,7 +190,7 @@ def get_agent(agent_id: int, db: Session = Depends(get_db)) -> AgentResponse:
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Agent with ID {agent_id} not found"
         )
-    return AgentResponse(**agent.to_dict())
+    return AgentResponse(**agent.to_dict(), active_session_count=compute_active_session_count(agent.id, db))
 
 
 @router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -193,4 +241,4 @@ def refresh_agent(agent_id: int, db: Session = Depends(get_db)) -> AgentResponse
     db.commit()
     db.refresh(agent)
 
-    return AgentResponse(**agent.to_dict())
+    return AgentResponse(**agent.to_dict(), active_session_count=compute_active_session_count(agent.id, db))

@@ -30,6 +30,6 @@ class InvocationSession(Base):
             "session_id": self.session_id,
             "qualifier": self.qualifier,
             "status": self.status,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": (self.created_at.isoformat() + "Z") if self.created_at else None,
             "invocations": [inv.to_dict() for inv in self.invocations] if self.invocations else [],
         }

@@ -1,40 +1,74 @@
-# Loom: A Simple Agent Platform Prototype
+# Loom: Agent Builder Playground
 
-This project is a prototype for an agent platform that simplifies the process of building, testing, integrating, deploying, and operating agents. The platform provides a streamlined user experience with an opinionated backend architecture.
-
-## Overview
-
-The agent platform prototype leverages:
-- **Amazon Bedrock AgentCore** for foundational agent capabilities
-- **AWS Strands Agents** for advanced reasoning and planning
-
-This combination provides a robust foundation for creating intelligent agents that can handle complex tasks while maintaining simplicity in development and operations.
+A platform for building, testing, and operating AI agents on Amazon Bedrock AgentCore Runtime and AWS Strands Agents. Loom provides a streamlined UI and opinionated backend for agent lifecycle management.
 
 ## Features
 
-- Simple agent creation workflow
-- Integrated testing environment
-- Seamless deployment processes
-- Operational tooling for monitoring and maintenance
-- Opinionated backend that reduces configuration complexity
+- Agent registration via AgentCore Runtime ARN
+- SSE streaming invocation with real-time response display
+- Cold-start latency measurement via automatic CloudWatch log parsing
+- Active session tracking with cold-start indicators per agent
+- Session liveness detection via idle timeout heuristic (no AWS API calls)
+- Prompt, thinking, and response text storage per invocation
+- Timezone-aware timestamp display (local / UTC toggle)
+- Catppuccin-themed UI (Mocha dark / Latte light)
 
 ## Project Structure
 
 ```
-├── src/          # Source code for agents
-├── iac/          # Infrastructure as Code
-├── etc/          # Configuration files
-└── tmp/          # Temporary files
+loom/
+├── backend/           # FastAPI backend (Python, SQLAlchemy, boto3)
+├── frontend/          # React/TypeScript frontend (Vite, shadcn, Tailwind CSS)
+├── etc/               # Configuration (environment.sh)
+├── iac/               # Infrastructure as Code (CloudFormation, SAM)
+├── makefile           # Root orchestration
+├── CLAUDE.md          # Project conventions
+├── SPECIFICATIONS.md  # Project-level specification
+└── README.md          # This file
 ```
+
+See [`backend/SPECIFICATIONS.md`](backend/SPECIFICATIONS.md) and [`frontend/SPECIFICATIONS.md`](frontend/SPECIFICATIONS.md) for detailed component specifications.
 
 ## Getting Started
 
-To begin working with this agent platform prototype:
+### Prerequisites
 
-1. Review the project structure in `src/`, `iac/`, and `etc/`
-2. Check the configuration files in `etc/` for environment settings
-3. Examine the infrastructure definitions in `iac/` for deployment requirements
+- Python 3.11+
+- Node.js 18+
+- AWS credentials configured via the standard boto3 credential chain (environment variables, AWS profile, or instance metadata)
+
+### Setup
+
+```bash
+# Backend
+cd backend
+uv venv .venv && source .venv/bin/activate
+make install
+make test
+make run
+
+# Frontend
+cd frontend
+npm install
+npm run dev
+```
+
+### Configuration
+
+Runtime configuration is sourced from `etc/environment.sh`. See the backend and frontend READMEs for available variables.
+
+### Make Targets
+
+Check the root `makefile` and component-level `makefile` files for available commands:
+
+```bash
+make -C backend test    # Run backend tests
+make -C backend run     # Start backend dev server
+make -C frontend dev    # Start frontend dev server
+```
 
 ## Architecture
 
-The platform utilizes Amazon Bedrock's AgentCore as the foundation for agent capabilities, while incorporating AWS Strands Agents for enhanced reasoning and planning functionality. This architecture provides both the reliability of proven AWS services and the flexibility to build sophisticated agent behaviors.
+- **Backend:** FastAPI with SQLAlchemy (SQLite), boto3 for AWS interactions, SSE streaming via `StreamingResponse`
+- **Frontend:** React 18, TypeScript, Vite, shadcn/ui, Tailwind CSS v4
+- **Session Liveness:** Computed locally using an idle timeout heuristic (`SESSION_IDLE_TIMEOUT_MINUTES`). No AWS control plane APIs are called — the Bedrock AgentCore SDK does not expose session listing/querying APIs.

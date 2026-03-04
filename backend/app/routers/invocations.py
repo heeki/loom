@@ -1,6 +1,8 @@
 """Agent invocation endpoints with SSE streaming support."""
 import asyncio
 import json
+import logging
+import os
 import time
 import uuid
 from datetime import datetime
@@ -8,7 +10,10 @@ from typing import List, AsyncGenerator
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.db import get_db
 from app.models.agent import Agent
@@ -29,6 +34,7 @@ class InvokeRequest(BaseModel):
     """Request body for agent invocation."""
     prompt: str = Field(..., description="Prompt to send to the agent")
     qualifier: str = Field(default="DEFAULT", description="Endpoint qualifier to use")
+    session_id: str | None = Field(default=None, description="Existing session ID to reuse (runtimeSessionId)")
 
 
 class InvocationResponse(BaseModel):
@@ -43,6 +49,9 @@ class InvocationResponse(BaseModel):
     client_duration_ms: float | None
     status: str
     error_message: str | None
+    prompt_text: str | None = None
+    thinking_text: str | None = None
+    response_text: str | None = None
     created_at: str | None
 
 
@@ -52,8 +61,39 @@ class SessionResponse(BaseModel):
     session_id: str
     qualifier: str
     status: str
+    live_status: str
     created_at: str | None
     invocations: List[InvocationResponse]
+
+
+def compute_live_status(session: InvocationSession, db: Session) -> str:
+    """
+    Compute the live status of a session based on its status and timing data.
+
+    Returns "pending", "streaming", "active", or "expired".
+    """
+    if session.status == "pending":
+        return "pending"
+    if session.status == "streaming":
+        return "streaming"
+
+    timeout_minutes = int(os.getenv("SESSION_IDLE_TIMEOUT_MINUTES", "15"))
+    timeout_seconds = timeout_minutes * 60
+
+    max_done_time = db.query(func.max(Invocation.client_done_time)).filter(
+        Invocation.session_id == session.session_id
+    ).scalar()
+
+    if max_done_time is not None:
+        if (time.time() - max_done_time) < timeout_seconds:
+            return "active"
+        return "expired"
+
+    # No client_done_time — fall back to created_at
+    if session.created_at:
+        if (datetime.utcnow() - session.created_at).total_seconds() < timeout_seconds:
+            return "active"
+    return "expired"
 
 
 def format_sse_event(event: str, data: dict) -> str:
@@ -90,6 +130,7 @@ async def invoke_agent_stream(
     invocation.client_invoke_time = client_invoke_time
     invocation.status = "streaming"
     session.status = "streaming"
+    completed = False
     db.commit()
 
     # Yield session_start event
@@ -109,6 +150,10 @@ async def invoke_agent_stream(
             region=agent.region
         )
 
+        # Accumulators for content storage
+        response_chunks: list[str] = []
+        thinking_chunks: list[str] = []
+
         # Stream chunks to frontend. Each next() call on the synchronous
         # generator blocks while waiting for boto3's StreamingBody. Running
         # it in a thread via asyncio.to_thread keeps the event loop free so
@@ -122,7 +167,18 @@ async def invoke_agent_stream(
             chunk = await asyncio.to_thread(_next_chunk)
             if chunk is _sentinel:
                 break
-            yield format_sse_event("chunk", {"text": chunk})
+
+            if chunk.get("type") == "text":
+                text_content = chunk["content"]
+                response_chunks.append(text_content)
+                yield format_sse_event("chunk", {"text": text_content})
+            elif chunk.get("type") == "structured":
+                structured = chunk["content"]
+                # Extract thinking/reasoning data from structured payloads
+                if isinstance(structured, dict):
+                    thinking = structured.get("thinking") or structured.get("reasoning")
+                    if thinking:
+                        thinking_chunks.append(str(thinking))
 
         # Mark invocation complete
         client_done_time = time.time()
@@ -133,6 +189,8 @@ async def invoke_agent_stream(
         try:
             log_group = derive_log_group(agent.runtime_id, session.qualifier)
             start_time_ms = int(client_invoke_time * 1000)
+            logger.info("Fetching CloudWatch logs: log_group=%s session_id=%s start_time_ms=%d",
+                        log_group, session_id, start_time_ms)
 
             # Run in thread to avoid blocking the event loop for up to 30s
             events = await asyncio.to_thread(
@@ -148,6 +206,7 @@ async def invoke_agent_stream(
             )
 
             if events:
+                logger.info("Found %d CloudWatch log events for session %s", len(events), session_id)
                 agent_start_time = parse_agent_start_time(events)
                 if agent_start_time is not None:
                     invocation.agent_start_time = agent_start_time
@@ -155,12 +214,23 @@ async def invoke_agent_stream(
                         client_invoke_time,
                         agent_start_time
                     )
-        except Exception:
-            # If CloudWatch retrieval fails, continue without latency data
-            pass
+                    logger.info("Computed cold_start_latency_ms=%.1f agent_start_time=%.3f",
+                                invocation.cold_start_latency_ms, agent_start_time)
+                else:
+                    logger.warning("Could not parse agent start time from %d log events for session %s",
+                                   len(events), session_id)
+            else:
+                logger.warning("No CloudWatch log events found for session %s after retries", session_id)
+        except Exception as cw_err:
+            logger.exception("CloudWatch retrieval failed for session %s: %s", session_id, cw_err)
+
+        # Persist accumulated content
+        invocation.response_text = "".join(response_chunks) if response_chunks else None
+        invocation.thinking_text = "\n".join(thinking_chunks) if thinking_chunks else None
 
         invocation.status = "complete"
         session.status = "complete"
+        completed = True
         db.commit()
 
         # Yield session_end event with all timing data
@@ -171,13 +241,9 @@ async def invoke_agent_stream(
             "client_invoke_time": client_invoke_time,
             "client_done_time": client_done_time,
             "client_duration_ms": invocation.client_duration_ms,
+            "cold_start_latency_ms": invocation.cold_start_latency_ms,
+            "agent_start_time": invocation.agent_start_time,
         }
-
-        # Include cold_start_latency_ms and agent_start_time if available
-        if invocation.cold_start_latency_ms is not None:
-            session_end_data["cold_start_latency_ms"] = invocation.cold_start_latency_ms
-        if invocation.agent_start_time is not None:
-            session_end_data["agent_start_time"] = invocation.agent_start_time
 
         yield format_sse_event("session_end", session_end_data)
 
@@ -186,11 +252,29 @@ async def invoke_agent_stream(
         invocation.status = "error"
         invocation.error_message = str(e)
         session.status = "error"
+        completed = True
         db.commit()
 
         yield format_sse_event("error", {
             "message": f"Invocation failed: {str(e)}"
         })
+
+    finally:
+        # Safety net: if the client disconnected (GeneratorExit) or the
+        # generator was closed before completing, ensure DB status is not
+        # left as "streaming".
+        if not completed:
+            try:
+                db.refresh(invocation)
+                db.refresh(session)
+                if invocation.status == "streaming":
+                    invocation.status = "error"
+                    invocation.error_message = "Client disconnected"
+                if session.status == "streaming":
+                    session.status = "error"
+                db.commit()
+            except Exception:
+                pass
 
 
 @router.post("/{agent_id}/invoke")
@@ -223,24 +307,42 @@ async def invoke_agent_endpoint(
     # Record client invoke time before session creation
     client_invoke_time = time.time()
 
-    # Look up or create session for this agent+qualifier
-    # For now, create a new session per invocation (can be modified later for session reuse)
-    session = InvocationSession(
-        agent_id=agent.id,
-        session_id=str(uuid.uuid4()),
-        qualifier=request.qualifier,
-        status="pending",
-        created_at=datetime.utcnow(),
-    )
-    db.add(session)
-    db.commit()
-    db.refresh(session)
+    # Reuse existing session or create a new one
+    if request.session_id:
+        session = db.query(InvocationSession).filter(
+            InvocationSession.agent_id == agent.id,
+            InvocationSession.session_id == request.session_id,
+        ).first()
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Session {request.session_id} not found for agent {agent_id}"
+            )
+        if session.qualifier != request.qualifier:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Qualifier mismatch: session uses '{session.qualifier}', request uses '{request.qualifier}'"
+            )
+        session.status = "pending"
+        db.commit()
+    else:
+        session = InvocationSession(
+            agent_id=agent.id,
+            session_id=str(uuid.uuid4()),
+            qualifier=request.qualifier,
+            status="pending",
+            created_at=datetime.utcnow(),
+        )
+        db.add(session)
+        db.commit()
+        db.refresh(session)
 
     # Create invocation record within the session
     invocation = Invocation(
         session_id=session.session_id,
         invocation_id=str(uuid.uuid4()),
         status="pending",
+        prompt_text=request.prompt,
         created_at=datetime.utcnow(),
     )
     db.add(invocation)
@@ -276,7 +378,10 @@ def list_sessions(
         InvocationSession.agent_id == agent_id
     ).order_by(InvocationSession.created_at.desc()).all()
 
-    return [SessionResponse(**session.to_dict()) for session in sessions]
+    return [
+        SessionResponse(**session.to_dict(), live_status=compute_live_status(session, db))
+        for session in sessions
+    ]
 
 
 @router.get("/{agent_id}/sessions/{session_id}", response_model=SessionResponse)
@@ -297,7 +402,7 @@ def get_session(
             detail=f"Session {session_id} not found for agent {agent_id}"
         )
 
-    return SessionResponse(**session.to_dict())
+    return SessionResponse(**session.to_dict(), live_status=compute_live_status(session, db))
 
 
 @router.get("/{agent_id}/sessions/{session_id}/invocations/{invocation_id}", response_model=InvocationResponse)

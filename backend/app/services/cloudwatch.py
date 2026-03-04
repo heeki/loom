@@ -234,10 +234,11 @@ def _filter_events_by_session_id(events: list[dict[str, Any]], session_id: str) 
 
 def parse_agent_start_time(log_events: list[dict[str, Any]]) -> float | None:
     """
-    Parse the agent start time from log events containing "Agent invoked - Start time:".
+    Parse the agent start time from log events.
 
-    Searches through log events for the "Agent invoked" message pattern and extracts
-    the ISO timestamp following "Start time:".
+    First searches for the "Agent invoked - Start time:" pattern. If not found,
+    falls back to the earliest CloudWatch event timestamp as an approximation of
+    when the agent started processing.
 
     Log message format examples:
         - "Agent invoked - Start time: 2026-02-11T19:44:38.558763, Request ID: ..."
@@ -249,6 +250,9 @@ def parse_agent_start_time(log_events: list[dict[str, Any]]) -> float | None:
     Returns:
         Unix timestamp (seconds since epoch) of agent start time, or None if not found
     """
+    import logging
+    logger = logging.getLogger(__name__)
+
     for event in log_events:
         message = event.get('message', '')
 
@@ -293,4 +297,19 @@ def parse_agent_start_time(log_events: list[dict[str, Any]]) -> float | None:
         except (ValueError, IndexError):
             continue
 
-    return None
+    # Fallback: use the earliest CloudWatch event timestamp.
+    # This approximates when the agent started processing, since
+    # not all agents emit the "Agent invoked - Start time:" log pattern.
+    earliest_ts = None
+    for event in log_events:
+        ts = event.get('timestamp')
+        if ts is not None:
+            # CloudWatch timestamps are in milliseconds
+            ts_seconds = ts / 1000.0
+            if earliest_ts is None or ts_seconds < earliest_ts:
+                earliest_ts = ts_seconds
+
+    if earliest_ts is not None:
+        logger.info("Used earliest CloudWatch event timestamp as agent_start_time fallback: %.3f", earliest_ts)
+
+    return earliest_ts

@@ -10,7 +10,13 @@
       "Bash(tmux list-panes:*)",
       "Bash(tmux send-keys:*)",
       "Bash(tmux kill-pane:*)",
-      "Bash(do tmux:*)"
+      "Bash(do tmux:*)",
+      "Bash(uv:*)",
+      "Bash(source:*)",
+      "Bash(make:*)",
+      "Bash(sqlite3:*)",
+      "Bash(npm create:*)",
+      "Bash(npm install:*)"
     ],
     "deny": []
   },

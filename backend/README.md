@@ -1,6 +1,6 @@
 # Loom Backend
 
-FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, SSE streaming invocation, CloudWatch log retrieval, and cold-start latency measurement.
+FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, and session liveness tracking.
 
 ## Technology Stack
 
@@ -41,6 +41,7 @@ Runtime configuration is sourced from `etc/environment.sh`:
 | `FRONTEND_PORT` | Port for Vite dev server (CORS) | `5173` |
 | `DATABASE_URL` | SQLite file path | `sqlite:///./loom.db` |
 | `LOG_LEVEL` | Backend log level | `info` |
+| `SESSION_IDLE_TIMEOUT_MINUTES` | Session idle timeout for liveness detection | `15` |
 
 AWS credentials use the standard boto3 credential chain (environment variables, AWS profile, instance metadata).
 
@@ -85,7 +86,7 @@ Groups related invocations. Uses `session_id` (UUID string) as the primary key �
 
 Stores per-invocation timing measurements and status. Each invocation belongs to a session. Fields include `client_invoke_time`, `client_done_time`, `agent_start_time`, `cold_start_latency_ms`, `client_duration_ms`, and `status`.
 
-Prompt and response text are not stored — the focus is on timing/latency measurement.
+Prompt text, thinking text, and response text are stored per invocation (`prompt_text`, `thinking_text`, `response_text`).
 
 ## API Endpoints
 
@@ -110,6 +111,8 @@ Prompt and response text are not stored — the focus is on timing/latency measu
 
 The invoke endpoint returns `text/event-stream` with events: `session_start`, `chunk`, `session_end`, `error`. Cold-start latency is computed automatically after the stream completes and included in the `session_end` event.
 
+Agent list responses include a computed `active_session_count` field — the number of sessions likely still warm in AWS. Session list responses include a computed `live_status` field (`"pending"`, `"streaming"`, `"active"`, or `"expired"`) based on a local idle timeout heuristic (`SESSION_IDLE_TIMEOUT_MINUTES`). No AWS API calls are made for session liveness — the Bedrock AgentCore SDK does not expose session querying APIs.
+
 ### CloudWatch Logs
 
 | Method | Path | Description |
@@ -133,7 +136,7 @@ Cold-start latency is computed automatically during the invoke flow:
 1. `client_invoke_time` is recorded before the AWS API call.
 2. After streaming completes, `client_done_time` is recorded and `client_duration_ms` is computed.
 3. CloudWatch logs are queried for the "Agent invoked - Start time:" pattern.
-4. `agent_start_time` is parsed from the log and `cold_start_latency_ms` is computed.
+4. `agent_start_time` is parsed from the log and `cold_start_latency_ms` is computed. If the "Start time:" pattern is not found (agents with non-standard log formats), the earliest CloudWatch event timestamp is used as a fallback.
 5. All metrics are persisted to SQLite and included in the `session_end` SSE event.
 
 If CloudWatch logs are unavailable, the invocation succeeds without latency data.
@@ -163,7 +166,7 @@ make curl.logs.session AGENT_ID=1 SESSION_ID=uuid
 
 ## Tests
 
-63 unit tests covering all routers, services, and models:
+81 unit tests covering all routers, services, and models:
 
 ```bash
 make test

@@ -76,6 +76,6 @@ class Agent(Base):
             "account_id": self.account_id,
             "log_group": self.log_group,
             "available_qualifiers": self.get_available_qualifiers(),
-            "registered_at": self.registered_at.isoformat() if self.registered_at else None,
-            "last_refreshed_at": self.last_refreshed_at.isoformat() if self.last_refreshed_at else None,
+            "registered_at": (self.registered_at.isoformat() + "Z") if self.registered_at else None,
+            "last_refreshed_at": (self.last_refreshed_at.isoformat() + "Z") if self.last_refreshed_at else None,
         }

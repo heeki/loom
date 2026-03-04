@@ -1,5 +1,7 @@
 """Tests for agent invocation endpoints."""
+import time
 import unittest
+from datetime import datetime, timedelta
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -9,6 +11,8 @@ from sqlalchemy.pool import StaticPool
 from app.main import app
 from app.db import Base, get_db
 from app.models.agent import Agent
+from app.models.session import InvocationSession
+from app.models.invocation import Invocation
 
 
 class TestInvocationsRouter(unittest.TestCase):
@@ -66,8 +70,13 @@ class TestInvocationsRouter(unittest.TestCase):
     def test_invoke_agent_success(self, mock_compute_duration, mock_invoke, mock_derive_log_group,
                                   mock_compute_cold_start, mock_parse_agent_start, mock_get_log_events):
         """Test successful agent invocation with SSE streaming."""
-        # Mock invoke_agent to return chunks
-        mock_invoke.return_value = iter(["Hello", " ", "world", "!"])
+        # Mock invoke_agent to return structured chunks
+        mock_invoke.return_value = iter([
+            {"type": "text", "content": "Hello"},
+            {"type": "text", "content": " "},
+            {"type": "text", "content": "world"},
+            {"type": "text", "content": "!"},
+        ])
         mock_compute_duration.return_value = 1500.0
 
         # Mock CloudWatch functions - no logs found (common case)
@@ -144,7 +153,7 @@ class TestInvocationsRouter(unittest.TestCase):
                           mock_compute_cold_start, mock_parse_agent_start, mock_get_log_events):
         """Test listing sessions for an agent."""
         # Mock invoke_agent
-        mock_invoke.return_value = iter(["Test response"])
+        mock_invoke.return_value = iter([{"type": "text", "content": "Test response"}])
         mock_compute_duration.return_value = 1000.0
 
         # Mock CloudWatch functions
@@ -165,7 +174,7 @@ class TestInvocationsRouter(unittest.TestCase):
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]["qualifier"], "DEFAULT")
         self.assertEqual(len(data[0]["invocations"]), 1)
-
+        self.assertIn("live_status", data[0])
 
     def test_list_sessions_agent_not_found(self):
         """Test listing sessions for non-existent agent."""
@@ -182,7 +191,7 @@ class TestInvocationsRouter(unittest.TestCase):
                         mock_compute_cold_start, mock_parse_agent_start, mock_get_log_events):
         """Test getting a specific session."""
         # Mock invoke_agent
-        mock_invoke.return_value = iter(["Test response"])
+        mock_invoke.return_value = iter([{"type": "text", "content": "Test response"}])
         mock_compute_duration.return_value = 1000.0
 
         # Mock CloudWatch functions
@@ -227,8 +236,8 @@ class TestInvocationsRouter(unittest.TestCase):
     def test_invoke_agent_with_cold_start_latency(self, mock_compute_duration, mock_invoke, mock_derive_log_group,
                                                   mock_compute_cold_start, mock_parse_agent_start, mock_get_log_events):
         """Test that cold_start_latency_ms appears in session_end when CloudWatch logs are available."""
-        # Mock invoke_agent to return chunks
-        mock_invoke.return_value = iter(["Hello"])
+        # Mock invoke_agent to return structured chunks
+        mock_invoke.return_value = iter([{"type": "text", "content": "Hello"}])
         mock_compute_duration.return_value = 1500.0
 
         # Mock CloudWatch functions - logs found with agent_start_time
@@ -262,6 +271,209 @@ class TestInvocationsRouter(unittest.TestCase):
         self.assertIn("agent_start_time", session_end_data)
         self.assertEqual(session_end_data["cold_start_latency_ms"], 558.0)
         self.assertEqual(session_end_data["agent_start_time"], 1234567890.558)
+
+
+    @patch("app.routers.invocations.get_log_events")
+    @patch("app.routers.invocations.parse_agent_start_time")
+    @patch("app.routers.invocations.compute_cold_start")
+    @patch("app.routers.invocations.derive_log_group")
+    @patch("app.routers.invocations.invoke_agent")
+    @patch("app.routers.invocations.compute_client_duration")
+    def test_invoke_stores_content(self, mock_compute_duration, mock_invoke, mock_derive_log_group,
+                                   mock_compute_cold_start, mock_parse_agent_start, mock_get_log_events):
+        """Test that prompt_text and response_text are persisted after invocation."""
+        mock_invoke.return_value = iter([
+            {"type": "text", "content": "Hello "},
+            {"type": "text", "content": "world"},
+        ])
+        mock_compute_duration.return_value = 1000.0
+        mock_derive_log_group.return_value = "/aws/bedrock-agentcore/runtimes/test-agent-DEFAULT"
+        mock_get_log_events.return_value = []
+        mock_parse_agent_start.return_value = None
+
+        response = self.client.post(
+            f"/api/agents/{self.agent.id}/invoke",
+            json={"prompt": "My test prompt", "qualifier": "DEFAULT"}
+        )
+        self.assertEqual(response.status_code, 200)
+
+        # Extract invocation_id from SSE
+        import json
+        import re
+        match = re.search(r'event: session_start\ndata: ({.*?})\n', response.text)
+        self.assertIsNotNone(match)
+        start_data = json.loads(match.group(1))
+        invocation_id = start_data["invocation_id"]
+        session_id = start_data["session_id"]
+
+        # Fetch the invocation detail and verify content fields
+        detail_response = self.client.get(
+            f"/api/agents/{self.agent.id}/sessions/{session_id}/invocations/{invocation_id}"
+        )
+        self.assertEqual(detail_response.status_code, 200)
+        data = detail_response.json()
+        self.assertEqual(data["prompt_text"], "My test prompt")
+        self.assertEqual(data["response_text"], "Hello world")
+
+    def test_live_status_pending_session(self):
+        """Test live_status is 'pending' for a pending session."""
+        session = InvocationSession(
+            agent_id=self.agent.id,
+            session_id="pending-session",
+            qualifier="DEFAULT",
+            status="pending",
+            created_at=datetime.utcnow(),
+        )
+        self.session.add(session)
+        self.session.commit()
+
+        response = self.client.get(f"/api/agents/{self.agent.id}/sessions/pending-session")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["live_status"], "pending")
+
+    def test_live_status_streaming_session(self):
+        """Test live_status is 'streaming' for a streaming session."""
+        session = InvocationSession(
+            agent_id=self.agent.id,
+            session_id="streaming-session",
+            qualifier="DEFAULT",
+            status="streaming",
+            created_at=datetime.utcnow(),
+        )
+        self.session.add(session)
+        self.session.commit()
+
+        response = self.client.get(f"/api/agents/{self.agent.id}/sessions/streaming-session")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["live_status"], "streaming")
+
+    def test_live_status_active_complete_session(self):
+        """Test live_status is 'active' for a recently completed session."""
+        session = InvocationSession(
+            agent_id=self.agent.id,
+            session_id="active-complete-session",
+            qualifier="DEFAULT",
+            status="complete",
+            created_at=datetime.utcnow(),
+        )
+        self.session.add(session)
+        self.session.commit()
+
+        inv = Invocation(
+            session_id="active-complete-session",
+            invocation_id="active-inv",
+            status="complete",
+            client_done_time=time.time() - 60,  # 1 minute ago
+            created_at=datetime.utcnow(),
+        )
+        self.session.add(inv)
+        self.session.commit()
+
+        response = self.client.get(f"/api/agents/{self.agent.id}/sessions/active-complete-session")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["live_status"], "active")
+
+    def test_live_status_expired_session(self):
+        """Test live_status is 'expired' for a session with old invocations."""
+        session = InvocationSession(
+            agent_id=self.agent.id,
+            session_id="expired-session",
+            qualifier="DEFAULT",
+            status="complete",
+            created_at=datetime.utcnow() - timedelta(hours=1),
+        )
+        self.session.add(session)
+        self.session.commit()
+
+        inv = Invocation(
+            session_id="expired-session",
+            invocation_id="expired-inv",
+            status="complete",
+            client_done_time=time.time() - 3600,  # 1 hour ago
+            created_at=datetime.utcnow() - timedelta(hours=1),
+        )
+        self.session.add(inv)
+        self.session.commit()
+
+        response = self.client.get(f"/api/agents/{self.agent.id}/sessions/expired-session")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["live_status"], "expired")
+
+    def test_live_status_no_invocations_recent_created(self):
+        """Test live_status falls back to created_at when no invocations exist."""
+        session = InvocationSession(
+            agent_id=self.agent.id,
+            session_id="no-inv-recent",
+            qualifier="DEFAULT",
+            status="complete",
+            created_at=datetime.utcnow(),  # Just created
+        )
+        self.session.add(session)
+        self.session.commit()
+
+        response = self.client.get(f"/api/agents/{self.agent.id}/sessions/no-inv-recent")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["live_status"], "active")
+
+    def test_live_status_no_invocations_old_created(self):
+        """Test live_status is 'expired' when no invocations and old created_at."""
+        session = InvocationSession(
+            agent_id=self.agent.id,
+            session_id="no-inv-old",
+            qualifier="DEFAULT",
+            status="complete",
+            created_at=datetime.utcnow() - timedelta(hours=1),
+        )
+        self.session.add(session)
+        self.session.commit()
+
+        response = self.client.get(f"/api/agents/{self.agent.id}/sessions/no-inv-old")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["live_status"], "expired")
+
+    def test_live_status_in_list_sessions(self):
+        """Test live_status is included in list sessions response."""
+        session = InvocationSession(
+            agent_id=self.agent.id,
+            session_id="list-status-session",
+            qualifier="DEFAULT",
+            status="streaming",
+            created_at=datetime.utcnow(),
+        )
+        self.session.add(session)
+        self.session.commit()
+
+        response = self.client.get(f"/api/agents/{self.agent.id}/sessions")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["live_status"], "streaming")
+
+    def test_live_status_error_session_recent(self):
+        """Test live_status is 'active' for a recently errored session."""
+        session = InvocationSession(
+            agent_id=self.agent.id,
+            session_id="error-recent-session",
+            qualifier="DEFAULT",
+            status="error",
+            created_at=datetime.utcnow(),
+        )
+        self.session.add(session)
+        self.session.commit()
+
+        inv = Invocation(
+            session_id="error-recent-session",
+            invocation_id="error-recent-inv",
+            status="error",
+            client_done_time=time.time() - 30,  # 30 seconds ago
+            created_at=datetime.utcnow(),
+        )
+        self.session.add(inv)
+        self.session.commit()
+
+        response = self.client.get(f"/api/agents/{self.agent.id}/sessions/error-recent-session")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["live_status"], "active")
 
 
 if __name__ == "__main__":

@@ -170,7 +170,11 @@ class TestInvokeAgent(unittest.TestCase):
         arn = 'arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/test-runtime'
         chunks = list(invoke_agent(arn, 'DEFAULT', 'session-123', 'test prompt', 'us-east-1'))
 
-        self.assertEqual(chunks, ['Hello ', 'world', '!'])
+        self.assertEqual(chunks, [
+            {"type": "text", "content": "Hello "},
+            {"type": "text", "content": "world"},
+            {"type": "text", "content": "!"},
+        ])
 
     @patch('boto3.client')
     def test_invoke_agent_skips_empty_lines(self, mock_boto_client: MagicMock) -> None:
@@ -194,7 +198,7 @@ class TestInvokeAgent(unittest.TestCase):
         arn = 'arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/test-runtime'
         chunks = list(invoke_agent(arn, 'DEFAULT', 'session-789', 'prompt', 'us-east-1'))
 
-        self.assertEqual(chunks, ['Content'])
+        self.assertEqual(chunks, [{"type": "text", "content": "Content"}])
 
     @patch('boto3.client')
     def test_invoke_agent_no_response_key(self, mock_boto_client: MagicMock) -> None:
@@ -230,7 +234,7 @@ class TestInvokeAgent(unittest.TestCase):
         arn = 'arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/test-runtime'
         chunks = list(invoke_agent(arn, 'DEFAULT', 'session-raw', 'prompt', 'us-east-1'))
 
-        self.assertEqual(chunks, ['not-json-text'])
+        self.assertEqual(chunks, [{"type": "text", "content": "not-json-text"}])
 
     @patch('boto3.client')
     def test_invoke_agent_sends_correct_parameters(self, mock_boto_client: MagicMock) -> None:
@@ -266,6 +270,31 @@ class TestInvokeAgent(unittest.TestCase):
         payload = json.loads(call_kwargs['payload'])
         self.assertEqual(payload['prompt'], prompt)
         self.assertIsInstance(call_kwargs['payload'], bytes)
+
+    @patch('boto3.client')
+    def test_invoke_agent_yields_structured_for_dict_payloads(self, mock_boto_client: MagicMock) -> None:
+        """Test that dict payloads are yielded as structured type."""
+        mock_agentcore_client = MagicMock()
+        mock_boto_client.return_value = mock_agentcore_client
+
+        mock_streaming_body = MagicMock()
+        mock_streaming_body.iter_lines.return_value = [
+            b'data: {"thinking": "reasoning about the question"}',
+            b'data: "answer text"',
+        ]
+
+        mock_agentcore_client.invoke_agent_runtime.return_value = {
+            'response': mock_streaming_body,
+            'statusCode': 200,
+        }
+
+        arn = 'arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/test-runtime'
+        chunks = list(invoke_agent(arn, 'DEFAULT', 'session-struct', 'prompt', 'us-east-1'))
+
+        self.assertEqual(chunks, [
+            {"type": "structured", "content": {"thinking": "reasoning about the question"}},
+            {"type": "text", "content": "answer text"},
+        ])
 
     @patch('boto3.client')
     def test_invoke_agent_propagates_api_errors(self, mock_boto_client: MagicMock) -> None:

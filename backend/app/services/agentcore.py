@@ -77,11 +77,11 @@ def invoke_agent(
     session_id: str,
     prompt: str,
     region: str
-) -> Generator[str, None, None]:
+) -> Generator[dict[str, Any], None, None]:
     """
     Invoke an AgentCore Runtime agent and stream the response.
 
-    Calls the AgentCore invoke_agent_runtime API and yields decoded text chunks
+    Calls the AgentCore invoke_agent_runtime API and yields structured chunks
     as they arrive from the streaming response.
 
     The boto3 API returns a 'response' field containing a StreamingBody.
@@ -95,7 +95,8 @@ def invoke_agent(
         region: AWS region name
 
     Yields:
-        Decoded text chunks from the agent's streaming response
+        Structured dicts: {"type": "text", "content": str} for text payloads,
+        {"type": "structured", "content": dict} for dict payloads (e.g. thinking data)
 
     Raises:
         Exception: If the agent invocation fails
@@ -134,8 +135,10 @@ def invoke_agent(
         try:
             parsed = json.loads(payload)
             if isinstance(parsed, str) and parsed:
-                yield parsed
+                yield {"type": "text", "content": parsed}
+            elif isinstance(parsed, dict):
+                yield {"type": "structured", "content": parsed}
         except json.JSONDecodeError:
-            # Not valid JSON — yield the raw text
+            # Not valid JSON — yield as raw text
             if payload:
-                yield payload
+                yield {"type": "text", "content": payload}

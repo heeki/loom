@@ -8,6 +8,8 @@ Loom is an agent builder playground that simplifies the lifecycle of building, t
 - A **React/TypeScript frontend** (Vite, shadcn, Tailwind CSS) that interacts exclusively through the backend API.
 - A **local SQLite database** (via SQLAlchemy) for persisting agent metadata and session history.
 
+The platform tracks session liveness using a local idle timeout heuristic, providing cold-start indicators so users know whether their next invocation will incur agent startup latency.
+
 ### Initial MVP Scope
 
 The initial implementation focuses on the **latency measurement test use case** for agents that are already deployed to AgentCore Runtime. Future phases will add agent creation/containerization/deployment workflows.
@@ -75,9 +77,9 @@ Detailed specifications for each component are maintained in their respective di
 ## 5. Implementation Phases
 
 ### Phase 1 — MVP (Initial Implementation) *(Backend Complete)*
-- Backend: Agent registration, metadata retrieval, SSE invocation with real-time streaming, CloudWatch log retrieval (stream browsing + session-filtered), integrated cold-start latency calculation, SQLite persistence with session/invocation separation.
+- Backend: Agent registration, metadata retrieval, SSE invocation with real-time streaming, CloudWatch log retrieval (stream browsing + session-filtered), integrated cold-start latency calculation, SQLite persistence with session/invocation separation, session liveness tracking via idle timeout heuristic, active session count per agent.
 - CLI: Streaming invocation client (`scripts/stream.py`) and comprehensive `makefile` targets for manual testing.
-- Frontend: Build tab (ARN registration), Test tab (invocation + streaming + latency display), Operate tab (basic dashboard).
+- Frontend: Build tab (ARN registration), Test tab (invocation + streaming + latency display), Operate tab (basic dashboard), active session count display on agent cards, session live status indicators.
 - Refactored `tmp/latency/` into reusable service modules.
 
 ### Phase 2 — Build Workflows
@@ -100,6 +102,7 @@ Detailed specifications for each component are maintained in their respective di
 |---|----------|-------|
 | 1 | What Strands Agents templates will be supported in Phase 2? | To be defined when Phase 2 begins. |
 | 2 | Should the Operate tab aggregate metrics via a separate analytics store or compute on-the-fly from SQLite? | SQLite is sufficient for MVP; revisit at scale. |
-| 3 | What is the CloudWatch log format for agents that do NOT emit the "Start time:" structured log? | `cold_start_latency_ms` and `agent_start_time` are omitted from the `session_end` SSE event when logs are not found. |
+| 3 | What is the CloudWatch log format for agents that do NOT emit the "Start time:" structured log? | **Resolved.** `parse_agent_start_time` first looks for the "Agent invoked - Start time:" pattern; if not found, it falls back to the earliest CloudWatch event timestamp as an approximation. This handles agents with non-standard log formats. If no logs are found at all, the invocation succeeds without latency data. |
 | 4 | Will multi-region support be needed in Phase 1? | Region is extracted per-agent from the ARN. The backend can manage agents across multiple regions simultaneously. |
 | 5 | Should the Agent PK be changed from integer to a natural key (ARN, UUID, or runtime_id)? | **Decision: keep integer PK.** The `session_id` string PK is justified as a natural key (UUID used in AWS API calls). Agent integer PK provides the best ergonomics for CLI usage and fastest SQLite joins. `arn` and `runtime_id` are already stored and indexed for AWS lookups. |
+| 6 | Can we query AWS for live session status (e.g., `list_runtime_sessions`)? | **No.** The Bedrock AgentCore SDK does not expose `list_runtime_sessions` or `get_runtime_session` APIs. Session liveness is instead computed locally using an idle timeout heuristic (`SESSION_IDLE_TIMEOUT_MINUTES`). This approach inherently avoids AWS API throttling. |

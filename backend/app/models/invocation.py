@@ -28,6 +28,12 @@ class Invocation(Base):
     # Invocation status
     status = Column(String, nullable=False, default="pending")  # pending, streaming, complete, error
     error_message = Column(Text, nullable=True)
+
+    # Content storage
+    prompt_text = Column(Text, nullable=True)
+    thinking_text = Column(Text, nullable=True)
+    response_text = Column(Text, nullable=True)
+
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
 
     # Relationship to session
@@ -46,5 +52,8 @@ class Invocation(Base):
             "client_duration_ms": self.client_duration_ms,
             "status": self.status,
             "error_message": self.error_message,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "prompt_text": self.prompt_text,
+            "thinking_text": self.thinking_text,
+            "response_text": self.response_text,
+            "created_at": (self.created_at.isoformat() + "Z") if self.created_at else None,
         }

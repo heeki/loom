@@ -293,8 +293,8 @@ class TestParseAgentStartTime(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIsInstance(result, float)
 
-    def test_parse_agent_start_time_not_found(self) -> None:
-        """Test that None is returned when no agent start time is found."""
+    def test_parse_agent_start_time_not_found_falls_back_to_event_timestamp(self) -> None:
+        """Test that earliest event timestamp is used as fallback when no Start time pattern found."""
         log_events = [
             {'timestamp': 1708000001000, 'message': 'Some other log message'},
             {'timestamp': 1708000002000, 'message': 'Another unrelated log'}
@@ -302,17 +302,24 @@ class TestParseAgentStartTime(unittest.TestCase):
 
         result = parse_agent_start_time(log_events)
 
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(result, 1708000001.0, places=1)
+
+    def test_parse_agent_start_time_no_events(self) -> None:
+        """Test that None is returned when no log events exist."""
+        result = parse_agent_start_time([])
         self.assertIsNone(result)
 
     def test_parse_agent_start_time_missing_start_time_field(self) -> None:
-        """Test handling of agent invoked message without Start time field."""
+        """Test handling of agent invoked message without Start time field falls back to event timestamp."""
         log_events = [
             {'timestamp': 1708000001000, 'message': 'Agent invoked - Request ID: abc-123'}
         ]
 
         result = parse_agent_start_time(log_events)
 
-        self.assertIsNone(result)
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(result, 1708000001.0, places=1)
 
     def test_parse_agent_start_time_multiple_events(self) -> None:
         """Test parsing when multiple events exist (returns first match)."""
@@ -343,7 +350,7 @@ class TestParseAgentStartTime(unittest.TestCase):
         self.assertIsInstance(result, float)
 
     def test_parse_agent_start_time_invalid_timestamp(self) -> None:
-        """Test handling of invalid timestamp format."""
+        """Test handling of invalid timestamp format falls back to event timestamp."""
         log_events = [
             {
                 'timestamp': 1708000001000,
@@ -353,7 +360,8 @@ class TestParseAgentStartTime(unittest.TestCase):
 
         result = parse_agent_start_time(log_events)
 
-        self.assertIsNone(result)
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(result, 1708000001.0, places=1)
 
 
 if __name__ == '__main__':
