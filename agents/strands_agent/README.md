@@ -21,7 +21,7 @@ strands_agent/
 │   ├── integrations/
 │   │   ├── __init__.py
 │   │   ├── mcp_client.py   # MCP tool client vending
-│   │   ├── a2a_client.py   # A2A agent client vending (scaffold)
+│   │   ├── a2a_client.py   # A2A agent client vending
 │   │   └── memory.py       # AgentCore Memory hooks
 │   └── telemetry.py        # OTEL instrumentation setup
 ├── tests/
@@ -83,10 +83,20 @@ The agent reads configuration from one of two sources (checked in order):
 }
 ```
 
+### System Prompt Injection
+
+The system prompt is resolved with the following precedence:
+
+1. `AGENT_SYSTEM_PROMPT` environment variable (highest priority — injected by the frontend at deploy time)
+2. `system_prompt` field in the configuration JSON file
+
+This allows the frontend to pass the user-configured prompt as a deploy-time parameter without modifying the static config file.
+
 ### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
+| `AGENT_SYSTEM_PROMPT` | System prompt (overrides config file) | — |
 | `AGENT_CONFIG_PATH` | Path to configuration JSON file | — |
 | `AGENT_CONFIG_JSON` | Inline configuration JSON string | — |
 | `MEMORY_STORE_ID` | AgentCore Memory store identifier | — |
@@ -132,7 +142,7 @@ MCP (Model Context Protocol) tool servers are dynamically loaded from configurat
 
 ### A2A Agent Clients
 
-Agent-to-agent (A2A) communication is scaffolded but not yet implemented. The configuration schema is defined and client vending follows the same pattern as MCP tools.
+Agent-to-agent (A2A) communication uses the Strands SDK `A2AAgent` class. Each enabled A2A agent in the configuration is wrapped as a `@tool` function that the orchestrating agent can invoke during conversation. Auth credential resolution from Secrets Manager is a TODO.
 
 ### AgentCore Memory
 

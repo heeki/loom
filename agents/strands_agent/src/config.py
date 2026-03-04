@@ -111,13 +111,24 @@ def _parse_integrations(data: Optional[dict]) -> IntegrationsConfig:
 
 
 def _parse_config(data: dict) -> AgentConfig:
-    """Parse and validate a configuration dictionary into an AgentConfig."""
-    if "system_prompt" not in data:
-        raise ValueError("Configuration must include 'system_prompt'")
+    """Parse and validate a configuration dictionary into an AgentConfig.
+
+    The system_prompt is resolved with the following precedence:
+      1. AGENT_SYSTEM_PROMPT environment variable (highest — injected at deploy time)
+      2. system_prompt field in the configuration data
+    This allows the frontend to pass the user-configured prompt as a
+    parameter at deployment without modifying the static config file.
+    """
+    system_prompt = os.environ.get("AGENT_SYSTEM_PROMPT") or data.get("system_prompt")
+    if not system_prompt:
+        raise ValueError(
+            "No system prompt configured. Set AGENT_SYSTEM_PROMPT env var "
+            "or include 'system_prompt' in the configuration."
+        )
     if "model_id" not in data:
         raise ValueError("Configuration must include 'model_id'")
     return AgentConfig(
-        system_prompt=data["system_prompt"],
+        system_prompt=system_prompt,
         model_id=data["model_id"],
         integrations=_parse_integrations(data.get("integrations")),
     )

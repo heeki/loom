@@ -26,24 +26,43 @@ class TestParseConfig(unittest.TestCase):
             "system_prompt": "You are helpful.",
             "model_id": "us.anthropic.claude-sonnet-4-20250514",
         }
-        config = _parse_config(data)
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AGENT_SYSTEM_PROMPT", None)
+            config = _parse_config(data)
         self.assertEqual(config.system_prompt, "You are helpful.")
         self.assertEqual(config.model_id, "us.anthropic.claude-sonnet-4-20250514")
         self.assertEqual(config.integrations.mcp_servers, [])
         self.assertEqual(config.integrations.a2a_agents, [])
         self.assertFalse(config.integrations.memory.enabled)
 
-    def test_missing_system_prompt(self) -> None:
+    def test_missing_system_prompt_and_no_env(self) -> None:
         data = {"model_id": "some-model"}
-        with self.assertRaises(ValueError) as ctx:
-            _parse_config(data)
-        self.assertIn("system_prompt", str(ctx.exception))
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AGENT_SYSTEM_PROMPT", None)
+            with self.assertRaises(ValueError) as ctx:
+                _parse_config(data)
+            self.assertIn("system prompt", str(ctx.exception).lower())
 
     def test_missing_model_id(self) -> None:
         data = {"system_prompt": "Hello"}
         with self.assertRaises(ValueError) as ctx:
             _parse_config(data)
         self.assertIn("model_id", str(ctx.exception))
+
+    def test_system_prompt_from_env_overrides_config(self) -> None:
+        data = {
+            "system_prompt": "From config file",
+            "model_id": "test-model",
+        }
+        with patch.dict(os.environ, {"AGENT_SYSTEM_PROMPT": "From env var"}, clear=False):
+            config = _parse_config(data)
+        self.assertEqual(config.system_prompt, "From env var")
+
+    def test_system_prompt_from_env_when_missing_in_config(self) -> None:
+        data = {"model_id": "test-model"}
+        with patch.dict(os.environ, {"AGENT_SYSTEM_PROMPT": "Injected prompt"}, clear=False):
+            config = _parse_config(data)
+        self.assertEqual(config.system_prompt, "Injected prompt")
 
     def test_full_config_with_integrations(self) -> None:
         data = {
