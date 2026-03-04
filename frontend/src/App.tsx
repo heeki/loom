@@ -30,7 +30,7 @@ function ThemeSelector({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme)
       <SelectTrigger className="h-7 w-auto gap-1 text-xs text-muted-foreground">
         <SelectValue />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent position="popper">
         <SelectItem value="light">Latte</SelectItem>
         <SelectItem value="dark">Mocha</SelectItem>
       </SelectContent>
@@ -162,7 +162,7 @@ function AppContent() {
         <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
             <img
-              src={theme === "light" ? "/assets/loom_light.png" : "/assets/loom_dark.png"}
+              src={theme === "light" ? "/assets/loom_light_alt.png" : "/assets/loom_dark_alt.png"}
               alt="Loom"
               className="h-12 shrink-0"
             />
