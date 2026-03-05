@@ -1,5 +1,5 @@
 include etc/environment.sh
-BASE_URL=http://localhost:$${BACKEND_PORT:-8000}
+BASE_URL=http://localhost:$${LOOM_BACKEND_PORT:-8000}
 
 install:
 	source .venv/bin/activate && uv pip install -r requirements.txt
@@ -8,7 +8,7 @@ test:
 	source .venv/bin/activate && python -m pytest tests/ -v
 
 run:
-	source .venv/bin/activate && uvicorn app.main:app --reload --port $${BACKEND_PORT:-8000}
+	source .venv/bin/activate && uvicorn app.main:app --reload --port $${LOOM_BACKEND_PORT:-8000}
 
 # Manual testing targets
 curl.health:

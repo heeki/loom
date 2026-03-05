@@ -56,7 +56,7 @@ app = FastAPI(
 )
 
 # Configure CORS
-FRONTEND_PORT = os.getenv("FRONTEND_PORT", "5173")
+FRONTEND_PORT = os.getenv("LOOM_FRONTEND_PORT", "5173")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -95,7 +95,7 @@ async def health() -> dict:
 if __name__ == "__main__":
     import uvicorn
 
-    port = int(os.getenv("BACKEND_PORT", "8000"))
+    port = int(os.getenv("LOOM_BACKEND_PORT", "8000"))
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",

@@ -41,6 +41,7 @@ class Agent(Base):
     endpoint_status = Column(String, nullable=True)
     protocol = Column(String, nullable=True)  # HTTP, MCP, A2A
     network_mode = Column(String, nullable=True)  # PUBLIC or VPC
+    authorizer_config = Column(Text, nullable=True)  # JSON: {type, pool_id, discovery_url, client_id, client_secret}
     deployed_at = Column(DateTime, nullable=True)
     registered_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     last_refreshed_at = Column(DateTime, nullable=True)
@@ -76,6 +77,19 @@ class Agent(Base):
     def set_raw_metadata(self, metadata: dict) -> None:
         """Serialize raw_metadata to JSON text."""
         self.raw_metadata = json.dumps(metadata, cls=DateTimeEncoder)
+
+    def get_authorizer_config(self) -> dict | None:
+        """Parse authorizer_config from JSON text."""
+        if not self.authorizer_config:
+            return None
+        try:
+            return json.loads(self.authorizer_config)
+        except json.JSONDecodeError:
+            return None
+
+    def set_authorizer_config(self, config: dict | None) -> None:
+        """Serialize authorizer_config to JSON text."""
+        self.authorizer_config = json.dumps(config) if config else None
 
     def to_dict(self) -> dict:
         """Convert agent to dictionary for API responses."""

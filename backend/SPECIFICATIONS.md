@@ -8,7 +8,7 @@
 | Server | Uvicorn (local dev) |
 | ORM | SQLAlchemy (with SQLite) |
 | AWS SDK | boto3 |
-| Python version | 3.11+ |
+| Python version | 3.11+ (3.13 for ARM64 runtime deployment) |
 | Dependency manager | uv |
 | Streaming | SSE via `StreamingResponse` |
 
@@ -25,6 +25,8 @@ All runtime configuration is injected via environment variables sourced from `et
 | `FRONTEND_PORT` | Port for Vite dev server (CORS) | `5173` |
 | `LOG_LEVEL` | Backend log level | `info` |
 | `SESSION_IDLE_TIMEOUT_MINUTES` | Idle timeout for session liveness detection | `15` |
+| `AWS_REGION` | AWS region for deployments | `us-east-1` |
+| `LOOM_ARTIFACT_BUCKET` | S3 bucket for agent deployment artifacts | — |
 
 AWS credentials use the standard boto3 credential chain (environment variables, AWS profile, instance metadata).
 
@@ -40,16 +42,23 @@ backend/
 │   ├── models/
 │   │   ├── __init__.py      # Re-exports all models
 │   │   ├── agent.py         # Agent ORM model
+│   │   ├── config_entry.py  # ConfigEntry ORM model (agent key-value configuration)
 │   │   ├── session.py       # InvocationSession ORM model
 │   │   └── invocation.py    # Invocation ORM model
 │   ├── routers/
 │   │   ├── agents.py        # Agent CRUD + ARN parsing + log group derivation
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
-│   │   └── logs.py          # CloudWatch log browsing + session log retrieval
+│   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
+│   │   └── utils.py         # Shared router utilities (get_agent_or_404)
 │   └── services/
 │       ├── agentcore.py     # Bedrock AgentCore API wrapper
 │       ├── cloudwatch.py    # CloudWatch log retrieval and parsing
-│       └── latency.py       # Latency calculation helpers
+│       ├── cognito.py       # Cognito OAuth2 token retrieval (client credentials grant)
+│       ├── credential.py    # AgentCore credential provider management
+│       ├── deployment.py    # Agent artifact build, runtime CRUD, secret detection
+│       ├── iam.py           # IAM role creation/deletion, Cognito pool listing
+│       ├── latency.py       # Latency calculation helpers
+│       └── secrets.py       # AWS Secrets Manager wrapper with in-memory caching
 ├── scripts/
 │   └── stream.py            # SSE streaming client for CLI invocations (httpx)
 ├── tests/
@@ -58,7 +67,8 @@ backend/
 │   ├── test_cloudwatch.py   # CloudWatch service tests
 │   ├── test_invocations.py  # Invocation router tests
 │   ├── test_latency.py      # Latency computation tests
-│   └── test_logs.py         # Logs router tests
+│   ├── test_logs.py         # Logs router tests
+│   └── test_agents_deploy.py # Deployment-specific tests
 ├── makefile
 ├── pyproject.toml
 └── requirements.txt
@@ -82,8 +92,34 @@ backend/
 | `log_group` | TEXT | Derived: `/aws/bedrock-agentcore/runtimes/{runtime_id}-{qualifier}` |
 | `available_qualifiers` | TEXT | JSON array of endpoint names (e.g., `["DEFAULT"]`) |
 | `raw_metadata` | TEXT | Full JSON from AgentCore describe API |
+| `source` | TEXT | `register` or `deploy` |
+| `deployment_status` | TEXT | `deploying`, `deployed`, `failed`, `removing` |
+| `execution_role_arn` | TEXT | IAM execution role ARN |
+| `config_hash` | TEXT | Configuration hash |
+| `endpoint_name` | TEXT | Runtime endpoint name |
+| `endpoint_arn` | TEXT | Runtime endpoint ARN |
+| `endpoint_status` | TEXT | Endpoint status |
+| `protocol` | TEXT | `HTTP`, `MCP`, or `A2A` |
+| `network_mode` | TEXT | `PUBLIC` or `VPC` |
+| `authorizer_config` | TEXT | JSON: `{type, pool_id, discovery_url, allowed_clients, allowed_scopes}` |
 | `registered_at` | DATETIME | Timestamp of local registration |
+| `deployed_at` | DATETIME | Deployment timestamp |
 | `last_refreshed_at` | DATETIME | Last time metadata was fetched from AWS |
+
+### `agent_config_entries` table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | Internal ID |
+| `agent_id` | INTEGER FK → agents.id (CASCADE delete) | Associated agent |
+| `key` | TEXT NOT NULL | Configuration key |
+| `value` | TEXT | Plaintext for non-secrets, ARN for secrets |
+| `is_secret` | BOOLEAN | Whether value references a secret |
+| `source` | TEXT | `env_var`, `secrets_manager`, `s3` |
+| `created_at` | DATETIME | Creation timestamp |
+| `updated_at` | DATETIME | Last update timestamp |
+
+**Constraints:** UNIQUE on (`agent_id`, `key`).
 
 ### `invocation_sessions` table
 
@@ -146,20 +182,56 @@ Log stream names are discovered dynamically via `describe_log_streams` (ordered 
 
 All endpoints are prefixed `/api`.
 
-### Agent Registration
+### Agent Registration and Deployment
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/agents` | Register an agent by ARN. Calls AgentCore describe API, stores metadata in SQLite. |
+| `POST` | `/api/agents` | Create agent (register by ARN or deploy new runtime). |
 | `GET` | `/api/agents` | List all registered agents. |
 | `GET` | `/api/agents/{agent_id}` | Get metadata for a specific registered agent. |
-| `DELETE` | `/api/agents/{agent_id}` | Remove an agent from the local registry. |
+| `DELETE` | `/api/agents/{agent_id}?cleanup_aws=true` | Remove agent; optionally delete runtime from AgentCore. |
 | `POST` | `/api/agents/{agent_id}/refresh` | Re-fetch metadata from AgentCore and update the local record. |
+| `POST` | `/api/agents/{agent_id}/redeploy` | Redeploy an agent with current config. |
+| `GET` | `/api/agents/roles` | List IAM roles suitable for AgentCore. |
+| `GET` | `/api/agents/cognito-pools` | List Cognito user pools. |
+| `GET` | `/api/agents/models` | List supported foundation models. |
+| `PUT` | `/api/agents/{agent_id}/config` | Update agent configuration entries. |
+| `GET` | `/api/agents/{agent_id}/config` | Get agent configuration entries. |
+| `POST` | `/api/agents/{agent_id}/token` | Get Cognito access token for authenticated invocation. |
 
-**`POST /api/agents` request body:**
+**`POST /api/agents` register request body:**
 ```json
-{ "arn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/myagent-abc123" }
+{ "arn": "arn:aws:bedrock-agentcore:{region}:{account_id}:runtime/{runtime_id}" }
 ```
+
+**`POST /api/agents` deploy request body:**
+
+| Field | Description |
+|-------|-------------|
+| `source` | `register` or `deploy` |
+| `name` | Agent name |
+| `description` | Agent description |
+| `agent_description` | Description passed to the agent prompt |
+| `behavioral_guidelines` | Behavioral guidelines for the agent |
+| `output_expectations` | Expected output format/behavior |
+| `model_id` | Foundation model identifier |
+| `role_arn` | IAM execution role ARN |
+| `protocol` | `HTTP`, `MCP`, or `A2A` |
+| `network_mode` | `PUBLIC` or `VPC` |
+| `idle_timeout` | Idle timeout in seconds |
+| `max_lifetime` | Maximum lifetime in seconds |
+| `authorizer_type` | Authorizer type (e.g., Cognito) |
+| `authorizer_pool_id` | Cognito user pool ID |
+| `authorizer_discovery_url` | OIDC discovery URL |
+| `authorizer_allowed_clients` | Allowed client IDs |
+| `authorizer_allowed_scopes` | Allowed OAuth scopes |
+| `authorizer_client_id` | Client ID for token retrieval |
+| `authorizer_client_secret` | Client secret for token retrieval |
+| `memory_enabled` | Whether memory is enabled |
+| `mcp_servers` | MCP server configuration |
+| `a2a_agents` | A2A agent configuration |
+
+**Supported foundation models:** Claude Opus 4.6, Claude Sonnet 4.6, Claude Haiku 4.5, Amazon Nova 2 Lite, Nova Pro, Nova Lite, Nova Micro, Nova Nano.
 
 **`GET /api/agents` response:**
 ```json
@@ -284,7 +356,7 @@ Wraps `boto3.client('bedrock-agentcore')` and `boto3.client('bedrock-agentcore-c
 
 - `describe_runtime(arn: str, region: str) -> dict` — calls `get_agent_runtime` and returns runtime metadata.
 - `list_runtime_endpoints(runtime_id: str, region: str) -> list[str]` — returns available qualifier names; falls back to `["DEFAULT"]` on error.
-- `invoke_agent(arn: str, qualifier: str, session_id: str, prompt: str, region: str) -> Generator` — calls `invoke_agent_runtime`, yields decoded text chunks from the SSE-formatted streaming response.
+- `invoke_agent(arn: str, qualifier: str, session_id: str, prompt: str, region: str) -> Generator` — calls `invoke_agent_runtime`, yields decoded text chunks from the SSE-formatted streaming response. Supports OAuth-authorized agents — when an access token is provided, the client skips SigV4 signing and injects a Bearer token header instead.
 
 **Note:** Session liveness (`live_status`, `active_session_count`) is computed locally in the routers using SQLite data and the idle timeout heuristic. No AWS API is called for session status — the Bedrock AgentCore SDK does not expose session listing/querying APIs.
 
@@ -297,6 +369,38 @@ Wraps `boto3.client('logs')`:
 - `get_log_events(log_group: str, session_id: str, region: str, start_time_ms: int | None, limit: int, max_retries: int, retry_interval: float) -> list[dict]` — retrieves events matching the session_id filter pattern across all streams, with configurable retry logic for CloudWatch ingestion delays.
 - `parse_agent_start_time(log_events: list[dict]) -> float | None` — searches events for the "Agent invoked - Start time:" pattern and returns the parsed Unix timestamp. Falls back to the earliest CloudWatch event timestamp when the pattern is not found, supporting agents with non-standard log formats.
 
+### `services/deployment.py`
+
+Handles agent artifact build and runtime lifecycle:
+
+- Builds agent artifacts by cross-compiling pip dependencies for ARM64 (`manylinux2014_aarch64`), copying agent source from `agents/strands_agent/src/`, and packaging into a zip archive uploaded to S3.
+- Creates, updates, and deletes AgentCore runtimes and endpoints.
+- Validates configuration values for secrets, stores/updates/deletes secrets in AWS Secrets Manager.
+- Stores large configuration values in S3.
+
+### `services/cognito.py`
+
+Cognito OAuth2 token retrieval:
+
+- `get_cognito_token(pool_id: str, client_id: str, client_secret: str, scopes: list[str]) -> str` — exchanges client credentials for an access token via the Cognito OAuth2 token endpoint (client credentials grant).
+
+### `services/secrets.py`
+
+AWS Secrets Manager wrapper with in-memory caching:
+
+- `store_secret(name: str, secret_value: str, region: str)` — creates or updates a secret.
+- `get_secret(name: str, region: str) -> str` — retrieves a secret value with a 5-minute in-memory cache.
+- `delete_secret(name: str, region: str)` — deletes a secret.
+
+### `services/iam.py`
+
+IAM and Cognito management:
+
+- `create_execution_role() -> str` — creates an IAM execution role suitable for AgentCore.
+- `delete_execution_role(role_arn: str)` — deletes an IAM execution role.
+- `list_agentcore_roles() -> list[dict]` — lists IAM roles suitable for AgentCore.
+- `list_cognito_pools() -> list[dict]` — lists Cognito user pools.
+
 ### `services/latency.py`
 
 Pure computation helpers (no AWS dependencies):
@@ -306,7 +410,33 @@ Pure computation helpers (no AWS dependencies):
 
 ---
 
-## 8. Latency Measurement Flow
+## 8. Agent Deployment Flow
+
+1. User submits a deploy form with agent configuration.
+2. Backend creates an IAM execution role (or uses the one provided by the user).
+3. Builds the deployment artifact:
+   - Copies source from `agents/strands_agent/src/`.
+   - Runs `pip install` against `requirements.txt` targeting `linux/arm64` (`manylinux2014_aarch64`).
+   - Zips the package and uploads it to S3.
+4. Calls `create_agent_runtime` with the artifact location, environment variables, network/protocol/lifecycle/authorizer configuration.
+5. Stores authorizer config on the agent record. Stores the Cognito `client_id` as a config entry. Stores the `client_secret` in AWS Secrets Manager and saves the resulting ARN as a config entry.
+6. On delete with `cleanup_aws=true`: deletes the endpoint, deletes the runtime, and cleans up the Secrets Manager secret.
+
+---
+
+## 9. Authenticated Invocation Flow
+
+When an agent has a Cognito authorizer configured, the invoke endpoint automatically fetches an access token before calling the runtime:
+
+1. Reads `COGNITO_CLIENT_ID` from the agent's config entries.
+2. Reads `COGNITO_CLIENT_SECRET_ARN` from the agent's config entries.
+3. Retrieves the actual secret value from AWS Secrets Manager (cached in memory for 5 minutes).
+4. Exchanges the client credentials for an access token via the Cognito client credentials grant.
+5. Passes the Bearer token to `invoke_agent_runtime` (unsigned SigV4 + `Authorization` header).
+
+---
+
+## 10. Latency Measurement Flow
 
 Latency measurement is integrated into the invoke flow — no separate endpoint is needed. The backend computes cold-start latency automatically after the agent stream completes.
 
@@ -342,7 +472,7 @@ Client                  Backend                 AWS
 
 ---
 
-## 9. Session Liveness Tracking
+## 11. Session Liveness Tracking
 
 Session liveness is computed locally — no AWS API calls are made. The Bedrock AgentCore SDK does not expose `list_runtime_sessions` or `get_runtime_session` APIs, so there is no way to query AWS for the actual state of a runtime session. Instead, the backend uses a local idle timeout heuristic based on invocation timestamps already stored in SQLite.
 
@@ -373,7 +503,7 @@ For each agent, `active_session_count` is computed at query time by counting ses
 
 ---
 
-## 10. Makefile Targets
+## 12. Makefile Targets
 
 The backend `makefile` sources `etc/environment.sh` and provides:
 

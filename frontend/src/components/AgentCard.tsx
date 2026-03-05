@@ -5,14 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
-import { statusVariant, deploymentStatusVariant } from "@/lib/status";
+import { statusVariant } from "@/lib/status";
 import type { AgentResponse } from "@/api/types";
 
 interface AgentCardProps {
   agent: AgentResponse;
   onSelect: (id: number) => void;
   onRefresh: (id: number) => void;
-  onDelete: (id: number) => void;
+  onDelete: (id: number, cleanupAws: boolean) => void;
 }
 
 function isCreating(agent: AgentResponse): boolean {
@@ -24,64 +24,61 @@ function isCreating(agent: AgentResponse): boolean {
   );
 }
 
+function existsInAgentCore(agent: AgentResponse): boolean {
+  return !!agent.runtime_id;
+}
+
 export function AgentCard({ agent, onSelect, onRefresh, onDelete }: AgentCardProps) {
   const { timezone } = useTimezone();
   const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const [cleanupAws, setCleanupAws] = useState(false);
+
+  const showCleanupOption = existsInAgentCore(agent);
 
   return (
     <Card
-      className="cursor-pointer transition-colors hover:bg-accent/50"
+      className="cursor-pointer transition-colors hover:bg-accent/50 py-3 gap-1"
       onClick={() => onSelect(agent.id)}
     >
-      <CardHeader className="pb-2">
+      <CardHeader className="gap-1 pb-3">
         <div className="flex items-start justify-between">
-          <CardTitle className="text-sm font-medium">
-            {agent.name ?? agent.runtime_id}
-          </CardTitle>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
+            <CardTitle className="text-sm font-medium">
+              {agent.name ?? agent.runtime_id}
+            </CardTitle>
+            {agent.protocol && (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                {agent.protocol}
+              </Badge>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5">
             {isCreating(agent) && (
               <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
             )}
-            {agent.deployment_status && (
-              <Badge variant={deploymentStatusVariant(agent.deployment_status)}>
-                {agent.deployment_status}
-              </Badge>
-            )}
-            {agent.endpoint_status && agent.endpoint_status !== agent.deployment_status && (
-              <Badge variant={statusVariant(agent.endpoint_status)}>
-                ep: {agent.endpoint_status}
-              </Badge>
+            {agent.active_session_count > 0 && (
+              <span className="inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-primary text-primary-foreground text-[10px] font-medium">
+                {agent.active_session_count}
+              </span>
             )}
             <Badge variant={statusVariant(agent.status)}>
               {agent.status ?? "unknown"}
             </Badge>
           </div>
         </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          {agent.source && (
-            <span className="text-[10px] uppercase tracking-wide font-medium">
-              {agent.source === "deploy" ? "Deployed" : "Registered"}
-            </span>
-          )}
-          {agent.protocol && (
-            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-              {agent.protocol}
-            </Badge>
-          )}
-          <span>
-            {agent.active_session_count > 0
-              ? `${agent.active_session_count} active session(s)`
-              : "No active sessions"}
-          </span>
-        </div>
       </CardHeader>
-      <CardContent className="space-y-2 text-xs text-muted-foreground">
+      <CardContent className="space-y-0.5 text-xs text-muted-foreground">
         <div>Region: {agent.region}</div>
         <div>Account: {agent.account_id}</div>
+        {agent.network_mode && (
+          <div>Network: {agent.network_mode}</div>
+        )}
+
         {agent.available_qualifiers.length > 0 && (
-          <div className="flex flex-wrap gap-1">
+          <div className="flex flex-wrap items-center gap-1">
+            <span>Endpoint:</span>
             {agent.available_qualifiers.map((q) => (
-              <Badge key={q} variant="outline" className="text-xs">
+              <Badge key={q} variant="outline" className="text-[10px] px-1.5 py-0">
                 {q}
               </Badge>
             ))}
@@ -90,40 +87,59 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete }: AgentCardPro
         {agent.registered_at && (
           <div>Registered: {formatTimestamp(agent.registered_at, timezone)}</div>
         )}
-        <div className="flex justify-between gap-2 pt-2" onClick={(e) => e.stopPropagation()}>
-          <Button size="sm" variant="outline" onClick={() => onRefresh(agent.id)}>
-            Refresh
-          </Button>
-          <div className="flex gap-2">
-            {confirmingRemove ? (
-              <>
+        <div className="pt-3" onClick={(e) => e.stopPropagation()}>
+          <div className="h-4 mb-1.5 flex items-center justify-end">
+            {confirmingRemove && showCleanupOption && (
+              <label className="flex items-center gap-1.5 text-[11px] cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={cleanupAws}
+                  onChange={(e) => setCleanupAws(e.target.checked)}
+                  className="h-3.5 w-3.5"
+                />
+                Remove in AgentCore
+              </label>
+            )}
+          </div>
+          <div className="flex justify-between gap-2">
+            <Button size="sm" variant="outline" onClick={() => onRefresh(agent.id)}>
+              Refresh
+            </Button>
+            <div className="flex items-center gap-2">
+              {confirmingRemove ? (
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setConfirmingRemove(false);
+                      setCleanupAws(false);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => {
+                      onDelete(agent.id, cleanupAws);
+                      setConfirmingRemove(false);
+                      setCleanupAws(false);
+                    }}
+                  >
+                    Confirm
+                  </Button>
+                </>
+              ) : (
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => setConfirmingRemove(false)}
+                  onClick={() => setConfirmingRemove(true)}
                 >
-                  Cancel
+                  Remove
                 </Button>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={() => {
-                    onDelete(agent.id);
-                    setConfirmingRemove(false);
-                  }}
-                >
-                  Confirm remove
-                </Button>
-              </>
-            ) : (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setConfirmingRemove(true)}
-              >
-                Remove
-              </Button>
-            )}
+              )}
+            </div>
           </div>
         </div>
       </CardContent>

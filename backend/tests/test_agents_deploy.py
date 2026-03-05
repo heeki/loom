@@ -50,7 +50,11 @@ class TestAgentsDeployRouter(unittest.TestCase):
     @patch("app.routers.agents.list_runtime_endpoints")
     def test_register_agent_existing_behavior(self, mock_list_endpoints, mock_describe):
         """Regression test: source='register' still works as before."""
-        mock_describe.return_value = {"agentRuntimeName": "Test Agent", "status": "READY"}
+        mock_describe.return_value = {
+            "agentRuntimeName": "Test Agent",
+            "status": "READY",
+            "protocolConfiguration": {"serverProtocol": "HTTP"},
+        }
         mock_list_endpoints.return_value = ["DEFAULT"]
 
         response = self.client.post(
@@ -65,6 +69,7 @@ class TestAgentsDeployRouter(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["source"], "register")
         self.assertEqual(data["runtime_id"], "reg-test")
+        self.assertEqual(data["protocol"], "HTTP")
         self.assertIsNone(data["deployment_status"])
 
     @patch("app.routers.agents.create_runtime")
@@ -86,15 +91,15 @@ class TestAgentsDeployRouter(unittest.TestCase):
             "/api/agents",
             json={
                 "source": "deploy",
-                "name": "my-deploy-agent",
-                "model_id": "us.anthropic.claude-sonnet-4-20250514",
+                "name": "my_deploy_agent",
+                "model_id": "us.anthropic.claude-sonnet-4-6-v1",
             },
         )
 
         self.assertEqual(response.status_code, 201)
         data = response.json()
         self.assertEqual(data["source"], "deploy")
-        self.assertEqual(data["name"], "my-deploy-agent")
+        self.assertEqual(data["name"], "my_deploy_agent")
         self.assertEqual(data["runtime_id"], "rt-new")
         self.assertIsNotNone(data["execution_role_arn"])
 
@@ -117,8 +122,8 @@ class TestAgentsDeployRouter(unittest.TestCase):
             "/api/agents",
             json={
                 "source": "deploy",
-                "name": "success-agent",
-                "model_id": "us.anthropic.claude-sonnet-4-20250514",
+                "name": "success_agent",
+                "model_id": "us.anthropic.claude-sonnet-4-6-v1",
             },
         )
 
@@ -143,8 +148,8 @@ class TestAgentsDeployRouter(unittest.TestCase):
             "/api/agents",
             json={
                 "source": "deploy",
-                "name": "fail-agent",
-                "model_id": "us.anthropic.claude-sonnet-4-20250514",
+                "name": "fail_agent",
+                "model_id": "us.anthropic.claude-sonnet-4-6-v1",
             },
         )
 
@@ -152,7 +157,7 @@ class TestAgentsDeployRouter(unittest.TestCase):
         self.assertIn("Failed to deploy", response.json()["detail"])
 
         # Verify DB record was updated to failed
-        agent = self.session.query(Agent).filter(Agent.name == "fail-agent").first()
+        agent = self.session.query(Agent).filter(Agent.name == "fail_agent").first()
         self.assertIsNotNone(agent)
         self.assertEqual(agent.deployment_status, "failed")
         self.assertEqual(agent.status, "FAILED")
@@ -182,8 +187,8 @@ class TestAgentsDeployRouter(unittest.TestCase):
             "/api/agents",
             json={
                 "source": "deploy",
-                "name": "redeploy-agent",
-                "model_id": "us.anthropic.claude-sonnet-4-20250514",
+                "name": "redeploy_agent",
+                "model_id": "us.anthropic.claude-sonnet-4-6-v1",
             },
         )
         agent_id = create_resp.json()["id"]
@@ -232,8 +237,8 @@ class TestAgentsDeployRouter(unittest.TestCase):
             "/api/agents",
             json={
                 "source": "deploy",
-                "name": "config-agent",
-                "model_id": "us.anthropic.claude-sonnet-4-20250514",
+                "name": "config_agent",
+                "model_id": "us.anthropic.claude-sonnet-4-6-v1",
             },
         )
         agent_id = create_resp.json()["id"]
@@ -241,9 +246,8 @@ class TestAgentsDeployRouter(unittest.TestCase):
         response = self.client.get(f"/api/agents/{agent_id}/config")
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        # Deploy flow creates AGENT_SYSTEM_PROMPT and AGENT_CONFIG_JSON config entries
+        # Deploy flow creates AGENT_CONFIG_JSON config entry
         keys = {entry["key"] for entry in data}
-        self.assertIn("AGENT_SYSTEM_PROMPT", keys)
         self.assertIn("AGENT_CONFIG_JSON", keys)
 
     @patch("app.routers.agents.create_runtime")
@@ -263,8 +267,8 @@ class TestAgentsDeployRouter(unittest.TestCase):
             "/api/agents",
             json={
                 "source": "deploy",
-                "name": "update-config-agent",
-                "model_id": "us.anthropic.claude-sonnet-4-20250514",
+                "name": "update_config_agent",
+                "model_id": "us.anthropic.claude-sonnet-4-6-v1",
             },
         )
         agent_id = create_resp.json()["id"]
@@ -301,16 +305,47 @@ class TestAgentsDeployRouter(unittest.TestCase):
             "/api/agents",
             json={
                 "source": "deploy",
-                "name": "delete-agent",
-                "model_id": "us.anthropic.claude-sonnet-4-20250514",
+                "name": "delete_agent",
+                "model_id": "us.anthropic.claude-sonnet-4-6-v1",
             },
         )
         agent_id = create_resp.json()["id"]
 
+        # Without cleanup_aws, should NOT call AWS delete
         response = self.client.delete(f"/api/agents/{agent_id}")
         self.assertEqual(response.status_code, 204)
+        mock_delete_rt.assert_not_called()
 
-        mock_delete_rt.assert_called_once_with("rt-del", "us-east-1")
+    @patch("app.routers.agents.delete_execution_role")
+    @patch("app.routers.agents.delete_runtime")
+    @patch("app.routers.agents.create_runtime")
+    @patch("app.routers.agents.build_agent_artifact")
+    @patch("app.routers.agents.create_execution_role")
+    def test_delete_deployed_agent_with_cleanup_aws(
+        self, mock_create_role, mock_build_artifact, mock_create_runtime, mock_delete_rt, mock_delete_role
+    ):
+        """Test that deleting a deployed agent with cleanup_aws=true calls AWS cleanup."""
+        mock_create_role.return_value = "arn:aws:iam::123456789012:role/loom-agent-pending-1"
+        mock_build_artifact.return_value = ("my-bucket", "artifacts/agent.zip")
+        mock_create_runtime.return_value = {
+            "agentRuntimeArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/rt-del2",
+            "agentRuntimeId": "rt-del2",
+            "status": "ACTIVE",
+        }
+
+        create_resp = self.client.post(
+            "/api/agents",
+            json={
+                "source": "deploy",
+                "name": "delete_agent_cleanup",
+                "model_id": "us.anthropic.claude-sonnet-4-6-v1",
+            },
+        )
+        agent_id = create_resp.json()["id"]
+
+        response = self.client.delete(f"/api/agents/{agent_id}?cleanup_aws=true")
+        self.assertEqual(response.status_code, 204)
+        mock_delete_rt.assert_called_once_with("rt-del2", "us-east-1")
 
     def test_deploy_agent_missing_name(self):
         """Test deploy without name returns 400."""
@@ -318,7 +353,7 @@ class TestAgentsDeployRouter(unittest.TestCase):
             "/api/agents",
             json={
                 "source": "deploy",
-                "model_id": "us.anthropic.claude-sonnet-4-20250514",
+                "model_id": "us.anthropic.claude-sonnet-4-6-v1",
             },
         )
         self.assertEqual(response.status_code, 400)
@@ -328,10 +363,36 @@ class TestAgentsDeployRouter(unittest.TestCase):
         """Test deploy without model_id returns 400."""
         response = self.client.post(
             "/api/agents",
-            json={"source": "deploy", "name": "my-agent"},
+            json={"source": "deploy", "name": "my_agent"},
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("model_id", response.json()["detail"].lower())
+
+    def test_deploy_agent_invalid_name_hyphen(self):
+        """Test deploy with hyphenated name returns 400."""
+        response = self.client.post(
+            "/api/agents",
+            json={
+                "source": "deploy",
+                "name": "my-agent",
+                "model_id": "us.anthropic.claude-sonnet-4-6-v1",
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid agent name", response.json()["detail"])
+
+    def test_deploy_agent_invalid_name_starts_with_digit(self):
+        """Test deploy with name starting with digit returns 400."""
+        response = self.client.post(
+            "/api/agents",
+            json={
+                "source": "deploy",
+                "name": "1agent",
+                "model_id": "us.anthropic.claude-sonnet-4-6-v1",
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid agent name", response.json()["detail"])
 
     def test_invalid_source(self):
         """Test invalid source returns 400."""
@@ -369,8 +430,8 @@ class TestAgentsDeployRouter(unittest.TestCase):
             "/api/agents",
             json={
                 "source": "deploy",
-                "name": "status-agent",
-                "model_id": "us.anthropic.claude-sonnet-4-20250514",
+                "name": "status_agent",
+                "model_id": "us.anthropic.claude-sonnet-4-6-v1",
             },
         )
         agent_id = create_resp.json()["id"]
@@ -423,7 +484,7 @@ class TestAgentsDeployRouter(unittest.TestCase):
         data = response.json()
         self.assertTrue(len(data) > 0)
         model_ids = [m["model_id"] for m in data]
-        self.assertIn("us.anthropic.claude-sonnet-4-20250514", model_ids)
+        self.assertIn("us.anthropic.claude-sonnet-4-6-v1", model_ids)
 
 
 if __name__ == "__main__":

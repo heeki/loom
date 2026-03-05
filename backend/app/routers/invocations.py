@@ -22,7 +22,9 @@ from app.models.invocation import Invocation
 
 from app.services.agentcore import invoke_agent
 from app.services.cloudwatch import get_log_events, parse_agent_start_time
+from app.services.cognito import get_cognito_token
 from app.services.latency import compute_client_duration, compute_cold_start
+from app.services.secrets import get_secret
 from app.routers.agents import derive_log_group
 
 
@@ -115,7 +117,8 @@ async def invoke_agent_stream(
     invocation: Invocation,
     db: Session,
     client_invoke_time: float,
-    prompt: str
+    prompt: str,
+    access_token: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Invoke the agent and yield SSE events as the response streams.
@@ -147,7 +150,8 @@ async def invoke_agent_stream(
             qualifier=session.qualifier,
             session_id=session_id,
             prompt=prompt,
-            region=agent.region
+            region=agent.region,
+            access_token=access_token,
         )
 
         # Accumulators for content storage
@@ -174,8 +178,13 @@ async def invoke_agent_stream(
                 yield format_sse_event("chunk", {"text": text_content})
             elif chunk.get("type") == "structured":
                 structured = chunk["content"]
-                # Extract thinking/reasoning data from structured payloads
                 if isinstance(structured, dict):
+                    # Strands SDK text delta: {"data": "token"}
+                    data = structured.get("data")
+                    if isinstance(data, str) and data:
+                        response_chunks.append(data)
+                        yield format_sse_event("chunk", {"text": data})
+                    # Extract thinking/reasoning data
                     thinking = structured.get("thinking") or structured.get("reasoning")
                     if thinking:
                         thinking_chunks.append(str(thinking))
@@ -349,9 +358,29 @@ async def invoke_agent_endpoint(
     db.commit()
     db.refresh(invocation)
 
+    # Fetch access token if agent has a Cognito authorizer configured
+    access_token = None
+    auth_config = agent.get_authorizer_config()
+    if auth_config and auth_config.get("type") == "cognito" and auth_config.get("pool_id"):
+        config_map = {e.key: e.value for e in agent.config_entries}
+        client_id = config_map.get("COGNITO_CLIENT_ID", "")
+        secret_arn = config_map.get("COGNITO_CLIENT_SECRET_ARN", "")
+        if client_id and secret_arn:
+            try:
+                client_secret = get_secret(secret_arn, agent.region)
+                token_response = get_cognito_token(
+                    pool_id=auth_config["pool_id"],
+                    client_id=client_id,
+                    client_secret=client_secret,
+                    scopes=auth_config.get("allowed_scopes") or None,
+                )
+                access_token = token_response.get("access_token")
+            except Exception as e:
+                logger.warning("Failed to get Cognito token for agent %s: %s", agent_id, e)
+
     # Return streaming response
     return StreamingResponse(
-        invoke_agent_stream(agent, session, invocation, db, client_invoke_time, request.prompt),
+        invoke_agent_stream(agent, session, invocation, db, client_invoke_time, request.prompt, access_token),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -359,6 +388,56 @@ async def invoke_agent_endpoint(
             "X-Accel-Buffering": "no",  # Disable buffering in nginx
         }
     )
+
+
+@router.post("/{agent_id}/token")
+def get_agent_token(
+    agent_id: int,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Get an access token for an agent with a Cognito authorizer.
+
+    Reads COGNITO_CLIENT_ID and COGNITO_CLIENT_SECRET from the agent's
+    config entries and exchanges them for a token via the client credentials grant.
+    """
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    auth_config = agent.get_authorizer_config()
+    if not auth_config or auth_config.get("type") != "cognito" or not auth_config.get("pool_id"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Agent does not have a Cognito authorizer configured",
+        )
+
+    config_map = {e.key: e.value for e in agent.config_entries}
+    client_id = config_map.get("COGNITO_CLIENT_ID", "")
+    secret_arn = config_map.get("COGNITO_CLIENT_SECRET_ARN", "")
+    if not client_id or not secret_arn:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="COGNITO_CLIENT_ID and COGNITO_CLIENT_SECRET_ARN must be set in agent configuration",
+        )
+
+    try:
+        client_secret = get_secret(secret_arn, agent.region)
+        token_response = get_cognito_token(
+            pool_id=auth_config["pool_id"],
+            client_id=client_id,
+            client_secret=client_secret,
+            scopes=auth_config.get("allowed_scopes") or None,
+        )
+        return {
+            "access_token": token_response["access_token"],
+            "token_type": token_response.get("token_type", "Bearer"),
+            "expires_in": token_response.get("expires_in"),
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to get token from Cognito: {str(e)}",
+        )
 
 
 @router.get("/{agent_id}/sessions", response_model=List[SessionResponse])

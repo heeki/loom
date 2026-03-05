@@ -119,8 +119,8 @@ export function useAgents() {
   );
 
   const deleteAgent = useCallback(
-    async (id: number) => {
-      await agentsApi.deleteAgent(id);
+    async (id: number, cleanupAws: boolean = false) => {
+      await agentsApi.deleteAgent(id, cleanupAws);
       await fetchAgents();
     },
     [fetchAgents],

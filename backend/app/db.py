@@ -8,8 +8,8 @@ from typing import Generator
 
 logger = logging.getLogger(__name__)
 
-# Get DATABASE_URL from environment, default to SQLite
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./loom.db")
+# Get LOOM_DATABASE_URL from environment, default to SQLite
+DATABASE_URL = os.getenv("LOOM_DATABASE_URL", "sqlite:///./loom.db")
 
 # Create SQLAlchemy engine
 engine = create_engine(

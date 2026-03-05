@@ -12,7 +12,7 @@ interface AgentListPageProps {
   onRegister: (arn: string) => Promise<unknown>;
   onDeploy?: (request: AgentDeployRequest) => Promise<unknown>;
   onRefresh: (id: number) => Promise<unknown>;
-  onDelete: (id: number) => Promise<void>;
+  onDelete: (id: number, cleanupAws: boolean) => Promise<void>;
 }
 
 export function AgentListPage({
@@ -60,10 +60,10 @@ export function AgentListPage({
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: number, cleanupAws: boolean) => {
     try {
-      await onDelete(id);
-      toast.success("Agent removed");
+      await onDelete(id, cleanupAws);
+      toast.success(cleanupAws ? "Agent removed from Loom and AgentCore" : "Agent removed from Loom");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Delete failed");
     }

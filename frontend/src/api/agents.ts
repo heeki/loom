@@ -48,8 +48,9 @@ export function refreshAgent(id: number): Promise<AgentResponse> {
   });
 }
 
-export function deleteAgent(id: number): Promise<void> {
-  return apiFetch<void>(`/api/agents/${id}`, {
+export function deleteAgent(id: number, cleanupAws: boolean = false): Promise<void> {
+  const params = cleanupAws ? "?cleanup_aws=true" : "";
+  return apiFetch<void>(`/api/agents/${id}${params}`, {
     method: "DELETE",
   });
 }

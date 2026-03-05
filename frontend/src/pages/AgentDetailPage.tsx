@@ -5,11 +5,7 @@ import { InvokePanel } from "@/components/InvokePanel";
 import { LatencySummary } from "@/components/LatencySummary";
 import { SessionTable } from "@/components/SessionTable";
 import { DeploymentPanel } from "@/components/DeploymentPanel";
-import { ConfigurationEditor } from "@/components/ConfigurationEditor";
-import { IntegrationManager } from "@/components/IntegrationManager";
-import { CredentialProviderForm } from "@/components/CredentialProviderForm";
 import { useInvoke } from "@/hooks/useInvoke";
-import { useAgentConfig, useCredentialProviders, useIntegrations } from "@/hooks/useDeployment";
 import type { AgentResponse, SessionResponse } from "@/api/types";
 
 interface AgentDetailPageProps {
@@ -31,19 +27,6 @@ export function AgentDetailPage({
 }: AgentDetailPageProps) {
   const { streamedText, sessionStart, sessionEnd, isStreaming, error, invoke, cancel } =
     useInvoke();
-
-  const { config, loading: configLoading, updateConfig } = useAgentConfig(
-    agent.source === "deploy" ? agent.id : null,
-  );
-  const { providers, loading: providersLoading, createProvider, deleteProvider } =
-    useCredentialProviders(agent.source === "deploy" ? agent.id : null);
-  const {
-    integrations,
-    loading: integrationsLoading,
-    createIntegration,
-    updateIntegration,
-    deleteIntegration,
-  } = useIntegrations(agent.source === "deploy" ? agent.id : null);
 
   const handleInvoke = async (prompt: string, qualifier: string, sessionId?: string) => {
     await invoke(agent.id, prompt, qualifier, sessionId);
@@ -85,7 +68,7 @@ export function AgentDetailPage({
       )}
 
       {/* Response — full width, expands dynamically with content */}
-      {(streamedText || isStreaming) && (
+      {(streamedText || isStreaming || sessionStart) && (
         <Card>
           <CardHeader className="pb-2">
             <div className="flex items-center gap-2">
@@ -122,28 +105,6 @@ export function AgentDetailPage({
           <DeploymentPanel
             agent={agent}
             onRedeploy={onRedeploy ?? (async () => {})}
-          />
-
-          <ConfigurationEditor
-            config={config}
-            loading={configLoading}
-            onSave={updateConfig}
-          />
-
-          <IntegrationManager
-            integrations={integrations}
-            credentialProviders={providers}
-            loading={integrationsLoading}
-            onCreate={createIntegration}
-            onUpdate={updateIntegration}
-            onDelete={deleteIntegration}
-          />
-
-          <CredentialProviderForm
-            providers={providers}
-            loading={providersLoading}
-            onCreate={createProvider}
-            onDelete={deleteProvider}
           />
         </>
       )}

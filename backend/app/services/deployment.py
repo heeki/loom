@@ -67,9 +67,18 @@ def build_agent_artifact(region: str) -> tuple[str, str]:
         # Copy source
         shutil.copytree(str(src_dir), os.path.join(tmp_dir, "src"))
 
-        # Install dependencies
+        # Install dependencies targeting linux/arm64 for AgentCore Runtime
         subprocess.run(
-            ["pip", "install", "-r", str(requirements), "-t", tmp_dir, "--quiet"],
+            [
+                "pip", "install",
+                "-r", str(requirements),
+                "-t", tmp_dir,
+                "--quiet",
+                "--platform", "manylinux2014_aarch64",
+                "--only-binary=:all:",
+                "--python-version", "3.13",
+                "--implementation", "cp",
+            ],
             check=True,
             capture_output=True,
         )
@@ -149,7 +158,7 @@ def create_runtime(
                     }
                 },
                 "runtime": "PYTHON_3_13",
-                "entryPoint": ["src.handler.main"],
+                "entryPoint": ["src/handler.py"],
             }
         },
         "roleArn": role_arn,

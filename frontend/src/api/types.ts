@@ -42,7 +42,13 @@ export interface AgentDeployRequest {
   network_mode: string;
   idle_timeout: number | null;
   max_lifetime: number | null;
+  authorizer_type: string | null;
   authorizer_pool_id: string | null;
+  authorizer_discovery_url: string | null;
+  authorizer_allowed_clients: string[];
+  authorizer_allowed_scopes: string[];
+  authorizer_client_id: string | null;
+  authorizer_client_secret: string | null;
   memory_enabled: boolean;
   mcp_servers: unknown[];
   a2a_agents: unknown[];

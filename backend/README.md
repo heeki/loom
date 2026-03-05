@@ -1,6 +1,6 @@
 # Loom Backend
 
-FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, and session liveness tracking.
+FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, and session liveness tracking.
 
 ## Technology Stack
 
@@ -42,6 +42,8 @@ Runtime configuration is sourced from `etc/environment.sh`:
 | `DATABASE_URL` | SQLite file path | `sqlite:///./loom.db` |
 | `LOG_LEVEL` | Backend log level | `info` |
 | `SESSION_IDLE_TIMEOUT_MINUTES` | Session idle timeout for liveness detection | `15` |
+| `AWS_REGION` | AWS region for deployments | `us-east-1` |
+| `LOOM_ARTIFACT_BUCKET` | S3 bucket for agent deployment artifacts | — |
 
 AWS credentials use the standard boto3 credential chain (environment variables, AWS profile, instance metadata).
 
@@ -54,6 +56,7 @@ backend/
 │   ├── db.py                # SQLAlchemy engine, session factory, init_db
 │   ├── models/
 │   │   ├── agent.py         # Agent ORM model
+│   │   ├── config_entry.py  # AgentConfigEntry ORM model (per-agent key-value config)
 │   │   ├── session.py       # InvocationSession ORM model (session_id string PK)
 │   │   └── invocation.py    # Invocation ORM model (timing + latency data)
 │   ├── routers/
@@ -63,7 +66,12 @@ backend/
 │   └── services/
 │       ├── agentcore.py     # boto3 wrapper: describe, list endpoints, invoke
 │       ├── cloudwatch.py    # boto3 wrapper: log streams, log events, start time parsing
-│       └── latency.py       # Pure computation: cold_start_latency_ms, client_duration_ms
+│       ├── cognito.py       # Cognito OAuth2 token retrieval
+│       ├── credential.py    # AgentCore credential provider management
+│       ├── deployment.py    # Agent artifact build + runtime CRUD
+│       ├── iam.py           # IAM role management + Cognito pool listing
+│       ├── latency.py       # Pure computation: cold_start_latency_ms, client_duration_ms
+│       └── secrets.py       # Secrets Manager wrapper with caching
 ├── scripts/
 │   └── stream.py            # CLI streaming client (httpx-based)
 ├── tests/                   # Unit tests (63 tests)
@@ -76,7 +84,11 @@ backend/
 
 ### `agents`
 
-Stores registered AgentCore Runtime agents. Uses an auto-incrementing integer PK for internal references; `arn` and `runtime_id` are stored as indexed columns for AWS lookups.
+Stores registered and deployed AgentCore Runtime agents. Uses an auto-incrementing integer PK for internal references; `arn` and `runtime_id` are stored as indexed columns for AWS lookups. Includes columns for: `source`, `deployment_status`, `execution_role_arn`, `endpoint_name`, `endpoint_arn`, `endpoint_status`, `protocol`, `network_mode`, `authorizer_config`, and `deployed_at`.
+
+### `agent_config_entries`
+
+Stores key-value configuration per agent. Used for environment variables and secret ARN references injected at deploy time.
 
 ### `invocation_sessions`
 
@@ -99,6 +111,18 @@ Prompt text, thinking text, and response text are stored per invocation (`prompt
 | `GET` | `/api/agents/{agent_id}` | Get agent metadata |
 | `DELETE` | `/api/agents/{agent_id}` | Remove an agent |
 | `POST` | `/api/agents/{agent_id}/refresh` | Re-fetch metadata from AWS |
+
+### Agent Deployment
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/agents` | Create agent (register or deploy) |
+| `DELETE` | `/api/agents/{agent_id}?cleanup_aws=true` | Remove agent; optionally clean up AWS |
+| `POST` | `/api/agents/{agent_id}/redeploy` | Redeploy with current config |
+| `GET` | `/api/agents/roles` | List IAM roles for AgentCore |
+| `GET` | `/api/agents/cognito-pools` | List Cognito user pools |
+| `GET` | `/api/agents/models` | List supported models |
+| `POST` | `/api/agents/{agent_id}/token` | Get Cognito access token |
 
 ### Agent Invocation (SSE Streaming)
 
@@ -140,6 +164,14 @@ Cold-start latency is computed automatically during the invoke flow:
 5. All metrics are persisted to SQLite and included in the `session_end` SSE event.
 
 If CloudWatch logs are unavailable, the invocation succeeds without latency data.
+
+## Agent Deployment
+
+Deploy creates a Strands Agent runtime on AgentCore. The build step cross-compiles an ARM64 artifact (pip install into a target directory, zips the result, and uploads to S3). The deployment supports configurable model, protocol (HTTP/WSS), network mode (PUBLIC/VPC), authorizer, and lifecycle settings. Cognito client secrets are stored in Secrets Manager and never persisted in the local database. Deletion optionally cleans up the AgentCore runtime and associated Secrets Manager entries.
+
+## Authenticated Invocation
+
+Agents configured with a Cognito authorizer auto-fetch an access token at invoke time. The token is retrieved via the OAuth2 client credentials grant; the client secret is fetched from Secrets Manager with a 5-minute in-memory cache. The Bearer token is sent alongside an UNSIGNED SigV4 request (OAuth mode).
 
 ## Makefile Targets
 

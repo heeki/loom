@@ -5,6 +5,7 @@ import os
 import re
 import time
 from datetime import datetime
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -36,6 +37,7 @@ from app.services.iam import (
     list_agentcore_roles,
     list_cognito_pools,
 )
+from app.services.secrets import store_secret, delete_secret
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +46,14 @@ router = APIRouter(prefix="/api/agents", tags=["agents"])
 DEFAULT_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 SUPPORTED_MODELS = [
-    {"model_id": "us.anthropic.claude-sonnet-4-20250514", "display_name": "Claude Sonnet 4"},
-    {"model_id": "us.anthropic.claude-haiku-4-5-20251001", "display_name": "Claude Haiku 4.5"},
-    {"model_id": "us.amazon.nova-premier-v1:0", "display_name": "Amazon Nova Premier"},
+    {"model_id": "us.anthropic.claude-opus-4-6-v1", "display_name": "Claude Opus 4.6"},
+    {"model_id": "us.anthropic.claude-sonnet-4-6", "display_name": "Claude Sonnet 4.6"},
+    {"model_id": "us.anthropic.claude-haiku-4-5-20251001-v1:0", "display_name": "Claude Haiku 4.5"},
+    {"model_id": "amazon.nova-2-lite-v1:0", "display_name": "Amazon Nova 2 Lite"},
     {"model_id": "us.amazon.nova-pro-v1:0", "display_name": "Amazon Nova Pro"},
     {"model_id": "us.amazon.nova-lite-v1:0", "display_name": "Amazon Nova Lite"},
+    {"model_id": "us.amazon.nova-micro-v1:0", "display_name": "Amazon Nova Micro"},
+    {"model_id": "us.amazon.nova-nano-v1:0", "display_name": "Amazon Nova Nano"},
 ]
 
 
@@ -75,7 +80,13 @@ class AgentDeployRequest(BaseModel):
     network_mode: str = Field(default="PUBLIC", description="PUBLIC or VPC")
     idle_timeout: int | None = Field(None, description="Idle runtime session timeout (seconds)")
     max_lifetime: int | None = Field(None, description="Max lifetime (seconds)")
-    authorizer_pool_id: str | None = Field(None, description="Cognito pool ID for authorizer")
+    authorizer_type: str | None = Field(None, description="Authorizer type: 'cognito' or 'other'")
+    authorizer_pool_id: str | None = Field(None, description="Cognito pool ID for authorizer (when type is 'cognito')")
+    authorizer_discovery_url: str | None = Field(None, description="OIDC discovery URL (when type is 'other')")
+    authorizer_allowed_clients: list[str] = Field(default_factory=list, description="Allowed client IDs")
+    authorizer_allowed_scopes: list[str] = Field(default_factory=list, description="Allowed OAuth scopes")
+    authorizer_client_id: str | None = Field(None, description="App client ID for Cognito token retrieval")
+    authorizer_client_secret: str | None = Field(None, description="App client secret for Cognito token retrieval")
     memory_enabled: bool = Field(default=False, description="Enable memory integration")
     mcp_servers: list = Field(default_factory=list, description="MCP server configs")
     a2a_agents: list = Field(default_factory=list, description="A2A agent configs")
@@ -98,7 +109,13 @@ class AgentCreateRequest(BaseModel):
     network_mode: str = Field(default="PUBLIC", description="PUBLIC or VPC")
     idle_timeout: int | None = Field(None, description="Idle runtime session timeout (seconds)")
     max_lifetime: int | None = Field(None, description="Max lifetime (seconds)")
-    authorizer_pool_id: str | None = Field(None, description="Cognito pool ID for authorizer")
+    authorizer_type: str | None = Field(None, description="Authorizer type: 'cognito' or 'other'")
+    authorizer_pool_id: str | None = Field(None, description="Cognito pool ID for authorizer (when type is 'cognito')")
+    authorizer_discovery_url: str | None = Field(None, description="OIDC discovery URL (when type is 'other')")
+    authorizer_allowed_clients: list[str] = Field(default_factory=list, description="Allowed client IDs")
+    authorizer_allowed_scopes: list[str] = Field(default_factory=list, description="Allowed OAuth scopes")
+    authorizer_client_id: str | None = Field(None, description="App client ID for Cognito token retrieval")
+    authorizer_client_secret: str | None = Field(None, description="App client secret for Cognito token retrieval")
     memory_enabled: bool = Field(default=False, description="Enable memory integration")
     mcp_servers: list = Field(default_factory=list, description="MCP server configs")
     a2a_agents: list = Field(default_factory=list, description="A2A agent configs")
@@ -296,6 +313,11 @@ def _register_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
     except Exception:
         qualifiers = ["DEFAULT"]
 
+    protocol_config = metadata.get("protocolConfiguration", {})
+    protocol = protocol_config.get("serverProtocol", "HTTP")
+    network_config = metadata.get("networkConfiguration", {})
+    network_mode = network_config.get("networkMode", "PUBLIC")
+
     agent = Agent(
         arn=request.arn,
         runtime_id=runtime_id,
@@ -305,6 +327,8 @@ def _register_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
         account_id=account_id,
         log_group=derive_log_group(runtime_id, qualifiers[0]) if qualifiers else None,
         source="register",
+        protocol=protocol,
+        network_mode=network_mode,
         registered_at=datetime.utcnow(),
         last_refreshed_at=datetime.utcnow(),
     )
@@ -331,10 +355,22 @@ def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
             detail="Field 'model_id' is required when source is 'deploy'"
         )
 
+    # AgentCore runtime names must match [a-zA-Z][a-zA-Z0-9_]{0,47}
+    runtime_name_pattern = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{0,47}$")
+    if not runtime_name_pattern.match(request.name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Invalid agent name '{request.name}'. "
+                "Must start with a letter, contain only letters, digits, and underscores, "
+                "and be at most 48 characters."
+            )
+        )
+
     region = os.getenv("AWS_REGION", DEFAULT_REGION)
     account_id = os.getenv("AWS_ACCOUNT_ID", "")
 
-    # Build system prompt and config JSON
+    # Build config JSON (includes system prompt, model, and integrations)
     system_prompt = _build_system_prompt(request)
     config_json = json.dumps({
         "system_prompt": system_prompt,
@@ -346,7 +382,6 @@ def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
         },
     })
     env_vars = {
-        "AGENT_SYSTEM_PROMPT": system_prompt,
         "AGENT_CONFIG_JSON": config_json,
     }
 
@@ -435,12 +470,22 @@ def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
             lifecycle_config["maxLifetime"] = request.max_lifetime
 
     authorizer_config = None
-    if request.authorizer_pool_id:
-        authorizer_config = {
-            "customJWTAuthorizer": {
-                "discoveryUrl": f"https://cognito-idp.{region}.amazonaws.com/{request.authorizer_pool_id}/.well-known/openid-configuration"
-            }
+    if request.authorizer_type == "cognito" and request.authorizer_pool_id:
+        jwt_config: dict[str, Any] = {
+            "discoveryUrl": f"https://cognito-idp.{region}.amazonaws.com/{request.authorizer_pool_id}/.well-known/openid-configuration"
         }
+        if request.authorizer_allowed_clients:
+            jwt_config["allowedClients"] = request.authorizer_allowed_clients
+        if request.authorizer_allowed_scopes:
+            jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
+        authorizer_config = {"customJWTAuthorizer": jwt_config}
+    elif request.authorizer_type == "other" and request.authorizer_discovery_url:
+        jwt_config = {"discoveryUrl": request.authorizer_discovery_url}
+        if request.authorizer_allowed_clients:
+            jwt_config["allowedClients"] = request.authorizer_allowed_clients
+        if request.authorizer_allowed_scopes:
+            jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
+        authorizer_config = {"customJWTAuthorizer": jwt_config}
 
     # Deploy to AgentCore
     try:
@@ -461,6 +506,13 @@ def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
         runtime_arn = response.get("agentRuntimeArn", "")
         runtime_id = response.get("agentRuntimeId", "")
 
+        # Extract account_id from the returned ARN
+        try:
+            _, arn_account_id, _ = parse_arn(runtime_arn)
+            agent.account_id = arn_account_id
+        except ValueError:
+            pass
+
         agent.arn = runtime_arn
         agent.runtime_id = runtime_id
         agent.deployment_status = "deployed"
@@ -469,6 +521,41 @@ def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
         agent.last_refreshed_at = datetime.utcnow()
         agent.log_group = derive_log_group(runtime_id, "DEFAULT") if runtime_id else None
         agent.set_available_qualifiers(["DEFAULT"])
+
+        # Persist authorizer config for token retrieval at invoke time
+        if request.authorizer_type:
+            agent.set_authorizer_config({
+                "type": request.authorizer_type,
+                "pool_id": request.authorizer_pool_id,
+                "discovery_url": request.authorizer_discovery_url,
+                "allowed_clients": request.authorizer_allowed_clients,
+                "allowed_scopes": request.authorizer_allowed_scopes,
+            })
+
+            # Store Cognito client credentials for token retrieval
+            if request.authorizer_client_id:
+                db.add(ConfigEntry(
+                    agent_id=agent.id,
+                    key="COGNITO_CLIENT_ID",
+                    value=request.authorizer_client_id,
+                    is_secret=False,
+                    source="env_var",
+                ))
+            if request.authorizer_client_id and request.authorizer_client_secret:
+                secret_name = f"loom/agents/{agent.id}/cognito-client-secret"
+                secret_arn = store_secret(
+                    name=secret_name,
+                    secret_value=request.authorizer_client_secret,
+                    region=region,
+                    description=f"Cognito client secret for Loom agent {agent.id} (client_id: {request.authorizer_client_id})",
+                )
+                db.add(ConfigEntry(
+                    agent_id=agent.id,
+                    key="COGNITO_CLIENT_SECRET_ARN",
+                    value=secret_arn,
+                    is_secret=True,
+                    source="secrets_manager",
+                ))
 
         db.commit()
         db.refresh(agent)
@@ -562,11 +649,19 @@ def get_agent_status(agent_id: int, db: Session = Depends(get_db)) -> AgentRespo
 
 
 @router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_agent(agent_id: int, db: Session = Depends(get_db)) -> None:
-    """Remove an agent from the local registry. For deployed agents, also clean up AWS resources."""
+def delete_agent(
+    agent_id: int,
+    cleanup_aws: bool = False,
+    db: Session = Depends(get_db),
+) -> None:
+    """Remove an agent from the local registry.
+
+    Args:
+        cleanup_aws: If True, also delete the runtime, endpoint, and IAM role from AWS.
+    """
     agent = get_agent_or_404(agent_id, db)
 
-    if agent.source == "deploy" and agent.runtime_id:
+    if cleanup_aws and agent.runtime_id:
         # Delete endpoint first
         if agent.endpoint_name:
             try:
@@ -580,9 +675,11 @@ def delete_agent(agent_id: int, db: Session = Depends(get_db)) -> None:
         except Exception as e:
             logger.warning("Failed to delete runtime %s: %s", agent.runtime_id, e)
 
-        # Delete IAM role if we created it
-        if agent.execution_role_arn:
-            _cleanup_role(agent.execution_role_arn)
+    # Clean up Cognito client secret from Secrets Manager
+    config_map = {e.key: e.value for e in agent.config_entries}
+    secret_arn = config_map.get("COGNITO_CLIENT_SECRET_ARN")
+    if secret_arn:
+        delete_secret(secret_arn, agent.region)
 
     db.delete(agent)
     db.commit()
@@ -608,6 +705,16 @@ def refresh_agent(agent_id: int, db: Session = Depends(get_db)) -> AgentResponse
 
     agent.name = metadata.get("agentRuntimeName")
     agent.status = metadata.get("status")
+    protocol_config = metadata.get("protocolConfiguration", {})
+    agent.protocol = protocol_config.get("serverProtocol", agent.protocol or "HTTP")
+    network_config = metadata.get("networkConfiguration", {})
+    agent.network_mode = network_config.get("networkMode", agent.network_mode or "PUBLIC")
+    if not agent.account_id:
+        try:
+            _, arn_account_id, _ = parse_arn(agent.arn)
+            agent.account_id = arn_account_id
+        except ValueError:
+            pass
     agent.set_available_qualifiers(qualifiers)
     agent.set_raw_metadata(metadata)
     agent.last_refreshed_at = datetime.utcnow()

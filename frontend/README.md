@@ -1,6 +1,6 @@
 # Loom Frontend
 
-Single-page React application for managing and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, and session liveness tracking.
+Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, and session liveness tracking.
 
 ## Prerequisites
 
@@ -71,6 +71,10 @@ src/
 ├── contexts/     # React contexts (timezone preference)
 ├── hooks/        # Custom React hooks for data fetching
 ├── components/   # Application components + shadcn ui/ primitives
+│   ├── AgentRegistrationForm.tsx   # Register (ARN) and Deploy (full form) tabs
+│   ├── DeploymentPanel.tsx         # Deployment details for deployed agents
+│   └── ui/
+│       └── searchable-select.tsx   # Searchable dropdown (combobox)
 ├── pages/        # Page-level view components
 ├── lib/          # Shared utilities (cn(), format helpers)
 ├── App.tsx       # Root component with navigation + timezone provider
@@ -80,7 +84,7 @@ src/
 ### API Layer
 
 - `api/client.ts` — `apiFetch<T>()` wrapper with `ApiError` class
-- `api/agents.ts` — Agent CRUD (list, get, register, refresh, delete)
+- `api/agents.ts` — Agent operations: listAgents, getAgent, registerAgent, deployAgent, deleteAgent (with optional AWS cleanup), refreshAgent, redeployAgent, fetchRoles, fetchCognitoPools, fetchModels
 - `api/invocations.ts` — Session queries + `invokeAgentStream()` SSE consumer
 - `api/logs.ts` — CloudWatch log queries (streams, agent logs, session logs)
 - `api/types.ts` — TypeScript interfaces mirroring backend Pydantic models
@@ -91,23 +95,21 @@ src/
 - `useSessions(agentId)` — Session list that re-fetches on agent change
 - `useInvoke()` — Streaming state management with `AbortController`
 - `useLogs()` — On-demand session log fetching
+- `useDeployment()` — Agent config, credential providers, and integrations for deployed agents
 
 ### Views
 
 | View | Layout | Description |
 |------|--------|-------------|
-| Agent List | Card grid | Registration form + agent cards with active session count |
-| Agent Detail | Stacked full-width | Sessions with live status (top) → latency summary → invoke form → response pane (bottom, expanding) |
-| Session Detail | Stacked sections | Metadata with live status badge, invocation timing table, dynamically expanding CloudWatch logs |
+| Agent List | Card grid | Register and Deploy tabs. Deploy form includes model selection, protocol/network/IAM role, authorizer (Cognito/Other), lifecycle timeouts, and integrations. |
+| Agent Detail | Stacked full-width | Sessions (top) → Invoke form → Latency summary → Response pane (raw streamed text) → Deployment panel for deployed agents (runtime status, protocol, network, execution role, deployed timestamp). |
+| Agent Card | Card | Shows protocol badge, network mode, and active session count. Remove flow has Cancel/Confirm buttons with optional "Remove in AgentCore" checkbox. |
+| Session Detail | Stacked sections | Metadata with live status badge, invocation timing table, dynamically expanding CloudWatch logs. |
 
-### Agent Detail Layout
+### Custom Components
 
-The agent detail view uses a stacked single-column layout:
-
-1. **Sessions** — full-width table with live status badges (active/expired/streaming/pending)
-2. **Latency Summary** — 4-metric placeholder that fills in after invocation completes
-3. **Invoke Agent** — qualifier selector + prompt textarea + invoke/cancel buttons
-4. **Response** — full-width pane that expands dynamically as streamed text arrives
+- **SearchableSelect** — Combobox with search and filter support, used for selecting IAM roles and Cognito pools in the deploy form.
+- **TagInput** — Inline component in the deploy form for adding and removing tag values (e.g. clients, scopes).
 
 ### Session Liveness
 
