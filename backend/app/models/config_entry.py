@@ -1,6 +1,6 @@
 """ConfigEntry ORM model for storing agent configuration key-value pairs."""
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.db import Base
 
@@ -13,6 +13,9 @@ class ConfigEntry(Base):
     environment variables, secrets references, and S3-sourced config.
     """
     __tablename__ = "agent_config_entries"
+    __table_args__ = (
+        UniqueConstraint("agent_id", "key", name="uq_config_agent_key"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     agent_id = Column(Integer, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True)

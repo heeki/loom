@@ -32,9 +32,9 @@ export function useAgentConfig(agentId: number | null) {
   }, [fetchConfig]);
 
   const updateConfig = useCallback(
-    async (entries: { key: string; value: string; is_secret: boolean }[]) => {
+    async (config: Record<string, string>) => {
       if (agentId === null) return;
-      const data = await agentsApi.updateAgentConfig(agentId, { entries });
+      const data = await agentsApi.updateAgentConfig(agentId, { config });
       setConfig(data);
       return data;
     },

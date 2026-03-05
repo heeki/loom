@@ -1,81 +1,262 @@
 """
 AgentCore Runtime deployment and configuration management.
 
-This module provides functions to deploy, update, and delete AgentCore Runtime agents,
-manage secrets via AWS Secrets Manager, and store large configuration values in S3.
+This module provides functions to build agent artifacts, deploy and manage
+AgentCore Runtime agents, manage secrets via AWS Secrets Manager, and
+store large configuration values in S3.
 """
 
+import logging
+import os
 import re
+import shutil
+import subprocess
+import tempfile
+import zipfile
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
+logger = logging.getLogger(__name__)
 
-def deploy_agent(
-    name: str,
-    code_uri: str,
-    execution_role_arn: str,
-    env_vars: dict[str, str],
-    region: str
-) -> dict[str, Any]:
+DEFAULT_TAGS: dict[str, str] = {
+    "deployed-by": "loom",
+    "owner": "heeki",
+    "team": "aws",
+}
+
+AGENT_SOURCE_DIR = Path(__file__).resolve().parents[3] / "agents" / "strands_agent"
+
+
+def _merge_tags(extra: dict[str, str] | None = None) -> dict[str, str]:
+    tags = dict(DEFAULT_TAGS)
+    if extra:
+        tags.update(extra)
+    return tags
+
+
+def build_agent_artifact(region: str) -> tuple[str, str]:
     """
-    Deploy a new agent runtime via the AgentCore control plane.
+    Build and upload the strands_agent artifact to S3.
 
-    Uses the bedrock-agentcore-control client to create an agent runtime
-    with the specified artifact location and configuration.
+    Copies agents/strands_agent/src/ and pip-installs requirements.txt into
+    a temp directory, zips the contents, and uploads to S3.
 
     Args:
-        name: Name for the agent runtime
-        code_uri: S3 URI for the agent code artifact
-        execution_role_arn: IAM role ARN for the runtime execution
-        env_vars: Environment variables to inject into the runtime
         region: AWS region name
 
     Returns:
-        Dictionary containing the create_agent_runtime API response
+        Tuple of (bucket, s3_key) for the uploaded artifact
     """
     import boto3
 
-    client = boto3.client('bedrock-agentcore-control', region_name=region)
+    bucket = os.environ.get("LOOM_ARTIFACT_BUCKET")
+    if not bucket:
+        raise ValueError("LOOM_ARTIFACT_BUCKET environment variable is not set")
 
-    response = client.create_agent_runtime(
-        agentRuntimeName=name,
-        agentRuntimeArtifact={'s3': {'s3BucketUri': code_uri}},
-        roleArn=execution_role_arn,
-        environmentVariables=env_vars
+    src_dir = AGENT_SOURCE_DIR / "src"
+    requirements = AGENT_SOURCE_DIR / "requirements.txt"
+
+    if not src_dir.is_dir():
+        raise FileNotFoundError(f"Agent source directory not found: {src_dir}")
+    if not requirements.is_file():
+        raise FileNotFoundError(f"Requirements file not found: {requirements}")
+
+    tmp_dir = tempfile.mkdtemp(prefix="loom-build-")
+    try:
+        # Copy source
+        shutil.copytree(str(src_dir), os.path.join(tmp_dir, "src"))
+
+        # Install dependencies
+        subprocess.run(
+            ["pip", "install", "-r", str(requirements), "-t", tmp_dir, "--quiet"],
+            check=True,
+            capture_output=True,
+        )
+
+        # Create zip
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        zip_path = os.path.join(tmp_dir, "agent.zip")
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, _dirs, files in os.walk(tmp_dir):
+                for fname in files:
+                    if fname == "agent.zip":
+                        continue
+                    full_path = os.path.join(root, fname)
+                    arcname = os.path.relpath(full_path, tmp_dir)
+                    if arcname.endswith(".pyc") or "__pycache__" in arcname:
+                        continue
+                    zf.write(full_path, arcname)
+
+        # Upload to S3
+        s3_key = f"loom-artifacts/strands_agent/{timestamp}/agent.zip"
+        s3 = boto3.client("s3", region_name=region)
+        s3.upload_file(zip_path, bucket, s3_key)
+        logger.info("Uploaded artifact to s3://%s/%s", bucket, s3_key)
+
+        return (bucket, s3_key)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def create_runtime(
+    name: str,
+    description: str,
+    role_arn: str,
+    env_vars: dict[str, str],
+    network_mode: str = "PUBLIC",
+    protocol: str = "HTTP",
+    lifecycle_config: dict | None = None,
+    authorizer_config: dict | None = None,
+    artifact_bucket: str = "",
+    artifact_prefix: str = "",
+    tags: dict[str, str] | None = None,
+    region: str = "us-east-1",
+) -> dict[str, Any]:
+    """
+    Create a new AgentCore agent runtime.
+
+    Args:
+        name: Name for the agent runtime
+        description: Description of the agent
+        role_arn: IAM role ARN for execution
+        env_vars: Environment variables to inject
+        network_mode: Network mode (PUBLIC or VPC)
+        protocol: Server protocol (HTTP or MCP)
+        lifecycle_config: Optional lifecycle configuration
+        authorizer_config: Optional authorizer configuration
+        artifact_bucket: S3 bucket containing the artifact
+        artifact_prefix: S3 key/prefix for the artifact
+        tags: Additional tags to merge with defaults
+        region: AWS region name
+
+    Returns:
+        create_agent_runtime API response
+    """
+    import boto3
+
+    client = boto3.client("bedrock-agentcore-control", region_name=region)
+
+    params: dict[str, Any] = {
+        "agentRuntimeName": name,
+        "description": description,
+        "agentRuntimeArtifact": {
+            "codeConfiguration": {
+                "code": {
+                    "s3": {
+                        "bucket": artifact_bucket,
+                        "prefix": artifact_prefix,
+                    }
+                },
+                "runtime": "PYTHON_3_13",
+                "entryPoint": ["src.handler.main"],
+            }
+        },
+        "roleArn": role_arn,
+        "networkConfiguration": {"networkMode": network_mode},
+        "protocolConfiguration": {"serverProtocol": protocol},
+        "environmentVariables": env_vars,
+        "tags": _merge_tags(tags),
+    }
+
+    if lifecycle_config is not None:
+        params["lifecycleConfiguration"] = lifecycle_config
+    if authorizer_config is not None:
+        params["authorizerConfiguration"] = authorizer_config
+
+    response = client.create_agent_runtime(**params)
+    return response
+
+
+def create_runtime_endpoint(
+    runtime_id: str,
+    name: str,
+    description: str = "",
+    tags: dict[str, str] | None = None,
+    region: str = "us-east-1",
+) -> dict[str, Any]:
+    """
+    Create an endpoint for an existing agent runtime.
+
+    Args:
+        runtime_id: AgentCore Runtime ID
+        name: Name for the endpoint
+        description: Optional endpoint description
+        tags: Additional tags to merge with defaults
+        region: AWS region name
+
+    Returns:
+        create_agent_runtime_endpoint API response
+    """
+    import boto3
+
+    client = boto3.client("bedrock-agentcore-control", region_name=region)
+
+    response = client.create_agent_runtime_endpoint(
+        agentRuntimeId=runtime_id,
+        name=name,
+        description=description,
+        tags=_merge_tags(tags),
     )
     return response
 
 
-def redeploy_agent(
-    runtime_id: str,
-    code_uri: str,
-    env_vars: dict[str, str] | None,
-    region: str
-) -> dict[str, Any]:
+def get_runtime(runtime_id: str, region: str) -> dict[str, Any]:
     """
-    Update an existing agent runtime with new code or environment variables.
+    Get the full details of an agent runtime.
 
     Args:
-        runtime_id: AgentCore Runtime ID to update
-        code_uri: S3 URI for the updated agent code artifact
-        env_vars: Optional updated environment variables (None to keep existing)
+        runtime_id: AgentCore Runtime ID
         region: AWS region name
 
     Returns:
-        Dictionary containing the update_agent_runtime API response
+        Full get_agent_runtime API response
     """
     import boto3
 
-    client = boto3.client('bedrock-agentcore-control', region_name=region)
+    client = boto3.client("bedrock-agentcore-control", region_name=region)
+    return client.get_agent_runtime(agentRuntimeId=runtime_id)
 
-    params: dict[str, Any] = {
-        'agentRuntimeId': runtime_id,
-        'agentRuntimeArtifact': {'s3': {'s3BucketUri': code_uri}},
-    }
-    if env_vars is not None:
-        params['environmentVariables'] = env_vars
 
-    response = client.update_agent_runtime(**params)
-    return response
+def get_runtime_endpoint(
+    runtime_id: str, endpoint_name: str, region: str
+) -> dict[str, Any]:
+    """
+    Get the full details of a runtime endpoint.
+
+    Args:
+        runtime_id: AgentCore Runtime ID
+        endpoint_name: Name of the endpoint
+        region: AWS region name
+
+    Returns:
+        Full get_agent_runtime_endpoint API response
+    """
+    import boto3
+
+    client = boto3.client("bedrock-agentcore-control", region_name=region)
+    return client.get_agent_runtime_endpoint(
+        agentRuntimeId=runtime_id, name=endpoint_name
+    )
+
+
+def delete_runtime_endpoint(
+    runtime_id: str, endpoint_name: str, region: str
+) -> None:
+    """
+    Delete a runtime endpoint.
+
+    Args:
+        runtime_id: AgentCore Runtime ID
+        endpoint_name: Name of the endpoint to delete
+        region: AWS region name
+    """
+    import boto3
+
+    client = boto3.client("bedrock-agentcore-control", region_name=region)
+    client.delete_agent_runtime_endpoint(
+        agentRuntimeId=runtime_id, name=endpoint_name
+    )
 
 
 def delete_runtime(runtime_id: str, region: str) -> None:
@@ -88,47 +269,57 @@ def delete_runtime(runtime_id: str, region: str) -> None:
     """
     import boto3
 
-    client = boto3.client('bedrock-agentcore-control', region_name=region)
+    client = boto3.client("bedrock-agentcore-control", region_name=region)
     client.delete_agent_runtime(agentRuntimeId=runtime_id)
 
 
-def get_runtime_status(runtime_id: str, region: str) -> str:
+def update_runtime(
+    runtime_id: str,
+    env_vars: dict[str, str] | None = None,
+    role_arn: str | None = None,
+    region: str = "us-east-1",
+) -> dict[str, Any]:
     """
-    Get the current deployment status of an agent runtime.
+    Update an existing agent runtime.
 
     Args:
-        runtime_id: AgentCore Runtime ID
+        runtime_id: AgentCore Runtime ID to update
+        env_vars: Optional updated environment variables
+        role_arn: Optional updated role ARN
         region: AWS region name
 
     Returns:
-        Status string from the AgentCore API (e.g., 'ACTIVE', 'CREATING', 'FAILED')
+        update_agent_runtime API response
     """
     import boto3
 
-    client = boto3.client('bedrock-agentcore-control', region_name=region)
-    response = client.get_agent_runtime(agentRuntimeId=runtime_id)
-    return response.get('status', 'UNKNOWN')
+    client = boto3.client("bedrock-agentcore-control", region_name=region)
+
+    params: dict[str, Any] = {"agentRuntimeId": runtime_id}
+    if env_vars is not None:
+        params["environmentVariables"] = env_vars
+    if role_arn is not None:
+        params["roleArn"] = role_arn
+
+    return client.update_agent_runtime(**params)
 
 
 # Patterns that indicate a value may contain a secret
 _SECRET_PATTERNS = [
-    re.compile(r'^sk-[a-zA-Z0-9]{20,}'),       # OpenAI-style API keys
-    re.compile(r'^AKIA[A-Z0-9]{16}'),            # AWS access key IDs
-    re.compile(r'^ghp_[a-zA-Z0-9]{36,}'),        # GitHub personal access tokens
-    re.compile(r'^gho_[a-zA-Z0-9]{36,}'),        # GitHub OAuth tokens
-    re.compile(r'^xox[bpsar]-'),                  # Slack tokens
-    re.compile(r'^eyJ[a-zA-Z0-9_-]{10,}\.'),     # JWT tokens
+    re.compile(r"^sk-[a-zA-Z0-9]{20,}"),       # OpenAI-style API keys
+    re.compile(r"^AKIA[A-Z0-9]{16}"),            # AWS access key IDs
+    re.compile(r"^ghp_[a-zA-Z0-9]{36,}"),        # GitHub personal access tokens
+    re.compile(r"^gho_[a-zA-Z0-9]{36,}"),        # GitHub OAuth tokens
+    re.compile(r"^xox[bpsar]-"),                  # Slack tokens
+    re.compile(r"^eyJ[a-zA-Z0-9_-]{10,}\."),     # JWT tokens
 ]
 
-_SECRET_KEYWORDS = ['password', 'secret', 'token', 'api_key', 'apikey', 'private_key']
+_SECRET_KEYWORDS = ["password", "secret", "token", "api_key", "apikey", "private_key"]
 
 
 def validate_config_values(config: dict[str, str]) -> list[str]:
     """
     Validate that configuration values do not appear to contain secrets.
-
-    Checks values against known secret patterns (API keys, tokens, passwords)
-    and flags suspicious entries.
 
     Args:
         config: Dictionary of configuration key-value pairs
@@ -141,7 +332,6 @@ def validate_config_values(config: dict[str, str]) -> list[str]:
     for key, value in config.items():
         key_lower = key.lower()
 
-        # Check if the key name suggests a secret
         for keyword in _SECRET_KEYWORDS:
             if keyword in key_lower:
                 warnings.append(
@@ -150,7 +340,6 @@ def validate_config_values(config: dict[str, str]) -> list[str]:
                 )
                 break
 
-        # Check if the value matches known secret patterns
         for pattern in _SECRET_PATTERNS:
             if pattern.match(value):
                 warnings.append(
@@ -176,12 +365,9 @@ def store_secret(name: str, value: str, region: str) -> str:
     """
     import boto3
 
-    client = boto3.client('secretsmanager', region_name=region)
-    response = client.create_secret(
-        Name=name,
-        SecretString=value
-    )
-    return response['ARN']
+    client = boto3.client("secretsmanager", region_name=region)
+    response = client.create_secret(Name=name, SecretString=value)
+    return response["ARN"]
 
 
 def update_secret(secret_arn: str, value: str, region: str) -> None:
@@ -195,18 +381,13 @@ def update_secret(secret_arn: str, value: str, region: str) -> None:
     """
     import boto3
 
-    client = boto3.client('secretsmanager', region_name=region)
-    client.put_secret_value(
-        SecretId=secret_arn,
-        SecretString=value
-    )
+    client = boto3.client("secretsmanager", region_name=region)
+    client.put_secret_value(SecretId=secret_arn, SecretString=value)
 
 
 def delete_secret(secret_arn: str, region: str) -> None:
     """
     Delete a secret from Secrets Manager.
-
-    Uses ForceDeleteWithoutRecovery for immediate deletion.
 
     Args:
         secret_arn: ARN of the secret to delete
@@ -214,11 +395,8 @@ def delete_secret(secret_arn: str, region: str) -> None:
     """
     import boto3
 
-    client = boto3.client('secretsmanager', region_name=region)
-    client.delete_secret(
-        SecretId=secret_arn,
-        ForceDeleteWithoutRecovery=True
-    )
+    client = boto3.client("secretsmanager", region_name=region)
+    client.delete_secret(SecretId=secret_arn, ForceDeleteWithoutRecovery=True)
 
 
 def store_large_config(
@@ -226,7 +404,7 @@ def store_large_config(
     key: str,
     value: str,
     bucket: str,
-    region: str
+    region: str,
 ) -> str:
     """
     Store a large configuration value in S3.
@@ -243,14 +421,14 @@ def store_large_config(
     """
     import boto3
 
-    client = boto3.client('s3', region_name=region)
+    client = boto3.client("s3", region_name=region)
     s3_key = f"{agent_name}/config/{key}"
 
     client.put_object(
         Bucket=bucket,
         Key=s3_key,
-        Body=value.encode('utf-8'),
-        ContentType='text/plain'
+        Body=value.encode("utf-8"),
+        ContentType="text/plain",
     )
 
     return f"s3://{bucket}/{s3_key}"

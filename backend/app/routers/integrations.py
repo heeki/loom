@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models.agent import Agent
 from app.models.integration import Integration
+from app.routers.utils import get_agent_or_404
 from app.services.iam import update_role_policy
 
 logger = logging.getLogger(__name__)
@@ -40,17 +41,6 @@ class IntegrationResponse(BaseModel):
     enabled: bool
     created_at: str | None
     updated_at: str | None
-
-
-def _get_agent_or_404(agent_id: int, db: Session) -> Agent:
-    """Fetch an agent by ID or raise 404."""
-    agent = db.query(Agent).filter(Agent.id == agent_id).first()
-    if not agent:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Agent with ID {agent_id} not found"
-        )
-    return agent
 
 
 def _sync_role_policy(agent: Agent, db: Session) -> None:
@@ -99,7 +89,7 @@ def create_integration(
     db: Session = Depends(get_db)
 ) -> IntegrationResponse:
     """Add an integration to an agent."""
-    agent = _get_agent_or_404(agent_id, db)
+    agent = get_agent_or_404(agent_id, db)
 
     integration = Integration(
         agent_id=agent_id,
@@ -123,7 +113,7 @@ def list_integrations(
     db: Session = Depends(get_db)
 ) -> List[IntegrationResponse]:
     """List all integrations for an agent."""
-    _get_agent_or_404(agent_id, db)
+    get_agent_or_404(agent_id, db)
     integrations = db.query(Integration).filter(
         Integration.agent_id == agent_id
     ).all()
@@ -138,7 +128,7 @@ def update_integration(
     db: Session = Depends(get_db)
 ) -> IntegrationResponse:
     """Update an integration."""
-    agent = _get_agent_or_404(agent_id, db)
+    agent = get_agent_or_404(agent_id, db)
     integration = db.query(Integration).filter(
         Integration.id == integration_id,
         Integration.agent_id == agent_id
@@ -174,7 +164,7 @@ def delete_integration(
     db: Session = Depends(get_db)
 ) -> None:
     """Delete an integration from an agent."""
-    agent = _get_agent_or_404(agent_id, db)
+    agent = get_agent_or_404(agent_id, db)
     integration = db.query(Integration).filter(
         Integration.id == integration_id,
         Integration.agent_id == agent_id

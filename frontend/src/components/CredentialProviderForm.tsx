@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { toast } from "sonner";
 import type { CredentialProvider, CredentialProviderCreateRequest } from "@/api/types";
 
 interface CredentialProviderFormProps {
@@ -67,6 +68,8 @@ export function CredentialProviderForm({
       });
       resetForm();
       setShowForm(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to create credential provider");
     } finally {
       setCreating(false);
     }

@@ -2,8 +2,10 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Loader2 } from "lucide-react";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
+import { statusVariant, deploymentStatusVariant } from "@/lib/status";
 import type { AgentResponse } from "@/api/types";
 
 interface AgentCardProps {
@@ -13,36 +15,13 @@ interface AgentCardProps {
   onDelete: (id: number) => void;
 }
 
-function statusVariant(status: string | null): "default" | "secondary" | "destructive" | "outline" {
-  switch (status) {
-    case "ACTIVE":
-    case "READY":
-      return "default";
-    case "CREATING":
-    case "UPDATING":
-      return "secondary";
-    case "FAILED":
-      return "destructive";
-    default:
-      return "outline";
-  }
-}
-
-function deploymentStatusVariant(
-  status: string | null,
-): "default" | "secondary" | "destructive" | "outline" {
-  switch (status) {
-    case "deployed":
-      return "default";
-    case "deploying":
-      return "secondary";
-    case "failed":
-      return "destructive";
-    case "removing":
-      return "outline";
-    default:
-      return "outline";
-  }
+function isCreating(agent: AgentResponse): boolean {
+  return (
+    agent.status === "CREATING" ||
+    agent.deployment_status === "deploying" ||
+    agent.deployment_status === "ENDPOINT_CREATING" ||
+    agent.endpoint_status === "CREATING"
+  );
 }
 
 export function AgentCard({ agent, onSelect, onRefresh, onDelete }: AgentCardProps) {
@@ -60,9 +39,17 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete }: AgentCardPro
             {agent.name ?? agent.runtime_id}
           </CardTitle>
           <div className="flex items-center gap-1">
+            {isCreating(agent) && (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+            )}
             {agent.deployment_status && (
               <Badge variant={deploymentStatusVariant(agent.deployment_status)}>
                 {agent.deployment_status}
+              </Badge>
+            )}
+            {agent.endpoint_status && agent.endpoint_status !== agent.deployment_status && (
+              <Badge variant={statusVariant(agent.endpoint_status)}>
+                ep: {agent.endpoint_status}
               </Badge>
             )}
             <Badge variant={statusVariant(agent.status)}>
@@ -75,6 +62,11 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete }: AgentCardPro
             <span className="text-[10px] uppercase tracking-wide font-medium">
               {agent.source === "deploy" ? "Deployed" : "Registered"}
             </span>
+          )}
+          {agent.protocol && (
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+              {agent.protocol}
+            </Badge>
           )}
           <span>
             {agent.active_session_count > 0

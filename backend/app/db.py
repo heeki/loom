@@ -64,6 +64,11 @@ def _migrate_add_columns(eng) -> None:
         ("agents", "code_uri", "VARCHAR"),
         ("agents", "config_hash", "VARCHAR"),
         ("agents", "deployed_at", "DATETIME"),
+        ("agents", "endpoint_name", "VARCHAR"),
+        ("agents", "endpoint_arn", "VARCHAR"),
+        ("agents", "endpoint_status", "VARCHAR"),
+        ("agents", "protocol", "VARCHAR"),
+        ("agents", "network_mode", "VARCHAR"),
     ]
 
     for table, column, col_type in migrations:

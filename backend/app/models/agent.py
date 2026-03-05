@@ -35,8 +35,12 @@ class Agent(Base):
     source = Column(String, nullable=True)  # 'register' or 'deploy'
     deployment_status = Column(String, nullable=True)  # 'deploying', 'deployed', 'failed', 'removing'
     execution_role_arn = Column(String, nullable=True)
-    code_uri = Column(String, nullable=True)  # S3 URI
     config_hash = Column(String, nullable=True)
+    endpoint_name = Column(String, nullable=True)
+    endpoint_arn = Column(String, nullable=True)
+    endpoint_status = Column(String, nullable=True)
+    protocol = Column(String, nullable=True)  # HTTP, MCP, A2A
+    network_mode = Column(String, nullable=True)  # PUBLIC or VPC
     deployed_at = Column(DateTime, nullable=True)
     registered_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     last_refreshed_at = Column(DateTime, nullable=True)
@@ -88,8 +92,12 @@ class Agent(Base):
             "source": self.source,
             "deployment_status": self.deployment_status,
             "execution_role_arn": self.execution_role_arn,
-            "code_uri": self.code_uri,
             "config_hash": self.config_hash,
+            "endpoint_name": self.endpoint_name,
+            "endpoint_arn": self.endpoint_arn,
+            "endpoint_status": self.endpoint_status,
+            "protocol": self.protocol,
+            "network_mode": self.network_mode,
             "deployed_at": (self.deployed_at.isoformat() + "Z") if self.deployed_at else None,
             "registered_at": (self.registered_at.isoformat() + "Z") if self.registered_at else None,
             "last_refreshed_at": (self.last_refreshed_at.isoformat() + "Z") if self.last_refreshed_at else None,

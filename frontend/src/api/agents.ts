@@ -5,6 +5,9 @@ import type {
   AgentDeployRequest,
   ConfigEntry,
   ConfigUpdateRequest,
+  IamRole,
+  CognitoPool,
+  ModelOption,
 } from "./types";
 
 export function listAgents(): Promise<AgentResponse[]> {
@@ -27,7 +30,7 @@ export function registerAgent(
 export function deployAgent(
   request: AgentDeployRequest,
 ): Promise<AgentResponse> {
-  return apiFetch<AgentResponse>("/api/agents/deploy", {
+  return apiFetch<AgentResponse>("/api/agents", {
     method: "POST",
     body: JSON.stringify(request),
   });
@@ -51,6 +54,10 @@ export function deleteAgent(id: number): Promise<void> {
   });
 }
 
+export function fetchAgentStatus(id: number): Promise<AgentResponse> {
+  return apiFetch<AgentResponse>(`/api/agents/${id}/status`);
+}
+
 export function getAgentConfig(id: number): Promise<ConfigEntry[]> {
   return apiFetch<ConfigEntry[]>(`/api/agents/${id}/config`);
 }
@@ -63,4 +70,16 @@ export function updateAgentConfig(
     method: "PUT",
     body: JSON.stringify(request),
   });
+}
+
+export function fetchRoles(): Promise<IamRole[]> {
+  return apiFetch<IamRole[]>("/api/agents/roles");
+}
+
+export function fetchCognitoPools(): Promise<CognitoPool[]> {
+  return apiFetch<CognitoPool[]>("/api/agents/cognito-pools");
+}
+
+export function fetchModels(): Promise<ModelOption[]> {
+  return apiFetch<ModelOption[]>("/api/agents/models");
 }

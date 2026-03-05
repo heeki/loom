@@ -3,14 +3,14 @@ import { AgentCard } from "@/components/AgentCard";
 import { AgentRegistrationForm } from "@/components/AgentRegistrationForm";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import type { AgentResponse } from "@/api/types";
+import type { AgentResponse, AgentDeployRequest } from "@/api/types";
 
 interface AgentListPageProps {
   agents: AgentResponse[];
   loading: boolean;
   onSelectAgent: (id: number) => void;
   onRegister: (arn: string) => Promise<unknown>;
-  onDeploy?: (name: string, codeUri: string, config?: Record<string, string>) => Promise<unknown>;
+  onDeploy?: (request: AgentDeployRequest) => Promise<unknown>;
   onRefresh: (id: number) => Promise<unknown>;
   onDelete: (id: number) => Promise<void>;
 }
@@ -38,11 +38,11 @@ export function AgentListPage({
     }
   };
 
-  const handleDeploy = async (name: string, codeUri: string, config?: Record<string, string>) => {
+  const handleDeploy = async (request: AgentDeployRequest) => {
     if (!onDeploy) return;
     setSubmitting(true);
     try {
-      await onDeploy(name, codeUri, config);
+      await onDeploy(request);
       toast.success("Agent deployment started");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Deployment failed");

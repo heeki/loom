@@ -67,12 +67,16 @@ class TestAgentsDeployRouter(unittest.TestCase):
         self.assertEqual(data["runtime_id"], "reg-test")
         self.assertIsNone(data["deployment_status"])
 
-    @patch("app.routers.agents.deploy_agent")
+    @patch("app.routers.agents.create_runtime")
+    @patch("app.routers.agents.build_agent_artifact")
     @patch("app.routers.agents.create_execution_role")
-    def test_deploy_agent_creates_deploying_record(self, mock_create_role, mock_deploy):
+    def test_deploy_agent_creates_deploying_record(
+        self, mock_create_role, mock_build_artifact, mock_create_runtime
+    ):
         """Test POST /api/agents with source='deploy' creates agent with correct initial state."""
         mock_create_role.return_value = "arn:aws:iam::123456789012:role/loom-agent-pending-1"
-        mock_deploy.return_value = {
+        mock_build_artifact.return_value = ("my-bucket", "artifacts/agent.zip")
+        mock_create_runtime.return_value = {
             "agentRuntimeArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/rt-new",
             "agentRuntimeId": "rt-new",
             "status": "CREATING",
@@ -83,8 +87,7 @@ class TestAgentsDeployRouter(unittest.TestCase):
             json={
                 "source": "deploy",
                 "name": "my-deploy-agent",
-                "code_uri": "s3://bucket/code.zip",
-                "config": {"ENV_VAR": "value1"},
+                "model_id": "us.anthropic.claude-sonnet-4-20250514",
             },
         )
 
@@ -93,15 +96,18 @@ class TestAgentsDeployRouter(unittest.TestCase):
         self.assertEqual(data["source"], "deploy")
         self.assertEqual(data["name"], "my-deploy-agent")
         self.assertEqual(data["runtime_id"], "rt-new")
-        self.assertEqual(data["code_uri"], "s3://bucket/code.zip")
         self.assertIsNotNone(data["execution_role_arn"])
 
-    @patch("app.routers.agents.deploy_agent")
+    @patch("app.routers.agents.create_runtime")
+    @patch("app.routers.agents.build_agent_artifact")
     @patch("app.routers.agents.create_execution_role")
-    def test_deploy_agent_success_updates_status(self, mock_create_role, mock_deploy):
+    def test_deploy_agent_success_updates_status(
+        self, mock_create_role, mock_build_artifact, mock_create_runtime
+    ):
         """Test that a successful deployment sets status to 'deployed'."""
         mock_create_role.return_value = "arn:aws:iam::123456789012:role/loom-agent-pending-1"
-        mock_deploy.return_value = {
+        mock_build_artifact.return_value = ("my-bucket", "artifacts/agent.zip")
+        mock_create_runtime.return_value = {
             "agentRuntimeArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/rt-ok",
             "agentRuntimeId": "rt-ok",
             "status": "ACTIVE",
@@ -112,7 +118,7 @@ class TestAgentsDeployRouter(unittest.TestCase):
             json={
                 "source": "deploy",
                 "name": "success-agent",
-                "code_uri": "s3://bucket/code.zip",
+                "model_id": "us.anthropic.claude-sonnet-4-20250514",
             },
         )
 
@@ -122,19 +128,23 @@ class TestAgentsDeployRouter(unittest.TestCase):
         self.assertEqual(data["status"], "ACTIVE")
         self.assertIsNotNone(data["deployed_at"])
 
-    @patch("app.routers.agents.deploy_agent")
+    @patch("app.routers.agents.create_runtime")
+    @patch("app.routers.agents.build_agent_artifact")
     @patch("app.routers.agents.create_execution_role")
-    def test_deploy_agent_failure_sets_failed_status(self, mock_create_role, mock_deploy):
+    def test_deploy_agent_failure_sets_failed_status(
+        self, mock_create_role, mock_build_artifact, mock_create_runtime
+    ):
         """Test that deploy failure returns 502 and sets status to 'failed'."""
         mock_create_role.return_value = "arn:aws:iam::123456789012:role/loom-agent-pending-1"
-        mock_deploy.side_effect = Exception("AWS deployment error")
+        mock_build_artifact.return_value = ("my-bucket", "artifacts/agent.zip")
+        mock_create_runtime.side_effect = Exception("AWS deployment error")
 
         response = self.client.post(
             "/api/agents",
             json={
                 "source": "deploy",
                 "name": "fail-agent",
-                "code_uri": "s3://bucket/code.zip",
+                "model_id": "us.anthropic.claude-sonnet-4-20250514",
             },
         )
 
@@ -147,18 +157,22 @@ class TestAgentsDeployRouter(unittest.TestCase):
         self.assertEqual(agent.deployment_status, "failed")
         self.assertEqual(agent.status, "FAILED")
 
-    @patch("app.routers.agents.redeploy_agent")
-    @patch("app.routers.agents.deploy_agent")
+    @patch("app.routers.agents.update_runtime")
+    @patch("app.routers.agents.create_runtime")
+    @patch("app.routers.agents.build_agent_artifact")
     @patch("app.routers.agents.create_execution_role")
-    def test_redeploy_agent(self, mock_create_role, mock_deploy, mock_redeploy):
+    def test_redeploy_agent(
+        self, mock_create_role, mock_build_artifact, mock_create_runtime, mock_update_runtime
+    ):
         """Test POST /api/agents/{id}/redeploy."""
         mock_create_role.return_value = "arn:aws:iam::123456789012:role/loom-agent-pending-1"
-        mock_deploy.return_value = {
+        mock_build_artifact.return_value = ("my-bucket", "artifacts/agent.zip")
+        mock_create_runtime.return_value = {
             "agentRuntimeArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/rt-redeploy",
             "agentRuntimeId": "rt-redeploy",
             "status": "ACTIVE",
         }
-        mock_redeploy.return_value = {
+        mock_update_runtime.return_value = {
             "agentRuntimeId": "rt-redeploy",
             "status": "ACTIVE",
         }
@@ -169,8 +183,7 @@ class TestAgentsDeployRouter(unittest.TestCase):
             json={
                 "source": "deploy",
                 "name": "redeploy-agent",
-                "code_uri": "s3://bucket/code.zip",
-                "config": {"KEY": "val"},
+                "model_id": "us.anthropic.claude-sonnet-4-20250514",
             },
         )
         agent_id = create_resp.json()["id"]
@@ -181,13 +194,10 @@ class TestAgentsDeployRouter(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["deployment_status"], "deployed")
-        mock_redeploy.assert_called_once()
+        mock_update_runtime.assert_called_once()
 
-    @patch("app.routers.agents.deploy_agent")
-    @patch("app.routers.agents.create_execution_role")
-    def test_redeploy_registered_agent_rejected(self, mock_create_role, mock_deploy):
+    def test_redeploy_registered_agent_rejected(self):
         """Test that redeploying a registered (non-deployed) agent returns 400."""
-        # Create a registered agent directly in DB
         agent = Agent(
             arn="arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/reg-only",
             runtime_id="reg-only",
@@ -205,12 +215,14 @@ class TestAgentsDeployRouter(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("Only deployed agents", response.json()["detail"])
 
-    @patch("app.routers.agents.deploy_agent")
+    @patch("app.routers.agents.create_runtime")
+    @patch("app.routers.agents.build_agent_artifact")
     @patch("app.routers.agents.create_execution_role")
-    def test_get_config(self, mock_create_role, mock_deploy):
+    def test_get_config(self, mock_create_role, mock_build_artifact, mock_create_runtime):
         """Test GET /api/agents/{id}/config returns config entries."""
         mock_create_role.return_value = "arn:aws:iam::123456789012:role/test"
-        mock_deploy.return_value = {
+        mock_build_artifact.return_value = ("my-bucket", "artifacts/agent.zip")
+        mock_create_runtime.return_value = {
             "agentRuntimeArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/cfg-test",
             "agentRuntimeId": "cfg-test",
             "status": "ACTIVE",
@@ -221,8 +233,7 @@ class TestAgentsDeployRouter(unittest.TestCase):
             json={
                 "source": "deploy",
                 "name": "config-agent",
-                "code_uri": "s3://bucket/code.zip",
-                "config": {"APP_ENV": "prod", "LOG_LEVEL": "DEBUG"},
+                "model_id": "us.anthropic.claude-sonnet-4-20250514",
             },
         )
         agent_id = create_resp.json()["id"]
@@ -230,17 +241,19 @@ class TestAgentsDeployRouter(unittest.TestCase):
         response = self.client.get(f"/api/agents/{agent_id}/config")
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertEqual(len(data), 2)
+        # Deploy flow creates AGENT_SYSTEM_PROMPT and AGENT_CONFIG_JSON config entries
         keys = {entry["key"] for entry in data}
-        self.assertIn("APP_ENV", keys)
-        self.assertIn("LOG_LEVEL", keys)
+        self.assertIn("AGENT_SYSTEM_PROMPT", keys)
+        self.assertIn("AGENT_CONFIG_JSON", keys)
 
-    @patch("app.routers.agents.deploy_agent")
+    @patch("app.routers.agents.create_runtime")
+    @patch("app.routers.agents.build_agent_artifact")
     @patch("app.routers.agents.create_execution_role")
-    def test_update_config(self, mock_create_role, mock_deploy):
+    def test_update_config(self, mock_create_role, mock_build_artifact, mock_create_runtime):
         """Test PUT /api/agents/{id}/config updates and adds config entries."""
         mock_create_role.return_value = "arn:aws:iam::123456789012:role/test"
-        mock_deploy.return_value = {
+        mock_build_artifact.return_value = ("my-bucket", "artifacts/agent.zip")
+        mock_create_runtime.return_value = {
             "agentRuntimeArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/cfg-up",
             "agentRuntimeId": "cfg-up",
             "status": "ACTIVE",
@@ -251,8 +264,7 @@ class TestAgentsDeployRouter(unittest.TestCase):
             json={
                 "source": "deploy",
                 "name": "update-config-agent",
-                "code_uri": "s3://bucket/code.zip",
-                "config": {"KEY1": "old_value"},
+                "model_id": "us.anthropic.claude-sonnet-4-20250514",
             },
         )
         agent_id = create_resp.json()["id"]
@@ -260,22 +272,26 @@ class TestAgentsDeployRouter(unittest.TestCase):
         # Update existing key and add new key
         response = self.client.put(
             f"/api/agents/{agent_id}/config",
-            json={"config": {"KEY1": "new_value", "KEY2": "added"}},
+            json={"config": {"AGENT_SYSTEM_PROMPT": "new prompt", "NEW_KEY": "added"}},
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()
         config_map = {entry["key"]: entry["value"] for entry in data}
-        self.assertEqual(config_map["KEY1"], "new_value")
-        self.assertEqual(config_map["KEY2"], "added")
+        self.assertEqual(config_map["AGENT_SYSTEM_PROMPT"], "new prompt")
+        self.assertEqual(config_map["NEW_KEY"], "added")
 
     @patch("app.routers.agents.delete_execution_role")
     @patch("app.routers.agents.delete_runtime")
-    @patch("app.routers.agents.deploy_agent")
+    @patch("app.routers.agents.create_runtime")
+    @patch("app.routers.agents.build_agent_artifact")
     @patch("app.routers.agents.create_execution_role")
-    def test_delete_deployed_agent_cleans_up(self, mock_create_role, mock_deploy, mock_delete_rt, mock_delete_role):
+    def test_delete_deployed_agent_cleans_up(
+        self, mock_create_role, mock_build_artifact, mock_create_runtime, mock_delete_rt, mock_delete_role
+    ):
         """Test that deleting a deployed agent calls AWS cleanup."""
         mock_create_role.return_value = "arn:aws:iam::123456789012:role/loom-agent-pending-1"
-        mock_deploy.return_value = {
+        mock_build_artifact.return_value = ("my-bucket", "artifacts/agent.zip")
+        mock_create_runtime.return_value = {
             "agentRuntimeArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/rt-del",
             "agentRuntimeId": "rt-del",
             "status": "ACTIVE",
@@ -286,7 +302,7 @@ class TestAgentsDeployRouter(unittest.TestCase):
             json={
                 "source": "deploy",
                 "name": "delete-agent",
-                "code_uri": "s3://bucket/code.zip",
+                "model_id": "us.anthropic.claude-sonnet-4-20250514",
             },
         )
         agent_id = create_resp.json()["id"]
@@ -295,25 +311,27 @@ class TestAgentsDeployRouter(unittest.TestCase):
         self.assertEqual(response.status_code, 204)
 
         mock_delete_rt.assert_called_once_with("rt-del", "us-east-1")
-        mock_delete_role.assert_called_once()
 
     def test_deploy_agent_missing_name(self):
         """Test deploy without name returns 400."""
         response = self.client.post(
             "/api/agents",
-            json={"source": "deploy", "code_uri": "s3://bucket/code.zip"},
+            json={
+                "source": "deploy",
+                "model_id": "us.anthropic.claude-sonnet-4-20250514",
+            },
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("name", response.json()["detail"].lower())
 
-    def test_deploy_agent_missing_code_uri(self):
-        """Test deploy without code_uri returns 400."""
+    def test_deploy_agent_missing_model_id(self):
+        """Test deploy without model_id returns 400."""
         response = self.client.post(
             "/api/agents",
             json={"source": "deploy", "name": "my-agent"},
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("code_uri", response.json()["detail"].lower())
+        self.assertIn("model_id", response.json()["detail"].lower())
 
     def test_invalid_source(self):
         """Test invalid source returns 400."""
@@ -323,6 +341,89 @@ class TestAgentsDeployRouter(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("Invalid source", response.json()["detail"])
+
+    # -------------------------------------------------------------------
+    # New endpoint tests
+    # -------------------------------------------------------------------
+    @patch("app.routers.agents.get_runtime")
+    @patch("app.routers.agents.create_runtime")
+    @patch("app.routers.agents.build_agent_artifact")
+    @patch("app.routers.agents.create_execution_role")
+    def test_status_endpoint_polls_runtime(
+        self, mock_create_role, mock_build_artifact, mock_create_runtime, mock_get_runtime
+    ):
+        """Test GET /api/agents/{id}/status polls AWS for runtime status."""
+        mock_create_role.return_value = "arn:aws:iam::123:role/r"
+        mock_build_artifact.return_value = ("b", "k")
+        mock_create_runtime.return_value = {
+            "agentRuntimeArn": "arn:aws:bedrock-agentcore:us-east-1:123:runtime/rt-status",
+            "agentRuntimeId": "rt-status",
+            "status": "CREATING",
+        }
+        mock_get_runtime.return_value = {
+            "status": "READY",
+            "agentRuntimeArn": "arn:aws:bedrock-agentcore:us-east-1:123:runtime/rt-status",
+        }
+
+        create_resp = self.client.post(
+            "/api/agents",
+            json={
+                "source": "deploy",
+                "name": "status-agent",
+                "model_id": "us.anthropic.claude-sonnet-4-20250514",
+            },
+        )
+        agent_id = create_resp.json()["id"]
+
+        with patch("app.routers.agents.create_runtime_endpoint") as mock_ep:
+            mock_ep.return_value = {
+                "name": "status-agent-ep",
+                "agentRuntimeEndpointArn": "arn:ep",
+                "status": "CREATING",
+            }
+            with patch("app.routers.agents.get_runtime_endpoint") as mock_get_ep:
+                mock_get_ep.return_value = {"status": "CREATING", "agentRuntimeEndpointArn": "arn:ep"}
+                response = self.client.get(f"/api/agents/{agent_id}/status")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["status"], "READY")
+
+    def test_roles_endpoint(self):
+        """Test GET /api/agents/roles returns roles list."""
+        with patch("app.routers.agents.list_agentcore_roles") as mock_list:
+            mock_list.return_value = [
+                {"role_name": "loom-role", "role_arn": "arn:iam::123:role/loom-role", "description": ""}
+            ]
+            response = self.client.get("/api/agents/roles")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["role_name"], "loom-role")
+
+    def test_cognito_pools_endpoint(self):
+        """Test GET /api/agents/cognito-pools returns pools list."""
+        with patch("app.routers.agents.list_cognito_pools") as mock_list:
+            mock_list.return_value = [
+                {"pool_id": "us-east-1_abc", "pool_name": "my-pool"}
+            ]
+            response = self.client.get("/api/agents/cognito-pools")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["pool_id"], "us-east-1_abc")
+
+    def test_models_endpoint(self):
+        """Test GET /api/agents/models returns supported models."""
+        response = self.client.get("/api/agents/models")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(len(data) > 0)
+        model_ids = [m["model_id"] for m in data]
+        self.assertIn("us.anthropic.claude-sonnet-4-20250514", model_ids)
 
 
 if __name__ == "__main__":

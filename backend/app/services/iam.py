@@ -3,24 +3,119 @@ IAM execution role management for AgentCore Runtime agents.
 
 This module provides functions to create, update, and delete IAM roles
 used by AgentCore Runtime agents, including trust policies and
-integration-specific permissions.
+integration-specific permissions. Also provides discovery functions
+for listing existing AgentCore roles and Cognito user pools.
 """
 
 import json
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_TAGS: dict[str, str] = {
+    "deployed-by": "loom",
+    "owner": "heeki",
+    "team": "aws",
+}
+
+
+def _iam_tags(extra: dict[str, str] | None = None) -> list[dict[str, str]]:
+    tags = dict(DEFAULT_TAGS)
+    if extra:
+        tags.update(extra)
+    return [{"Key": k, "Value": v} for k, v in tags.items()]
+
+
+def list_agentcore_roles(region: str) -> list[dict[str, Any]]:
+    """
+    List IAM roles that trust bedrock-agentcore.amazonaws.com.
+
+    Args:
+        region: AWS region name
+
+    Returns:
+        List of dicts with role_name, role_arn, description
+    """
+    import boto3
+
+    client = boto3.client("iam", region_name=region)
+    roles: list[dict[str, Any]] = []
+    marker = None
+
+    while True:
+        params: dict[str, Any] = {"MaxItems": 100}
+        if marker:
+            params["Marker"] = marker
+
+        response = client.list_roles(**params)
+
+        for role in response.get("Roles", []):
+            trust_doc = role.get("AssumeRolePolicyDocument", {})
+            for statement in trust_doc.get("Statement", []):
+                principal = statement.get("Principal", {})
+                service = principal.get("Service", "")
+                services = [service] if isinstance(service, str) else service
+                if "bedrock-agentcore.amazonaws.com" in services:
+                    roles.append({
+                        "role_name": role["RoleName"],
+                        "role_arn": role["Arn"],
+                        "description": role.get("Description", ""),
+                    })
+                    break
+
+        if response.get("IsTruncated"):
+            marker = response.get("Marker")
+        else:
+            break
+
+    return roles
+
+
+def list_cognito_pools(region: str) -> list[dict[str, Any]]:
+    """
+    List Cognito user pools accessible in the given region.
+
+    Args:
+        region: AWS region name
+
+    Returns:
+        List of dicts with pool_id, pool_name
+    """
+    import boto3
+
+    client = boto3.client("cognito-idp", region_name=region)
+    pools: list[dict[str, Any]] = []
+    next_token = None
+
+    while True:
+        params: dict[str, Any] = {"MaxResults": 60}
+        if next_token:
+            params["NextToken"] = next_token
+
+        response = client.list_user_pools(**params)
+
+        for pool in response.get("UserPools", []):
+            pools.append({
+                "pool_id": pool["Id"],
+                "pool_name": pool["Name"],
+            })
+
+        next_token = response.get("NextToken")
+        if not next_token:
+            break
+
+    return pools
 
 
 def create_execution_role(
     agent_name: str,
     runtime_id: str,
     region: str,
-    account_id: str
+    account_id: str,
 ) -> str:
     """
     Create an IAM execution role for an agent runtime.
-
-    Creates a role with a trust policy allowing bedrock-agentcore.amazonaws.com
-    and attaches a base inline policy with workload access token permissions.
 
     Args:
         agent_name: Name of the agent (used for resource scoping)
@@ -33,7 +128,7 @@ def create_execution_role(
     """
     import boto3
 
-    client = boto3.client('iam')
+    client = boto3.client("iam")
 
     role_name = f"loom-agent-{runtime_id}"
     trust_policy = build_trust_policy()
@@ -43,16 +138,17 @@ def create_execution_role(
         RoleName=role_name,
         AssumeRolePolicyDocument=json.dumps(trust_policy),
         Description=f"Execution role for Loom agent: {agent_name}",
-        MaxSessionDuration=3600
+        MaxSessionDuration=3600,
+        Tags=_iam_tags(),
     )
 
     client.put_role_policy(
         RoleName=role_name,
-        PolicyName='loom-agent-base-policy',
-        PolicyDocument=json.dumps(base_policy)
+        PolicyName="loom-agent-base-policy",
+        PolicyDocument=json.dumps(base_policy),
     )
 
-    return response['Role']['Arn']
+    return response["Role"]["Arn"]
 
 
 def build_trust_policy() -> dict:
@@ -70,9 +166,9 @@ def build_trust_policy() -> dict:
                 "Principal": {
                     "Service": "bedrock-agentcore.amazonaws.com"
                 },
-                "Action": "sts:AssumeRole"
+                "Action": "sts:AssumeRole",
             }
-        ]
+        ],
     }
 
 
@@ -96,14 +192,14 @@ def build_base_policy(region: str, account_id: str, agent_name: str) -> dict:
                 "Action": [
                     "bedrock-agentcore:GetWorkloadAccessToken",
                     "bedrock-agentcore:GetWorkloadAccessTokenForJWT",
-                    "bedrock-agentcore:GetWorkloadAccessTokenForUserId"
+                    "bedrock-agentcore:GetWorkloadAccessTokenForUserId",
                 ],
                 "Resource": [
                     f"arn:aws:bedrock-agentcore:{region}:{account_id}:workload-identity-directory/default",
-                    f"arn:aws:bedrock-agentcore:{region}:{account_id}:workload-identity-directory/default/workload-identity/{agent_name}-*"
-                ]
+                    f"arn:aws:bedrock-agentcore:{region}:{account_id}:workload-identity-directory/default/workload-identity/{agent_name}-*",
+                ],
             }
-        ]
+        ],
     }
 
 
@@ -120,56 +216,80 @@ def build_integration_policy_statements(integrations: list[dict]) -> list[dict]:
 
     Returns:
         List of IAM policy statement dicts
+
+    Raises:
+        ValueError: If required config fields are missing for an integration type
     """
     statements: list[dict] = []
 
     for integration in integrations:
-        integration_type = integration.get('integration_type', '')
-        config_str = integration.get('integration_config', '{}')
+        integration_type = integration.get("integration_type", "")
+        config_str = integration.get("integration_config", "{}")
 
         try:
             config = json.loads(config_str) if isinstance(config_str, str) else config_str
         except json.JSONDecodeError:
+            logger.warning(
+                "Skipping integration '%s': invalid JSON config: %s",
+                integration_type,
+                config_str,
+            )
             continue
 
-        if integration_type == 's3':
-            bucket = config.get('bucket', '*')
-            prefix = config.get('prefix', '*')
+        if integration_type == "s3":
+            bucket = config.get("bucket")
+            if not bucket:
+                raise ValueError(
+                    "S3 integration requires 'bucket' in config"
+                )
+            prefix = config.get("prefix", "*")
             statements.append({
                 "Effect": "Allow",
                 "Action": [
                     "s3:GetObject",
                     "s3:PutObject",
-                    "s3:ListBucket"
+                    "s3:ListBucket",
                 ],
                 "Resource": [
                     f"arn:aws:s3:::{bucket}",
-                    f"arn:aws:s3:::{bucket}/{prefix}"
-                ]
+                    f"arn:aws:s3:::{bucket}/{prefix}",
+                ],
             })
 
-        elif integration_type == 'bedrock':
-            region = config.get('region', '*')
-            model_id = config.get('model_id', '*')
+        elif integration_type == "bedrock":
+            region = config.get("region")
+            model_id = config.get("model_id")
+            if not region or not model_id:
+                raise ValueError(
+                    "Bedrock integration requires 'region' and 'model_id' in config"
+                )
             statements.append({
                 "Effect": "Allow",
                 "Action": [
                     "bedrock:InvokeModel",
-                    "bedrock:InvokeModelWithResponseStream"
+                    "bedrock:InvokeModelWithResponseStream",
                 ],
-                "Resource": f"arn:aws:bedrock:{region}::foundation-model/{model_id}"
+                "Resource": f"arn:aws:bedrock:{region}::foundation-model/{model_id}",
             })
 
-        elif integration_type == 'lambda':
-            function_arn = config.get('function_arn', '*')
+        elif integration_type == "lambda":
+            function_arn = config.get("function_arn")
+            if not function_arn:
+                raise ValueError(
+                    "Lambda integration requires 'function_arn' in config"
+                )
             statements.append({
                 "Effect": "Allow",
                 "Action": "lambda:InvokeFunction",
-                "Resource": function_arn
+                "Resource": function_arn,
             })
 
-        elif integration_type == 'dynamodb':
-            table_arn = config.get('table_arn', '*')
+        elif integration_type == "dynamodb":
+            table_arn = config.get("table_arn")
+            if not table_arn:
+                raise ValueError(
+                    "DynamoDB integration requires 'table_arn' in config"
+                )
             statements.append({
                 "Effect": "Allow",
                 "Action": [
@@ -177,32 +297,40 @@ def build_integration_policy_statements(integrations: list[dict]) -> list[dict]:
                     "dynamodb:PutItem",
                     "dynamodb:Query",
                     "dynamodb:UpdateItem",
-                    "dynamodb:DeleteItem"
+                    "dynamodb:DeleteItem",
                 ],
                 "Resource": [
                     table_arn,
-                    f"{table_arn}/index/*"
-                ]
+                    f"{table_arn}/index/*",
+                ],
             })
 
-        elif integration_type == 'sqs':
-            queue_arn = config.get('queue_arn', '*')
+        elif integration_type == "sqs":
+            queue_arn = config.get("queue_arn")
+            if not queue_arn:
+                raise ValueError(
+                    "SQS integration requires 'queue_arn' in config"
+                )
             statements.append({
                 "Effect": "Allow",
                 "Action": [
                     "sqs:SendMessage",
                     "sqs:ReceiveMessage",
-                    "sqs:DeleteMessage"
+                    "sqs:DeleteMessage",
                 ],
-                "Resource": queue_arn
+                "Resource": queue_arn,
             })
 
-        elif integration_type == 'sns':
-            topic_arn = config.get('topic_arn', '*')
+        elif integration_type == "sns":
+            topic_arn = config.get("topic_arn")
+            if not topic_arn:
+                raise ValueError(
+                    "SNS integration requires 'topic_arn' in config"
+                )
             statements.append({
                 "Effect": "Allow",
                 "Action": "sns:Publish",
-                "Resource": topic_arn
+                "Resource": topic_arn,
             })
 
     return statements
@@ -213,13 +341,10 @@ def update_role_policy(
     integrations: list[dict],
     region: str,
     account_id: str,
-    agent_name: str
+    agent_name: str,
 ) -> None:
     """
     Update the inline policy on an execution role.
-
-    Rebuilds the full policy from the base policy plus any integration-specific
-    statements.
 
     Args:
         role_name: IAM role name to update
@@ -230,18 +355,18 @@ def update_role_policy(
     """
     import boto3
 
-    client = boto3.client('iam')
+    client = boto3.client("iam")
 
     base_policy = build_base_policy(region, account_id, agent_name)
     integration_statements = build_integration_policy_statements(integrations)
 
     if integration_statements:
-        base_policy['Statement'].extend(integration_statements)
+        base_policy["Statement"].extend(integration_statements)
 
     client.put_role_policy(
         RoleName=role_name,
-        PolicyName='loom-agent-base-policy',
-        PolicyDocument=json.dumps(base_policy)
+        PolicyName="loom-agent-base-policy",
+        PolicyDocument=json.dumps(base_policy),
     )
 
 
@@ -249,18 +374,15 @@ def delete_execution_role(role_name: str) -> None:
     """
     Delete an IAM role and its inline policies.
 
-    Removes all inline policies before deleting the role itself.
-
     Args:
         role_name: IAM role name to delete
     """
     import boto3
 
-    client = boto3.client('iam')
+    client = boto3.client("iam")
 
-    # Remove all inline policies before deleting the role
     policies_response = client.list_role_policies(RoleName=role_name)
-    for policy_name in policies_response.get('PolicyNames', []):
+    for policy_name in policies_response.get("PolicyNames", []):
         client.delete_role_policy(RoleName=role_name, PolicyName=policy_name)
 
     client.delete_role(RoleName=role_name)

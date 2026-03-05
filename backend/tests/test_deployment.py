@@ -1,12 +1,17 @@
 """Tests for deployment service functions."""
+import os
 import unittest
 from unittest.mock import MagicMock, patch
 
 from app.services.deployment import (
-    deploy_agent,
-    redeploy_agent,
+    build_agent_artifact,
+    create_runtime,
+    create_runtime_endpoint,
+    get_runtime,
+    get_runtime_endpoint,
     delete_runtime,
-    get_runtime_status,
+    delete_runtime_endpoint,
+    update_runtime,
     validate_config_values,
     store_secret,
     update_secret,
@@ -15,12 +20,35 @@ from app.services.deployment import (
 )
 
 
-class TestDeployAgent(unittest.TestCase):
-    """Test cases for deploy_agent function."""
+class TestBuildAgentArtifact(unittest.TestCase):
+    """Test cases for build_agent_artifact function."""
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_build_agent_artifact_missing_bucket_env(self) -> None:
+        """Test that missing LOOM_ARTIFACT_BUCKET raises ValueError."""
+        os.environ.pop("LOOM_ARTIFACT_BUCKET", None)
+        with self.assertRaises(ValueError):
+            build_agent_artifact("us-east-1")
+
+    @patch("app.services.deployment.shutil")
+    @patch("app.services.deployment.subprocess")
+    @patch.dict(os.environ, {"LOOM_ARTIFACT_BUCKET": "my-bucket"})
+    def test_build_agent_artifact_missing_source_dir(self, mock_subprocess, mock_shutil) -> None:
+        """Test that missing agent source directory raises FileNotFoundError."""
+        with patch("app.services.deployment.AGENT_SOURCE_DIR") as mock_dir:
+            mock_src = MagicMock()
+            mock_src.is_dir.return_value = False
+            mock_dir.__truediv__ = MagicMock(return_value=mock_src)
+            with self.assertRaises(FileNotFoundError):
+                build_agent_artifact("us-east-1")
+
+
+class TestCreateRuntime(unittest.TestCase):
+    """Test cases for create_runtime function."""
 
     @patch("boto3.client")
-    def test_deploy_agent(self, mock_boto_client: MagicMock) -> None:
-        """Test deploying a new agent runtime."""
+    def test_create_runtime(self, mock_boto_client: MagicMock) -> None:
+        """Test creating a new agent runtime."""
         mock_client = MagicMock()
         mock_boto_client.return_value = mock_client
         mock_client.create_agent_runtime.return_value = {
@@ -29,69 +57,116 @@ class TestDeployAgent(unittest.TestCase):
             "status": "CREATING",
         }
 
-        result = deploy_agent(
+        result = create_runtime(
             name="test-agent",
-            code_uri="s3://bucket/code.zip",
-            execution_role_arn="arn:aws:iam::123456789012:role/test-role",
+            description="A test agent",
+            role_arn="arn:aws:iam::123456789012:role/test-role",
             env_vars={"KEY": "value"},
+            artifact_bucket="my-bucket",
+            artifact_prefix="artifacts/agent.zip",
             region="us-east-1",
         )
 
         mock_boto_client.assert_called_once_with("bedrock-agentcore-control", region_name="us-east-1")
-        mock_client.create_agent_runtime.assert_called_once_with(
-            agentRuntimeName="test-agent",
-            agentRuntimeArtifact={"s3": {"s3BucketUri": "s3://bucket/code.zip"}},
-            roleArn="arn:aws:iam::123456789012:role/test-role",
-            environmentVariables={"KEY": "value"},
-        )
+        call_kwargs = mock_client.create_agent_runtime.call_args[1]
+        self.assertEqual(call_kwargs["agentRuntimeName"], "test-agent")
+        self.assertEqual(call_kwargs["description"], "A test agent")
+        self.assertEqual(call_kwargs["roleArn"], "arn:aws:iam::123456789012:role/test-role")
+        self.assertEqual(call_kwargs["environmentVariables"], {"KEY": "value"})
+        self.assertEqual(call_kwargs["networkConfiguration"], {"networkMode": "PUBLIC"})
+        self.assertEqual(call_kwargs["protocolConfiguration"], {"serverProtocol": "HTTP"})
+        self.assertIn("tags", call_kwargs)
         self.assertEqual(result["agentRuntimeId"], "rt-123")
 
-
-class TestRedeployAgent(unittest.TestCase):
-    """Test cases for redeploy_agent function."""
-
     @patch("boto3.client")
-    def test_redeploy_agent(self, mock_boto_client: MagicMock) -> None:
-        """Test redeploying an existing agent runtime."""
+    def test_create_runtime_with_lifecycle_and_authorizer(self, mock_boto_client: MagicMock) -> None:
+        """Test create_runtime with optional lifecycle and authorizer configs."""
         mock_client = MagicMock()
         mock_boto_client.return_value = mock_client
-        mock_client.update_agent_runtime.return_value = {
-            "agentRuntimeId": "rt-123",
-            "status": "UPDATING",
+        mock_client.create_agent_runtime.return_value = {"agentRuntimeId": "rt-456"}
+
+        lifecycle = {"idleRuntimeSessionTimeout": 300}
+        authorizer = {"customJWTAuthorizer": {"discoveryUrl": "https://example.com"}}
+
+        create_runtime(
+            name="agent-with-opts",
+            description="",
+            role_arn="arn:aws:iam::123:role/r",
+            env_vars={},
+            lifecycle_config=lifecycle,
+            authorizer_config=authorizer,
+            region="us-east-1",
+        )
+
+        call_kwargs = mock_client.create_agent_runtime.call_args[1]
+        self.assertEqual(call_kwargs["lifecycleConfiguration"], lifecycle)
+        self.assertEqual(call_kwargs["authorizerConfiguration"], authorizer)
+
+
+class TestCreateRuntimeEndpoint(unittest.TestCase):
+    """Test cases for create_runtime_endpoint function."""
+
+    @patch("boto3.client")
+    def test_create_runtime_endpoint(self, mock_boto_client: MagicMock) -> None:
+        """Test creating a runtime endpoint."""
+        mock_client = MagicMock()
+        mock_boto_client.return_value = mock_client
+        mock_client.create_agent_runtime_endpoint.return_value = {
+            "name": "test-ep",
+            "agentRuntimeEndpointArn": "arn:endpoint",
+            "status": "CREATING",
         }
 
-        result = redeploy_agent(
+        result = create_runtime_endpoint(
             runtime_id="rt-123",
-            code_uri="s3://bucket/code-v2.zip",
-            env_vars={"KEY": "new_value"},
+            name="test-ep",
+            description="Test endpoint",
             region="us-east-1",
         )
 
-        mock_client.update_agent_runtime.assert_called_once_with(
-            agentRuntimeId="rt-123",
-            agentRuntimeArtifact={"s3": {"s3BucketUri": "s3://bucket/code-v2.zip"}},
-            environmentVariables={"KEY": "new_value"},
-        )
-        self.assertEqual(result["status"], "UPDATING")
+        mock_client.create_agent_runtime_endpoint.assert_called_once()
+        call_kwargs = mock_client.create_agent_runtime_endpoint.call_args[1]
+        self.assertEqual(call_kwargs["agentRuntimeId"], "rt-123")
+        self.assertEqual(call_kwargs["name"], "test-ep")
+        self.assertIn("tags", call_kwargs)
+        self.assertEqual(result["name"], "test-ep")
+
+
+class TestGetRuntime(unittest.TestCase):
+    """Test cases for get_runtime function."""
 
     @patch("boto3.client")
-    def test_redeploy_agent_no_env_vars(self, mock_boto_client: MagicMock) -> None:
-        """Test redeploying without updating env vars."""
+    def test_get_runtime(self, mock_boto_client: MagicMock) -> None:
+        """Test getting runtime details."""
         mock_client = MagicMock()
         mock_boto_client.return_value = mock_client
-        mock_client.update_agent_runtime.return_value = {"status": "UPDATING"}
+        mock_client.get_agent_runtime.return_value = {"status": "READY", "agentRuntimeId": "rt-123"}
 
-        redeploy_agent(
-            runtime_id="rt-123",
-            code_uri="s3://bucket/code.zip",
-            env_vars=None,
-            region="us-east-1",
-        )
+        result = get_runtime("rt-123", "us-east-1")
 
-        mock_client.update_agent_runtime.assert_called_once_with(
-            agentRuntimeId="rt-123",
-            agentRuntimeArtifact={"s3": {"s3BucketUri": "s3://bucket/code.zip"}},
+        mock_client.get_agent_runtime.assert_called_once_with(agentRuntimeId="rt-123")
+        self.assertEqual(result["status"], "READY")
+
+
+class TestGetRuntimeEndpoint(unittest.TestCase):
+    """Test cases for get_runtime_endpoint function."""
+
+    @patch("boto3.client")
+    def test_get_runtime_endpoint(self, mock_boto_client: MagicMock) -> None:
+        """Test getting runtime endpoint details."""
+        mock_client = MagicMock()
+        mock_boto_client.return_value = mock_client
+        mock_client.get_agent_runtime_endpoint.return_value = {
+            "status": "READY",
+            "name": "my-ep",
+        }
+
+        result = get_runtime_endpoint("rt-123", "my-ep", "us-east-1")
+
+        mock_client.get_agent_runtime_endpoint.assert_called_once_with(
+            agentRuntimeId="rt-123", name="my-ep"
         )
+        self.assertEqual(result["status"], "READY")
 
 
 class TestDeleteRuntime(unittest.TestCase):
@@ -109,31 +184,71 @@ class TestDeleteRuntime(unittest.TestCase):
         mock_client.delete_agent_runtime.assert_called_once_with(agentRuntimeId="rt-123")
 
 
-class TestGetRuntimeStatus(unittest.TestCase):
-    """Test cases for get_runtime_status function."""
+class TestDeleteRuntimeEndpoint(unittest.TestCase):
+    """Test cases for delete_runtime_endpoint function."""
 
     @patch("boto3.client")
-    def test_get_runtime_status(self, mock_boto_client: MagicMock) -> None:
-        """Test getting runtime status."""
+    def test_delete_runtime_endpoint(self, mock_boto_client: MagicMock) -> None:
+        """Test deleting a runtime endpoint."""
         mock_client = MagicMock()
         mock_boto_client.return_value = mock_client
-        mock_client.get_agent_runtime.return_value = {"status": "ACTIVE"}
 
-        result = get_runtime_status("rt-123", "us-east-1")
+        delete_runtime_endpoint("rt-123", "my-ep", "us-east-1")
 
-        mock_client.get_agent_runtime.assert_called_once_with(agentRuntimeId="rt-123")
-        self.assertEqual(result, "ACTIVE")
+        mock_client.delete_agent_runtime_endpoint.assert_called_once_with(
+            agentRuntimeId="rt-123", name="my-ep"
+        )
+
+
+class TestUpdateRuntime(unittest.TestCase):
+    """Test cases for update_runtime function."""
 
     @patch("boto3.client")
-    def test_get_runtime_status_unknown(self, mock_boto_client: MagicMock) -> None:
-        """Test getting runtime status when status key is missing."""
+    def test_update_runtime_with_env_vars(self, mock_boto_client: MagicMock) -> None:
+        """Test updating runtime with new env vars."""
         mock_client = MagicMock()
         mock_boto_client.return_value = mock_client
-        mock_client.get_agent_runtime.return_value = {}
+        mock_client.update_agent_runtime.return_value = {"status": "UPDATING"}
 
-        result = get_runtime_status("rt-123", "us-east-1")
+        result = update_runtime(
+            runtime_id="rt-123",
+            env_vars={"KEY": "new_value"},
+            region="us-east-1",
+        )
 
-        self.assertEqual(result, "UNKNOWN")
+        call_kwargs = mock_client.update_agent_runtime.call_args[1]
+        self.assertEqual(call_kwargs["agentRuntimeId"], "rt-123")
+        self.assertEqual(call_kwargs["environmentVariables"], {"KEY": "new_value"})
+        self.assertEqual(result["status"], "UPDATING")
+
+    @patch("boto3.client")
+    def test_update_runtime_no_env_vars(self, mock_boto_client: MagicMock) -> None:
+        """Test updating runtime without env vars."""
+        mock_client = MagicMock()
+        mock_boto_client.return_value = mock_client
+        mock_client.update_agent_runtime.return_value = {"status": "UPDATING"}
+
+        update_runtime(runtime_id="rt-123", region="us-east-1")
+
+        call_kwargs = mock_client.update_agent_runtime.call_args[1]
+        self.assertEqual(call_kwargs["agentRuntimeId"], "rt-123")
+        self.assertNotIn("environmentVariables", call_kwargs)
+
+    @patch("boto3.client")
+    def test_update_runtime_with_role_arn(self, mock_boto_client: MagicMock) -> None:
+        """Test updating runtime with a new role ARN."""
+        mock_client = MagicMock()
+        mock_boto_client.return_value = mock_client
+        mock_client.update_agent_runtime.return_value = {"status": "UPDATING"}
+
+        update_runtime(
+            runtime_id="rt-123",
+            role_arn="arn:aws:iam::123:role/new-role",
+            region="us-east-1",
+        )
+
+        call_kwargs = mock_client.update_agent_runtime.call_args[1]
+        self.assertEqual(call_kwargs["roleArn"], "arn:aws:iam::123:role/new-role")
 
 
 class TestValidateConfigValues(unittest.TestCase):

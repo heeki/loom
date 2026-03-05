@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { toast } from "sonner";
 import type {
   AgentIntegration,
   IntegrationCreateRequest,
@@ -73,6 +74,8 @@ export function IntegrationManager({
       setShowForm(false);
       setConfigPairs({});
       setSelectedProvider("");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to create integration");
     } finally {
       setCreating(false);
     }

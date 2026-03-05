@@ -10,19 +10,23 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { toast } from "sonner";
 import type { ConfigEntry } from "@/api/types";
+
+const MASKED = "********";
 
 interface EditableEntry {
   key: string;
   value: string;
   is_secret: boolean;
   isNew?: boolean;
+  modified?: boolean;
 }
 
 interface ConfigurationEditorProps {
   config: ConfigEntry[];
   loading: boolean;
-  onSave: (entries: { key: string; value: string; is_secret: boolean }[]) => Promise<unknown>;
+  onSave: (config: Record<string, string>) => Promise<unknown>;
 }
 
 export function ConfigurationEditor({ config, loading, onSave }: ConfigurationEditorProps) {
@@ -34,21 +38,22 @@ export function ConfigurationEditor({ config, loading, onSave }: ConfigurationEd
     setEntries(
       config.map((c) => ({
         key: c.key,
-        value: c.is_secret ? "" : c.value,
+        value: c.is_secret ? MASKED : c.value,
         is_secret: c.is_secret,
+        modified: false,
       })),
     );
     setDirty(false);
   }, [config]);
 
   const addEntry = () => {
-    setEntries([...entries, { key: "", value: "", is_secret: false, isNew: true }]);
+    setEntries([...entries, { key: "", value: "", is_secret: false, isNew: true, modified: true }]);
     setDirty(true);
   };
 
   const updateEntry = (index: number, field: keyof EditableEntry, val: string | boolean) => {
     setEntries((prev) =>
-      prev.map((entry, i) => (i === index ? { ...entry, [field]: val } : entry)),
+      prev.map((entry, i) => (i === index ? { ...entry, [field]: val, modified: true } : entry)),
     );
     setDirty(true);
   };
@@ -61,15 +66,17 @@ export function ConfigurationEditor({ config, loading, onSave }: ConfigurationEd
   const handleSave = async () => {
     setSaving(true);
     try {
-      const toSave = entries
-        .filter((e) => e.key.trim())
-        .map((e) => ({
-          key: e.key.trim(),
-          value: e.value,
-          is_secret: e.is_secret,
-        }));
+      const toSave: Record<string, string> = {};
+      for (const e of entries) {
+        if (!e.key.trim()) continue;
+        // Skip unchanged masked secret entries
+        if (e.is_secret && !e.modified && e.value === MASKED) continue;
+        toSave[e.key.trim()] = e.value;
+      }
       await onSave(toSave);
       setDirty(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save configuration");
     } finally {
       setSaving(false);
     }
@@ -123,9 +130,9 @@ export function ConfigurationEditor({ config, loading, onSave }: ConfigurationEd
                   <TableCell>
                     <Input
                       type={entry.is_secret && !entry.isNew ? "password" : "text"}
-                      value={entry.is_secret && !entry.isNew && !entry.value ? "" : entry.value}
+                      value={entry.value}
                       onChange={(e) => updateEntry(i, "value", e.target.value)}
-                      placeholder={entry.is_secret && !entry.isNew ? "********" : "value"}
+                      placeholder={entry.is_secret && !entry.isNew ? MASKED : "value"}
                       className="h-8 text-xs font-mono"
                     />
                   </TableCell>

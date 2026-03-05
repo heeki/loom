@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models.agent import Agent
 from app.models.credential_provider import CredentialProvider
+from app.routers.utils import get_agent_or_404
 from app.services.credential import create_oauth2_credential_provider, delete_credential_provider
 
 logger = logging.getLogger(__name__)
@@ -41,17 +41,6 @@ class CredentialProviderResponse(BaseModel):
     created_at: str | None
 
 
-def _get_agent_or_404(agent_id: int, db: Session) -> Agent:
-    """Fetch an agent by ID or raise 404."""
-    agent = db.query(Agent).filter(Agent.id == agent_id).first()
-    if not agent:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Agent with ID {agent_id} not found"
-        )
-    return agent
-
-
 @router.post(
     "/{agent_id}/credential-providers",
     response_model=CredentialProviderResponse,
@@ -63,7 +52,7 @@ def create_credential_provider(
     db: Session = Depends(get_db)
 ) -> CredentialProviderResponse:
     """Create a credential provider for an agent."""
-    agent = _get_agent_or_404(agent_id, db)
+    agent = get_agent_or_404(agent_id, db)
 
     # Call AgentCore API to create the OAuth2 credential provider
     callback_url = None
@@ -106,7 +95,7 @@ def list_credential_providers(
     db: Session = Depends(get_db)
 ) -> List[CredentialProviderResponse]:
     """List all credential providers for an agent."""
-    _get_agent_or_404(agent_id, db)
+    get_agent_or_404(agent_id, db)
     providers = db.query(CredentialProvider).filter(
         CredentialProvider.agent_id == agent_id
     ).all()
@@ -123,7 +112,7 @@ def delete_credential_provider_endpoint(
     db: Session = Depends(get_db)
 ) -> None:
     """Delete a credential provider."""
-    agent = _get_agent_or_404(agent_id, db)
+    agent = get_agent_or_404(agent_id, db)
     provider = db.query(CredentialProvider).filter(
         CredentialProvider.id == provider_id,
         CredentialProvider.agent_id == agent_id

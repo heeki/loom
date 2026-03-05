@@ -13,21 +13,55 @@ export interface AgentResponse {
   registered_at: string | null;
   last_refreshed_at: string | null;
   source: "register" | "deploy" | null;
-  deployment_status: "deploying" | "deployed" | "failed" | "removing" | null;
+  deployment_status: string | null;
   execution_role_arn: string | null;
-  code_uri: string | null;
   config_hash: string | null;
+  endpoint_name: string | null;
+  endpoint_arn: string | null;
+  endpoint_status: string | null;
+  protocol: string | null;
+  network_mode: string | null;
   deployed_at: string | null;
 }
 
 export interface AgentRegisterRequest {
+  source: "register";
   arn: string;
 }
 
 export interface AgentDeployRequest {
+  source: "deploy";
   name: string;
-  code_uri: string;
-  config?: Record<string, string>;
+  description: string;
+  agent_description: string;
+  behavioral_guidelines: string;
+  output_expectations: string;
+  model_id: string;
+  role_arn: string | null;
+  protocol: string;
+  network_mode: string;
+  idle_timeout: number | null;
+  max_lifetime: number | null;
+  authorizer_pool_id: string | null;
+  memory_enabled: boolean;
+  mcp_servers: unknown[];
+  a2a_agents: unknown[];
+}
+
+export interface IamRole {
+  role_name: string;
+  role_arn: string;
+  description: string;
+}
+
+export interface CognitoPool {
+  pool_id: string;
+  pool_name: string;
+}
+
+export interface ModelOption {
+  model_id: string;
+  display_name: string;
 }
 
 // Config types
@@ -43,7 +77,7 @@ export interface ConfigEntry {
 }
 
 export interface ConfigUpdateRequest {
-  entries: { key: string; value: string; is_secret: boolean }[];
+  config: Record<string, string>;
 }
 
 // Credential provider types
