@@ -190,6 +190,104 @@ export interface LogStreamsResponse {
   streams: LogStreamInfo[];
 }
 
+// Security types
+export interface ManagedRole {
+  id: number;
+  role_name: string;
+  role_arn: string;
+  description: string;
+  policy_document: PolicyDocument;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface PolicyDocument {
+  Version?: string;
+  Statement?: PolicyStatement[];
+}
+
+export interface PolicyStatement {
+  Effect: string;
+  Action: string | string[];
+  Resource: string | string[];
+  Sid?: string;
+}
+
+export interface ManagedRoleCreateRequest {
+  mode: "import" | "wizard";
+  role_arn?: string;
+  role_name?: string;
+  description?: string;
+  policy_document?: PolicyDocument;
+}
+
+export interface ManagedRoleUpdateRequest {
+  description?: string;
+  policy_document?: PolicyDocument;
+}
+
+export interface AuthorizerConfigResponse {
+  id: number;
+  name: string;
+  authorizer_type: string;
+  pool_id: string | null;
+  discovery_url: string | null;
+  allowed_clients: string[];
+  allowed_scopes: string[];
+  client_id: string | null;
+  has_client_secret: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface AuthorizerConfigCreateRequest {
+  name: string;
+  authorizer_type: string;
+  pool_id?: string;
+  discovery_url?: string;
+  allowed_clients?: string[];
+  allowed_scopes?: string[];
+  client_id?: string;
+  client_secret?: string;
+}
+
+export interface AuthorizerConfigUpdateRequest {
+  name?: string;
+  authorizer_type?: string;
+  pool_id?: string;
+  discovery_url?: string;
+  allowed_clients?: string[];
+  allowed_scopes?: string[];
+  client_id?: string;
+  client_secret?: string;
+}
+
+export interface PermissionRequestResponse {
+  id: number;
+  managed_role_id: number;
+  role_name: string | null;
+  role_arn: string | null;
+  requested_actions: string[];
+  requested_resources: string[];
+  justification: string;
+  status: "pending" | "approved" | "denied";
+  reviewer_notes: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface PermissionRequestCreateRequest {
+  managed_role_id: number;
+  requested_actions: string[];
+  requested_resources: string[];
+  justification: string;
+}
+
+export interface PermissionRequestReviewRequest {
+  status: "approved" | "denied";
+  reviewer_notes?: string;
+}
+
 // SSE event types
 export interface SSESessionStart {
   session_id: string;

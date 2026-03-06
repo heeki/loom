@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Loader2 } from "lucide-react";
+import { Loader2, ChevronDown, ChevronUp } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -12,8 +12,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { PolicyViewer } from "@/components/PolicyViewer";
 import * as agentsApi from "@/api/agents";
-import type { AgentDeployRequest, IamRole, CognitoPool, ModelOption } from "@/api/types";
+import * as securityApi from "@/api/security";
+import type { AgentDeployRequest, ModelOption, ManagedRole, AuthorizerConfigResponse } from "@/api/types";
+import { toast } from "sonner";
 
 function TagInput({
   values,
@@ -74,7 +77,6 @@ function TagInput({
 }
 
 type Mode = "register" | "deploy";
-type AuthorizerType = "none" | "cognito" | "other";
 
 interface AgentRegistrationFormProps {
   onRegister: (arn: string) => Promise<void>;
@@ -96,18 +98,18 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
   const [behavioralGuidelines, setBehavioralGuidelines] = useState("");
   const [outputExpectations, setOutputExpectations] = useState("");
   const [modelId, setModelId] = useState("us.anthropic.claude-sonnet-4-6");
-  const [roleArn, setRoleArn] = useState<string>("");
+  const [selectedRoleId, setSelectedRoleId] = useState<string>("");
   const [protocol] = useState("HTTP");
   const [networkMode, setNetworkMode] = useState("PUBLIC");
 
-  // Authorizer state
-  const [authorizerType, setAuthorizerType] = useState<AuthorizerType>("none");
-  const [authorizerPoolId, setAuthorizerPoolId] = useState<string>("");
-  const [authorizerDiscoveryUrl, setAuthorizerDiscoveryUrl] = useState("");
-  const [authorizerAllowedClients, setAuthorizerAllowedClients] = useState<string[]>([]);
-  const [authorizerAllowedScopes, setAuthorizerAllowedScopes] = useState<string[]>([]);
-  const [authorizerClientId, setAuthorizerClientId] = useState("");
-  const [authorizerClientSecret, setAuthorizerClientSecret] = useState("");
+  // Security config state (pre-configured by Security Admin)
+  const [selectedAuthConfigId, setSelectedAuthConfigId] = useState<string>("");
+
+  // Permission request state
+  const [showPermRequest, setShowPermRequest] = useState(false);
+  const [permActions, setPermActions] = useState<string[]>([]);
+  const [permResources, setPermResources] = useState<string[]>([]);
+  const [permJustification, setPermJustification] = useState("");
 
   // Lifecycle state
   const [idleTimeout, setIdleTimeout] = useState("");
@@ -143,29 +145,19 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
 
   // Discovery data
   const [models, setModels] = useState<ModelOption[]>([]);
-  const [roles, setRoles] = useState<IamRole[]>([]);
-  const [cognitoPools, setCognitoPools] = useState<CognitoPool[]>([]);
+  const [managedRoles, setManagedRoles] = useState<ManagedRole[]>([]);
+  const [authConfigs, setAuthConfigs] = useState<AuthorizerConfigResponse[]>([]);
 
   useEffect(() => {
     if (mode === "deploy") {
       void agentsApi.fetchModels().then(setModels).catch(() => {});
-      void agentsApi.fetchRoles().then(setRoles).catch(() => {});
-      void agentsApi.fetchCognitoPools().then(setCognitoPools).catch(() => {});
+      void securityApi.listManagedRoles().then(setManagedRoles).catch(() => {});
+      void securityApi.listAuthorizerConfigs().then(setAuthConfigs).catch(() => {});
     }
   }, [mode]);
 
-  // Auto-populate discovery URL when Cognito pool selected
-  useEffect(() => {
-    if (authorizerType === "cognito" && authorizerPoolId) {
-      const pool = cognitoPools.find((p) => p.pool_id === authorizerPoolId);
-      if (pool) {
-        const region = pool.pool_id.split("_")[0];
-        setAuthorizerDiscoveryUrl(
-          `https://cognito-idp.${region}.amazonaws.com/${pool.pool_id}/.well-known/openid-configuration`
-        );
-      }
-    }
-  }, [authorizerType, authorizerPoolId, cognitoPools]);
+  const selectedRole = managedRoles.find((r) => r.id.toString() === selectedRoleId);
+  const selectedAuthConfig = authConfigs.find((c) => c.id.toString() === selectedAuthConfigId);
 
   const validateName = (value: string) => {
     if (!value) {
@@ -223,6 +215,11 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
     } else {
       if (!name.trim() || !onDeploy || hasValidationErrors) return;
 
+      // Resolve managed role to role_arn
+      const roleArn = selectedRole?.role_arn ?? null;
+
+      // Resolve authorizer config to raw fields
+      const authConfig = selectedAuthConfig;
       const request: AgentDeployRequest = {
         source: "deploy",
         name: name.trim(),
@@ -231,19 +228,18 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
         behavioral_guidelines: behavioralGuidelines.trim(),
         output_expectations: outputExpectations.trim(),
         model_id: modelId,
-        role_arn: roleArn || null,
+        role_arn: roleArn,
         protocol,
         network_mode: networkMode,
         idle_timeout: idleTimeout ? parseInt(idleTimeout, 10) : null,
         max_lifetime: maxLifetime ? parseInt(maxLifetime, 10) : null,
-        authorizer_type: authorizerType === "none" ? null : authorizerType,
-        authorizer_pool_id: authorizerType === "cognito" ? authorizerPoolId || null : null,
-        authorizer_discovery_url:
-          authorizerType === "other" ? authorizerDiscoveryUrl || null : null,
-        authorizer_allowed_clients: authorizerAllowedClients,
-        authorizer_allowed_scopes: authorizerAllowedScopes,
-        authorizer_client_id: authorizerClientId || null,
-        authorizer_client_secret: authorizerClientSecret || null,
+        authorizer_type: authConfig?.authorizer_type ?? null,
+        authorizer_pool_id: authConfig?.pool_id ?? null,
+        authorizer_discovery_url: authConfig?.discovery_url ?? null,
+        authorizer_allowed_clients: authConfig?.allowed_clients ?? [],
+        authorizer_allowed_scopes: authConfig?.allowed_scopes ?? [],
+        authorizer_client_id: authConfig?.client_id ?? null,
+        authorizer_client_secret: null,
         memory_enabled: memoryEnabled,
         mcp_servers: [],
         a2a_agents: [],
@@ -255,15 +251,9 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
       setBehavioralGuidelines("");
       setOutputExpectations("");
       setModelId("us.anthropic.claude-sonnet-4-6");
-      setRoleArn("");
+      setSelectedRoleId("");
       setNetworkMode("PUBLIC");
-      setAuthorizerType("none");
-      setAuthorizerPoolId("");
-      setAuthorizerDiscoveryUrl("");
-      setAuthorizerAllowedClients([]);
-      setAuthorizerAllowedScopes([]);
-      setAuthorizerClientId("");
-      setAuthorizerClientSecret("");
+      setSelectedAuthConfigId("");
       setIdleTimeout("");
       setMaxLifetime("");
       setIdleTimeoutError("");
@@ -433,140 +423,122 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
                 <section className="flex-1 min-w-0 space-y-2">
                   <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">IAM Role</h4>
                   <SearchableSelect
-                    options={roles.map((r) => ({
-                      value: r.role_arn,
+                    options={managedRoles.map((r) => ({
+                      value: r.id.toString(),
                       label: r.role_name,
                     }))}
-                    value={roleArn}
-                    onValueChange={setRoleArn}
-                    placeholder="Search roles..."
+                    value={selectedRoleId}
+                    onValueChange={setSelectedRoleId}
+                    placeholder="Select managed role..."
                   />
                 </section>
               </div>
 
+              {/* IAM Role Permissions (read-only) */}
+              {selectedRole && (
+                <section className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Role Permissions (read-only)</h4>
+                    <button
+                      type="button"
+                      onClick={() => setShowPermRequest(!showPermRequest)}
+                      className="text-xs text-primary hover:underline flex items-center gap-1"
+                    >
+                      Request Additional Permissions
+                      {showPermRequest ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                    </button>
+                  </div>
+                  <div className="rounded border p-3 bg-muted/30">
+                    <p className="text-xs text-muted-foreground mb-2">{selectedRole.role_arn}</p>
+                    <PolicyViewer policy={selectedRole.policy_document} />
+                  </div>
+                  {showPermRequest && (
+                    <div className="rounded border border-dashed p-3 space-y-3">
+                      <h5 className="text-xs font-medium text-muted-foreground">Request Additional Permissions</h5>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <label className="text-xs text-muted-foreground">AWS Actions (press Enter to add)</label>
+                          <TagInput
+                            values={permActions}
+                            onChange={setPermActions}
+                            placeholder="e.g. s3:PutObject"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-xs text-muted-foreground">Resource ARNs (press Enter to add)</label>
+                          <TagInput
+                            values={permResources}
+                            onChange={setPermResources}
+                            placeholder="e.g. arn:aws:s3:::my-bucket/*"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-xs text-muted-foreground">Justification</label>
+                        <Textarea
+                          placeholder="Explain why these permissions are needed..."
+                          value={permJustification}
+                          onChange={(e) => setPermJustification(e.target.value)}
+                          rows={2}
+                          className="text-sm"
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={permActions.length === 0 || permResources.length === 0 || !permJustification.trim()}
+                        onClick={async () => {
+                          try {
+                            await securityApi.createPermissionRequest({
+                              managed_role_id: selectedRole.id,
+                              requested_actions: permActions,
+                              requested_resources: permResources,
+                              justification: permJustification.trim(),
+                            });
+                            toast.success("Permission request submitted");
+                            setPermActions([]);
+                            setPermResources([]);
+                            setPermJustification("");
+                            setShowPermRequest(false);
+                          } catch {
+                            toast.error("Failed to submit permission request");
+                          }
+                        }}
+                      >
+                        Submit Request
+                      </Button>
+                    </div>
+                  )}
+                </section>
+              )}
+
               {/* Authorizer */}
               <section className="space-y-3">
                 <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Authorizer</h4>
-                <Select
-                  value={authorizerType}
-                  onValueChange={(v) => {
-                    setAuthorizerType(v as AuthorizerType);
-                    setAuthorizerPoolId("");
-                    setAuthorizerDiscoveryUrl("");
-                    setAuthorizerAllowedClients([]);
-                    setAuthorizerAllowedScopes([]);
-                    setAuthorizerClientId("");
-                    setAuthorizerClientSecret("");
-                  }}
-                >
-                  <SelectTrigger className="text-sm">
-                    <SelectValue placeholder="Select authorizer type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    <SelectItem value="cognito">Cognito</SelectItem>
-                    <SelectItem value="other">Other provider</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                {authorizerType === "cognito" && (
-                  <div className="space-y-3 rounded border border-dashed p-3">
-                    <div className="space-y-1.5">
-                      <label className="text-xs text-muted-foreground">Cognito User Pool</label>
-                      <SearchableSelect
-                        options={cognitoPools.map((p) => ({
-                          value: p.pool_id,
-                          label: p.pool_name,
-                        }))}
-                        value={authorizerPoolId}
-                        onValueChange={setAuthorizerPoolId}
-                        placeholder="Search and select a Cognito pool..."
-                        className="w-[30%]"
-                      />
-                    </div>
-                    {authorizerPoolId && (
-                      <>
-                        <div className="space-y-1.5">
-                          <label className="text-xs text-muted-foreground">Discovery URL (auto-populated)</label>
-                          <Input
-                            value={authorizerDiscoveryUrl}
-                            readOnly
-                            className="text-sm bg-muted/50"
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-1.5">
-                            <label className="text-xs text-muted-foreground">Allowed Clients (optional — press Enter to add)</label>
-                            <TagInput
-                              values={authorizerAllowedClients}
-                              onChange={setAuthorizerAllowedClients}
-                              placeholder="Enter a client ID and press Enter"
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-xs text-muted-foreground">Allowed Scopes (optional — press Enter to add)</label>
-                            <TagInput
-                              values={authorizerAllowedScopes}
-                              onChange={setAuthorizerAllowedScopes}
-                              placeholder="Enter a scope and press Enter"
-                            />
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-1.5">
-                            <label className="text-xs text-muted-foreground">App Client ID (for token retrieval)</label>
-                            <Input
-                              placeholder="Cognito app client ID"
-                              value={authorizerClientId}
-                              onChange={(e) => setAuthorizerClientId(e.target.value)}
-                              className="text-sm"
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-xs text-muted-foreground">App Client Secret (for token retrieval)</label>
-                            <Input
-                              type="password"
-                              placeholder="Cognito app client secret"
-                              value={authorizerClientSecret}
-                              onChange={(e) => setAuthorizerClientSecret(e.target.value)}
-                              className="text-sm"
-                            />
-                          </div>
-                        </div>
-                      </>
+                <SearchableSelect
+                  options={[
+                    { value: "", label: "None" },
+                    ...authConfigs.map((c) => ({
+                      value: c.id.toString(),
+                      label: `${c.name} (${c.authorizer_type})`,
+                    })),
+                  ]}
+                  value={selectedAuthConfigId}
+                  onValueChange={setSelectedAuthConfigId}
+                  placeholder="Select authorizer config..."
+                />
+                {selectedAuthConfig && (
+                  <div className="rounded border p-3 bg-muted/30 text-xs space-y-1">
+                    <p><span className="text-muted-foreground">Type:</span> {selectedAuthConfig.authorizer_type}</p>
+                    {selectedAuthConfig.pool_id && <p><span className="text-muted-foreground">Pool:</span> {selectedAuthConfig.pool_id}</p>}
+                    {selectedAuthConfig.discovery_url && <p><span className="text-muted-foreground">Discovery URL:</span> {selectedAuthConfig.discovery_url}</p>}
+                    {selectedAuthConfig.allowed_clients.length > 0 && (
+                      <p><span className="text-muted-foreground">Clients:</span> {selectedAuthConfig.allowed_clients.join(", ")}</p>
                     )}
-                  </div>
-                )}
-
-                {authorizerType === "other" && (
-                  <div className="space-y-3 rounded border border-dashed p-3">
-                    <div className="space-y-1.5">
-                      <label className="text-xs text-muted-foreground">Discovery URL</label>
-                      <Input
-                        placeholder="https://your-provider.com/.well-known/openid-configuration"
-                        value={authorizerDiscoveryUrl}
-                        onChange={(e) => setAuthorizerDiscoveryUrl(e.target.value)}
-                        className="text-sm"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1.5">
-                        <label className="text-xs text-muted-foreground">Allowed Clients (optional — press Enter to add)</label>
-                        <TagInput
-                          values={authorizerAllowedClients}
-                          onChange={setAuthorizerAllowedClients}
-                          placeholder="Enter a client ID and press Enter"
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="text-xs text-muted-foreground">Allowed Scopes (optional — press Enter to add)</label>
-                        <TagInput
-                          values={authorizerAllowedScopes}
-                          onChange={setAuthorizerAllowedScopes}
-                          placeholder="Enter a scope and press Enter"
-                        />
-                      </div>
-                    </div>
+                    {selectedAuthConfig.allowed_scopes.length > 0 && (
+                      <p><span className="text-muted-foreground">Scopes:</span> {selectedAuthConfig.allowed_scopes.join(", ")}</p>
+                    )}
                   </div>
                 )}
               </section>

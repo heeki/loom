@@ -20,9 +20,13 @@ import { AgentListPage } from "@/pages/AgentListPage";
 import { AgentDetailPage } from "@/pages/AgentDetailPage";
 import { SessionDetailPage } from "@/pages/SessionDetailPage";
 import { InvocationDetailPage } from "@/pages/InvocationDetailPage";
+import { SecurityAdminPage } from "@/pages/SecurityAdminPage";
+import { DataIntegrationPage } from "@/pages/DataIntegrationPage";
 import type { SessionResponse, InvocationResponse } from "@/api/types";
+import { Shield, Hammer, Network } from "lucide-react";
 
 type Theme = "light" | "dark";
+type Persona = "security" | "builder" | "integrations";
 
 function ThemeSelector({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) => void }) {
   return (
@@ -58,10 +62,38 @@ function TimezoneSelector() {
   );
 }
 
+function SidebarItem({
+  icon: Icon,
+  label,
+  active,
+  onClick,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+        active
+          ? "bg-primary text-primary-foreground"
+          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+      }`}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      <span>{label}</span>
+    </button>
+  );
+}
+
 function AppContent() {
   const [theme, setTheme] = useState<Theme>(() =>
     document.documentElement.classList.contains("dark") ? "dark" : "light",
   );
+  const [activePersona, setActivePersona] = useState<Persona>("builder");
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
@@ -109,7 +141,7 @@ function AppContent() {
     }
   };
 
-  // Breadcrumb
+  // Breadcrumb (only for builder persona)
   const breadcrumb: { label: string; onClick?: () => void }[] = [
     {
       label: "Agents",
@@ -157,86 +189,126 @@ function AppContent() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b">
-        <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <img
-              src={theme === "light" ? "/assets/loom_light_alt.png" : "/assets/loom_dark_alt.png"}
-              alt="Loom"
-              className="h-12 shrink-0"
-            />
-            <nav className="flex items-center gap-1 text-sm text-muted-foreground min-w-0">
-              {breadcrumb.map((item, i) => (
-                <span key={i} className="flex items-center gap-1 min-w-0">
-                  {i > 0 && <span className="shrink-0">/</span>}
-                  {item.onClick ? (
-                    <button
-                      onClick={item.onClick}
-                      className="hover:text-foreground transition-colors truncate"
-                    >
-                      {item.label}
-                    </button>
-                  ) : (
-                    <span className="text-foreground truncate">{item.label}</span>
-                  )}
-                </span>
-              ))}
-            </nav>
-          </div>
-          <div className="flex items-center gap-3 shrink-0">
+    <div className="min-h-screen bg-background flex">
+      {/* Sidebar */}
+      <aside className="w-56 border-r bg-card flex flex-col shrink-0">
+        <div className="p-4 border-b">
+          <img
+            src={theme === "light" ? "/assets/loom_light_alt.png" : "/assets/loom_dark_alt.png"}
+            alt="Loom"
+            className="h-10"
+          />
+        </div>
+        <nav className="flex-1 p-2 space-y-1">
+          <SidebarItem
+            icon={Shield}
+            label="Security"
+            active={activePersona === "security"}
+            onClick={() => setActivePersona("security")}
+          />
+          <SidebarItem
+            icon={Hammer}
+            label="Builder"
+            active={activePersona === "builder"}
+            onClick={() => setActivePersona("builder")}
+          />
+          <SidebarItem
+            icon={Network}
+            label="Integrations"
+            active={activePersona === "integrations"}
+            onClick={() => setActivePersona("integrations")}
+          />
+        </nav>
+        <div className="p-2 border-t space-y-1">
+          <div className="px-3 py-1">
             <ThemeSelector theme={theme} setTheme={setTheme} />
+          </div>
+          <div className="px-3 py-1">
             <TimezoneSelector />
           </div>
         </div>
-      </header>
+      </aside>
 
-      <main className="mx-auto max-w-6xl px-4 py-6">
-        {selectedAgentId !== null && (
-          <Button variant="ghost" size="sm" onClick={handleBack} className="mb-4">
-            &larr; Back
-          </Button>
+      {/* Main content */}
+      <div className="flex-1 min-h-screen flex flex-col">
+        {activePersona === "builder" && (
+          <header className="border-b">
+            <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between gap-4">
+              <nav className="flex items-center gap-1 text-sm text-muted-foreground min-w-0">
+                {breadcrumb.map((item, i) => (
+                  <span key={i} className="flex items-center gap-1 min-w-0">
+                    {i > 0 && <span className="shrink-0">/</span>}
+                    {item.onClick ? (
+                      <button
+                        onClick={item.onClick}
+                        className="hover:text-foreground transition-colors truncate"
+                      >
+                        {item.label}
+                      </button>
+                    ) : (
+                      <span className="text-foreground truncate">{item.label}</span>
+                    )}
+                  </span>
+                ))}
+              </nav>
+            </div>
+          </header>
         )}
 
-        {selectedAgentId === null && (
-          <AgentListPage
-            agents={agents}
-            loading={loading}
-            onSelectAgent={setSelectedAgentId}
-            onRegister={registerAgent}
-            onDeploy={deployAgent}
-            onRefresh={refreshAgent}
-            onDelete={deleteAgent}
-          />
-        )}
+        <main className="mx-auto max-w-6xl px-4 py-6 flex-1 w-full">
+          {activePersona === "builder" && (
+            <>
+              {selectedAgentId !== null && (
+                <Button variant="ghost" size="sm" onClick={handleBack} className="mb-4">
+                  &larr; Back
+                </Button>
+              )}
 
-        {selectedAgent && !selectedSessionId && (
-          <AgentDetailPage
-            agent={selectedAgent}
-            sessions={sessions}
-            sessionsLoading={sessionsLoading}
-            onSelectSession={setSelectedSessionId}
-            onSessionsRefresh={() => void refetchSessions()}
-            onRedeploy={async (id) => { await redeployAgent(id); }}
-          />
-        )}
+              {selectedAgentId === null && (
+                <AgentListPage
+                  agents={agents}
+                  loading={loading}
+                  onSelectAgent={setSelectedAgentId}
+                  onRegister={registerAgent}
+                  onDeploy={deployAgent}
+                  onRefresh={refreshAgent}
+                  onDelete={deleteAgent}
+                />
+              )}
 
-        {selectedAgent && sessionDetail && !selectedInvocationId && (
-          <SessionDetailPage
-            agent={selectedAgent}
-            session={sessionDetail}
-            onSelectInvocation={setSelectedInvocationId}
-          />
-        )}
+              {selectedAgent && !selectedSessionId && (
+                <AgentDetailPage
+                  agent={selectedAgent}
+                  sessions={sessions}
+                  sessionsLoading={sessionsLoading}
+                  onSelectSession={setSelectedSessionId}
+                  onSessionsRefresh={() => void refetchSessions()}
+                  onRedeploy={async (id) => { await redeployAgent(id); }}
+                />
+              )}
 
-        {selectedAgent && sessionDetail && invocationDetail && (
-          <InvocationDetailPage
-            agent={selectedAgent}
-            session={sessionDetail}
-            invocation={invocationDetail}
-          />
-        )}
-      </main>
+              {selectedAgent && sessionDetail && !selectedInvocationId && (
+                <SessionDetailPage
+                  agent={selectedAgent}
+                  session={sessionDetail}
+                  onSelectInvocation={setSelectedInvocationId}
+                />
+              )}
+
+              {selectedAgent && sessionDetail && invocationDetail && (
+                <InvocationDetailPage
+                  agent={selectedAgent}
+                  session={sessionDetail}
+                  invocation={invocationDetail}
+                />
+              )}
+            </>
+          )}
+
+          {activePersona === "security" && <SecurityAdminPage />}
+          {activePersona === "integrations" && <DataIntegrationPage />}
+        </main>
+      </div>
 
       <Toaster />
     </div>
