@@ -24,7 +24,8 @@ All runtime configuration is injected via environment variables sourced from `et
 | `BACKEND_PORT` | Port for uvicorn | `8000` |
 | `FRONTEND_PORT` | Port for Vite dev server (CORS) | `5173` |
 | `LOG_LEVEL` | Backend log level | `info` |
-| `SESSION_IDLE_TIMEOUT_MINUTES` | Idle timeout for session liveness detection | `15` |
+| `LOOM_SESSION_IDLE_TIMEOUT_SECONDS` | Idle timeout for session liveness detection | `300` |
+| `LOOM_SESSION_MAX_LIFETIME_SECONDS` | Maximum session lifetime | `3600` |
 | `AWS_REGION` | AWS region for deployments | `us-east-1` |
 | `LOOM_ARTIFACT_BUCKET` | S3 bucket for agent deployment artifacts | — |
 
@@ -44,11 +45,16 @@ backend/
 │   │   ├── agent.py         # Agent ORM model
 │   │   ├── config_entry.py  # ConfigEntry ORM model (agent key-value configuration)
 │   │   ├── session.py       # InvocationSession ORM model
-│   │   └── invocation.py    # Invocation ORM model
+│   │   ├── invocation.py    # Invocation ORM model
+│   │   ├── managed_role.py  # ManagedRole ORM model (IAM roles)
+│   │   ├── authorizer_config.py    # AuthorizerConfig ORM model
+│   │   ├── authorizer_credential.py # AuthorizerCredential ORM model
+│   │   └── permission_request.py   # PermissionRequest ORM model
 │   ├── routers/
 │   │   ├── agents.py        # Agent CRUD + ARN parsing + log group derivation
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
 │   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
+│   │   ├── security.py      # Security admin: roles, authorizers, credentials, permissions
 │   │   └── utils.py         # Shared router utilities (get_agent_or_404)
 │   └── services/
 │       ├── agentcore.py     # Bedrock AgentCore API wrapper
@@ -121,6 +127,59 @@ backend/
 
 **Constraints:** UNIQUE on (`agent_id`, `key`).
 
+### `managed_roles` table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | Internal ID |
+| `role_name` | TEXT NOT NULL | IAM role name |
+| `role_arn` | TEXT UNIQUE NOT NULL | IAM role ARN |
+| `description` | TEXT | Role description |
+| `policy_document` | TEXT | JSON policy document |
+| `created_at` | DATETIME | Creation timestamp |
+| `updated_at` | DATETIME | Last update timestamp |
+
+### `authorizer_configs` table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | Internal ID |
+| `name` | TEXT UNIQUE NOT NULL | Authorizer config name |
+| `authorizer_type` | TEXT NOT NULL | e.g., `cognito` |
+| `pool_id` | TEXT | Cognito user pool ID |
+| `discovery_url` | TEXT | OIDC discovery URL |
+| `allowed_clients` | TEXT | JSON array of allowed client IDs |
+| `allowed_scopes` | TEXT | JSON array of allowed OAuth scopes |
+| `client_id` | TEXT | Default client ID |
+| `client_secret_arn` | TEXT | Secrets Manager ARN for default client secret |
+| `created_at` | DATETIME | Creation timestamp |
+| `updated_at` | DATETIME | Last update timestamp |
+
+### `authorizer_credentials` table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | Internal ID |
+| `authorizer_config_id` | INTEGER FK → authorizer_configs.id (CASCADE delete) | Associated authorizer |
+| `label` | TEXT NOT NULL | Human-readable credential label |
+| `client_id` | TEXT NOT NULL | OAuth client ID |
+| `client_secret_arn` | TEXT NOT NULL | Secrets Manager ARN for client secret |
+| `created_at` | DATETIME | Creation timestamp |
+
+### `permission_requests` table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | Internal ID |
+| `managed_role_id` | INTEGER FK → managed_roles.id | Target role |
+| `requested_actions` | TEXT | JSON array of IAM actions |
+| `requested_resources` | TEXT | JSON array of IAM resources |
+| `justification` | TEXT | Request justification |
+| `status` | TEXT NOT NULL | `pending`, `approved`, `denied` |
+| `reviewer_notes` | TEXT | Reviewer notes |
+| `created_at` | DATETIME | Creation timestamp |
+| `updated_at` | DATETIME | Last update timestamp |
+
 ### `invocation_sessions` table
 
 | Column | Type | Description |
@@ -130,8 +189,6 @@ backend/
 | `qualifier` | TEXT NOT NULL | Endpoint qualifier used (e.g., `DEFAULT`) |
 | `status` | TEXT NOT NULL | `pending`, `streaming`, `complete`, `error` |
 | `created_at` | DATETIME NOT NULL | Session creation timestamp |
-
-**Design decision:** `session_id` (UUID string) is the primary key rather than an auto-incrementing integer. This is a natural key — the session UUID is generated at invocation time and used as the `runtimeSessionId` in AWS API calls.
 
 ### `invocations` table
 
@@ -152,14 +209,14 @@ Each session contains one or more invocations. Timing measurements and latency d
 | `created_at` | DATETIME NOT NULL | Invocation creation timestamp |
 
 **Computed fields (not stored in the database):**
-- `active_session_count` — returned on agent responses. Counts sessions with at least one invocation whose last activity is within `SESSION_IDLE_TIMEOUT_MINUTES` of the current time. Indicates how many sessions are likely still warm in AWS.
+- `active_session_count` — returned on agent responses. Counts sessions with at least one invocation whose last activity is within `LOOM_SESSION_IDLE_TIMEOUT_SECONDS` of the current time.
 - `live_status` — returned on session responses. Computed from the session's stored `status` and the timestamp of its most recent invocation:
   - `"pending"` / `"streaming"` → returned as-is
   - `"complete"` / `"error"` → `"active"` if last activity is within the idle timeout, otherwise `"expired"`
 
 **Design decisions:**
 - Prompt text, thinking text, and response text are stored per invocation (`prompt_text`, `thinking_text`, `response_text` columns on the `invocations` table).
-- The `Agent` model retains an integer auto-incrementing PK. This is a surrogate key for internal use. The `arn` and `runtime_id` columns serve as natural identifiers when interacting with AWS. Integer PKs provide the best ergonomics for CLI usage (`AGENT_ID=1`) and fastest joins in SQLite.
+- The `Agent` model retains an integer auto-incrementing PK. The `arn` and `runtime_id` columns serve as natural identifiers when interacting with AWS.
 
 ---
 
@@ -173,8 +230,6 @@ From the ARN, the backend automatically derives:
 - `runtime_id` → extracted from ARN resource path
 
 Log group format (per qualifier): `/aws/bedrock-agentcore/runtimes/{runtime_id}-{qualifier}`
-
-Log stream names are discovered dynamically via `describe_log_streams` (ordered by last event time, filtering out AWS validation streams).
 
 ---
 
@@ -194,15 +249,20 @@ All endpoints are prefixed `/api`.
 | `POST` | `/api/agents/{agent_id}/redeploy` | Redeploy an agent with current config. |
 | `GET` | `/api/agents/roles` | List IAM roles suitable for AgentCore. |
 | `GET` | `/api/agents/cognito-pools` | List Cognito user pools. |
-| `GET` | `/api/agents/models` | List supported foundation models. |
+| `GET` | `/api/agents/models` | List supported foundation models (with display name and group). |
+| `GET` | `/api/agents/defaults` | Get configurable defaults (idle timeout, max lifetime). |
 | `PUT` | `/api/agents/{agent_id}/config` | Update agent configuration entries. |
 | `GET` | `/api/agents/{agent_id}/config` | Get agent configuration entries. |
-| `POST` | `/api/agents/{agent_id}/token` | Get Cognito access token for authenticated invocation. |
 
 **`POST /api/agents` register request body:**
 ```json
-{ "arn": "arn:aws:bedrock-agentcore:{region}:{account_id}:runtime/{runtime_id}" }
+{
+  "arn": "arn:aws:bedrock-agentcore:{region}:{account_id}:runtime/{runtime_id}",
+  "model_id": "us.anthropic.claude-sonnet-4-6"
+}
 ```
+
+The `model_id` field is optional on registration and stored as an `AGENT_CONFIG_JSON` config entry.
 
 **`POST /api/agents` deploy request body:**
 
@@ -214,8 +274,8 @@ All endpoints are prefixed `/api`.
 | `agent_description` | Description passed to the agent prompt |
 | `behavioral_guidelines` | Behavioral guidelines for the agent |
 | `output_expectations` | Expected output format/behavior |
-| `model_id` | Foundation model identifier |
-| `role_arn` | IAM execution role ARN |
+| `model_id` | Foundation model identifier (required) |
+| `role_arn` | IAM execution role ARN (required) |
 | `protocol` | `HTTP`, `MCP`, or `A2A` |
 | `network_mode` | `PUBLIC` or `VPC` |
 | `idle_timeout` | Idle timeout in seconds |
@@ -231,58 +291,77 @@ All endpoints are prefixed `/api`.
 | `mcp_servers` | MCP server configuration |
 | `a2a_agents` | A2A agent configuration |
 
-**Supported foundation models:** Claude Opus 4.6, Claude Sonnet 4.6, Claude Haiku 4.5, Amazon Nova 2 Lite, Nova Pro, Nova Lite, Nova Micro, Nova Nano.
+**`GET /api/agents` response includes:**
+- `model_id` — extracted from the agent's `AGENT_CONFIG_JSON` config entry
+- `active_session_count` — computed at query time based on `LOOM_SESSION_IDLE_TIMEOUT_SECONDS`
 
-**`GET /api/agents` response:**
+**`GET /api/agents/models` response:**
 ```json
 [
-  {
-    "id": 1,
-    "arn": "...",
-    "runtime_id": "myagent-abc123",
-    "name": "My Agent",
-    "status": "READY",
-    "region": "us-east-1",
-    "available_qualifiers": ["DEFAULT"],
-    "log_group": "/aws/bedrock-agentcore/runtimes/myagent-abc123-DEFAULT",
-    "registered_at": "2026-02-18T10:00:00Z",
-    "active_session_count": 2
-  }
+  {"model_id": "us.anthropic.claude-opus-4-6-v1", "display_name": "Claude Opus 4.6", "group": "Anthropic"},
+  {"model_id": "us.amazon.nova-pro-v1:0", "display_name": "Nova Pro", "group": "Amazon"}
 ]
 ```
 
-The `active_session_count` field is computed at query time — it counts sessions with recent invocation activity within the `SESSION_IDLE_TIMEOUT_MINUTES` window. A value of 0 indicates the next invocation will likely be a cold start.
+**`GET /api/agents/defaults` response:**
+```json
+{
+  "idle_timeout_seconds": 300,
+  "max_lifetime_seconds": 3600
+}
+```
+
+### Security Administration
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/security/roles` | Create a managed role (import or wizard mode). |
+| `GET` | `/api/security/roles` | List managed roles. |
+| `GET` | `/api/security/roles/{role_id}` | Get a specific managed role. |
+| `PUT` | `/api/security/roles/{role_id}` | Update a managed role. |
+| `DELETE` | `/api/security/roles/{role_id}` | Delete a managed role. |
+| `GET` | `/api/security/cognito-pools` | List Cognito pools with discovery URLs. |
+| `POST` | `/api/security/authorizers` | Create an authorizer config. |
+| `GET` | `/api/security/authorizers` | List authorizer configs. |
+| `GET` | `/api/security/authorizers/{auth_id}` | Get a specific authorizer config. |
+| `PUT` | `/api/security/authorizers/{auth_id}` | Update an authorizer config. |
+| `DELETE` | `/api/security/authorizers/{auth_id}` | Delete an authorizer config. |
+| `POST` | `/api/security/authorizers/{auth_id}/credentials` | Add a credential to an authorizer. |
+| `GET` | `/api/security/authorizers/{auth_id}/credentials` | List credentials for an authorizer. |
+| `DELETE` | `/api/security/authorizers/{auth_id}/credentials/{cred_id}` | Delete a credential. |
+| `POST` | `/api/security/authorizers/{auth_id}/credentials/{cred_id}/token` | Generate OAuth token from credential. |
+| `POST` | `/api/security/permission-requests` | Create a permission request. |
+| `GET` | `/api/security/permission-requests` | List permission requests. |
+| `PUT` | `/api/security/permission-requests/{req_id}/review` | Approve or deny a permission request. |
 
 ### Agent Invocation (SSE Streaming)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/agents/{agent_id}/invoke` | Invoke the agent and stream the response via SSE. |
-| `GET` | `/api/agents/{agent_id}/sessions` | List all invocation sessions with their invocations. Includes computed `live_status`. |
-| `GET` | `/api/agents/{agent_id}/sessions/{session_id}` | Get a specific session with its invocations. Includes computed `live_status`. |
-| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/invocations/{invocation_id}` | Get a specific invocation within a session. |
+| `GET` | `/api/agents/{agent_id}/sessions` | List all invocation sessions with their invocations. |
+| `GET` | `/api/agents/{agent_id}/sessions/{session_id}` | Get a specific session with its invocations. |
+| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/invocations/{invocation_id}` | Get a specific invocation. |
 
 **`POST /api/agents/{agent_id}/invoke` request body:**
 ```json
 {
   "prompt": "Hello, agent!",
-  "qualifier": "DEFAULT"
+  "qualifier": "DEFAULT",
+  "credential_id": 1
 }
 ```
 
-**SSE event stream format:**
+The optional `credential_id` references an authorizer credential. When provided, the backend fetches the client secret from Secrets Manager and generates an OAuth token for authenticated invocation.
 
-The response is `text/event-stream`. Events:
+**SSE event stream format:**
 
 ```
 event: session_start
-data: {"session_id": "uuid-...", "invocation_id": "uuid-...", "client_invoke_time": 1708000000.123}
+data: {"session_id": "uuid-...", "invocation_id": "uuid-...", "client_invoke_time": 1708000000.123, "has_token": true, "token_source": "credential:my-cred"}
 
 event: chunk
-data: {"text": "Hello! I am "}
-
-event: chunk
-data: {"text": "your agent."}
+data: {"text": "Hello! I am your agent."}
 
 event: session_end
 data: {"session_id": "uuid-...", "invocation_id": "uuid-...", "qualifier": "DEFAULT", "client_invoke_time": 1708000000.123, "client_done_time": 1708000002.456, "client_duration_ms": 2333.0, "cold_start_latency_ms": 500.0, "agent_start_time": 1708000000.623}
@@ -291,60 +370,15 @@ event: error
 data: {"message": "Invocation failed: ..."}
 ```
 
-The `cold_start_latency_ms` and `agent_start_time` fields in `session_end` are only present when CloudWatch logs are successfully retrieved. The backend creates session and invocation records before streaming begins, updates them incrementally, and computes latency metrics when the stream completes.
-
-**Streaming architecture:** The boto3 `invoke_agent_runtime` call returns a synchronous `StreamingBody`. Each chunk read is dispatched via `asyncio.to_thread()` to prevent blocking the uvicorn event loop, allowing SSE events to be flushed to the client in real-time.
+The `has_token` and `token_source` fields in `session_start` indicate whether an OAuth token was used for the invocation.
 
 ### CloudWatch Logs
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/agents/{agent_id}/logs/streams` | List available CloudWatch log streams for this agent. |
+| `GET` | `/api/agents/{agent_id}/logs/streams` | List available CloudWatch log streams. |
 | `GET` | `/api/agents/{agent_id}/logs` | Retrieve recent logs from the latest (or specified) log stream. |
-| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/logs` | Retrieve logs filtered to a specific session (searches across all streams). |
-
-**Query parameters for `GET /logs`:**
-- `qualifier` (string, default: `DEFAULT`) — which endpoint's log group to query
-- `stream` (string, optional) — specific log stream name; defaults to the latest stream
-- `limit` (int, default: `100`, max: `1000`) — max number of log events to return
-- `start_time` (ISO 8601, optional) — filter events after this time
-- `end_time` (ISO 8601, optional) — filter events before this time
-
-**Query parameters for `GET /sessions/{session_id}/logs`:**
-- `qualifier` (string, default: `DEFAULT`) — which endpoint's log group to query
-- `limit` (int, default: `100`, max: `1000`) — max number of log events to return
-
-**Log event response shape:**
-```json
-{
-  "log_group": "/aws/bedrock-agentcore/runtimes/myagent-abc123-DEFAULT",
-  "log_stream": "stream-name-here",
-  "events": [
-    {
-      "timestamp_ms": 1708000001000,
-      "timestamp_iso": "2026-02-18T10:00:01.000+00:00",
-      "message": "{\"message\": \"Agent invoked - Start time: 2026-02-18T10:00:01.123456\", \"sessionId\": \"uuid-...\"}",
-      "session_id": "uuid-..."
-    }
-  ]
-}
-```
-
-**Log streams response shape:**
-```json
-{
-  "log_group": "/aws/bedrock-agentcore/runtimes/myagent-abc123-DEFAULT",
-  "streams": [
-    {"name": "stream-latest", "last_event_time": 1708000002000},
-    {"name": "stream-older", "last_event_time": 1708000001000}
-  ]
-}
-```
-
-**Design decisions:**
-- The general logs endpoint (`GET /logs`) queries a single stream (latest by default) and does not retry. This is suitable for log browsing.
-- The session logs endpoint (`GET /sessions/{id}/logs`) searches across all streams using `filter_log_events` with the session ID as a filter pattern. It uses `max_retries=1` with no retry interval — retry logic is only appropriate during the invoke flow where logs need time to appear in CloudWatch.
-- A separate latency endpoint was removed. Cold-start latency is computed automatically during the invoke flow and included in the `session_end` SSE event.
+| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/logs` | Retrieve logs filtered to a specific session. |
 
 ---
 
@@ -355,46 +389,37 @@ The `cold_start_latency_ms` and `agent_start_time` fields in `session_end` are o
 Wraps `boto3.client('bedrock-agentcore')` and `boto3.client('bedrock-agentcore-control')`:
 
 - `describe_runtime(arn: str, region: str) -> dict` — calls `get_agent_runtime` and returns runtime metadata.
-- `list_runtime_endpoints(runtime_id: str, region: str) -> list[str]` — returns available qualifier names; falls back to `["DEFAULT"]` on error.
-- `invoke_agent(arn: str, qualifier: str, session_id: str, prompt: str, region: str) -> Generator` — calls `invoke_agent_runtime`, yields decoded text chunks from the SSE-formatted streaming response. Supports OAuth-authorized agents — when an access token is provided, the client skips SigV4 signing and injects a Bearer token header instead.
-
-**Note:** Session liveness (`live_status`, `active_session_count`) is computed locally in the routers using SQLite data and the idle timeout heuristic. No AWS API is called for session status — the Bedrock AgentCore SDK does not expose session listing/querying APIs.
+- `list_runtime_endpoints(runtime_id: str, region: str) -> list[str]` — returns available qualifier names.
+- `invoke_agent(arn: str, qualifier: str, session_id: str, prompt: str, region: str) -> Generator` — calls `invoke_agent_runtime`, yields decoded text chunks. Supports OAuth-authorized agents via Bearer token header.
 
 ### `services/cloudwatch.py`
 
 Wraps `boto3.client('logs')`:
 
-- `list_log_streams(log_group: str, region: str) -> list[dict]` — lists streams ordered by last event time, filters out AWS validation streams.
-- `get_stream_log_events(log_group: str, stream_name: str, region: str, ...) -> list[dict]` — retrieves events from a single log stream without retry logic; suitable for general log browsing.
-- `get_log_events(log_group: str, session_id: str, region: str, start_time_ms: int | None, limit: int, max_retries: int, retry_interval: float) -> list[dict]` — retrieves events matching the session_id filter pattern across all streams, with configurable retry logic for CloudWatch ingestion delays.
-- `parse_agent_start_time(log_events: list[dict]) -> float | None` — searches events for the "Agent invoked - Start time:" pattern and returns the parsed Unix timestamp. Falls back to the earliest CloudWatch event timestamp when the pattern is not found, supporting agents with non-standard log formats.
+- `list_log_streams(log_group: str, region: str) -> list[dict]` — lists streams ordered by last event time.
+- `get_stream_log_events(log_group: str, stream_name: str, region: str, ...) -> list[dict]` — retrieves events from a single log stream.
+- `get_log_events(log_group: str, session_id: str, region: str, ...) -> list[dict]` — retrieves events matching the session_id filter pattern across all streams.
+- `parse_agent_start_time(log_events: list[dict]) -> float | None` — parses "Agent invoked - Start time:" pattern; falls back to earliest CloudWatch event timestamp.
 
 ### `services/deployment.py`
 
 Handles agent artifact build and runtime lifecycle:
 
-- Builds agent artifacts by cross-compiling pip dependencies for ARM64 (`manylinux2014_aarch64`), copying agent source from `agents/strands_agent/src/`, and packaging into a zip archive uploaded to S3.
+- Builds agent artifacts by cross-compiling pip dependencies for ARM64 (`manylinux2014_aarch64`).
 - Creates, updates, and deletes AgentCore runtimes and endpoints.
 - Validates configuration values for secrets, stores/updates/deletes secrets in AWS Secrets Manager.
-- Stores large configuration values in S3.
 
 ### `services/cognito.py`
 
-Cognito OAuth2 token retrieval:
-
-- `get_cognito_token(pool_id: str, client_id: str, client_secret: str, scopes: list[str]) -> str` — exchanges client credentials for an access token via the Cognito OAuth2 token endpoint (client credentials grant).
+- `get_cognito_token(pool_id: str, client_id: str, client_secret: str, scopes: list[str]) -> str` — exchanges client credentials for an access token via the Cognito OAuth2 token endpoint.
 
 ### `services/secrets.py`
-
-AWS Secrets Manager wrapper with in-memory caching:
 
 - `store_secret(name: str, secret_value: str, region: str)` — creates or updates a secret.
 - `get_secret(name: str, region: str) -> str` — retrieves a secret value with a 5-minute in-memory cache.
 - `delete_secret(name: str, region: str)` — deletes a secret.
 
 ### `services/iam.py`
-
-IAM and Cognito management:
 
 - `create_execution_role() -> str` — creates an IAM execution role suitable for AgentCore.
 - `delete_execution_role(role_arn: str)` — deletes an IAM execution role.
@@ -403,8 +428,6 @@ IAM and Cognito management:
 
 ### `services/latency.py`
 
-Pure computation helpers (no AWS dependencies):
-
 - `compute_cold_start(client_invoke_time: float, agent_start_time: float) -> float` — returns millisecond delta.
 - `compute_client_duration(client_invoke_time: float, client_done_time: float) -> float` — returns millisecond delta.
 
@@ -412,8 +435,8 @@ Pure computation helpers (no AWS dependencies):
 
 ## 8. Agent Deployment Flow
 
-1. User submits a deploy form with agent configuration.
-2. Backend creates an IAM execution role (or uses the one provided by the user).
+1. User submits a deploy form with agent configuration (model and IAM role are required).
+2. Backend uses the provided IAM execution role.
 3. Builds the deployment artifact:
    - Copies source from `agents/strands_agent/src/`.
    - Runs `pip install` against `requirements.txt` targeting `linux/arm64` (`manylinux2014_aarch64`).
@@ -426,19 +449,20 @@ Pure computation helpers (no AWS dependencies):
 
 ## 9. Authenticated Invocation Flow
 
-When an agent has a Cognito authorizer configured, the invoke endpoint automatically fetches an access token before calling the runtime:
+Invocations can be authenticated using credentials from authorizer configs:
 
-1. Reads `COGNITO_CLIENT_ID` from the agent's config entries.
-2. Reads `COGNITO_CLIENT_SECRET_ARN` from the agent's config entries.
-3. Retrieves the actual secret value from AWS Secrets Manager (cached in memory for 5 minutes).
+1. The invoke request includes an optional `credential_id`.
+2. The backend looks up the `AuthorizerCredential` by ID, resolving the associated `AuthorizerConfig`.
+3. Reads the `client_secret` from AWS Secrets Manager (cached in memory for 5 minutes).
 4. Exchanges the client credentials for an access token via the Cognito client credentials grant.
 5. Passes the Bearer token to `invoke_agent_runtime` (unsigned SigV4 + `Authorization` header).
+6. The `session_start` SSE event includes `has_token: true` and `token_source` indicating which credential was used.
 
 ---
 
 ## 10. Latency Measurement Flow
 
-Latency measurement is integrated into the invoke flow — no separate endpoint is needed. The backend computes cold-start latency automatically after the agent stream completes.
+Latency measurement is integrated into the invoke flow — no separate endpoint is needed.
 
 ```
 Client                  Backend                 AWS
@@ -460,29 +484,20 @@ Client                  Backend                 AWS
    │◄── SSE: session_end ──│  (includes latency data)                │
 ```
 
-**Latency definition:**
-- `cold_start_latency_ms = (agent_start_time - client_invoke_time) * 1000`
-- `client_duration_ms = (client_done_time - client_invoke_time) * 1000`
-- `agent_start_time` is preferentially parsed from the CloudWatch log message pattern:
-  `Agent invoked - Start time: {ISO_TIMESTAMP}, ...`
-  If this pattern is not found (agents with non-standard log formats), the earliest CloudWatch event timestamp is used as a fallback approximation.
-- CloudWatch log retrieval is done with `session_id` as the filter pattern.
-- During invoke, the system retries CloudWatch polling up to 6 times (5-second intervals, 30-second max) waiting for logs to appear.
-- If CloudWatch retrieval fails or no logs are found, the invocation completes successfully without latency data — `cold_start_latency_ms` and `agent_start_time` will be absent from the `session_end` event.
-
 ---
 
 ## 11. Session Liveness Tracking
 
-Session liveness is computed locally — no AWS API calls are made. The Bedrock AgentCore SDK does not expose `list_runtime_sessions` or `get_runtime_session` APIs, so there is no way to query AWS for the actual state of a runtime session. Instead, the backend uses a local idle timeout heuristic based on invocation timestamps already stored in SQLite.
+Session liveness is computed locally — no AWS API calls are made.
 
 ### Configuration
 
-- `SESSION_IDLE_TIMEOUT_MINUTES` (default: `15`) — how long after the last invocation activity a session is considered still warm in AWS.
+- `LOOM_SESSION_IDLE_TIMEOUT_SECONDS` (default: `300`) — how long after the last invocation activity a session is considered still warm.
+- `LOOM_SESSION_MAX_LIFETIME_SECONDS` (default: `3600`) — maximum session lifetime regardless of activity.
+
+Both values are exposed via `GET /api/agents/defaults` for the frontend to display as placeholder hints.
 
 ### `live_status` Computation
-
-For each session, the `live_status` is computed at query time from the stored `status` and the most recent invocation's timestamp:
 
 | Stored Status | Last Activity | `live_status` |
 |---------------|---------------|---------------|
@@ -493,13 +508,7 @@ For each session, the `live_status` is computed at query time from the stored `s
 
 ### `active_session_count` Computation
 
-For each agent, `active_session_count` is computed at query time by counting sessions whose `live_status` would be `"pending"`, `"streaming"`, or `"active"`. This tells users how many sessions are likely still warm — when the count is 0, the next invocation will likely incur cold-start latency.
-
-### Design Rationale
-
-- **No AWS API dependency** — avoids throttling, latency, and credential scope concerns.
-- **Heuristic accuracy** — AWS session idle timeout behavior is not documented, but 15 minutes is a reasonable default. The timeout is configurable via `SESSION_IDLE_TIMEOUT_MINUTES`.
-- **Computed, not stored** — `live_status` and `active_session_count` are derived at query time, ensuring they always reflect the current moment relative to invocation history.
+Counts sessions whose `live_status` would be `"pending"`, `"streaming"`, or `"active"`. Computed based on the end time (`client_done_time`) of the last invocation.
 
 ---
 

@@ -6,13 +6,18 @@ Loom is an agent builder playground that simplifies the lifecycle of building, t
 
 - A **FastAPI backend** that encapsulates all AWS interactions and business logic.
 - A **React/TypeScript frontend** (Vite, shadcn, Tailwind CSS) that interacts exclusively through the backend API.
-- A **local SQLite database** (via SQLAlchemy) for persisting agent metadata and session history.
+- A **local SQLite database** (via SQLAlchemy) for persisting agent metadata, session history, security configurations, and credential management.
 
 The platform tracks session liveness using a local idle timeout heuristic, providing cold-start indicators so users know whether their next invocation will incur agent startup latency.
 
-### Initial MVP Scope
+### Persona-Based Workflows
 
-The initial implementation focuses on the **latency measurement test use case** for agents that are already deployed to AgentCore Runtime. **Phase 2 (agent deployment) is now implemented.** Agents can be deployed directly from the UI using the Strands Agent blueprint with configurable model, protocol, network mode, authorizer (Cognito JWT), and lifecycle settings.
+The frontend is organized around four persona-based workflows, accessible via a sidebar:
+
+- **Catalog** (default) — Browse, invoke, and manage registered/deployed agents.
+- **Builder** — Register agents by ARN or deploy new agents to AgentCore Runtime.
+- **Security Admin** — Manage IAM roles, authorizer configurations, credentials, and permission requests.
+- **Data Integration** — Manage data integrations (placeholder for future work).
 
 ---
 
@@ -31,29 +36,51 @@ loom/
 │   │   ├── main.py
 │   │   ├── db.py
 │   │   ├── models/
-│   │   │   └── config_entry.py # Configuration entry model
+│   │   │   ├── agent.py
+│   │   │   ├── config_entry.py
+│   │   │   ├── session.py
+│   │   │   ├── invocation.py
+│   │   │   ├── managed_role.py
+│   │   │   ├── authorizer_config.py
+│   │   │   ├── authorizer_credential.py
+│   │   │   └── permission_request.py
 │   │   ├── routers/
+│   │   │   ├── agents.py
+│   │   │   ├── invocations.py
+│   │   │   ├── logs.py
+│   │   │   ├── security.py
+│   │   │   └── utils.py
 │   │   └── services/
-│   │       ├── secrets.py      # AWS Secrets Manager integration
-│   │       ├── cognito.py      # Cognito OAuth2 token retrieval
-│   │       ├── credential.py   # Credential management
-│   │       └── deployment.py   # Agent deployment orchestration
+│   │       ├── agentcore.py
+│   │       ├── secrets.py
+│   │       ├── cognito.py
+│   │       ├── credential.py
+│   │       ├── deployment.py
+│   │       ├── iam.py
+│   │       └── latency.py
 │   ├── scripts/
 │   ├── tests/
 │   ├── makefile
-│   ├── SPECIFICATIONS.md       # Backend-specific specification
+│   ├── SPECIFICATIONS.md
 │   └── README.md
 ├── frontend/                   # Frontend UI (see frontend/SPECIFICATIONS.md)
 │   ├── src/
 │   │   ├── api/
 │   │   ├── components/
+│   │   ├── contexts/
+│   │   ├── hooks/
 │   │   ├── pages/
+│   │   ├── lib/
 │   │   ├── App.tsx
 │   │   └── main.tsx
 │   ├── package.json
 │   ├── tsconfig.json
 │   ├── vite.config.ts
-│   └── SPECIFICATIONS.md       # Frontend-specific specification
+│   └── SPECIFICATIONS.md
+├── security/                   # Security IaC templates
+│   └── iac/
+│       ├── role.yaml           # SAM template for IAM roles
+│       └── cognito.yaml        # SAM template for Cognito pools
 ├── etc/
 │   └── environment.sh          # Source-of-truth for injectable parameters
 ├── tmp/
@@ -70,8 +97,8 @@ loom/
 
 Detailed specifications for each component are maintained in their respective directories:
 
-- **Backend:** [`backend/SPECIFICATIONS.md`](backend/SPECIFICATIONS.md) — API endpoints, database schema, service modules, streaming architecture, latency measurement flow.
-- **Frontend:** [`frontend/SPECIFICATIONS.md`](frontend/SPECIFICATIONS.md) — Technology stack, application shell, Build/Test/Operate tab specifications, streaming behavior.
+- **Backend:** [`backend/SPECIFICATIONS.md`](backend/SPECIFICATIONS.md) — API endpoints, database schema, service modules, streaming architecture, latency measurement flow, security management.
+- **Frontend:** [`frontend/SPECIFICATIONS.md`](frontend/SPECIFICATIONS.md) — Technology stack, persona-based navigation, Catalog/Builder/Security Admin workflows, streaming behavior.
 
 ---
 
@@ -80,15 +107,38 @@ Detailed specifications for each component are maintained in their respective di
 - No credentials, tokens, or secrets are committed to git.
 - `etc/environment.sh` and `.env` files are listed in `.gitignore`.
 - The backend uses the standard boto3 credential chain (environment variables, AWS profile, instance metadata) — no hardcoded credentials.
-- All AWS API calls follow least-privilege IAM: read-only access to `bedrock-agentcore:GetAgentRuntime`, `bedrock-agentcore:InvokeAgentRuntime`, `logs:DescribeLogStreams`, `logs:FilterLogEvents`.
+- All AWS API calls follow least-privilege IAM.
 - CORS is configured to allow `localhost:{FRONTEND_PORT}` only in development.
 - Cognito client secrets are stored in AWS Secrets Manager, never in the local database.
 - The backend retrieves secrets at invocation time with in-memory caching (5-minute TTL).
-- Secrets are cleaned up from Secrets Manager when agents are deleted.
+- Secrets are cleaned up from Secrets Manager when authorizer credentials or agents are deleted.
+- Security administration (roles, authorizers, credentials, permissions) is managed through a dedicated persona workflow.
 
 ---
 
-## 5. Implementation Phases
+## 5. Supported Foundation Models
+
+Models are organized into two groups and use cross-region inference profiles (`us.` prefix):
+
+**Anthropic:**
+- Claude Opus 4.6 (`us.anthropic.claude-opus-4-6-v1`)
+- Claude Sonnet 4.6 (`us.anthropic.claude-sonnet-4-6`)
+- Claude Opus 4.5 (`us.anthropic.claude-opus-4-5-20251101-v1:0`)
+- Claude Sonnet 4.5 (`us.anthropic.claude-sonnet-4-5-20250929-v1:0`)
+- Claude Haiku 4.5 (`us.anthropic.claude-haiku-4-5-20251001-v1:0`)
+
+**Amazon:**
+- Nova 2 Lite (`us.amazon.nova-2-lite-v1:0`)
+- Nova Premier (`us.amazon.nova-premier-v1:0`)
+- Nova Pro (`us.amazon.nova-pro-v1:0`)
+- Nova Lite (`us.amazon.nova-lite-v1:0`)
+- Nova Micro (`us.amazon.nova-micro-v1:0`)
+
+Model selectors in the UI are searchable by both display name and model ID, with grouped sections (Anthropic / Amazon). No default is pre-selected — the user must explicitly choose a model.
+
+---
+
+## 6. Implementation Phases
 
 ### Phase 1 — MVP (Initial Implementation) *(Complete)*
 - Backend: Agent registration, metadata retrieval, SSE invocation with real-time streaming, CloudWatch log retrieval (stream browsing + session-filtered), integrated cold-start latency calculation, SQLite persistence with session/invocation separation, session liveness tracking via idle timeout heuristic, active session count per agent.
@@ -99,13 +149,24 @@ Detailed specifications for each component are maintained in their respective di
 ### Phase 2 — Agent Deployment *(Complete)*
 - Agent deployment to AgentCore Runtime from the Strands Agent blueprint.
 - Auto-build artifact pipeline (pip cross-compile for ARM64, S3 upload, zip packaging).
-- Configurable deploy form: model selection, protocol (HTTP; MCP/A2A coming soon), network mode (PUBLIC; VPC coming soon), IAM role (searchable select or auto-create), authorizer (Cognito JWT with auto-populated discovery URL, or custom OIDC provider), lifecycle timeouts, integrations (coming soon).
+- Configurable deploy form: model selection (grouped, searchable), protocol (HTTP; MCP/A2A coming soon), network mode (PUBLIC; VPC coming soon), IAM role (searchable select or auto-create), authorizer (Cognito JWT with auto-populated discovery URL, or custom OIDC provider), lifecycle timeouts, integrations (coming soon).
 - Cognito OAuth2 token retrieval for authenticated agent invocations (client credentials grant).
 - Secret management via AWS Secrets Manager for Cognito client secrets.
 - Agent deletion with optional AgentCore cleanup (runtime + endpoint removal).
 - Account ID extraction from runtime ARN on deploy and refresh.
 
-### Phase 3 — Advanced Operations
+### Phase 3 — Persona-Based Workflows *(Complete)*
+- Persona-based frontend navigation: Catalog, Builder, Security Admin, Data Integration.
+- Catalog page with agent cards: eraser icon for deletion, overlay confirmation with "Also delete in AgentCore" checkbox, no refresh button on cards.
+- Builder page with register and deploy tabs, collapsible role permissions, grouped searchable model selectors.
+- Security Admin page for managing IAM roles, authorizer configs, authorizer credentials, and permission requests.
+- Model selector on both register and deploy forms with no default selection.
+- Model ID tracked on agent responses for display on invoke page.
+- Credential-based invocation: select a credential from an authorizer config to generate an OAuth token at invoke time.
+- Token indicator on invoke responses (`has_token`, `token_source` in SSE session_start).
+- Configurable session defaults via `LOOM_SESSION_IDLE_TIMEOUT_SECONDS` and `LOOM_SESSION_MAX_LIFETIME_SECONDS` environment variables, exposed via `/api/agents/defaults`.
+
+### Phase 4 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.
@@ -113,15 +174,15 @@ Detailed specifications for each component are maintained in their respective di
 
 ---
 
-## 6. Open Questions / Future Decisions
+## 7. Open Questions / Future Decisions
 
 | # | Question | Notes |
 |---|----------|-------|
-| 1 | What Strands Agents templates will be supported in Phase 2? | To be defined when Phase 2 begins. |
+| 1 | What Strands Agents templates will be supported beyond the initial blueprint? | To be defined as new agent patterns emerge. |
 | 2 | Should the Operate tab aggregate metrics via a separate analytics store or compute on-the-fly from SQLite? | SQLite is sufficient for MVP; revisit at scale. |
-| 3 | What is the CloudWatch log format for agents that do NOT emit the "Start time:" structured log? | **Resolved.** `parse_agent_start_time` first looks for the "Agent invoked - Start time:" pattern; if not found, it falls back to the earliest CloudWatch event timestamp as an approximation. This handles agents with non-standard log formats. If no logs are found at all, the invocation succeeds without latency data. |
-| 4 | Will multi-region support be needed in Phase 1? | Region is extracted per-agent from the ARN. The backend can manage agents across multiple regions simultaneously. |
-| 5 | Should the Agent PK be changed from integer to a natural key (ARN, UUID, or runtime_id)? | **Decision: keep integer PK.** The `session_id` string PK is justified as a natural key (UUID used in AWS API calls). Agent integer PK provides the best ergonomics for CLI usage and fastest SQLite joins. `arn` and `runtime_id` are already stored and indexed for AWS lookups. |
-| 6 | Can we query AWS for live session status (e.g., `list_runtime_sessions`)? | **No.** The Bedrock AgentCore SDK does not expose `list_runtime_sessions` or `get_runtime_session` APIs. Session liveness is instead computed locally using an idle timeout heuristic (`SESSION_IDLE_TIMEOUT_MINUTES`). This approach inherently avoids AWS API throttling. |
+| 3 | What is the CloudWatch log format for agents that do NOT emit the "Start time:" structured log? | **Resolved.** `parse_agent_start_time` first looks for the "Agent invoked - Start time:" pattern; if not found, it falls back to the earliest CloudWatch event timestamp as an approximation. |
+| 4 | Will multi-region support be needed? | Region is extracted per-agent from the ARN. The backend can manage agents across multiple regions simultaneously. |
+| 5 | Should the Agent PK be changed from integer to a natural key? | **Decision: keep integer PK.** Integer PKs provide the best ergonomics for CLI usage and fastest SQLite joins. |
+| 6 | Can we query AWS for live session status? | **No.** The Bedrock AgentCore SDK does not expose session listing/querying APIs. Session liveness is computed locally using an idle timeout heuristic (`LOOM_SESSION_IDLE_TIMEOUT_SECONDS`, default 300). |
 | 7 | How should Cognito client secrets be stored? | **Resolved.** AWS Secrets Manager with in-memory caching (5-minute TTL). Never stored in the local database. |
-| 8 | Should agent deletion also clean up AWS resources? | **Resolved.** Optional checkbox "Remove in AgentCore" shown when agent has a runtime_id. IAM roles are preserved. |
+| 8 | Should agent deletion also clean up AWS resources? | **Resolved.** Optional checkbox "Also delete in AgentCore" shown when agent has a runtime_id. IAM roles are preserved. |

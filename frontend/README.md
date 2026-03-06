@@ -1,6 +1,6 @@
 # Loom Frontend
 
-Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, and session liveness tracking.
+Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, session liveness tracking, and security administration.
 
 ## Prerequisites
 
@@ -45,75 +45,103 @@ make preview
 
 The app uses the [Catppuccin](https://catppuccin.com/) color palette:
 
-- **Mocha** (dark) is the default theme, matching the catppuccin/tmux convention
-- **Latte** (light) is available via the `.dark` class toggle on `<html>`
+- **Mocha** (dark) is the default theme
+- **Latte** (light) is available via the theme toggle in the sidebar
 - Colors are mapped to shadcn CSS variables in `src/index.css`
 
-### Timezone Support
+### Persona-Based Navigation
 
-All timestamps are timezone-aware. A dropdown in the header lets the user switch between their local timezone and UTC. The preference applies globally and updates every timestamp in the UI immediately.
+The sidebar provides access to four persona-based workflows:
 
-### Navigation
+| Persona | Description |
+|---------|-------------|
+| **Catalog** | Browse agents, invoke, view sessions and latency (default) |
+| **Builder** | Register agents by ARN or deploy new agents |
+| **Security Admin** | Manage IAM roles, authorizer configs, credentials, permission requests |
+| **Data Integration** | Manage data integrations (placeholder) |
 
-State-driven drill-down navigation managed in `App.tsx`:
+The sidebar also includes theme toggle, timezone selector, and a live clock.
+
+### Drill-Down Navigation
+
+Within the Catalog persona, state-driven drill-down:
 
 ```
-Agents → Agent Detail → Session Detail
+Catalog → Agent Detail → Session Detail
 ```
 
-No router library — view selection is based on `selectedAgentId` and `selectedSessionId` state.
+No router library — view selection is based on `selectedAgentId` and `selectedSessionId` state in `App.tsx`.
 
 ### Source Layout
 
 ```
 src/
 ├── api/          # Typed API client and endpoint functions
+│   ├── agents.ts      # Agent CRUD, models, roles, cognito pools, defaults
+│   ├── invocations.ts # Session queries + SSE stream consumer
+│   ├── logs.ts        # CloudWatch log queries
+│   ├── security.ts    # Roles, authorizers, credentials, permissions
+│   └── types.ts       # TypeScript interfaces mirroring backend models
 ├── contexts/     # React contexts (timezone preference)
 ├── hooks/        # Custom React hooks for data fetching
 ├── components/   # Application components + shadcn ui/ primitives
-│   ├── AgentRegistrationForm.tsx   # Register (ARN) and Deploy (full form) tabs
-│   ├── DeploymentPanel.tsx         # Deployment details for deployed agents
+│   ├── AgentCard.tsx              # Agent card with eraser icon deletion + overlay confirmation
+│   ├── AgentRegistrationForm.tsx  # Register (ARN + model) and Deploy (full form) tabs
+│   ├── AuthorizerManagementPanel.tsx # Authorizer config and credential management
+│   ├── InvokePanel.tsx            # Qualifier, credential selector, model badge, prompt
+│   ├── DeploymentPanel.tsx        # Deployment details for deployed agents
 │   └── ui/
-│       └── searchable-select.tsx   # Searchable dropdown (combobox)
+│       └── searchable-select.tsx  # Searchable dropdown with group headers
 ├── pages/        # Page-level view components
-├── lib/          # Shared utilities (cn(), format helpers)
-├── App.tsx       # Root component with navigation + timezone provider
+│   ├── CatalogPage.tsx         # Agent card grid
+│   ├── AgentListPage.tsx       # Builder: registration form + agent grid
+│   ├── AgentDetailPage.tsx     # Sessions, invoke, latency, response
+│   ├── SecurityAdminPage.tsx   # Roles, authorizers, credentials, permissions
+│   ├── DataIntegrationPage.tsx # Placeholder
+│   └── SessionDetailPage.tsx   # Session metadata, invocations, logs
+├── lib/          # Shared utilities (cn(), format helpers, status mapping)
+├── App.tsx       # Root: persona sidebar + navigation + timezone provider
 └── main.tsx      # Entry point
 ```
 
 ### API Layer
 
 - `api/client.ts` — `apiFetch<T>()` wrapper with `ApiError` class
-- `api/agents.ts` — Agent operations: listAgents, getAgent, registerAgent, deployAgent, deleteAgent (with optional AWS cleanup), refreshAgent, redeployAgent, fetchRoles, fetchCognitoPools, fetchModels
-- `api/invocations.ts` — Session queries + `invokeAgentStream()` SSE consumer
-- `api/logs.ts` — CloudWatch log queries (streams, agent logs, session logs)
-- `api/types.ts` — TypeScript interfaces mirroring backend Pydantic models
+- `api/agents.ts` — Agent operations: list, get, register (with optional model_id), deploy, delete (with optional AWS cleanup), refresh, redeploy, fetchRoles, fetchCognitoPools, fetchModels, fetchDefaults
+- `api/invocations.ts` — Session queries + `invokeAgentStream()` SSE consumer (supports `credential_id`)
+- `api/logs.ts` — CloudWatch log queries
+- `api/security.ts` — Security admin operations: managed roles, authorizer configs, authorizer credentials, permission requests
+- `api/types.ts` — TypeScript interfaces including AgentResponse (with `model_id`), SSESessionStart (with `has_token`, `token_source`), AuthorizerCredential, ManagedRole, PermissionRequestResponse
 
 ### Hooks
 
-- `useAgents()` — Agent list with auto-fetch, re-fetch on navigation back, and CRUD actions
+- `useAgents()` — Agent list with auto-fetch, CRUD actions, register (with optional modelId)
 - `useSessions(agentId)` — Session list that re-fetches on agent change
-- `useInvoke()` — Streaming state management with `AbortController`
+- `useInvoke()` — Streaming state management with `AbortController`, supports credential_id
 - `useLogs()` — On-demand session log fetching
-- `useDeployment()` — Agent config, credential providers, and integrations for deployed agents
+- `useDeployment()` — Agent config, credential providers, and integrations
+
+### Key Components
+
+- **SearchableSelect** — Combobox with search, filter, optional group headers (Anthropic/Amazon), and click-outside detection. Searches both label and value fields.
+- **AgentCard** — Compact card with inline badges, eraser icon for deletion, overlay confirmation with "Also delete in AgentCore" checkbox.
+- **InvokePanel** — Qualifier selector, credential dropdown, model ID badge, prompt textarea, invoke/cancel buttons. Token indicator shown when invocation uses OAuth.
+- **AuthorizerManagementPanel** — Lists authorizer configs with expandable credential management (add/list/delete credentials per config).
 
 ### Views
 
-| View | Layout | Description |
-|------|--------|-------------|
-| Agent List | Card grid | Register and Deploy tabs. Deploy form includes model selection, protocol/network/IAM role, authorizer (Cognito/Other), lifecycle timeouts, and integrations. |
-| Agent Detail | Stacked full-width | Sessions (top) → Invoke form → Latency summary → Response pane (raw streamed text) → Deployment panel for deployed agents (runtime status, protocol, network, execution role, deployed timestamp). |
-| Agent Card | Card | Shows protocol badge, network mode, and active session count. Remove flow has Cancel/Confirm buttons with optional "Remove in AgentCore" checkbox. |
-| Session Detail | Stacked sections | Metadata with live status badge, invocation timing table, dynamically expanding CloudWatch logs. |
-
-### Custom Components
-
-- **SearchableSelect** — Combobox with search and filter support, used for selecting IAM roles and Cognito pools in the deploy form.
-- **TagInput** — Inline component in the deploy form for adding and removing tag values (e.g. clients, scopes).
+| View | Persona | Description |
+|------|---------|-------------|
+| CatalogPage | Catalog | Agent card grid with management |
+| AgentDetailPage | Catalog | Sessions, invoke, latency, streaming response, deployment details |
+| SessionDetailPage | Catalog | Session metadata, invocation timing, CloudWatch logs |
+| AgentListPage | Builder | Register/Deploy form + agent grid |
+| SecurityAdminPage | Security | Roles, authorizers, credentials, permissions |
+| DataIntegrationPage | Integration | Placeholder |
 
 ### Session Liveness
 
-Session liveness is computed server-side using a local idle timeout heuristic (no AWS API calls). The frontend displays:
+Session liveness is computed server-side using `LOOM_SESSION_IDLE_TIMEOUT_SECONDS` (default 300). The frontend displays:
 - **Active session count** on each agent card — cold-start indicator (0 = next invoke is cold)
 - **Live status badges** on sessions — color-coded: active (green), expired (muted), streaming/pending (yellow), error (red)
 
