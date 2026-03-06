@@ -1,5 +1,5 @@
 include etc/environment.sh
-BASE_URL=http://localhost:$${BACKEND_PORT:-8000}
+BASE_URL=http://localhost:$${LOOM_BACKEND_PORT:-8000}
 
 install:
 	source .venv/bin/activate && uv pip install -r requirements.txt
@@ -8,7 +8,7 @@ test:
 	source .venv/bin/activate && python -m pytest tests/ -v
 
 run:
-	source .venv/bin/activate && uvicorn app.main:app --reload --port $${BACKEND_PORT:-8000}
+	source .venv/bin/activate && uvicorn app.main:app --reload --port $${LOOM_BACKEND_PORT:-8000}
 
 # Manual testing targets
 curl.health:
@@ -49,3 +49,51 @@ curl.logs.streams:
 
 curl.logs.session:
 	curl -s "$(BASE_URL)/api/agents/$(AGENT_ID)/sessions/$(SESSION_ID)/logs?qualifier=$(or $(QUALIFIER),DEFAULT)" | jq
+
+# Deploy agent
+curl.agents.deploy:
+	curl -s -X POST $(BASE_URL)/api/agents \
+		-H "Content-Type: application/json" \
+		-d '{"source": "deploy", "name": "$(NAME)", "code_uri": "$(CODE_URI)", "config": $(or $(CONFIG),{})}' | jq
+
+# Redeploy agent
+curl.agents.redeploy:
+	curl -s -X POST $(BASE_URL)/api/agents/$(AGENT_ID)/redeploy | jq
+
+# Agent config
+curl.agents.config.get:
+	curl -s $(BASE_URL)/api/agents/$(AGENT_ID)/config | jq
+
+curl.agents.config.update:
+	curl -s -X PUT $(BASE_URL)/api/agents/$(AGENT_ID)/config \
+		-H "Content-Type: application/json" \
+		-d '{"config": $(CONFIG)}' | jq
+
+# Credential providers
+curl.credentials.create:
+	curl -s -X POST $(BASE_URL)/api/agents/$(AGENT_ID)/credential-providers \
+		-H "Content-Type: application/json" \
+		-d '$(BODY)' | jq
+
+curl.credentials.list:
+	curl -s $(BASE_URL)/api/agents/$(AGENT_ID)/credential-providers | jq
+
+curl.credentials.delete:
+	curl -s -X DELETE $(BASE_URL)/api/agents/$(AGENT_ID)/credential-providers/$(PROVIDER_ID) -w "\nHTTP %{http_code}\n"
+
+# Integrations
+curl.integrations.create:
+	curl -s -X POST $(BASE_URL)/api/agents/$(AGENT_ID)/integrations \
+		-H "Content-Type: application/json" \
+		-d '$(BODY)' | jq
+
+curl.integrations.list:
+	curl -s $(BASE_URL)/api/agents/$(AGENT_ID)/integrations | jq
+
+curl.integrations.update:
+	curl -s -X PUT $(BASE_URL)/api/agents/$(AGENT_ID)/integrations/$(INTEGRATION_ID) \
+		-H "Content-Type: application/json" \
+		-d '$(BODY)' | jq
+
+curl.integrations.delete:
+	curl -s -X DELETE $(BASE_URL)/api/agents/$(AGENT_ID)/integrations/$(INTEGRATION_ID) -w "\nHTTP %{http_code}\n"

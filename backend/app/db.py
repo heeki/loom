@@ -8,8 +8,8 @@ from typing import Generator
 
 logger = logging.getLogger(__name__)
 
-# Get DATABASE_URL from environment, default to SQLite
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./loom.db")
+# Get LOOM_DATABASE_URL from environment, default to SQLite
+DATABASE_URL = os.getenv("LOOM_DATABASE_URL", "sqlite:///./loom.db")
 
 # Create SQLAlchemy engine
 engine = create_engine(
@@ -58,6 +58,17 @@ def _migrate_add_columns(eng) -> None:
         ("invocations", "prompt_text", "TEXT"),
         ("invocations", "thinking_text", "TEXT"),
         ("invocations", "response_text", "TEXT"),
+        ("agents", "source", "VARCHAR"),
+        ("agents", "deployment_status", "VARCHAR"),
+        ("agents", "execution_role_arn", "VARCHAR"),
+        ("agents", "code_uri", "VARCHAR"),
+        ("agents", "config_hash", "VARCHAR"),
+        ("agents", "deployed_at", "DATETIME"),
+        ("agents", "endpoint_name", "VARCHAR"),
+        ("agents", "endpoint_arn", "VARCHAR"),
+        ("agents", "endpoint_status", "VARCHAR"),
+        ("agents", "protocol", "VARCHAR"),
+        ("agents", "network_mode", "VARCHAR"),
     ]
 
     for table, column, col_type in migrations:

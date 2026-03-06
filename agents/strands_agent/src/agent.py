@@ -6,11 +6,11 @@ from typing import Optional
 from strands import Agent
 from strands.models.bedrock import BedrockModel
 
-from .config import AgentConfig
-from .integrations.mcp_client import create_mcp_clients
-from .integrations.a2a_client import create_a2a_clients
-from .integrations.memory import MemoryHook
-from .telemetry import setup_telemetry
+from src.config import AgentConfig
+from src.integrations.mcp_client import create_mcp_clients
+from src.integrations.a2a_client import create_a2a_clients
+from src.integrations.memory import MemoryHook
+from src.telemetry import setup_telemetry
 
 logger = logging.getLogger(__name__)
 

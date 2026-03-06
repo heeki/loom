@@ -24,7 +24,7 @@ frontend/
 │   ├── api/
 │   │   ├── types.ts            # TypeScript interfaces mirroring backend models
 │   │   ├── client.ts           # apiFetch<T>() wrapper + ApiError class
-│   │   ├── agents.ts           # Agent CRUD functions
+│   │   ├── agents.ts           # Agent CRUD + fetchRoles(), fetchCognitoPools(), fetchModels(), deployAgent(), deleteAgent(id, cleanupAws)
 │   │   ├── invocations.ts      # Session queries + SSE stream consumer
 │   │   └── logs.ts             # CloudWatch log queries
 │   ├── contexts/
@@ -33,11 +33,13 @@ frontend/
 │   │   ├── useAgents.ts        # Agent list state + CRUD actions
 │   │   ├── useSessions.ts      # Session list state per agent
 │   │   ├── useInvoke.ts        # Streaming invocation state + AbortController
-│   │   └── useLogs.ts          # Session log fetching
+│   │   ├── useLogs.ts          # Session log fetching
+│   │   └── useDeployment.ts    # Agent config, credential providers, integrations hooks
 │   ├── components/
-│   │   ├── ui/                 # shadcn primitives (auto-generated)
+│   │   ├── ui/                 # shadcn primitives (auto-generated) + searchable-select.tsx (combobox with click-outside detection)
 │   │   ├── AgentCard.tsx       # Agent summary card with actions
-│   │   ├── AgentRegistrationForm.tsx  # ARN input form
+│   │   ├── AgentRegistrationForm.tsx  # Tabbed form: ARN registration + agent deployment
+│   │   ├── DeploymentPanel.tsx # Deployment details panel (runtime status, protocol, network, role, deployed timestamp)
 │   │   ├── InvokePanel.tsx     # Qualifier select, prompt input, invoke/cancel
 │   │   ├── LatencySummary.tsx  # Timing breakdown (placeholder until filled)
 │   │   ├── SessionTable.tsx    # Clickable session list
@@ -85,27 +87,39 @@ No authentication or authorization in the initial prototype.
 
 ## 4. Agent List (Home View)
 
-**Purpose:** Register agents by ARN and manage the agent inventory.
+**Purpose:** Register agents by ARN, deploy new agents, and manage the agent inventory.
 
 **Content:**
-- `AgentRegistrationForm` at the top: single text input for the Agent Runtime ARN
-- On submit: `POST /api/agents` → success/error toast → list auto-refreshes
+- `AgentRegistrationForm` at the top with two tabs:
+  - **Register** tab: single text input for the Agent Runtime ARN. On submit: `POST /api/agents` → success/error toast → list auto-refreshes.
+  - **Deploy** tab: full deployment form with the following sections:
+    - **Agent Identity**: name (1/3 width) and description (2/3 width)
+    - **System Prompt**: agent description, behavioral guidelines, output expectations — each with placeholder examples
+    - **Model / Protocol / Network / IAM Role**: single flex row with explicit widths (20% / 10% / 10% / flex-1). Protocol offers HTTP as selectable; MCP and A2A shown as disabled with "(coming soon)". Network offers PUBLIC as selectable; VPC shown as disabled with "(coming soon)". IAM Role uses a SearchableSelect component with a searchable dropdown of existing roles.
+    - **Authorizer**: radio selection of None, Cognito, or Other.
+      - Cognito: searchable Cognito pool select (30% width), auto-populated discovery URL, tag inputs for allowed clients and scopes (press Enter to add, X badge to remove), app client ID and client secret fields (secret is password-masked)
+      - Other: textbox for discovery URL, tag inputs for allowed clients and scopes
+    - **Lifecycle**: idle timeout (60–28800, step 60, default 300) and max lifetime (60–28800, step 60, default 3600)
+    - **Integrations**: Memory, MCP Servers, A2A Agents — all shown as disabled checkboxes with "coming soon" labels
 - Below the form: responsive grid of `AgentCard` components showing:
-  - Name or Runtime ID
+  - Name
+  - Protocol badge
   - Status badge (color-coded: ACTIVE=default, CREATING/UPDATING=secondary, FAILED=destructive)
   - Active session count alongside runtime status — indicates how many sessions are likely still warm in AWS. When 0, the next invocation will likely be a cold start.
   - Region and Account ID
+  - Network mode
   - Available qualifiers as outline badges
   - Registered timestamp (timezone-aware)
   - Refresh button (`POST /api/agents/{id}/refresh`)
-  - Remove button (`DELETE /api/agents/{id}`)
+  - Remove button with confirmation flow: Cancel/Confirm buttons with a fixed-height row below for "Remove in AgentCore" checkbox (shown when agent has runtime_id)
+- Card layout is uniform across all agents — the checkbox row space is always reserved to prevent layout shifts
 - Clicking a card navigates to Agent Detail
 
 ---
 
 ## 5. Agent Detail View
 
-**Purpose:** Invoke agents with streaming, view latency metrics, and inspect session history.
+**Purpose:** Invoke agents with streaming, view latency metrics, inspect session history, and view deployment details.
 
 **Layout:** Single-column, full-width stacked layout:
 
@@ -114,16 +128,22 @@ No authentication or authorization in the initial prototype.
 │ Sessions (full width)                        │
 │ Table of prior sessions, clickable rows      │
 ├─────────────────────────────────────────────┤
-│ Latency Summary (placeholder → filled)       │
-│ 4-column grid: invoke time, agent start,     │
-│ cold start, duration                         │
-├─────────────────────────────────────────────┤
 │ Invoke Agent                                 │
 │ [Qualifier ▼] [Prompt textarea]              │
 │ [Invoke] [Cancel]                            │
 ├─────────────────────────────────────────────┤
+│ Latency Summary (placeholder → filled)       │
+│ 4-column grid: invoke time, agent start,     │
+│ cold start, duration                         │
+├─────────────────────────────────────────────┤
+│ Error (if any)                               │
+├─────────────────────────────────────────────┤
 │ Response (full width, expands dynamically)   │
-│ Streamed text with cursor, session ID badge  │
+│ Raw text with whitespace-pre-wrap, monospace │
+├─────────────────────────────────────────────┤
+│ Deployment (deployed agents only)            │
+│ Runtime status, protocol, network, role,     │
+│ deployed timestamp                           │
 └─────────────────────────────────────────────┘
 ```
 
@@ -134,22 +154,28 @@ No authentication or authorization in the initial prototype.
 - Auto-refreshes after each invocation completes
 - Clicking a row navigates to Session Detail
 
-### Latency Summary
-- Always visible as a 4-metric placeholder (shows "—" before invocation)
-- Fills in after `session_end` SSE event with:
-  - Client invoke time, Agent start time, Cold start latency (ms), Client duration (ms)
-
 ### Invoke Form
 - `InvokePanel` component: qualifier selector, multi-line prompt textarea, invoke/cancel buttons
 - Invoke triggers `POST /api/agents/{id}/invoke` (disabled while streaming)
 - Cancel aborts via `AbortController`
 
+### Latency Summary
+- Always visible as a 4-metric placeholder (shows "—" before invocation)
+- Fills in after `session_end` SSE event with:
+  - Client invoke time, Agent start time, Cold start latency (ms), Client duration (ms)
+
 ### Response Pane
-- Appears when streaming starts, spans full width
+- Shown when `streamedText`, `isStreaming`, or `sessionStart` is truthy (stays visible even if streaming ends with no content)
+- Raw text display with `whitespace-pre-wrap` and monospace font
 - **Expands dynamically** with content (no fixed max-height, no scroll overflow)
 - Session ID badge and animated "streaming" indicator in header
 - Blinking cursor while streaming, disappears on completion
-- Monospace font in a bordered container with muted background
+- Bordered container with muted background
+
+### Deployment Section (deployed agents only)
+- Simplified card matching AgentCard styling
+- Shows: runtime status badge, protocol, network mode, execution role, deployed timestamp
+- No config hash, no endpoint status, no redeploy button
 
 ### Streaming Implementation
 - **POST-based SSE** using `fetch` + `ReadableStream` (avoids `EventSource` GET-only limitation)
@@ -240,11 +266,32 @@ Custom hooks encapsulate data fetching and state management:
 - `useSessions` — re-fetches when `agentId` changes, exposes `refetch()` for post-invocation refresh
 - `useInvoke` — manages all streaming state, stores `AbortController` in a ref, cleans up on unmount; lifted to `AgentDetailPage` so it can be composed across the stacked layout
 - `useLogs` — exposes `fetchSessionLogs()` for on-demand log loading
+- `useDeployment` — fetches agent config, credential providers, and integration data for deployment forms
+
+### SearchableSelect Component
+Custom combobox used for IAM roles and Cognito pools. Uses click-outside detection, filtered option list, and a check mark for the selected item. Accepts a `className` prop for width control.
+
+### TagInput Pattern
+Inline component for adding/removing tag-style values (clients, scopes). Single textbox with Enter to add, badge with X to remove. Values are collected as a string array on form submit.
+
+### Agent Card Layout Stability
+The remove confirmation row (checkbox + buttons) always reserves a fixed-height space below buttons. This prevents card height changes when toggling confirmation state, keeping the grid layout stable across all cards.
+
+### Secrets Handling
+The Cognito client secret field is password-masked in the deploy form. The secret is sent to the backend which stores it in AWS Secrets Manager — it never persists in the frontend or local database.
+
+### Deploy Form Spacing
+Model / Protocol / Network / IAM Role use a flex row with explicit width percentages (20% / 10% / 10% / flex-1) for consistent spacing. Agent Identity name and description split 1/3 and 2/3.
 
 ---
 
 ## 8. Future Work
 
+- **Markdown rendering** for agent responses
+- **MCP server integration** configuration
+- **A2A agent integration** configuration
+- **VPC network mode** support
+- **MCP and A2A protocol** support
 - **Operate Tab** — aggregate dashboard with summary cards (total agents, invocations, avg cold-start, error rate), per-agent latency charts (Recharts), agent drill-down
 - **Real-time auto-refresh** of sessions and metrics
 - **Log stream selection** via the `/logs/streams` endpoint

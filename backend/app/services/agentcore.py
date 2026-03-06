@@ -76,7 +76,8 @@ def invoke_agent(
     qualifier: str,
     session_id: str,
     prompt: str,
-    region: str
+    region: str,
+    access_token: str | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """
     Invoke an AgentCore Runtime agent and stream the response.
@@ -102,19 +103,36 @@ def invoke_agent(
         Exception: If the agent invocation fails
     """
     import boto3
-
-    client = boto3.client('bedrock-agentcore', region_name=region)
+    from botocore import UNSIGNED
+    from botocore.config import Config
 
     payload_bytes = json.dumps({"prompt": prompt}).encode('utf-8')
 
-    response = client.invoke_agent_runtime(
-        agentRuntimeArn=arn,
-        qualifier=qualifier,
-        runtimeSessionId=session_id,
-        payload=payload_bytes,
-        contentType='application/json',
-        accept='application/json'
-    )
+    params: dict[str, Any] = {
+        "agentRuntimeArn": arn,
+        "qualifier": qualifier,
+        "runtimeSessionId": session_id,
+        "payload": payload_bytes,
+        "contentType": "application/json",
+        "accept": "application/json",
+    }
+
+    if access_token:
+        # OAuth-authorized agents: skip SigV4, use Bearer token only
+        client = boto3.client(
+            'bedrock-agentcore',
+            region_name=region,
+            config=Config(signature_version=UNSIGNED),
+        )
+
+        def _add_auth_header(request, **kwargs):
+            request.headers["Authorization"] = f"Bearer {access_token}"
+
+        client.meta.events.register("before-send.bedrock-agentcore.InvokeAgentRuntime", _add_auth_header)
+    else:
+        client = boto3.client('bedrock-agentcore', region_name=region)
+
+    response = client.invoke_agent_runtime(**params)
 
     # The API returns 'response' as a StreamingBody.
     # The agent's response is SSE-formatted: each token arrives as a
@@ -134,11 +152,9 @@ def invoke_agent(
             continue
         try:
             parsed = json.loads(payload)
-            if isinstance(parsed, str) and parsed:
-                yield {"type": "text", "content": parsed}
-            elif isinstance(parsed, dict):
+            if isinstance(parsed, dict):
                 yield {"type": "structured", "content": parsed}
+            elif isinstance(parsed, str) and parsed:
+                yield {"type": "text", "content": parsed}
         except json.JSONDecodeError:
-            # Not valid JSON — yield as raw text
-            if payload:
-                yield {"type": "text", "content": payload}
+            pass

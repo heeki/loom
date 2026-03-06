@@ -19,8 +19,8 @@ from typing import Any, AsyncGenerator
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 
-from .config import load_config
-from .agent import build_agent
+from src.config import load_config
+from src.agent import build_agent
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -69,7 +69,16 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
 
     stream = agent.stream_async(prompt)
     async for event in stream:
-        yield event
+        # Only yield the text content from Strands events
+        if isinstance(event, dict):
+            text = None
+            data = event.get("data")
+            if isinstance(data, str):
+                text = data
+            elif isinstance(event.get("delta"), dict):
+                text = event["delta"].get("text")
+            if text:
+                yield text
 
 
 def main() -> None:

@@ -12,10 +12,124 @@ export interface AgentResponse {
   active_session_count: number;
   registered_at: string | null;
   last_refreshed_at: string | null;
+  source: "register" | "deploy" | null;
+  deployment_status: string | null;
+  execution_role_arn: string | null;
+  config_hash: string | null;
+  endpoint_name: string | null;
+  endpoint_arn: string | null;
+  endpoint_status: string | null;
+  protocol: string | null;
+  network_mode: string | null;
+  deployed_at: string | null;
 }
 
 export interface AgentRegisterRequest {
+  source: "register";
   arn: string;
+}
+
+export interface AgentDeployRequest {
+  source: "deploy";
+  name: string;
+  description: string;
+  agent_description: string;
+  behavioral_guidelines: string;
+  output_expectations: string;
+  model_id: string;
+  role_arn: string | null;
+  protocol: string;
+  network_mode: string;
+  idle_timeout: number | null;
+  max_lifetime: number | null;
+  authorizer_type: string | null;
+  authorizer_pool_id: string | null;
+  authorizer_discovery_url: string | null;
+  authorizer_allowed_clients: string[];
+  authorizer_allowed_scopes: string[];
+  authorizer_client_id: string | null;
+  authorizer_client_secret: string | null;
+  memory_enabled: boolean;
+  mcp_servers: unknown[];
+  a2a_agents: unknown[];
+}
+
+export interface IamRole {
+  role_name: string;
+  role_arn: string;
+  description: string;
+}
+
+export interface CognitoPool {
+  pool_id: string;
+  pool_name: string;
+}
+
+export interface ModelOption {
+  model_id: string;
+  display_name: string;
+}
+
+// Config types
+export interface ConfigEntry {
+  id: number;
+  agent_id: number;
+  key: string;
+  value: string;
+  is_secret: boolean;
+  source: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConfigUpdateRequest {
+  config: Record<string, string>;
+}
+
+// Credential provider types
+export interface CredentialProvider {
+  id: number;
+  agent_id: number;
+  name: string;
+  vendor: string;
+  callback_url: string;
+  scopes: string[];
+  provider_type: string;
+  created_at: string;
+}
+
+export interface CredentialProviderCreateRequest {
+  name: string;
+  vendor: string;
+  client_id: string;
+  client_secret: string;
+  auth_server_url: string;
+  scopes: string[];
+  provider_type: string;
+}
+
+// Integration types
+export interface AgentIntegration {
+  id: number;
+  agent_id: number;
+  integration_type: string;
+  integration_config: Record<string, string>;
+  credential_provider_id: number | null;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IntegrationCreateRequest {
+  integration_type: string;
+  integration_config: Record<string, string>;
+  credential_provider_id?: number;
+}
+
+export interface IntegrationUpdateRequest {
+  integration_config?: Record<string, string>;
+  credential_provider_id?: number | null;
+  enabled?: boolean;
 }
 
 // Invocation types

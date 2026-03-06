@@ -6,7 +6,6 @@ node_modules
 dist
 build
 tmp
-build
 
 # files
 environment.sh

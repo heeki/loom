@@ -4,6 +4,7 @@ import { Separator } from "@/components/ui/separator";
 import { InvokePanel } from "@/components/InvokePanel";
 import { LatencySummary } from "@/components/LatencySummary";
 import { SessionTable } from "@/components/SessionTable";
+import { DeploymentPanel } from "@/components/DeploymentPanel";
 import { useInvoke } from "@/hooks/useInvoke";
 import type { AgentResponse, SessionResponse } from "@/api/types";
 
@@ -13,6 +14,7 @@ interface AgentDetailPageProps {
   sessionsLoading: boolean;
   onSelectSession: (sessionId: string) => void;
   onSessionsRefresh: () => void;
+  onRedeploy?: (id: number) => Promise<void>;
 }
 
 export function AgentDetailPage({
@@ -21,6 +23,7 @@ export function AgentDetailPage({
   sessionsLoading,
   onSelectSession,
   onSessionsRefresh,
+  onRedeploy,
 }: AgentDetailPageProps) {
   const { streamedText, sessionStart, sessionEnd, isStreaming, error, invoke, cancel } =
     useInvoke();
@@ -29,6 +32,8 @@ export function AgentDetailPage({
     await invoke(agent.id, prompt, qualifier, sessionId);
     onSessionsRefresh();
   };
+
+  const isDeployed = agent.source === "deploy";
 
   return (
     <div className="space-y-4">
@@ -63,7 +68,7 @@ export function AgentDetailPage({
       )}
 
       {/* Response — full width, expands dynamically with content */}
-      {(streamedText || isStreaming) && (
+      {(streamedText || isStreaming || sessionStart) && (
         <Card>
           <CardHeader className="pb-2">
             <div className="flex items-center gap-2">
@@ -89,6 +94,19 @@ export function AgentDetailPage({
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Deployment section — only for deployed agents */}
+      {isDeployed && (
+        <>
+          <Separator />
+          <h3 className="text-sm font-medium">Deployment</h3>
+
+          <DeploymentPanel
+            agent={agent}
+            onRedeploy={onRedeploy ?? (async () => {})}
+          />
+        </>
       )}
     </div>
   );

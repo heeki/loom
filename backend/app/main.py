@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import init_db
-from app.routers import agents, invocations, logs
+from app.routers import agents, credentials, integrations, invocations, logs
 
 # Configure logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "info").upper()
@@ -56,7 +56,7 @@ app = FastAPI(
 )
 
 # Configure CORS
-FRONTEND_PORT = os.getenv("FRONTEND_PORT", "5173")
+FRONTEND_PORT = os.getenv("LOOM_FRONTEND_PORT", "5173")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -70,6 +70,8 @@ app.add_middleware(
 
 # Include routers
 app.include_router(agents.router)
+app.include_router(credentials.router)
+app.include_router(integrations.router)
 app.include_router(invocations.router)
 app.include_router(logs.router)
 
@@ -93,7 +95,7 @@ async def health() -> dict:
 if __name__ == "__main__":
     import uvicorn
 
-    port = int(os.getenv("BACKEND_PORT", "8000"))
+    port = int(os.getenv("LOOM_BACKEND_PORT", "8000"))
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
