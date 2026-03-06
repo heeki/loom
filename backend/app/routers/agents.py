@@ -49,11 +49,10 @@ SUPPORTED_MODELS = [
     {"model_id": "us.anthropic.claude-opus-4-6-v1", "display_name": "Claude Opus 4.6"},
     {"model_id": "us.anthropic.claude-sonnet-4-6", "display_name": "Claude Sonnet 4.6"},
     {"model_id": "us.anthropic.claude-haiku-4-5-20251001-v1:0", "display_name": "Claude Haiku 4.5"},
-    {"model_id": "amazon.nova-2-lite-v1:0", "display_name": "Amazon Nova 2 Lite"},
+    {"model_id": "us.amazon.nova-2-lite-v1:0", "display_name": "Amazon Nova 2 Lite"},
     {"model_id": "us.amazon.nova-pro-v1:0", "display_name": "Amazon Nova Pro"},
     {"model_id": "us.amazon.nova-lite-v1:0", "display_name": "Amazon Nova Lite"},
     {"model_id": "us.amazon.nova-micro-v1:0", "display_name": "Amazon Nova Micro"},
-    {"model_id": "us.amazon.nova-nano-v1:0", "display_name": "Amazon Nova Nano"},
 ]
 
 
