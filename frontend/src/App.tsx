@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Toaster } from "@/components/ui/sonner";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -16,6 +17,7 @@ import {
 import { useAgents } from "@/hooks/useAgents";
 import { useSessions } from "@/hooks/useSessions";
 import { getSession, getInvocation } from "@/api/invocations";
+import { CatalogPage } from "@/pages/CatalogPage";
 import { AgentListPage } from "@/pages/AgentListPage";
 import { AgentDetailPage } from "@/pages/AgentDetailPage";
 import { SessionDetailPage } from "@/pages/SessionDetailPage";
@@ -23,15 +25,15 @@ import { InvocationDetailPage } from "@/pages/InvocationDetailPage";
 import { SecurityAdminPage } from "@/pages/SecurityAdminPage";
 import { DataIntegrationPage } from "@/pages/DataIntegrationPage";
 import type { SessionResponse, InvocationResponse } from "@/api/types";
-import { Shield, Hammer, Network } from "lucide-react";
+import { BookOpen, Shield, Wrench, Cable } from "lucide-react";
 
 type Theme = "light" | "dark";
-type Persona = "security" | "builder" | "integrations";
+type Persona = "catalog" | "security" | "builder" | "integrations";
 
 function ThemeSelector({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) => void }) {
   return (
     <Select value={theme} onValueChange={(v) => setTheme(v as Theme)}>
-      <SelectTrigger className="h-7 w-auto gap-1 text-xs text-muted-foreground">
+      <SelectTrigger className="h-7 w-full gap-1 text-xs text-muted-foreground">
         <SelectValue />
       </SelectTrigger>
       <SelectContent position="popper">
@@ -51,7 +53,7 @@ function TimezoneSelector() {
       value={timezone}
       onValueChange={(v) => setTimezone(v as TimezonePreference)}
     >
-      <SelectTrigger className="h-7 w-auto gap-1 text-xs text-muted-foreground">
+      <SelectTrigger className="h-7 w-full gap-1 text-xs text-muted-foreground">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -59,6 +61,33 @@ function TimezoneSelector() {
         <SelectItem value="UTC">UTC</SelectItem>
       </SelectContent>
     </Select>
+  );
+}
+
+function SidebarClock() {
+  const { timezone } = useTimezone();
+
+  const formatTime = () => {
+    const now = new Date();
+    const opts: Intl.DateTimeFormatOptions = {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+      timeZone: timezone === "UTC" ? "UTC" : undefined,
+    };
+    return now.toLocaleTimeString(undefined, opts);
+  };
+
+  const [time, setTime] = useState(formatTime);
+
+  useEffect(() => {
+    const id = setInterval(() => setTime(formatTime()), 1000);
+    return () => clearInterval(id);
+  });
+
+  return (
+    <span className="text-[10px] text-muted-foreground tabular-nums">{time}</span>
   );
 }
 
@@ -93,13 +122,13 @@ function AppContent() {
   const [theme, setTheme] = useState<Theme>(() =>
     document.documentElement.classList.contains("dark") ? "dark" : "light",
   );
-  const [activePersona, setActivePersona] = useState<Persona>("builder");
+  const [activePersona, setActivePersona] = useState<Persona>("catalog");
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
   }, [theme]);
 
-  const { agents, loading, fetchAgents, registerAgent, deployAgent, redeployAgent, refreshAgent, deleteAgent } = useAgents();
+  const { agents, loading, fetchAgents, registerAgent, deployAgent, redeployAgent, deleteAgent } = useAgents();
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessionDetail, setSessionDetail] = useState<SessionResponse | null>(null);
@@ -141,7 +170,18 @@ function AppContent() {
     }
   };
 
-  // Breadcrumb (only for builder persona)
+
+
+  const handleDelete = async (id: number, cleanupAws: boolean) => {
+    try {
+      await deleteAgent(id, cleanupAws);
+      toast.success(cleanupAws ? "Agent removed from Loom and AgentCore" : "Agent removed from Loom");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Delete failed");
+    }
+  };
+
+  // Breadcrumb (only for catalog persona drill-down)
   const breadcrumb: { label: string; onClick?: () => void }[] = [
     {
       label: "Agents",
@@ -196,10 +236,22 @@ function AppContent() {
           <img
             src={theme === "light" ? "/assets/loom_light_alt.png" : "/assets/loom_dark_alt.png"}
             alt="Loom"
-            className="h-10"
+            className="h-15"
           />
         </div>
         <nav className="flex-1 p-2 space-y-1">
+          <SidebarItem
+            icon={BookOpen}
+            label="Catalog"
+            active={activePersona === "catalog"}
+            onClick={() => setActivePersona("catalog")}
+          />
+          <SidebarItem
+            icon={Wrench}
+            label="Builder"
+            active={activePersona === "builder"}
+            onClick={() => setActivePersona("builder")}
+          />
           <SidebarItem
             icon={Shield}
             label="Security"
@@ -207,13 +259,7 @@ function AppContent() {
             onClick={() => setActivePersona("security")}
           />
           <SidebarItem
-            icon={Hammer}
-            label="Builder"
-            active={activePersona === "builder"}
-            onClick={() => setActivePersona("builder")}
-          />
-          <SidebarItem
-            icon={Network}
+            icon={Cable}
             label="Integrations"
             active={activePersona === "integrations"}
             onClick={() => setActivePersona("integrations")}
@@ -226,14 +272,22 @@ function AppContent() {
           <div className="px-3 py-1">
             <TimezoneSelector />
           </div>
+          <div className="px-3 py-1 flex items-center justify-between">
+            <span className="inline-flex items-center rounded-full border border-border bg-input-bg px-2 py-0.5">
+              <SidebarClock />
+            </span>
+            <span className="inline-flex items-center rounded-full border border-border bg-input-bg px-2 py-0.5 text-[10px] text-muted-foreground">
+              v{__APP_VERSION__}
+            </span>
+          </div>
         </div>
       </aside>
 
       {/* Main content */}
       <div className="flex-1 min-h-screen flex flex-col">
-        {activePersona === "builder" && (
+        {activePersona === "catalog" && selectedAgentId !== null && (
           <header className="border-b">
-            <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between gap-4">
+            <div className="max-w-6xl px-8 py-3 flex items-center justify-between gap-4">
               <nav className="flex items-center gap-1 text-sm text-muted-foreground min-w-0">
                 {breadcrumb.map((item, i) => (
                   <span key={i} className="flex items-center gap-1 min-w-0">
@@ -255,8 +309,8 @@ function AppContent() {
           </header>
         )}
 
-        <main className="mx-auto max-w-6xl px-4 py-6 flex-1 w-full">
-          {activePersona === "builder" && (
+        <main className="max-w-6xl px-8 py-6 flex-1 w-full">
+          {activePersona === "catalog" && (
             <>
               {selectedAgentId !== null && (
                 <Button variant="ghost" size="sm" onClick={handleBack} className="mb-4">
@@ -265,14 +319,11 @@ function AppContent() {
               )}
 
               {selectedAgentId === null && (
-                <AgentListPage
+                <CatalogPage
                   agents={agents}
                   loading={loading}
                   onSelectAgent={setSelectedAgentId}
-                  onRegister={registerAgent}
-                  onDeploy={deployAgent}
-                  onRefresh={refreshAgent}
-                  onDelete={deleteAgent}
+                  onDelete={handleDelete}
                 />
               )}
 
@@ -303,6 +354,21 @@ function AppContent() {
                 />
               )}
             </>
+          )}
+
+          {activePersona === "builder" && (
+            <AgentListPage
+              onRegister={async (arn, modelId) => {
+                await registerAgent(arn, modelId);
+                await fetchAgents();
+                setActivePersona("catalog");
+              }}
+              onDeploy={async (req) => {
+                await deployAgent(req);
+                await fetchAgents();
+                setActivePersona("catalog");
+              }}
+            />
           )}
 
           {activePersona === "security" && <SecurityAdminPage />}

@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import { Loader2, ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -79,13 +78,13 @@ function TagInput({
 type Mode = "register" | "deploy";
 
 interface AgentRegistrationFormProps {
-  onRegister: (arn: string) => Promise<void>;
+  mode: Mode;
+  onRegister: (arn: string, modelId?: string) => Promise<void>;
   onDeploy?: (request: AgentDeployRequest) => Promise<void>;
   isLoading: boolean;
 }
 
-export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: AgentRegistrationFormProps) {
-  const [mode, setMode] = useState<Mode>("register");
+export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }: AgentRegistrationFormProps) {
 
   // Register state
   const [arn, setArn] = useState("");
@@ -97,7 +96,7 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
   const [agentDescription, setAgentDescription] = useState("");
   const [behavioralGuidelines, setBehavioralGuidelines] = useState("");
   const [outputExpectations, setOutputExpectations] = useState("");
-  const [modelId, setModelId] = useState("us.anthropic.claude-sonnet-4-6");
+  const [modelId, setModelId] = useState("");
   const [selectedRoleId, setSelectedRoleId] = useState<string>("");
   const [protocol] = useState("HTTP");
   const [networkMode, setNetworkMode] = useState("PUBLIC");
@@ -106,6 +105,7 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
   const [selectedAuthConfigId, setSelectedAuthConfigId] = useState<string>("");
 
   // Permission request state
+  const [showRolePerms, setShowRolePerms] = useState(true);
   const [showPermRequest, setShowPermRequest] = useState(false);
   const [permActions, setPermActions] = useState<string[]>([]);
   const [permResources, setPermResources] = useState<string[]>([]);
@@ -147,10 +147,12 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
   const [models, setModels] = useState<ModelOption[]>([]);
   const [managedRoles, setManagedRoles] = useState<ManagedRole[]>([]);
   const [authConfigs, setAuthConfigs] = useState<AuthorizerConfigResponse[]>([]);
+  const [defaults, setDefaults] = useState<agentsApi.LoomDefaults>({ idle_timeout_seconds: 300, max_lifetime_seconds: 3600 });
 
   useEffect(() => {
+    void agentsApi.fetchModels().then(setModels).catch(() => {});
+    void agentsApi.fetchDefaults().then(setDefaults).catch(() => {});
     if (mode === "deploy") {
-      void agentsApi.fetchModels().then(setModels).catch(() => {});
       void securityApi.listManagedRoles().then(setManagedRoles).catch(() => {});
       void securityApi.listAuthorizerConfigs().then(setAuthConfigs).catch(() => {});
     }
@@ -187,7 +189,7 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
   const handleIdleTimeoutChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let value = e.target.value;
     if (idleTimeout === "" && value !== "") {
-      value = "300";
+      value = String(defaults.idle_timeout_seconds);
       e.target.value = value;
     }
     setIdleTimeout(value);
@@ -197,7 +199,7 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
   const handleMaxLifetimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let value = e.target.value;
     if (maxLifetime === "" && value !== "") {
-      value = "3600";
+      value = String(defaults.max_lifetime_seconds);
       e.target.value = value;
     }
     setMaxLifetime(value);
@@ -210,10 +212,10 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
     e.preventDefault();
     if (mode === "register") {
       if (!arn.trim()) return;
-      await onRegister(arn.trim());
+      await onRegister(arn.trim(), modelId || undefined);
       setArn("");
     } else {
-      if (!name.trim() || !onDeploy || hasValidationErrors) return;
+      if (!name.trim() || !modelId || !selectedRoleId || !onDeploy || hasValidationErrors) return;
 
       // Resolve managed role to role_arn
       const roleArn = selectedRole?.role_arn ?? null;
@@ -231,8 +233,8 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
         role_arn: roleArn,
         protocol,
         network_mode: networkMode,
-        idle_timeout: idleTimeout ? parseInt(idleTimeout, 10) : null,
-        max_lifetime: maxLifetime ? parseInt(maxLifetime, 10) : null,
+        idle_timeout: idleTimeout ? parseInt(idleTimeout, 10) : defaults.idle_timeout_seconds,
+        max_lifetime: maxLifetime ? parseInt(maxLifetime, 10) : defaults.max_lifetime_seconds,
         authorizer_type: authConfig?.authorizer_type ?? null,
         authorizer_pool_id: authConfig?.pool_id ?? null,
         authorizer_discovery_url: authConfig?.discovery_url ?? null,
@@ -250,7 +252,7 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
       setAgentDescription("");
       setBehavioralGuidelines("");
       setOutputExpectations("");
-      setModelId("us.anthropic.claude-sonnet-4-6");
+      setModelId("");
       setSelectedRoleId("");
       setNetworkMode("PUBLIC");
       setSelectedAuthConfigId("");
@@ -262,60 +264,34 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-medium">
-            {mode === "register" ? "Register Agent" : "Deploy Agent"}
-          </CardTitle>
-          <div className="flex rounded-md border text-xs" role="tablist" aria-label="Agent creation mode">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === "register"}
-              aria-controls="panel-register"
-              className={`px-3 py-1 rounded-l-md transition-colors ${
-                mode === "register"
-                  ? "bg-primary text-primary-foreground"
-                  : "hover:bg-accent"
-              }`}
-              onClick={() => setMode("register")}
-            >
-              Register
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === "deploy"}
-              aria-controls="panel-deploy"
-              className={`px-3 py-1 rounded-r-md transition-colors ${
-                mode === "deploy"
-                  ? "bg-primary text-primary-foreground"
-                  : "hover:bg-accent"
-              }`}
-              onClick={() => setMode("deploy")}
-            >
-              Deploy
-            </button>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {mode === "register" ? (
-            <div id="panel-register" role="tabpanel" className="flex gap-2">
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {mode === "register" ? (
+        <div className="space-y-3">
+          <div className="flex gap-3 items-end">
+            <div className="flex-1 min-w-0">
+              <label className="text-xs text-muted-foreground">AgentCore Runtime ARN</label>
               <Input
                 placeholder="arn:aws:bedrock-agentcore:region:account:runtime/id"
                 value={arn}
                 onChange={(e) => setArn(e.target.value)}
-                className="flex-1"
               />
-              <Button type="submit" disabled={isLoading || !arn.trim()}>
-                {isLoading ? "Registering..." : "Register"}
-              </Button>
             </div>
-          ) : (
-            <div id="panel-deploy" role="tabpanel" className="space-y-5">
+            <div className="w-1/4 min-w-0">
+              <label className="text-xs text-muted-foreground">Model Used</label>
+              <SearchableSelect
+                options={models.map((m) => ({ value: m.model_id, label: m.display_name, group: m.group }))}
+                value={modelId}
+                onValueChange={setModelId}
+                placeholder="Select model..."
+              />
+            </div>
+            <Button type="submit" disabled={isLoading || !arn.trim()} className="min-w-[120px]">
+              {isLoading ? "Registering..." : "Register"}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-5">
               {/* Agent Identity */}
               <section className="space-y-3">
                 <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Agent Identity</h4>
@@ -376,24 +352,12 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
               <div className="flex gap-3">
                 <section className="w-[20%] min-w-0 space-y-2">
                   <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Model</h4>
-                  <Select value={modelId} onValueChange={setModelId}>
-                    <SelectTrigger className="w-full text-sm">
-                      <SelectValue placeholder="Select model" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {models.length > 0
-                        ? models.map((m) => (
-                            <SelectItem key={m.model_id} value={m.model_id}>
-                              {m.display_name}
-                            </SelectItem>
-                          ))
-                        : (
-                            <SelectItem value="us.anthropic.claude-sonnet-4-6">
-                              Claude Sonnet 4.6
-                            </SelectItem>
-                          )}
-                    </SelectContent>
-                  </Select>
+                  <SearchableSelect
+                    options={models.map((m) => ({ value: m.model_id, label: m.display_name, group: m.group }))}
+                    value={modelId}
+                    onValueChange={setModelId}
+                    placeholder="Select model..."
+                  />
                 </section>
                 <section className="w-[10%] min-w-0 space-y-2">
                   <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Protocol</h4>
@@ -438,21 +402,32 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
               {selectedRole && (
                 <section className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Role Permissions (read-only)</h4>
                     <button
                       type="button"
-                      onClick={() => setShowPermRequest(!showPermRequest)}
-                      className="text-xs text-primary hover:underline flex items-center gap-1"
+                      onClick={() => setShowRolePerms(!showRolePerms)}
+                      className="flex items-center gap-1 text-xs font-medium text-muted-foreground uppercase tracking-wide hover:text-foreground"
                     >
-                      Request Additional Permissions
-                      {showPermRequest ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                      {showRolePerms ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                      Role Permissions (read-only)
                     </button>
+                    {showRolePerms && (
+                      <button
+                        type="button"
+                        onClick={() => setShowPermRequest(!showPermRequest)}
+                        className="text-xs text-primary hover:underline flex items-center gap-1"
+                      >
+                        Request Additional Permissions
+                        {showPermRequest ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                      </button>
+                    )}
                   </div>
-                  <div className="rounded border p-3 bg-muted/30">
-                    <p className="text-xs text-muted-foreground mb-2">{selectedRole.role_arn}</p>
-                    <PolicyViewer policy={selectedRole.policy_document} />
-                  </div>
-                  {showPermRequest && (
+                  {showRolePerms && (
+                    <div className="rounded border p-3 bg-muted/30">
+                      <p className="text-xs text-muted-foreground mb-2">{selectedRole.role_arn}</p>
+                      <PolicyViewer policy={selectedRole.policy_document} />
+                    </div>
+                  )}
+                  {showRolePerms && showPermRequest && (
                     <div className="rounded border border-dashed p-3 space-y-3">
                       <h5 className="text-xs font-medium text-muted-foreground">Request Additional Permissions</h5>
                       <div className="grid grid-cols-2 gap-3">
@@ -516,28 +491,30 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
               {/* Authorizer */}
               <section className="space-y-3">
                 <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Authorizer</h4>
-                <SearchableSelect
-                  options={[
-                    { value: "", label: "None" },
-                    ...authConfigs.map((c) => ({
-                      value: c.id.toString(),
-                      label: `${c.name} (${c.authorizer_type})`,
-                    })),
-                  ]}
-                  value={selectedAuthConfigId}
-                  onValueChange={setSelectedAuthConfigId}
-                  placeholder="Select authorizer config..."
-                />
+                <div className="w-1/4">
+                  <SearchableSelect
+                    options={[
+                      { value: "", label: "None" },
+                      ...authConfigs.map((c) => ({
+                        value: c.id.toString(),
+                        label: c.name,
+                      })),
+                    ]}
+                    value={selectedAuthConfigId}
+                    onValueChange={setSelectedAuthConfigId}
+                    placeholder="Select authorizer config..."
+                  />
+                </div>
                 {selectedAuthConfig && (
                   <div className="rounded border p-3 bg-muted/30 text-xs space-y-1">
                     <p><span className="text-muted-foreground">Type:</span> {selectedAuthConfig.authorizer_type}</p>
                     {selectedAuthConfig.pool_id && <p><span className="text-muted-foreground">Pool:</span> {selectedAuthConfig.pool_id}</p>}
                     {selectedAuthConfig.discovery_url && <p><span className="text-muted-foreground">Discovery URL:</span> {selectedAuthConfig.discovery_url}</p>}
                     {selectedAuthConfig.allowed_clients.length > 0 && (
-                      <p><span className="text-muted-foreground">Clients:</span> {selectedAuthConfig.allowed_clients.join(", ")}</p>
+                      <p><span className="text-muted-foreground">Allowed Clients:</span> {selectedAuthConfig.allowed_clients.join(", ")}</p>
                     )}
                     {selectedAuthConfig.allowed_scopes.length > 0 && (
-                      <p><span className="text-muted-foreground">Scopes:</span> {selectedAuthConfig.allowed_scopes.join(", ")}</p>
+                      <p><span className="text-muted-foreground">Allowed Scopes:</span> {selectedAuthConfig.allowed_scopes.join(", ")}</p>
                     )}
                   </div>
                 )}
@@ -551,7 +528,7 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
                     <label className="text-xs text-muted-foreground">Idle Timeout (seconds)</label>
                     <Input
                       type="number"
-                      placeholder="Defaults to 300 (5 min)"
+                      placeholder={`Defaults to ${defaults.idle_timeout_seconds} (${Math.round(defaults.idle_timeout_seconds / 60)} min)`}
                       value={idleTimeout}
                       onChange={handleIdleTimeoutChange}
                       min={60}
@@ -566,7 +543,7 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
                     <label className="text-xs text-muted-foreground">Max Lifetime (seconds)</label>
                     <Input
                       type="number"
-                      placeholder="Defaults to 3600 (1 hr)"
+                      placeholder={`Defaults to ${defaults.max_lifetime_seconds} (${Math.round(defaults.max_lifetime_seconds / 3600)} hr)`}
                       value={maxLifetime}
                       onChange={handleMaxLifetimeChange}
                       min={60}
@@ -604,7 +581,7 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
 
               <Button
                 type="submit"
-                disabled={isLoading || !name.trim() || !onDeploy || hasValidationErrors}
+                disabled={isLoading || !name.trim() || !modelId || !selectedRoleId || !onDeploy || hasValidationErrors}
                 className="w-full"
               >
                 {isLoading ? (
@@ -616,10 +593,8 @@ export function AgentRegistrationForm({ onRegister, onDeploy, isLoading }: Agent
                   "Deploy Agent"
                 )}
               </Button>
-            </div>
-          )}
-        </form>
-      </CardContent>
-    </Card>
+        </div>
+      )}
+    </form>
   );
 }

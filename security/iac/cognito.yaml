@@ -1,0 +1,112 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Cognito User Pool for Bedrock AgentCore agent authorization
+
+Parameters:
+  pPoolName:
+    Type: String
+    Description: Name of the Cognito User Pool
+  pDomain:
+    Type: String
+    Description: Cognito UserPool domain prefix (must be globally unique)
+  pResourceServerIdentifier:
+    Type: String
+    Description: Resource server identifier URL
+  pScopes:
+    Type: CommaDelimitedList
+    Description: Comma-separated list of OAuth scope names
+    Default: "invoke"
+  pCallbackUrls:
+    Type: CommaDelimitedList
+    Description: Comma-separated list of allowed callback URLs
+    Default: "https://localhost"
+
+Resources:
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Ref pPoolName
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+
+  CognitoUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Ref pDomain
+      UserPoolId: !Ref CognitoUserPool
+
+  CognitoResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Properties:
+      Identifier: !Ref pResourceServerIdentifier
+      Name: !Sub "${pPoolName}-resource-server"
+      UserPoolId: !Ref CognitoUserPool
+      Scopes:
+        - ScopeName: invoke
+          ScopeDescription: Invoke agent through AgentCore
+
+  # Machine-to-machine client (client_credentials flow, access token only)
+  M2MClient:
+    Type: AWS::Cognito::UserPoolClient
+    DependsOn: CognitoResourceServer
+    Properties:
+      ClientName: !Sub "${pPoolName}-m2m-client"
+      UserPoolId: !Ref CognitoUserPool
+      GenerateSecret: true
+      AllowedOAuthFlows:
+        - client_credentials
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - !Sub "${pResourceServerIdentifier}/invoke"
+      CallbackURLs: !Ref pCallbackUrls
+      SupportedIdentityProviders:
+        - COGNITO
+
+  # User-facing client (authorization code flow, returns id + access + refresh tokens)
+  UserClient:
+    Type: AWS::Cognito::UserPoolClient
+    DependsOn: CognitoResourceServer
+    Properties:
+      ClientName: !Sub "${pPoolName}-user-client"
+      UserPoolId: !Ref CognitoUserPool
+      GenerateSecret: true
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - profile
+        - !Sub "${pResourceServerIdentifier}/invoke"
+      CallbackURLs: !Ref pCallbackUrls
+      SupportedIdentityProviders:
+        - COGNITO
+
+Outputs:
+  oCognitoUserPoolId:
+    Description: Cognito UserPool ID
+    Value: !Ref CognitoUserPool
+  oCognitoUserPoolArn:
+    Description: Cognito UserPool ARN
+    Value: !GetAtt CognitoUserPool.Arn
+  oM2MClientId:
+    Description: "Machine-to-machine client ID (client_credentials flow: access token only)"
+    Value: !Ref M2MClient
+  oUserClientId:
+    Description: "User-facing client ID (authorization code flow: id + access + refresh tokens)"
+    Value: !Ref UserClient
+  oCognitoDomain:
+    Description: Cognito UserPool domain
+    Value: !Ref pDomain
+  oCognitoDiscoveryUrl:
+    Description: Cognito OIDC Discovery URL
+    Value: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPool}/.well-known/openid-configuration"
+  oCognitoIssuer:
+    Description: Cognito Issuer URL
+    Value: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPool}"
+  oCognitoTokenUrl:
+    Description: Cognito Token endpoint URL
+    Value: !Sub "https://${pDomain}.auth.${AWS::Region}.amazoncognito.com/oauth2/token"

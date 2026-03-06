@@ -3,6 +3,8 @@ import type {
   ManagedRole,
   ManagedRoleCreateRequest,
   ManagedRoleUpdateRequest,
+  CognitoPool,
+  AuthorizerCredential,
   AuthorizerConfigResponse,
   AuthorizerConfigCreateRequest,
   AuthorizerConfigUpdateRequest,
@@ -40,6 +42,11 @@ export function deleteManagedRole(id: number): Promise<void> {
   return apiFetch<void>(`/api/security/roles/${id}`, { method: "DELETE" });
 }
 
+// Cognito Pools
+export function listCognitoPools(): Promise<CognitoPool[]> {
+  return apiFetch<CognitoPool[]>("/api/security/cognito-pools");
+}
+
 // Authorizer Configs
 export function listAuthorizerConfigs(): Promise<AuthorizerConfigResponse[]> {
   return apiFetch<AuthorizerConfigResponse[]>("/api/security/authorizers");
@@ -67,6 +74,30 @@ export function updateAuthorizerConfig(id: number, request: AuthorizerConfigUpda
 
 export function deleteAuthorizerConfig(id: number): Promise<void> {
   return apiFetch<void>(`/api/security/authorizers/${id}`, { method: "DELETE" });
+}
+
+// Authorizer Credentials
+export function listAuthorizerCredentials(authId: number): Promise<AuthorizerCredential[]> {
+  return apiFetch<AuthorizerCredential[]>(`/api/security/authorizers/${authId}/credentials`);
+}
+
+export function createAuthorizerCredential(
+  authId: number,
+  request: { label: string; client_id: string; client_secret?: string },
+): Promise<AuthorizerCredential> {
+  return apiFetch<AuthorizerCredential>(`/api/security/authorizers/${authId}/credentials`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+}
+
+export function deleteAuthorizerCredential(authId: number, credId: number): Promise<void> {
+  return apiFetch<void>(`/api/security/authorizers/${authId}/credentials/${credId}`, { method: "DELETE" });
+}
+
+export function getCredentialToken(authId: number, credId: number): Promise<{ access_token: string; token_type: string; expires_in: number }> {
+  return apiFetch(`/api/security/authorizers/${authId}/credentials/${credId}/token`, { method: "POST" });
 }
 
 // Permission Requests

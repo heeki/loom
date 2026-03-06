@@ -84,3 +84,12 @@ export function fetchCognitoPools(): Promise<CognitoPool[]> {
 export function fetchModels(): Promise<ModelOption[]> {
   return apiFetch<ModelOption[]>("/api/agents/models");
 }
+
+export interface LoomDefaults {
+  idle_timeout_seconds: number;
+  max_lifetime_seconds: number;
+}
+
+export function fetchDefaults(): Promise<LoomDefaults> {
+  return apiFetch<LoomDefaults>("/api/agents/defaults");
+}

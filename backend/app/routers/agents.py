@@ -46,13 +46,16 @@ router = APIRouter(prefix="/api/agents", tags=["agents"])
 DEFAULT_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 SUPPORTED_MODELS = [
-    {"model_id": "us.anthropic.claude-opus-4-6-v1", "display_name": "Claude Opus 4.6"},
-    {"model_id": "us.anthropic.claude-sonnet-4-6", "display_name": "Claude Sonnet 4.6"},
-    {"model_id": "us.anthropic.claude-haiku-4-5-20251001-v1:0", "display_name": "Claude Haiku 4.5"},
-    {"model_id": "us.amazon.nova-2-lite-v1:0", "display_name": "Amazon Nova 2 Lite"},
-    {"model_id": "us.amazon.nova-pro-v1:0", "display_name": "Amazon Nova Pro"},
-    {"model_id": "us.amazon.nova-lite-v1:0", "display_name": "Amazon Nova Lite"},
-    {"model_id": "us.amazon.nova-micro-v1:0", "display_name": "Amazon Nova Micro"},
+    {"model_id": "us.anthropic.claude-opus-4-6-v1", "display_name": "Claude Opus 4.6", "group": "Anthropic"},
+    {"model_id": "us.anthropic.claude-sonnet-4-6", "display_name": "Claude Sonnet 4.6", "group": "Anthropic"},
+    {"model_id": "us.anthropic.claude-opus-4-5-20251101-v1:0", "display_name": "Claude Opus 4.5", "group": "Anthropic"},
+    {"model_id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "display_name": "Claude Sonnet 4.5", "group": "Anthropic"},
+    {"model_id": "us.anthropic.claude-haiku-4-5-20251001-v1:0", "display_name": "Claude Haiku 4.5", "group": "Anthropic"},
+    {"model_id": "us.amazon.nova-2-lite-v1:0", "display_name": "Nova 2 Lite", "group": "Amazon"},
+    {"model_id": "us.amazon.nova-premier-v1:0", "display_name": "Nova Premier", "group": "Amazon"},
+    {"model_id": "us.amazon.nova-pro-v1:0", "display_name": "Nova Pro", "group": "Amazon"},
+    {"model_id": "us.amazon.nova-lite-v1:0", "display_name": "Nova Lite", "group": "Amazon"},
+    {"model_id": "us.amazon.nova-micro-v1:0", "display_name": "Nova Micro", "group": "Amazon"},
 ]
 
 
@@ -140,6 +143,7 @@ class AgentResponse(BaseModel):
     endpoint_status: str | None = None
     protocol: str | None = None
     network_mode: str | None = None
+    model_id: str | None = None
     deployed_at: str | None = None
     registered_at: str | None
     last_refreshed_at: str | None
@@ -187,8 +191,7 @@ def derive_log_group(runtime_id: str, qualifier: str) -> str:
 
 def compute_active_session_count(agent_id: int, db: Session) -> int:
     """Count sessions that are likely still warm in AWS."""
-    timeout_minutes = int(os.getenv("SESSION_IDLE_TIMEOUT_MINUTES", "15"))
-    timeout_seconds = timeout_minutes * 60
+    timeout_seconds = int(os.getenv("LOOM_SESSION_IDLE_TIMEOUT_SECONDS", "300"))
     now_ts = time.time()
     now_dt = datetime.utcnow()
 
@@ -218,8 +221,17 @@ def compute_active_session_count(agent_id: int, db: Session) -> int:
 
 def _agent_response(agent: Agent, db: Session) -> AgentResponse:
     """Build an AgentResponse from an Agent ORM object."""
+    model_id = None
+    for entry in agent.config_entries:
+        if entry.key == "AGENT_CONFIG_JSON":
+            try:
+                model_id = json.loads(entry.value).get("model_id")
+            except (json.JSONDecodeError, TypeError):
+                pass
+            break
     return AgentResponse(
         **agent.to_dict(),
+        model_id=model_id,
         active_session_count=compute_active_session_count(agent.id, db)
     )
 
@@ -257,6 +269,15 @@ def get_cognito_pools() -> list[dict]:
 def get_models() -> list[dict]:
     """Return list of supported Bedrock model IDs."""
     return SUPPORTED_MODELS
+
+
+@router.get("/defaults")
+def get_defaults() -> dict:
+    """Return configurable default values for the frontend."""
+    return {
+        "idle_timeout_seconds": int(os.getenv("LOOM_SESSION_IDLE_TIMEOUT_SECONDS", "300")),
+        "max_lifetime_seconds": int(os.getenv("LOOM_SESSION_MAX_LIFETIME_SECONDS", "3600")),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +356,21 @@ def _register_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
     agent.set_raw_metadata(metadata)
 
     db.add(agent)
+    db.commit()
+    db.refresh(agent)
+
+    # Store model_id as config entry if provided
+    if request.model_id:
+        config_json = json.dumps({"model_id": request.model_id})
+        entry = ConfigEntry(
+            agent_id=agent.id,
+            key="AGENT_CONFIG_JSON",
+            value=config_json,
+            is_secret=False,
+            source="env_var",
+        )
+        db.add(entry)
+
     db.commit()
     db.refresh(agent)
 

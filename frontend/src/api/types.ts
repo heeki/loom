@@ -21,12 +21,14 @@ export interface AgentResponse {
   endpoint_status: string | null;
   protocol: string | null;
   network_mode: string | null;
+  model_id: string | null;
   deployed_at: string | null;
 }
 
 export interface AgentRegisterRequest {
   source: "register";
   arn: string;
+  model_id?: string;
 }
 
 export interface AgentDeployRequest {
@@ -68,6 +70,7 @@ export interface CognitoPool {
 export interface ModelOption {
   model_id: string;
   display_name: string;
+  group?: string;
 }
 
 // Config types
@@ -137,6 +140,7 @@ export interface InvokeRequest {
   prompt: string;
   qualifier?: string;
   session_id?: string;
+  credential_id?: number;
 }
 
 export interface InvocationResponse {
@@ -226,6 +230,21 @@ export interface ManagedRoleUpdateRequest {
   policy_document?: PolicyDocument;
 }
 
+export interface CognitoPool {
+  pool_id: string;
+  pool_name: string;
+  discovery_url: string;
+}
+
+export interface AuthorizerCredential {
+  id: number;
+  authorizer_config_id: number;
+  label: string;
+  client_id: string;
+  has_secret: boolean;
+  created_at: string | null;
+}
+
 export interface AuthorizerConfigResponse {
   id: number;
   name: string;
@@ -247,8 +266,6 @@ export interface AuthorizerConfigCreateRequest {
   discovery_url?: string;
   allowed_clients?: string[];
   allowed_scopes?: string[];
-  client_id?: string;
-  client_secret?: string;
 }
 
 export interface AuthorizerConfigUpdateRequest {
@@ -258,8 +275,6 @@ export interface AuthorizerConfigUpdateRequest {
   discovery_url?: string;
   allowed_clients?: string[];
   allowed_scopes?: string[];
-  client_id?: string;
-  client_secret?: string;
 }
 
 export interface PermissionRequestResponse {
@@ -293,6 +308,8 @@ export interface SSESessionStart {
   session_id: string;
   invocation_id: string;
   client_invoke_time: number;
+  token_source?: string;
+  has_token?: boolean;
 }
 
 export interface SSEChunk {

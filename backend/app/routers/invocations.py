@@ -6,7 +6,7 @@ import os
 import time
 import uuid
 from datetime import datetime
-from typing import List, AsyncGenerator
+from typing import Any, List, AsyncGenerator
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -19,6 +19,8 @@ from app.db import get_db
 from app.models.agent import Agent
 from app.models.session import InvocationSession
 from app.models.invocation import Invocation
+from app.models.authorizer_config import AuthorizerConfig
+from app.models.authorizer_credential import AuthorizerCredential
 
 from app.services.agentcore import invoke_agent
 from app.services.cloudwatch import get_log_events, parse_agent_start_time
@@ -37,6 +39,7 @@ class InvokeRequest(BaseModel):
     prompt: str = Field(..., description="Prompt to send to the agent")
     qualifier: str = Field(default="DEFAULT", description="Endpoint qualifier to use")
     session_id: str | None = Field(default=None, description="Existing session ID to reuse (runtimeSessionId)")
+    credential_id: int | None = Field(default=None, description="Authorizer credential ID for token generation")
 
 
 class InvocationResponse(BaseModel):
@@ -79,8 +82,7 @@ def compute_live_status(session: InvocationSession, db: Session) -> str:
     if session.status == "streaming":
         return "streaming"
 
-    timeout_minutes = int(os.getenv("SESSION_IDLE_TIMEOUT_MINUTES", "15"))
-    timeout_seconds = timeout_minutes * 60
+    timeout_seconds = int(os.getenv("LOOM_SESSION_IDLE_TIMEOUT_SECONDS", "300"))
 
     max_done_time = db.query(func.max(Invocation.client_done_time)).filter(
         Invocation.session_id == session.session_id
@@ -119,6 +121,7 @@ async def invoke_agent_stream(
     client_invoke_time: float,
     prompt: str,
     access_token: str | None = None,
+    token_source: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Invoke the agent and yield SSE events as the response streams.
@@ -137,11 +140,16 @@ async def invoke_agent_stream(
     db.commit()
 
     # Yield session_start event
-    yield format_sse_event("session_start", {
+    session_start_data: dict[str, Any] = {
         "session_id": session_id,
         "invocation_id": invocation_id,
         "client_invoke_time": client_invoke_time,
-    })
+    }
+    if token_source:
+        session_start_data["token_source"] = token_source
+    if access_token:
+        session_start_data["has_token"] = True
+    yield format_sse_event("session_start", session_start_data)
 
     try:
         # Call invoke_agent service (returns a synchronous generator)
@@ -358,29 +366,51 @@ async def invoke_agent_endpoint(
     db.commit()
     db.refresh(invocation)
 
-    # Fetch access token if agent has a Cognito authorizer configured
+    # Fetch access token using credential_id if provided, or fall back to agent config
     access_token = None
-    auth_config = agent.get_authorizer_config()
-    if auth_config and auth_config.get("type") == "cognito" and auth_config.get("pool_id"):
-        config_map = {e.key: e.value for e in agent.config_entries}
-        client_id = config_map.get("COGNITO_CLIENT_ID", "")
-        secret_arn = config_map.get("COGNITO_CLIENT_SECRET_ARN", "")
-        if client_id and secret_arn:
-            try:
-                client_secret = get_secret(secret_arn, agent.region)
-                token_response = get_cognito_token(
-                    pool_id=auth_config["pool_id"],
-                    client_id=client_id,
-                    client_secret=client_secret,
-                    scopes=auth_config.get("allowed_scopes") or None,
-                )
-                access_token = token_response.get("access_token")
-            except Exception as e:
-                logger.warning("Failed to get Cognito token for agent %s: %s", agent_id, e)
+    token_source = None
+    if request.credential_id:
+        cred = db.query(AuthorizerCredential).filter(AuthorizerCredential.id == request.credential_id).first()
+        if cred and cred.client_secret_arn:
+            auth = db.query(AuthorizerConfig).filter(AuthorizerConfig.id == cred.authorizer_config_id).first()
+            if auth and auth.pool_id:
+                try:
+                    import json as _json
+                    region = os.getenv("AWS_REGION", "us-east-1")
+                    client_secret = get_secret(cred.client_secret_arn, region)
+                    allowed_scopes = _json.loads(auth.allowed_scopes) if auth.allowed_scopes else None
+                    token_response = get_cognito_token(
+                        pool_id=auth.pool_id,
+                        client_id=cred.client_id,
+                        client_secret=client_secret,
+                        scopes=allowed_scopes or None,
+                    )
+                    access_token = token_response.get("access_token")
+                    token_source = cred.label
+                except Exception as e:
+                    logger.warning("Failed to get token via credential %s: %s", request.credential_id, e)
+    else:
+        auth_config = agent.get_authorizer_config()
+        if auth_config and auth_config.get("type") == "cognito" and auth_config.get("pool_id"):
+            config_map = {e.key: e.value for e in agent.config_entries}
+            client_id = config_map.get("COGNITO_CLIENT_ID", "")
+            secret_arn = config_map.get("COGNITO_CLIENT_SECRET_ARN", "")
+            if client_id and secret_arn:
+                try:
+                    client_secret = get_secret(secret_arn, agent.region)
+                    token_response = get_cognito_token(
+                        pool_id=auth_config["pool_id"],
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        scopes=auth_config.get("allowed_scopes") or None,
+                    )
+                    access_token = token_response.get("access_token")
+                except Exception as e:
+                    logger.warning("Failed to get Cognito token for agent %s: %s", agent_id, e)
 
     # Return streaming response
     return StreamingResponse(
-        invoke_agent_stream(agent, session, invocation, db, client_invoke_time, request.prompt, access_token),
+        invoke_agent_stream(agent, session, invocation, db, client_invoke_time, request.prompt, access_token, token_source),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

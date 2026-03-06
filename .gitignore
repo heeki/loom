@@ -11,3 +11,4 @@ tmp
 environment.sh
 loom.db
 notes.md
+*_output.yaml

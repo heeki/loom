@@ -17,7 +17,7 @@ export function useInvoke() {
   }, []);
 
   const invoke = useCallback(
-    async (agentId: number, prompt: string, qualifier = "DEFAULT", sessionId?: string) => {
+    async (agentId: number, prompt: string, qualifier = "DEFAULT", sessionId?: string, credentialId?: number) => {
       // Abort any in-flight request
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -33,7 +33,12 @@ export function useInvoke() {
       try {
         await invokeAgentStream(
           agentId,
-          { prompt, qualifier, ...(sessionId ? { session_id: sessionId } : {}) },
+          {
+            prompt,
+            qualifier,
+            ...(sessionId ? { session_id: sessionId } : {}),
+            ...(credentialId ? { credential_id: credentialId } : {}),
+          },
           {
             onSessionStart: (data) => setSessionStart(data),
             onChunk: (data) => setStreamedText((prev) => prev + data.text),

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models.managed_role import ManagedRole
 from app.models.authorizer_config import AuthorizerConfig
+from app.models.authorizer_credential import AuthorizerCredential
 from app.models.permission_request import PermissionRequest
 from app.models.agent import Agent
 from app.services.security import (
@@ -225,6 +226,36 @@ def delete_role(role_id: int, db: Session = Depends(get_db)) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Cognito Pools (discovery)
+# ---------------------------------------------------------------------------
+@router.get("/cognito-pools")
+def list_cognito_pools() -> list[dict]:
+    """List available Cognito User Pools in the current region."""
+    import boto3
+
+    region = _get_region()
+    client = boto3.client("cognito-idp", region_name=region)
+    pools: list[dict] = []
+
+    paginator = client.get_paginator("list_user_pools")
+    for page in paginator.paginate(MaxResults=60):
+        for pool in page.get("UserPools", []):
+            pool_id = pool["Id"]
+            pool_name = pool["Name"]
+            discovery_url = (
+                f"https://cognito-idp.{region}.amazonaws.com/{pool_id}"
+                "/.well-known/openid-configuration"
+            )
+            pools.append({
+                "pool_id": pool_id,
+                "pool_name": pool_name,
+                "discovery_url": discovery_url,
+            })
+
+    return pools
+
+
+# ---------------------------------------------------------------------------
 # Authorizer Configs
 # ---------------------------------------------------------------------------
 @router.post("/authorizers", status_code=status.HTTP_201_CREATED)
@@ -335,6 +366,113 @@ def delete_authorizer(auth_id: int, db: Session = Depends(get_db)) -> None:
 
     db.delete(auth)
     db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Authorizer Credentials
+# ---------------------------------------------------------------------------
+class CreateCredentialRequest(BaseModel):
+    label: str
+    client_id: str
+    client_secret: str | None = None
+
+
+@router.post("/authorizers/{auth_id}/credentials", status_code=status.HTTP_201_CREATED)
+def create_credential(auth_id: int, request: CreateCredentialRequest, db: Session = Depends(get_db)) -> dict:
+    """Add a client credential to an authorizer configuration."""
+    auth = db.query(AuthorizerConfig).filter(AuthorizerConfig.id == auth_id).first()
+    if not auth:
+        raise HTTPException(status_code=404, detail="Authorizer not found")
+
+    client_secret_arn = None
+    if request.client_secret:
+        region = _get_region()
+        secret_name = f"loom/authorizers/{auth.name}/credentials/{request.label}"
+        try:
+            client_secret_arn = store_secret(
+                name=secret_name,
+                secret_value=request.client_secret,
+                region=region,
+                description=f"Client secret for credential '{request.label}' on authorizer '{auth.name}'",
+            )
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Failed to store client secret: {e}")
+
+    cred = AuthorizerCredential(
+        authorizer_config_id=auth_id,
+        label=request.label,
+        client_id=request.client_id,
+        client_secret_arn=client_secret_arn,
+    )
+    db.add(cred)
+    db.commit()
+    db.refresh(cred)
+    return cred.to_dict()
+
+
+@router.get("/authorizers/{auth_id}/credentials")
+def list_credentials(auth_id: int, db: Session = Depends(get_db)) -> list[dict]:
+    """List credentials for an authorizer."""
+    creds = db.query(AuthorizerCredential).filter(
+        AuthorizerCredential.authorizer_config_id == auth_id
+    ).order_by(AuthorizerCredential.id).all()
+    return [c.to_dict() for c in creds]
+
+
+@router.delete("/authorizers/{auth_id}/credentials/{cred_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_credential(auth_id: int, cred_id: int, db: Session = Depends(get_db)) -> None:
+    """Delete a credential from an authorizer."""
+    cred = db.query(AuthorizerCredential).filter(
+        AuthorizerCredential.id == cred_id,
+        AuthorizerCredential.authorizer_config_id == auth_id,
+    ).first()
+    if not cred:
+        raise HTTPException(status_code=404, detail="Credential not found")
+    if cred.client_secret_arn:
+        region = _get_region()
+        delete_secret(cred.client_secret_arn, region)
+    db.delete(cred)
+    db.commit()
+
+
+@router.post("/authorizers/{auth_id}/credentials/{cred_id}/token")
+def get_credential_token(auth_id: int, cred_id: int, db: Session = Depends(get_db)) -> dict:
+    """Generate an access token using a credential's client_id and client_secret."""
+    from app.services.cognito import get_cognito_token
+
+    auth = db.query(AuthorizerConfig).filter(AuthorizerConfig.id == auth_id).first()
+    if not auth:
+        raise HTTPException(status_code=404, detail="Authorizer not found")
+
+    cred = db.query(AuthorizerCredential).filter(
+        AuthorizerCredential.id == cred_id,
+        AuthorizerCredential.authorizer_config_id == auth_id,
+    ).first()
+    if not cred:
+        raise HTTPException(status_code=404, detail="Credential not found")
+
+    if not auth.pool_id:
+        raise HTTPException(status_code=400, detail="Authorizer has no Cognito pool configured")
+    if not cred.client_secret_arn:
+        raise HTTPException(status_code=400, detail="Credential has no client secret stored")
+
+    region = _get_region()
+    try:
+        client_secret = get_secret(cred.client_secret_arn, region)
+        allowed_scopes = json.loads(auth.allowed_scopes) if auth.allowed_scopes else None
+        token_response = get_cognito_token(
+            pool_id=auth.pool_id,
+            client_id=cred.client_id,
+            client_secret=client_secret,
+            scopes=allowed_scopes or None,
+        )
+        return {
+            "access_token": token_response["access_token"],
+            "token_type": token_response.get("token_type", "Bearer"),
+            "expires_in": token_response.get("expires_in"),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to get token: {e}")
 
 
 # ---------------------------------------------------------------------------
