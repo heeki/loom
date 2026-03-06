@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Key } from "lucide-react";
 import { InvokePanel } from "@/components/InvokePanel";
 import { LatencySummary } from "@/components/LatencySummary";
 import { SessionTable } from "@/components/SessionTable";
@@ -28,8 +29,8 @@ export function AgentDetailPage({
   const { streamedText, sessionStart, sessionEnd, isStreaming, error, invoke, cancel } =
     useInvoke();
 
-  const handleInvoke = async (prompt: string, qualifier: string, sessionId?: string) => {
-    await invoke(agent.id, prompt, qualifier, sessionId);
+  const handleInvoke = async (prompt: string, qualifier: string, sessionId?: string, credentialId?: number) => {
+    await invoke(agent.id, prompt, qualifier, sessionId, credentialId);
     onSessionsRefresh();
   };
 
@@ -53,6 +54,7 @@ export function AgentDetailPage({
         qualifiers={agent.available_qualifiers}
         sessions={sessions}
         isStreaming={isStreaming}
+        modelId={agent.model_id}
         onInvoke={handleInvoke}
         onCancel={cancel}
       />
@@ -76,6 +78,12 @@ export function AgentDetailPage({
               {sessionStart && (
                 <Badge variant="outline" className="font-mono text-xs">
                   {sessionStart.session_id}
+                </Badge>
+              )}
+              {sessionStart?.has_token && (
+                <Badge variant="outline" className="border-border bg-input-bg text-xs gap-1">
+                  <Key className="h-3 w-3" />
+                  {sessionStart.token_source ?? "token"}
                 </Badge>
               )}
               {isStreaming && (

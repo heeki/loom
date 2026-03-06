@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,22 +10,49 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { SessionResponse } from "@/api/types";
+import { listAuthorizerConfigs, listAuthorizerCredentials } from "@/api/security";
+import type { SessionResponse, AuthorizerCredential } from "@/api/types";
 
 const NEW_SESSION = "__new__";
+const NO_CREDENTIAL = "__none__";
 
 interface InvokePanelProps {
   qualifiers: string[];
   sessions: SessionResponse[];
   isStreaming: boolean;
-  onInvoke: (prompt: string, qualifier: string, sessionId?: string) => void;
+  modelId?: string | null;
+  onInvoke: (prompt: string, qualifier: string, sessionId?: string, credentialId?: number) => void;
   onCancel: () => void;
 }
 
-export function InvokePanel({ qualifiers, sessions, isStreaming, onInvoke, onCancel }: InvokePanelProps) {
+export function InvokePanel({ qualifiers, sessions, isStreaming, modelId, onInvoke, onCancel }: InvokePanelProps) {
   const [prompt, setPrompt] = useState("");
   const [qualifier, setQualifier] = useState(qualifiers[0] ?? "DEFAULT");
   const [selectedSession, setSelectedSession] = useState(NEW_SESSION);
+  const [selectedCredential, setSelectedCredential] = useState(NO_CREDENTIAL);
+  const [allCredentials, setAllCredentials] = useState<(AuthorizerCredential & { authorizer_name: string })[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const configs = await listAuthorizerConfigs();
+        const results: (AuthorizerCredential & { authorizer_name: string })[] = [];
+        for (const config of configs) {
+          const creds = await listAuthorizerCredentials(config.id);
+          for (const cred of creds) {
+            if (cred.has_secret) {
+              results.push({ ...cred, authorizer_name: config.name });
+            }
+          }
+        }
+        if (!cancelled) setAllCredentials(results);
+      } catch {
+        // Silently fail — credentials are optional
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Filter sessions that match the selected qualifier and are not expired
   const matchingSessions = sessions.filter(
@@ -35,7 +63,8 @@ export function InvokePanel({ qualifiers, sessions, isStreaming, onInvoke, onCan
     e.preventDefault();
     if (!prompt.trim() || isStreaming) return;
     const sessionId = selectedSession === NEW_SESSION ? undefined : selectedSession;
-    onInvoke(prompt.trim(), qualifier, sessionId);
+    const credentialId = selectedCredential === NO_CREDENTIAL ? undefined : Number(selectedCredential);
+    onInvoke(prompt.trim(), qualifier, sessionId, credentialId);
   };
 
   const handleQualifierChange = (value: string) => {
@@ -47,7 +76,14 @@ export function InvokePanel({ qualifiers, sessions, isStreaming, onInvoke, onCan
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm font-medium">Invoke Agent</CardTitle>
+        <div className="flex items-center gap-2">
+          <CardTitle className="text-sm font-medium">Invoke Agent</CardTitle>
+          {modelId && (
+            <Badge variant="outline" className="border-border bg-input-bg text-xs font-normal">
+              {modelId}
+            </Badge>
+          )}
+        </div>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-3">
@@ -85,6 +121,21 @@ export function InvokePanel({ qualifiers, sessions, isStreaming, onInvoke, onCan
                 ))}
               </SelectContent>
             </Select>
+            {allCredentials.length > 0 && (
+              <Select value={selectedCredential} onValueChange={setSelectedCredential}>
+                <SelectTrigger className="w-64">
+                  <SelectValue placeholder="No credential" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_CREDENTIAL}>No credential</SelectItem>
+                  {allCredentials.map((c) => (
+                    <SelectItem key={c.id} value={String(c.id)}>
+                      {c.authorizer_name} / {c.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
           <div className="flex gap-2">
             <Button type="submit" disabled={isStreaming || !prompt.trim()}>

@@ -1,35 +1,26 @@
 import { useState } from "react";
-import { AgentCard } from "@/components/AgentCard";
 import { AgentRegistrationForm } from "@/components/AgentRegistrationForm";
-import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import type { AgentResponse, AgentDeployRequest } from "@/api/types";
+import type { AgentDeployRequest } from "@/api/types";
+
+type BuilderTab = "register" | "deploy";
 
 interface AgentListPageProps {
-  agents: AgentResponse[];
-  loading: boolean;
-  onSelectAgent: (id: number) => void;
-  onRegister: (arn: string) => Promise<unknown>;
+  onRegister: (arn: string, modelId?: string) => Promise<unknown>;
   onDeploy?: (request: AgentDeployRequest) => Promise<unknown>;
-  onRefresh: (id: number) => Promise<unknown>;
-  onDelete: (id: number, cleanupAws: boolean) => Promise<void>;
 }
 
 export function AgentListPage({
-  agents,
-  loading,
-  onSelectAgent,
   onRegister,
   onDeploy,
-  onRefresh,
-  onDelete,
 }: AgentListPageProps) {
   const [submitting, setSubmitting] = useState(false);
+  const [activeTab, setActiveTab] = useState<BuilderTab>("deploy");
 
-  const handleRegister = async (arn: string) => {
+  const handleRegister = async (arn: string, modelId?: string) => {
     setSubmitting(true);
     try {
-      await onRegister(arn);
+      await onRegister(arn, modelId);
       toast.success("Agent registered");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Registration failed");
@@ -51,55 +42,47 @@ export function AgentListPage({
     }
   };
 
-  const handleRefresh = async (id: number) => {
-    try {
-      await onRefresh(id);
-      toast.success("Agent refreshed");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Refresh failed");
-    }
-  };
-
-  const handleDelete = async (id: number, cleanupAws: boolean) => {
-    try {
-      await onDelete(id, cleanupAws);
-      toast.success(cleanupAws ? "Agent removed from Loom and AgentCore" : "Agent removed from Loom");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Delete failed");
-    }
-  };
+  const tabs: { key: BuilderTab; label: string }[] = [
+    { key: "deploy", label: "Deploy" },
+    { key: "register", label: "Register" },
+  ];
 
   return (
     <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold">Builder</h2>
+        <p className="text-sm text-muted-foreground">Deploy new agents or register existing ones.</p>
+      </div>
+
+      <div className="flex rounded-md border text-sm w-fit" role="tablist">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.key}
+            className={`px-4 py-1.5 transition-colors ${
+              tab.key === "deploy" ? "rounded-l-md" : ""
+            } ${
+              tab.key === "register" ? "rounded-r-md" : ""
+            } ${
+              activeTab === tab.key
+                ? "bg-primary text-primary-foreground"
+                : "hover:bg-accent"
+            }`}
+            onClick={() => setActiveTab(tab.key)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       <AgentRegistrationForm
+        mode={activeTab}
         onRegister={handleRegister}
         onDeploy={onDeploy ? handleDeploy : undefined}
         isLoading={submitting}
       />
-
-      {loading ? (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-48" />
-          ))}
-        </div>
-      ) : agents.length === 0 ? (
-        <div className="text-center text-muted-foreground py-12">
-          No agents registered. Add one above to get started.
-        </div>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {agents.map((agent) => (
-            <AgentCard
-              key={agent.id}
-              agent={agent}
-              onSelect={onSelectAgent}
-              onRefresh={handleRefresh}
-              onDelete={handleDelete}
-            />
-          ))}
-        </div>
-      )}
     </div>
   );
 }

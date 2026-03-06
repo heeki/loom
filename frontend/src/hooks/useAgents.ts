@@ -83,8 +83,8 @@ export function useAgents() {
   }, [agents]);
 
   const registerAgent = useCallback(
-    async (arn: string) => {
-      const agent = await agentsApi.registerAgent({ source: "register", arn });
+    async (arn: string, modelId?: string) => {
+      const agent = await agentsApi.registerAgent({ source: "register", arn, model_id: modelId });
       await fetchAgents();
       return agent;
     },

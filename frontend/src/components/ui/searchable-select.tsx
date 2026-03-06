@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 interface SearchableSelectOption {
   value: string;
   label: string;
+  group?: string;
 }
 
 interface SearchableSelectProps {
@@ -27,9 +28,10 @@ export function SearchableSelect({
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const filtered = options.filter((o) =>
-    o.label.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = options.filter((o) => {
+    const q = search.toLowerCase();
+    return o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q);
+  });
 
   const selectedLabel = options.find((o) => o.value === value)?.label;
 
@@ -79,25 +81,65 @@ export function SearchableSelect({
             {filtered.length === 0 ? (
               <div className="px-2 py-1.5 text-xs text-muted-foreground">No results</div>
             ) : (
-              filtered.map((o) => (
-                <button
-                  key={o.value}
-                  type="button"
-                  onClick={() => {
-                    onValueChange(o.value);
-                    setOpen(false);
-                    setSearch("");
-                  }}
-                  className="relative flex w-full cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
-                >
-                  <span className="truncate">{o.label}</span>
-                  {o.value === value && (
-                    <span className="absolute right-2 flex size-3.5 items-center justify-center">
-                      <CheckIcon className="size-4" />
-                    </span>
-                  )}
-                </button>
-              ))
+              (() => {
+                const hasGroups = filtered.some((o) => o.group);
+                if (!hasGroups) {
+                  return filtered.map((o) => (
+                    <button
+                      key={o.value}
+                      type="button"
+                      onClick={() => {
+                        onValueChange(o.value);
+                        setOpen(false);
+                        setSearch("");
+                      }}
+                      className="relative flex w-full cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+                    >
+                      <span className="truncate">{o.label}</span>
+                      {o.value === value && (
+                        <span className="absolute right-2 flex size-3.5 items-center justify-center">
+                          <CheckIcon className="size-4" />
+                        </span>
+                      )}
+                    </button>
+                  ));
+                }
+                const groups: string[] = [];
+                for (const o of filtered) {
+                  const g = o.group ?? "";
+                  if (!groups.includes(g)) groups.push(g);
+                }
+                return groups.map((g) => (
+                  <div key={g}>
+                    {g && (
+                      <div className="px-2 pt-1.5 pb-0.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+                        {g}
+                      </div>
+                    )}
+                    {filtered
+                      .filter((o) => (o.group ?? "") === g)
+                      .map((o) => (
+                        <button
+                          key={o.value}
+                          type="button"
+                          onClick={() => {
+                            onValueChange(o.value);
+                            setOpen(false);
+                            setSearch("");
+                          }}
+                          className="relative flex w-full cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+                        >
+                          <span className="truncate">{o.label}</span>
+                          {o.value === value && (
+                            <span className="absolute right-2 flex size-3.5 items-center justify-center">
+                              <CheckIcon className="size-4" />
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                  </div>
+                ));
+              })()
             )}
           </div>
         </div>

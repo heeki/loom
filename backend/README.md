@@ -1,6 +1,6 @@
 # Loom Backend
 
-FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, and session liveness tracking.
+FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, and security administration.
 
 ## Technology Stack
 
@@ -41,7 +41,8 @@ Runtime configuration is sourced from `etc/environment.sh`:
 | `FRONTEND_PORT` | Port for Vite dev server (CORS) | `5173` |
 | `DATABASE_URL` | SQLite file path | `sqlite:///./loom.db` |
 | `LOG_LEVEL` | Backend log level | `info` |
-| `SESSION_IDLE_TIMEOUT_MINUTES` | Session idle timeout for liveness detection | `15` |
+| `LOOM_SESSION_IDLE_TIMEOUT_SECONDS` | Session idle timeout for liveness detection | `300` |
+| `LOOM_SESSION_MAX_LIFETIME_SECONDS` | Maximum session lifetime | `3600` |
 | `AWS_REGION` | AWS region for deployments | `us-east-1` |
 | `LOOM_ARTIFACT_BUCKET` | S3 bucket for agent deployment artifacts | — |
 
@@ -58,11 +59,17 @@ backend/
 │   │   ├── agent.py         # Agent ORM model
 │   │   ├── config_entry.py  # AgentConfigEntry ORM model (per-agent key-value config)
 │   │   ├── session.py       # InvocationSession ORM model (session_id string PK)
-│   │   └── invocation.py    # Invocation ORM model (timing + latency data)
+│   │   ├── invocation.py    # Invocation ORM model (timing + latency data)
+│   │   ├── managed_role.py  # ManagedRole ORM model (IAM roles)
+│   │   ├── authorizer_config.py    # AuthorizerConfig ORM model
+│   │   ├── authorizer_credential.py # AuthorizerCredential ORM model
+│   │   └── permission_request.py   # PermissionRequest ORM model
 │   ├── routers/
 │   │   ├── agents.py        # Agent CRUD + ARN parsing + log group derivation
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
-│   │   └── logs.py          # CloudWatch log browsing + session log retrieval
+│   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
+│   │   ├── security.py      # Security admin: roles, authorizers, credentials, permissions
+│   │   └── utils.py         # Shared router utilities
 │   └── services/
 │       ├── agentcore.py     # boto3 wrapper: describe, list endpoints, invoke
 │       ├── cloudwatch.py    # boto3 wrapper: log streams, log events, start time parsing
@@ -74,7 +81,7 @@ backend/
 │       └── secrets.py       # Secrets Manager wrapper with caching
 ├── scripts/
 │   └── stream.py            # CLI streaming client (httpx-based)
-├── tests/                   # Unit tests (63 tests)
+├── tests/                   # Unit tests
 ├── makefile                 # Build, test, and manual testing targets
 ├── pyproject.toml
 └── requirements.txt
@@ -88,7 +95,23 @@ Stores registered and deployed AgentCore Runtime agents. Uses an auto-incrementi
 
 ### `agent_config_entries`
 
-Stores key-value configuration per agent. Used for environment variables and secret ARN references injected at deploy time.
+Stores key-value configuration per agent. Used for environment variables, secret ARN references, and agent metadata (e.g., `AGENT_CONFIG_JSON` for model_id).
+
+### `managed_roles`
+
+Stores IAM roles managed through the Security Admin workflow. Includes role name, ARN, description, and policy document.
+
+### `authorizer_configs`
+
+Stores authorizer configurations (e.g., Cognito pools) with pool ID, discovery URL, allowed clients, and allowed scopes.
+
+### `authorizer_credentials`
+
+Stores OAuth credentials per authorizer config. Each credential has a label, client_id, and a reference to the client_secret stored in AWS Secrets Manager (`client_secret_arn`). Client secrets are never stored in the local database.
+
+### `permission_requests`
+
+Stores permission escalation requests against managed roles. Includes requested actions, resources, justification, and review status (pending/approved/denied).
 
 ### `invocation_sessions`
 
@@ -96,33 +119,45 @@ Groups related invocations. Uses `session_id` (UUID string) as the primary key �
 
 ### `invocations`
 
-Stores per-invocation timing measurements and status. Each invocation belongs to a session. Fields include `client_invoke_time`, `client_done_time`, `agent_start_time`, `cold_start_latency_ms`, `client_duration_ms`, and `status`.
-
-Prompt text, thinking text, and response text are stored per invocation (`prompt_text`, `thinking_text`, `response_text`).
+Stores per-invocation timing measurements and status. Fields include `client_invoke_time`, `client_done_time`, `agent_start_time`, `cold_start_latency_ms`, `client_duration_ms`, and `status`. Prompt text, thinking text, and response text are stored per invocation.
 
 ## API Endpoints
 
-### Agent Registration
+### Agent Registration and Deployment
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/agents` | Register an agent by ARN |
-| `GET` | `/api/agents` | List all registered agents |
+| `POST` | `/api/agents` | Register an agent by ARN or deploy a new agent |
+| `GET` | `/api/agents` | List all registered agents (includes `model_id` and `active_session_count`) |
 | `GET` | `/api/agents/{agent_id}` | Get agent metadata |
-| `DELETE` | `/api/agents/{agent_id}` | Remove an agent |
+| `DELETE` | `/api/agents/{agent_id}?cleanup_aws=true` | Remove agent; optionally clean up AWS resources |
 | `POST` | `/api/agents/{agent_id}/refresh` | Re-fetch metadata from AWS |
-
-### Agent Deployment
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/agents` | Create agent (register or deploy) |
-| `DELETE` | `/api/agents/{agent_id}?cleanup_aws=true` | Remove agent; optionally clean up AWS |
 | `POST` | `/api/agents/{agent_id}/redeploy` | Redeploy with current config |
 | `GET` | `/api/agents/roles` | List IAM roles for AgentCore |
 | `GET` | `/api/agents/cognito-pools` | List Cognito user pools |
-| `GET` | `/api/agents/models` | List supported models |
-| `POST` | `/api/agents/{agent_id}/token` | Get Cognito access token |
+| `GET` | `/api/agents/models` | List supported models (with display name and group) |
+| `GET` | `/api/agents/defaults` | Get configurable defaults (idle timeout, max lifetime) |
+
+### Security Administration
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/security/roles` | Create a managed role |
+| `GET` | `/api/security/roles` | List managed roles |
+| `GET` | `/api/security/roles/{role_id}` | Get a managed role |
+| `PUT` | `/api/security/roles/{role_id}` | Update a managed role |
+| `DELETE` | `/api/security/roles/{role_id}` | Delete a managed role |
+| `GET` | `/api/security/cognito-pools` | List Cognito pools with discovery URLs |
+| `POST` | `/api/security/authorizers` | Create an authorizer config |
+| `GET` | `/api/security/authorizers` | List authorizer configs |
+| `DELETE` | `/api/security/authorizers/{auth_id}` | Delete an authorizer config |
+| `POST` | `/api/security/authorizers/{auth_id}/credentials` | Add a credential |
+| `GET` | `/api/security/authorizers/{auth_id}/credentials` | List credentials |
+| `DELETE` | `/api/security/authorizers/{auth_id}/credentials/{cred_id}` | Delete a credential |
+| `POST` | `/api/security/authorizers/{auth_id}/credentials/{cred_id}/token` | Generate OAuth token |
+| `POST` | `/api/security/permission-requests` | Create a permission request |
+| `GET` | `/api/security/permission-requests` | List permission requests |
+| `PUT` | `/api/security/permission-requests/{req_id}/review` | Review a permission request |
 
 ### Agent Invocation (SSE Streaming)
 
@@ -131,11 +166,10 @@ Prompt text, thinking text, and response text are stored per invocation (`prompt
 | `POST` | `/api/agents/{agent_id}/invoke` | Invoke agent, stream response via SSE |
 | `GET` | `/api/agents/{agent_id}/sessions` | List sessions with invocations |
 | `GET` | `/api/agents/{agent_id}/sessions/{session_id}` | Get a specific session |
-| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/invocations/{invocation_id}` | Get a specific invocation |
 
-The invoke endpoint returns `text/event-stream` with events: `session_start`, `chunk`, `session_end`, `error`. Cold-start latency is computed automatically after the stream completes and included in the `session_end` event.
+The invoke endpoint accepts an optional `credential_id` to authenticate via an authorizer credential. The `session_start` SSE event includes `has_token` and `token_source` fields when a token is used.
 
-Agent list responses include a computed `active_session_count` field — the number of sessions likely still warm in AWS. Session list responses include a computed `live_status` field (`"pending"`, `"streaming"`, `"active"`, or `"expired"`) based on a local idle timeout heuristic (`SESSION_IDLE_TIMEOUT_MINUTES`). No AWS API calls are made for session liveness — the Bedrock AgentCore SDK does not expose session querying APIs.
+Agent list responses include a computed `active_session_count` field based on `LOOM_SESSION_IDLE_TIMEOUT_SECONDS`. Session responses include computed `live_status` (`"pending"`, `"streaming"`, `"active"`, or `"expired"`).
 
 ### CloudWatch Logs
 
@@ -151,7 +185,7 @@ The boto3 `invoke_agent_runtime` call returns a synchronous `StreamingBody`. To 
 
 1. Each `next()` call on the chunk generator runs via `asyncio.to_thread()`.
 2. SSE events are flushed to the client in real-time as chunks arrive.
-3. After streaming completes, CloudWatch log retrieval also runs via `asyncio.to_thread()` (retries up to 6 times at 5-second intervals).
+3. After streaming completes, CloudWatch log retrieval also runs via `asyncio.to_thread()`.
 
 ## Latency Measurement
 
@@ -160,18 +194,16 @@ Cold-start latency is computed automatically during the invoke flow:
 1. `client_invoke_time` is recorded before the AWS API call.
 2. After streaming completes, `client_done_time` is recorded and `client_duration_ms` is computed.
 3. CloudWatch logs are queried for the "Agent invoked - Start time:" pattern.
-4. `agent_start_time` is parsed from the log and `cold_start_latency_ms` is computed. If the "Start time:" pattern is not found (agents with non-standard log formats), the earliest CloudWatch event timestamp is used as a fallback.
+4. `agent_start_time` is parsed and `cold_start_latency_ms` is computed. Falls back to the earliest CloudWatch event timestamp when the pattern is not found.
 5. All metrics are persisted to SQLite and included in the `session_end` SSE event.
-
-If CloudWatch logs are unavailable, the invocation succeeds without latency data.
 
 ## Agent Deployment
 
-Deploy creates a Strands Agent runtime on AgentCore. The build step cross-compiles an ARM64 artifact (pip install into a target directory, zips the result, and uploads to S3). The deployment supports configurable model, protocol (HTTP/WSS), network mode (PUBLIC/VPC), authorizer, and lifecycle settings. Cognito client secrets are stored in Secrets Manager and never persisted in the local database. Deletion optionally cleans up the AgentCore runtime and associated Secrets Manager entries.
+Deploy creates a Strands Agent runtime on AgentCore. The build step cross-compiles an ARM64 artifact (pip install into a target directory, zips the result, and uploads to S3). Model and IAM role are required fields. The deployment supports configurable protocol (HTTP), network mode (PUBLIC), authorizer, and lifecycle settings. Cognito client secrets are stored in Secrets Manager and never persisted in the local database. Deletion optionally cleans up the AgentCore runtime and associated Secrets Manager entries.
 
 ## Authenticated Invocation
 
-Agents configured with a Cognito authorizer auto-fetch an access token at invoke time. The token is retrieved via the OAuth2 client credentials grant; the client secret is fetched from Secrets Manager with a 5-minute in-memory cache. The Bearer token is sent alongside an UNSIGNED SigV4 request (OAuth mode).
+Invocations can be authenticated using credentials from authorizer configs. The invoke request accepts an optional `credential_id`. The backend resolves the credential, fetches the client secret from Secrets Manager (5-minute cache), exchanges credentials for an OAuth token via Cognito client credentials grant, and sends the Bearer token with the runtime invocation.
 
 ## Makefile Targets
 
@@ -198,7 +230,7 @@ make curl.logs.session AGENT_ID=1 SESSION_ID=uuid
 
 ## Tests
 
-81 unit tests covering all routers, services, and models:
+Unit tests covering all routers, services, and models:
 
 ```bash
 make test
