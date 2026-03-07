@@ -45,8 +45,13 @@ Runtime configuration is sourced from `etc/environment.sh`:
 | `LOOM_SESSION_MAX_LIFETIME_SECONDS` | Maximum session lifetime | `3600` |
 | `AWS_REGION` | AWS region for deployments | `us-east-1` |
 | `LOOM_ARTIFACT_BUCKET` | S3 bucket for agent deployment artifacts | — |
+| `LOOM_COGNITO_USER_POOL_ID` | Cognito User Pool ID for user authentication | — |
+| `LOOM_COGNITO_USER_CLIENT_ID` | Cognito user-facing app client ID | — |
+| `LOOM_COGNITO_REGION` | Region of the Cognito pool | `AWS_REGION` |
 
 AWS credentials use the standard boto3 credential chain (environment variables, AWS profile, instance metadata).
+
+When the `LOOM_COGNITO_USER_POOL_ID` and `LOOM_COGNITO_USER_CLIENT_ID` variables are set, the backend validates user JWTs and forwards user tokens to AgentCore for authenticated invocations. When not set, the app runs without user authentication.
 
 ## Project Structure
 
@@ -64,7 +69,10 @@ backend/
 │   │   ├── authorizer_config.py    # AuthorizerConfig ORM model
 │   │   ├── authorizer_credential.py # AuthorizerCredential ORM model
 │   │   └── permission_request.py   # PermissionRequest ORM model
+│   ├── dependencies/
+│   │   └── auth.py          # Auth dependencies (token extraction, validation)
 │   ├── routers/
+│   │   ├── auth.py          # Auth config endpoint (GET /api/auth/config)
 │   │   ├── agents.py        # Agent CRUD + ARN parsing + log group derivation
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
 │   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
@@ -77,6 +85,7 @@ backend/
 │       ├── credential.py    # AgentCore credential provider management
 │       ├── deployment.py    # Agent artifact build + runtime CRUD
 │       ├── iam.py           # IAM role management + Cognito pool listing
+│       ├── jwt_validator.py # JWT validation against Cognito JWKS
 │       ├── latency.py       # Pure computation: cold_start_latency_ms, client_duration_ms
 │       └── secrets.py       # Secrets Manager wrapper with caching
 ├── scripts/
@@ -159,6 +168,12 @@ Stores per-invocation timing measurements and status. Fields include `client_inv
 | `GET` | `/api/security/permission-requests` | List permission requests |
 | `PUT` | `/api/security/permission-requests/{req_id}/review` | Review a permission request |
 
+### Authentication
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/auth/config` | Return Cognito config (pool ID, client ID, region) for frontend |
+
 ### Agent Invocation (SSE Streaming)
 
 | Method | Path | Description |
@@ -167,7 +182,7 @@ Stores per-invocation timing measurements and status. Fields include `client_inv
 | `GET` | `/api/agents/{agent_id}/sessions` | List sessions with invocations |
 | `GET` | `/api/agents/{agent_id}/sessions/{session_id}` | Get a specific session |
 
-The invoke endpoint accepts an optional `credential_id` to authenticate via an authorizer credential. The `session_start` SSE event includes `has_token` and `token_source` fields when a token is used.
+The invoke endpoint uses a priority-based token selection: (1) user access token from Authorization header, (2) `credential_id` for M2M token, (3) agent config M2M flow. The `session_start` SSE event includes `has_token` and `token_source` fields when a token is used.
 
 Agent list responses include a computed `active_session_count` field based on `LOOM_SESSION_IDLE_TIMEOUT_SECONDS`. Session responses include computed `live_status` (`"pending"`, `"streaming"`, `"active"`, or `"expired"`).
 
@@ -203,7 +218,11 @@ Deploy creates a Strands Agent runtime on AgentCore. The build step cross-compil
 
 ## Authenticated Invocation
 
-Invocations can be authenticated using credentials from authorizer configs. The invoke request accepts an optional `credential_id`. The backend resolves the credential, fetches the client secret from Secrets Manager (5-minute cache), exchanges credentials for an OAuth token via Cognito client credentials grant, and sends the Bearer token with the runtime invocation.
+Invocations support three token sources with priority ordering:
+
+1. **User token**: If the request includes an `Authorization: Bearer` header with a valid Cognito user access token (validated via JWKS), it is forwarded directly to AgentCore.
+2. **Credential-based token**: If the invoke request includes a `credential_id`, the backend resolves the credential, fetches the client secret from Secrets Manager (5-minute cache), and exchanges it for an M2M OAuth token.
+3. **Agent config token**: Falls back to the agent's stored authorizer config for M2M token retrieval.
 
 ## Makefile Targets
 

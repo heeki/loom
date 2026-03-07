@@ -7,7 +7,7 @@ import time
 import uuid
 from datetime import datetime
 from typing import Any, List, AsyncGenerator
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func
@@ -297,8 +297,9 @@ async def invoke_agent_stream(
 @router.post("/{agent_id}/invoke")
 async def invoke_agent_endpoint(
     agent_id: int,
-    request: InvokeRequest,
-    db: Session = Depends(get_db)
+    request_body: InvokeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
 ) -> StreamingResponse:
     """
     Invoke an agent and stream the response via Server-Sent Events.
@@ -315,30 +316,30 @@ async def invoke_agent_endpoint(
 
     # Validate qualifier
     available_qualifiers = agent.get_available_qualifiers()
-    if request.qualifier not in available_qualifiers:
+    if request_body.qualifier not in available_qualifiers:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Qualifier '{request.qualifier}' not available. Available: {available_qualifiers}"
+            detail=f"Qualifier '{request_body.qualifier}' not available. Available: {available_qualifiers}"
         )
 
     # Record client invoke time before session creation
     client_invoke_time = time.time()
 
     # Reuse existing session or create a new one
-    if request.session_id:
+    if request_body.session_id:
         session = db.query(InvocationSession).filter(
             InvocationSession.agent_id == agent.id,
-            InvocationSession.session_id == request.session_id,
+            InvocationSession.session_id == request_body.session_id,
         ).first()
         if not session:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Session {request.session_id} not found for agent {agent_id}"
+                detail=f"Session {request_body.session_id} not found for agent {agent_id}"
             )
-        if session.qualifier != request.qualifier:
+        if session.qualifier != request_body.qualifier:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Qualifier mismatch: session uses '{session.qualifier}', request uses '{request.qualifier}'"
+                detail=f"Qualifier mismatch: session uses '{session.qualifier}', request uses '{request_body.qualifier}'"
             )
         session.status = "pending"
         db.commit()
@@ -346,7 +347,7 @@ async def invoke_agent_endpoint(
         session = InvocationSession(
             agent_id=agent.id,
             session_id=str(uuid.uuid4()),
-            qualifier=request.qualifier,
+            qualifier=request_body.qualifier,
             status="pending",
             created_at=datetime.utcnow(),
         )
@@ -359,18 +360,36 @@ async def invoke_agent_endpoint(
         session_id=session.session_id,
         invocation_id=str(uuid.uuid4()),
         status="pending",
-        prompt_text=request.prompt,
+        prompt_text=request_body.prompt,
         created_at=datetime.utcnow(),
     )
     db.add(invocation)
     db.commit()
     db.refresh(invocation)
 
-    # Fetch access token using credential_id if provided, or fall back to agent config
+    # Fetch access token with priority: user token > credential_id > agent config
     access_token = None
     token_source = None
-    if request.credential_id:
-        cred = db.query(AuthorizerCredential).filter(AuthorizerCredential.id == request.credential_id).first()
+
+    # Priority 1: Use user's access token from Authorization header
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        user_token = auth_header[7:]
+        user_pool_id = os.getenv("LOOM_COGNITO_USER_POOL_ID", "")
+        if user_pool_id:
+            try:
+                from app.services.jwt_validator import validate_cognito_token
+                region_env = os.getenv("LOOM_COGNITO_REGION", os.getenv("AWS_REGION", "us-east-1"))
+                validate_cognito_token(user_token, user_pool_id, region_env)
+                access_token = user_token
+                token_source = "user"
+                logger.info("Using user access token for agent invocation")
+            except Exception as e:
+                logger.warning("User token validation failed, falling back to M2M: %s", e)
+
+    # Priority 2: Use credential_id if provided
+    if not access_token and request_body.credential_id:
+        cred = db.query(AuthorizerCredential).filter(AuthorizerCredential.id == request_body.credential_id).first()
         if cred and cred.client_secret_arn:
             auth = db.query(AuthorizerConfig).filter(AuthorizerConfig.id == cred.authorizer_config_id).first()
             if auth and auth.pool_id:
@@ -388,8 +407,10 @@ async def invoke_agent_endpoint(
                     access_token = token_response.get("access_token")
                     token_source = cred.label
                 except Exception as e:
-                    logger.warning("Failed to get token via credential %s: %s", request.credential_id, e)
-    else:
+                    logger.warning("Failed to get token via credential %s: %s", request_body.credential_id, e)
+
+    # Priority 3: Fall back to agent config M2M flow
+    if not access_token:
         auth_config = agent.get_authorizer_config()
         if auth_config and auth_config.get("type") == "cognito" and auth_config.get("pool_id"):
             config_map = {e.key: e.value for e in agent.config_entries}
@@ -410,7 +431,7 @@ async def invoke_agent_endpoint(
 
     # Return streaming response
     return StreamingResponse(
-        invoke_agent_stream(agent, session, invocation, db, client_invoke_time, request.prompt, access_token, token_source),
+        invoke_agent_stream(agent, session, invocation, db, client_invoke_time, request_body.prompt, access_token, token_source),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

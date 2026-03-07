@@ -60,7 +60,7 @@ The sidebar provides access to four persona-based workflows:
 | **Security Admin** | Manage IAM roles, authorizer configs, credentials, permission requests |
 | **Data Integration** | Manage data integrations (placeholder) |
 
-The sidebar also includes theme toggle, timezone selector, and a live clock.
+The sidebar also includes a user indicator (when authenticated), theme toggle, timezone selector, and a live clock.
 
 ### Drill-Down Navigation
 
@@ -82,7 +82,7 @@ src/
 │   ├── logs.ts        # CloudWatch log queries
 │   ├── security.ts    # Roles, authorizers, credentials, permissions
 │   └── types.ts       # TypeScript interfaces mirroring backend models
-├── contexts/     # React contexts (timezone preference)
+├── contexts/     # React contexts (auth, timezone preference)
 ├── hooks/        # Custom React hooks for data fetching
 ├── components/   # Application components + shadcn ui/ primitives
 │   ├── AgentCard.tsx              # Agent card with eraser icon deletion + overlay confirmation
@@ -100,15 +100,20 @@ src/
 │   ├── DataIntegrationPage.tsx # Placeholder
 │   └── SessionDetailPage.tsx   # Session metadata, invocations, logs
 ├── lib/          # Shared utilities (cn(), format helpers, status mapping)
-├── App.tsx       # Root: persona sidebar + navigation + timezone provider
+├── App.tsx       # Root: auth gate + persona sidebar + navigation
 └── main.tsx      # Entry point
 ```
 
+### Authentication
+
+When the backend has Cognito configured (`LOOM_COGNITO_USER_POOL_ID` and `LOOM_COGNITO_USER_CLIENT_ID`), users must sign in before accessing the app. The login page handles the `USER_PASSWORD_AUTH` flow and `NEW_PASSWORD_REQUIRED` challenge. Tokens are stored in memory only (not persisted across page reloads). The access token is automatically attached to all API requests.
+
 ### API Layer
 
-- `api/client.ts` — `apiFetch<T>()` wrapper with `ApiError` class
+- `api/client.ts` — `apiFetch<T>()` wrapper with `ApiError` class and automatic auth token injection
+- `api/auth.ts` — Cognito auth API: `fetchAuthConfig`, `initiateAuth`, `respondToNewPasswordChallenge`, `refreshTokens`
 - `api/agents.ts` — Agent operations: list, get, register (with optional model_id), deploy, delete (with optional AWS cleanup), refresh, redeploy, fetchRoles, fetchCognitoPools, fetchModels, fetchDefaults
-- `api/invocations.ts` — Session queries + `invokeAgentStream()` SSE consumer (supports `credential_id`)
+- `api/invocations.ts` — Session queries + `invokeAgentStream()` SSE consumer (supports `credential_id`, includes auth header)
 - `api/logs.ts` — CloudWatch log queries
 - `api/security.ts` — Security admin operations: managed roles, authorizer configs, authorizer credentials, permission requests
 - `api/types.ts` — TypeScript interfaces including AgentResponse (with `model_id`), SSESessionStart (with `has_token`, `token_source`), AuthorizerCredential, ManagedRole, PermissionRequestResponse
@@ -132,6 +137,7 @@ src/
 
 | View | Persona | Description |
 |------|---------|-------------|
+| LoginPage | — | Cognito login + set new password |
 | CatalogPage | Catalog | Agent card grid with management |
 | AgentDetailPage | Catalog | Sessions, invoke, latency, streaming response, deployment details |
 | SessionDetailPage | Catalog | Session metadata, invocation timing, CloudWatch logs |
