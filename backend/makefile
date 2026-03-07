@@ -97,3 +97,21 @@ curl.integrations.update:
 
 curl.integrations.delete:
 	curl -s -X DELETE $(BASE_URL)/api/agents/$(AGENT_ID)/integrations/$(INTEGRATION_ID) -w "\nHTTP %{http_code}\n"
+
+# Memory resources
+curl.memories.create:
+	curl -s -X POST $(BASE_URL)/api/memories \
+		-H "Content-Type: application/json" \
+		-d '{"name": "$(MEMORY_NAME)", "event_expiry_duration": $(MEMORY_EVENT_EXPIRY_DURATION), "memory_strategies": [{"strategy_type": "semantic", "name": "default-semantic"}]}' | jq
+
+curl.memories.list:
+	curl -s $(BASE_URL)/api/memories | jq
+
+curl.memories.get:
+	curl -s $(BASE_URL)/api/memories/$(MEMORY_ID) | jq
+
+curl.memories.refresh:
+	curl -s -X POST $(BASE_URL)/api/memories/$(MEMORY_ID)/refresh | jq
+
+curl.memories.delete:
+	curl -s -X DELETE $(BASE_URL)/api/memories/$(MEMORY_ID) -w "\nHTTP %{http_code}\n"

@@ -63,11 +63,13 @@ backend/
 │   │   ├── managed_role.py  # ManagedRole ORM model (IAM roles)
 │   │   ├── authorizer_config.py    # AuthorizerConfig ORM model
 │   │   ├── authorizer_credential.py # AuthorizerCredential ORM model
-│   │   └── permission_request.py   # PermissionRequest ORM model
+│   │   ├── permission_request.py   # PermissionRequest ORM model
+│   │   └── memory.py        # Memory ORM model (AgentCore Memory resources)
 │   ├── routers/
 │   │   ├── agents.py        # Agent CRUD + ARN parsing + log group derivation
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
 │   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
+│   │   ├── memories.py      # Memory resource CRUD + strategy mapping
 │   │   ├── security.py      # Security admin: roles, authorizers, credentials, permissions
 │   │   └── utils.py         # Shared router utilities
 │   └── services/
@@ -78,6 +80,7 @@ backend/
 │       ├── deployment.py    # Agent artifact build + runtime CRUD
 │       ├── iam.py           # IAM role management + Cognito pool listing
 │       ├── latency.py       # Pure computation: cold_start_latency_ms, client_duration_ms
+│       ├── memory.py        # boto3 wrapper: AgentCore Memory CRUD
 │       └── secrets.py       # Secrets Manager wrapper with caching
 ├── scripts/
 │   └── stream.py            # CLI streaming client (httpx-based)
@@ -112,6 +115,10 @@ Stores OAuth credentials per authorizer config. Each credential has a label, cli
 ### `permission_requests`
 
 Stores permission escalation requests against managed roles. Includes requested actions, resources, justification, and review status (pending/approved/denied).
+
+### `memories`
+
+Stores AgentCore Memory resource metadata. Columns include `name`, `arn`, `memory_id`, `region`, `account_id`, `status` (CREATING/ACTIVE/FAILED/DELETING), `event_expiry_duration`, `memory_execution_role_arn`, `encryption_key_arn`, `strategies_config` (JSON), `strategies_response` (JSON), and `failure_reason`.
 
 ### `invocation_sessions`
 
@@ -158,6 +165,18 @@ Stores per-invocation timing measurements and status. Fields include `client_inv
 | `POST` | `/api/security/permission-requests` | Create a permission request |
 | `GET` | `/api/security/permission-requests` | List permission requests |
 | `PUT` | `/api/security/permission-requests/{req_id}/review` | Review a permission request |
+
+### Memory Resources
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/memories` | Create a memory resource |
+| `GET` | `/api/memories` | List all memory resources |
+| `GET` | `/api/memories/{memory_id}` | Get a specific memory resource |
+| `POST` | `/api/memories/{memory_id}/refresh` | Refresh memory status from AWS |
+| `DELETE` | `/api/memories/{memory_id}` | Delete a memory resource |
+
+Supports five memory strategy types: semantic, summary, user_preference, episodic, and custom. Strategies are mapped to AWS tagged union format on creation.
 
 ### Agent Invocation (SSE Streaming)
 
@@ -226,6 +245,13 @@ make curl.sessions.get AGENT_ID=1 SESSION_ID=uuid
 make curl.logs AGENT_ID=1 QUALIFIER=DEFAULT LIMIT=20
 make curl.logs.streams AGENT_ID=1
 make curl.logs.session AGENT_ID=1 SESSION_ID=uuid
+
+# Memory resources
+make curl.memories.create MEMORY_NAME=loom-memory MEMORY_EVENT_EXPIRY_DURATION=30
+make curl.memories.list
+make curl.memories.get MEMORY_ID=1
+make curl.memories.refresh MEMORY_ID=1
+make curl.memories.delete MEMORY_ID=1
 ```
 
 ## Tests

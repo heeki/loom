@@ -43,15 +43,18 @@ loom/
 │   │   │   ├── managed_role.py
 │   │   │   ├── authorizer_config.py
 │   │   │   ├── authorizer_credential.py
-│   │   │   └── permission_request.py
+│   │   │   ├── permission_request.py
+│   │   │   └── memory.py
 │   │   ├── routers/
 │   │   │   ├── agents.py
 │   │   │   ├── invocations.py
 │   │   │   ├── logs.py
+│   │   │   ├── memories.py
 │   │   │   ├── security.py
 │   │   │   └── utils.py
 │   │   └── services/
 │   │       ├── agentcore.py
+│   │       ├── memory.py
 │   │       ├── secrets.py
 │   │       ├── cognito.py
 │   │       ├── credential.py
@@ -97,7 +100,7 @@ loom/
 
 Detailed specifications for each component are maintained in their respective directories:
 
-- **Backend:** [`backend/SPECIFICATIONS.md`](backend/SPECIFICATIONS.md) — API endpoints, database schema, service modules, streaming architecture, latency measurement flow, security management.
+- **Backend:** [`backend/SPECIFICATIONS.md`](backend/SPECIFICATIONS.md) — API endpoints, database schema, service modules, streaming architecture, latency measurement flow, security management, memory resource management.
 - **Frontend:** [`frontend/SPECIFICATIONS.md`](frontend/SPECIFICATIONS.md) — Technology stack, persona-based navigation, Catalog/Builder/Security Admin workflows, streaming behavior.
 
 ---
@@ -166,7 +169,15 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Token indicator on invoke responses (`has_token`, `token_source` in SSE session_start).
 - Configurable session defaults via `LOOM_SESSION_IDLE_TIMEOUT_SECONDS` and `LOOM_SESSION_MAX_LIFETIME_SECONDS` environment variables, exposed via `/api/agents/defaults`.
 
-### Phase 4 — Advanced Operations
+### Phase 4 — AgentCore Memory Resources *(Complete)*
+- Backend API for creating, managing, and deleting AgentCore Memory resources.
+- Memory strategies: semantic, summary, user_preference, episodic, and custom — mapped to AWS tagged union format.
+- Local SQLite persistence for memory resource metadata with status tracking.
+- Refresh endpoint to poll AWS for latest memory status.
+- AWS error mapping: ValidationException→400, ConflictException→409, ResourceNotFoundException→404, AccessDeniedException→403, ThrottledException/ServiceQuotaExceededException→429.
+- Makefile curl targets for manual testing of all memory endpoints.
+
+### Phase 5 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.
