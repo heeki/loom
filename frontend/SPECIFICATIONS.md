@@ -23,13 +23,15 @@ frontend/
 ├── src/
 │   ├── api/
 │   │   ├── types.ts            # TypeScript interfaces mirroring backend models
-│   │   ├── client.ts           # apiFetch<T>() wrapper + ApiError class
+│   │   ├── client.ts           # apiFetch<T>() wrapper + ApiError class + auth token injection
+│   │   ├── auth.ts             # Cognito auth API (initiateAuth, respondToChallenge, refreshTokens)
 │   │   ├── agents.ts           # Agent CRUD + fetchRoles(), fetchCognitoPools(), fetchModels(), fetchDefaults()
-│   │   ├── invocations.ts      # Session queries + SSE stream consumer
+│   │   ├── invocations.ts      # Session queries + SSE stream consumer (with auth header)
 │   │   ├── logs.ts             # CloudWatch log queries
 │   │   ├── memories.ts         # Memory resource CRUD + refresh
 │   │   └── security.ts         # Security admin: roles, authorizers, credentials, permissions
 │   ├── contexts/
+│   │   ├── AuthContext.tsx      # Cognito auth provider (login, logout, token refresh)
 │   │   └── TimezoneContext.tsx  # Timezone preference provider + hook
 │   ├── hooks/
 │   │   ├── useAgents.ts        # Agent list state + CRUD actions
@@ -55,13 +57,14 @@ frontend/
 │   │   ├── AgentDetailPage.tsx # Sessions, latency, invoke, response
 │   │   ├── CatalogPage.tsx     # Platform Catalog: agents, memory, MCP, A2A sections
 │   │   ├── SecurityAdminPage.tsx  # Security persona: roles, authorizers, credentials, permissions
+│   │   ├── LoginPage.tsx        # Cognito login + NEW_PASSWORD_REQUIRED challenge
 │   │   ├── MemoryManagementPage.tsx # Memory persona: memory resource management
 │   │   └── SessionDetailPage.tsx  # Session metadata, invocations, logs
 │   ├── lib/
 │   │   ├── utils.ts            # shadcn cn() utility
 │   │   ├── format.ts           # Timezone-aware timestamp + metric formatters
 │   │   └── status.ts           # Status badge variant mapping
-│   ├── App.tsx                 # Persona-based navigation + sidebar + timezone
+│   ├── App.tsx                 # Auth gate + persona-based navigation + sidebar
 │   ├── main.tsx                # Entry point
 │   └── index.css               # Tailwind v4 imports + Catppuccin CSS variables
 ├── index.html
@@ -92,6 +95,7 @@ The app uses a persona-based single-page architecture with a sidebar for workflo
 | A2A Agents | Users | Future A2A agent management (disabled) | |
 
 The sidebar also contains:
+- User indicator with email/username display and logout button (when authenticated)
 - Theme toggle (Mocha dark / Latte light)
 - Timezone selector (local / UTC)
 - Live clock display
@@ -340,9 +344,18 @@ Inline component for adding/removing tag-style values (clients, scopes). Single 
 ### Secrets Handling
 Cognito client secrets are password-masked in forms. Secrets are sent to the backend which stores them in AWS Secrets Manager — they never persist in the frontend or local database.
 
+### User Authentication
+- `AuthContext` provides login, logout, token refresh, and user state to the entire app.
+- Tokens (id, access, refresh) are stored in React state only — never in localStorage or cookies.
+- The `AuthProvider` wraps the app at the top level (outside `TimezoneProvider`). If Cognito is not configured (empty pool ID/client ID), authentication is bypassed and the app loads normally.
+- `LoginPage` renders when the user is not authenticated. It handles the `NEW_PASSWORD_REQUIRED` challenge for admin-created Cognito users.
+- Access tokens are automatically refreshed 60 seconds before expiry using the refresh token.
+- The user indicator (email/username + logout button) is shown in the sidebar footer, above the theme selector.
+- `apiFetch` and `invokeAgentStream` automatically include the `Authorization: Bearer` header when a token is available, via a module-level token setter (`setAuthToken`/`getAuthToken`).
+
 ### API Layer Design
-- `apiFetch<T>()` is a thin wrapper around `fetch` with JSON parsing and `ApiError` class
-- Each API domain (agents, invocations, logs, security) is a separate module with typed functions
+- `apiFetch<T>()` is a thin wrapper around `fetch` with JSON parsing, `ApiError` class, and automatic auth token injection
+- Each API domain (agents, auth, invocations, logs, security) is a separate module with typed functions
 
 ### Session Liveness Display
 Computed server-side using `LOOM_SESSION_IDLE_TIMEOUT_SECONDS`. The frontend displays `live_status` with color-coded badges and `active_session_count` on agent cards.

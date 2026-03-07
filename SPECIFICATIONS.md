@@ -47,7 +47,10 @@ loom/
 │   │   │   ├── authorizer_credential.py
 │   │   │   ├── permission_request.py
 │   │   │   └── memory.py
+│   │   ├── dependencies/
+│   │   │   └── auth.py
 │   │   ├── routers/
+│   │   │   ├── auth.py
 │   │   │   ├── agents.py
 │   │   │   ├── invocations.py
 │   │   │   ├── logs.py
@@ -62,6 +65,7 @@ loom/
 │   │       ├── credential.py
 │   │       ├── deployment.py
 │   │       ├── iam.py
+│   │       ├── jwt_validator.py
 │   │       └── latency.py
 │   ├── scripts/
 │   ├── tests/
@@ -118,6 +122,18 @@ Detailed specifications for each component are maintained in their respective di
 - The backend retrieves secrets at invocation time with in-memory caching (5-minute TTL).
 - Secrets are cleaned up from Secrets Manager when authorizer credentials or agents are deleted.
 - Security administration (roles, authorizers, credentials, permissions) is managed through a dedicated persona workflow.
+
+### User Authentication
+
+- Users authenticate via a pre-existing AWS Cognito User Pool using the `USER_PASSWORD_AUTH` flow.
+- The frontend stores tokens (id, access, refresh) in React state only — never in localStorage or cookies.
+- The backend validates user JWTs against the Cognito JWKS endpoint (keys cached for 1 hour).
+- The `GET /api/auth/config` endpoint exposes only the pool ID, user client ID, and region — never client secrets.
+- When a user is authenticated, their access token is forwarded to AgentCore for agent invocations, replacing the M2M client credentials flow.
+- Unauthenticated requests are allowed to pass through with a warning (no breaking change to existing flows).
+- The `NEW_PASSWORD_REQUIRED` Cognito challenge is handled on first login for admin-created users.
+- Access tokens are automatically refreshed before expiry using the refresh token.
+- Token persistence across browser refreshes is out of scope — users must re-login after page reload.
 
 ---
 
@@ -196,11 +212,22 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Console script shebang fix: the build pipeline rewrites `opentelemetry-instrument` (and `opentelemetry-bootstrap`) scripts with a portable `#!/usr/bin/env python3` shebang so they execute correctly on the Linux-based AgentCore Runtime container.
 - Unit tests for telemetry setup idempotency, span creation, hook lifecycle, shebang fix, and noop operation.
 
-### Phase 6 — Advanced Operations
+### Phase 6 — User Authentication *(Complete)*
+- Cognito-based user authentication with `USER_PASSWORD_AUTH` flow.
+- Login page with `NEW_PASSWORD_REQUIRED` challenge handling for admin-created users.
+- `AuthContext` provider with login, logout, and automatic token refresh.
+- User indicator and logout button in the sidebar.
+- JWT validation middleware on the backend (JWKS caching, token claim extraction).
+- User access token forwarded to AgentCore for authenticated invocations (priority over M2M flow).
+- Graceful fallback to existing M2M client credentials flow when no user token is present.
+- `GET /api/auth/config` endpoint for frontend to discover Cognito configuration.
+- Tokens stored in memory only (not localStorage); authentication does not persist across page reloads.
+
+### Phase 7 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.
-- Authentication and authorization.
+- Role-based access control within Loom.
 
 ---
 

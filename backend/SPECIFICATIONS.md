@@ -30,6 +30,9 @@ All runtime configuration is injected via environment variables sourced from `et
 | `LOOM_ARTIFACT_BUCKET` | S3 bucket for agent deployment artifacts | — |
 | `MEMORY_NAME` | Default memory resource name | `loom_memory` |
 | `MEMORY_EVENT_EXPIRY_DURATION` | Default memory event expiry in days | `30` |
+| `LOOM_COGNITO_USER_POOL_ID` | Cognito User Pool ID for user authentication | — |
+| `LOOM_COGNITO_USER_CLIENT_ID` | Cognito user-facing app client ID | — |
+| `LOOM_COGNITO_REGION` | Region of the Cognito pool | `AWS_REGION` |
 
 AWS credentials use the standard boto3 credential chain (environment variables, AWS profile, instance metadata).
 
@@ -53,7 +56,11 @@ backend/
 │   │   ├── authorizer_credential.py # AuthorizerCredential ORM model
 │   │   ├── permission_request.py   # PermissionRequest ORM model
 │   │   └── memory.py        # Memory ORM model (AgentCore Memory resources)
+│   ├── dependencies/
+│   │   ├── __init__.py
+│   │   └── auth.py          # Auth dependencies (get_current_user_token, get_token_claims)
 │   ├── routers/
+│   │   ├── auth.py          # Authentication config endpoint (GET /api/auth/config)
 │   │   ├── agents.py        # Agent CRUD + ARN parsing + log group derivation
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
 │   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
@@ -67,6 +74,7 @@ backend/
 │       ├── credential.py    # AgentCore credential provider management
 │       ├── deployment.py    # Agent artifact build, runtime CRUD, secret detection
 │       ├── iam.py           # IAM role creation/deletion, Cognito pool listing
+│       ├── jwt_validator.py # JWT validation against Cognito JWKS (with caching)
 │       ├── latency.py       # Latency calculation helpers
 │       ├── memory.py        # Bedrock AgentCore Memory API wrapper
 │       └── secrets.py       # AWS Secrets Manager wrapper with in-memory caching
@@ -263,6 +271,14 @@ Log group format (per qualifier): `/aws/bedrock-agentcore/runtimes/{runtime_id}-
 ## 6. API Endpoints
 
 All endpoints are prefixed `/api`.
+
+### Authentication
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/auth/config` | Return Cognito pool ID, user client ID, and region for frontend auth flow. |
+
+The `/api/auth/config` endpoint does **not** expose client secrets. It returns only the information the frontend needs to initiate the `USER_PASSWORD_AUTH` flow directly with Cognito.
 
 ### Agent Registration and Deployment
 
@@ -510,6 +526,15 @@ Handles agent artifact build and runtime lifecycle:
 
 - `get_cognito_token(pool_id: str, client_id: str, client_secret: str, scopes: list[str]) -> str` — exchanges client credentials for an access token via the Cognito OAuth2 token endpoint.
 
+### `services/jwt_validator.py`
+
+- `validate_cognito_token(token: str, user_pool_id: str, region: str, client_id: str | None) -> dict` — validates a JWT against the Cognito JWKS endpoint. Caches JWKS keys for 1 hour.
+
+### `dependencies/auth.py`
+
+- `get_current_user_token(request: Request) -> str | None` — extracts and validates the Bearer token from the Authorization header. Returns the raw token string if valid, None otherwise. Allows unauthenticated requests to pass through with a warning.
+- `get_token_claims(request: Request) -> dict | None` — extracts, validates, and decodes the Bearer token. Returns decoded claims if valid, None otherwise.
+
 ### `services/secrets.py`
 
 - `store_secret(name: str, secret_value: str, region: str)` — creates or updates a secret.
@@ -556,14 +581,13 @@ Wraps `boto3.client('bedrock-agentcore-control')` for memory operations:
 
 ## 9. Authenticated Invocation Flow
 
-Invocations can be authenticated using credentials from authorizer configs:
+Invocations are authenticated with a priority-based token selection:
 
-1. The invoke request includes an optional `credential_id`.
-2. The backend looks up the `AuthorizerCredential` by ID, resolving the associated `AuthorizerConfig`.
-3. Reads the `client_secret` from AWS Secrets Manager (cached in memory for 5 minutes).
-4. Exchanges the client credentials for an access token via the Cognito client credentials grant.
-5. Passes the Bearer token to `invoke_agent_runtime` (unsigned SigV4 + `Authorization` header).
-6. The `session_start` SSE event includes `has_token: true` and `token_source` indicating which credential was used.
+1. **User token (highest priority):** If the incoming request has a valid `Authorization: Bearer` header containing a Cognito user access token, it is validated against the JWKS endpoint and forwarded to AgentCore. The `token_source` is set to `"user"`.
+2. **Credential-based token:** If the invoke request includes an optional `credential_id`, the backend looks up the `AuthorizerCredential`, fetches the client secret from Secrets Manager (5-minute cache), and exchanges credentials for an M2M access token.
+3. **Agent config token (lowest priority):** Falls back to the agent's stored authorizer config to fetch an M2M token.
+
+The selected Bearer token is passed to `invoke_agent_runtime` (unsigned SigV4 + `Authorization` header). The `session_start` SSE event includes `has_token: true` and `token_source` indicating which token source was used.
 
 ---
 
