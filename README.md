@@ -4,8 +4,10 @@ A platform for building, testing, and operating AI agents on Amazon Bedrock Agen
 
 ## Features
 
+- Cognito-based user authentication with login page and automatic token refresh
 - Agent registration via AgentCore Runtime ARN
 - SSE streaming invocation with real-time response display
+- Authenticated agent invocations using user tokens or M2M credentials
 - Cold-start latency measurement via automatic CloudWatch log parsing
 - Active session tracking with cold-start indicators per agent
 - Session liveness detection via idle timeout heuristic (no AWS API calls)
@@ -52,6 +54,18 @@ cd frontend
 npm install
 npm run dev
 ```
+
+### Authentication (Optional)
+
+To enable Cognito-based user authentication, set these environment variables before starting the backend:
+
+```bash
+export LOOM_COGNITO_USER_POOL_ID=<your-pool-id>
+export LOOM_COGNITO_USER_CLIENT_ID=<your-user-client-id>
+export LOOM_COGNITO_REGION=<your-region>  # defaults to AWS_REGION
+```
+
+When configured, users must log in before accessing the application. When not configured, the app runs without authentication (existing behavior).
 
 ### Configuration
 
