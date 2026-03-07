@@ -28,6 +28,8 @@ All runtime configuration is injected via environment variables sourced from `et
 | `LOOM_SESSION_MAX_LIFETIME_SECONDS` | Maximum session lifetime | `3600` |
 | `AWS_REGION` | AWS region for deployments | `us-east-1` |
 | `LOOM_ARTIFACT_BUCKET` | S3 bucket for agent deployment artifacts | — |
+| `MEMORY_NAME` | Default memory resource name | `loom_memory` |
+| `MEMORY_EVENT_EXPIRY_DURATION` | Default memory event expiry in days | `30` |
 
 AWS credentials use the standard boto3 credential chain (environment variables, AWS profile, instance metadata).
 
@@ -49,11 +51,13 @@ backend/
 │   │   ├── managed_role.py  # ManagedRole ORM model (IAM roles)
 │   │   ├── authorizer_config.py    # AuthorizerConfig ORM model
 │   │   ├── authorizer_credential.py # AuthorizerCredential ORM model
-│   │   └── permission_request.py   # PermissionRequest ORM model
+│   │   ├── permission_request.py   # PermissionRequest ORM model
+│   │   └── memory.py        # Memory ORM model (AgentCore Memory resources)
 │   ├── routers/
 │   │   ├── agents.py        # Agent CRUD + ARN parsing + log group derivation
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
 │   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
+│   │   ├── memories.py      # Memory resource CRUD + strategy mapping
 │   │   ├── security.py      # Security admin: roles, authorizers, credentials, permissions
 │   │   └── utils.py         # Shared router utilities (get_agent_or_404)
 │   └── services/
@@ -64,6 +68,7 @@ backend/
 │       ├── deployment.py    # Agent artifact build, runtime CRUD, secret detection
 │       ├── iam.py           # IAM role creation/deletion, Cognito pool listing
 │       ├── latency.py       # Latency calculation helpers
+│       ├── memory.py        # Bedrock AgentCore Memory API wrapper
 │       └── secrets.py       # AWS Secrets Manager wrapper with in-memory caching
 ├── scripts/
 │   └── stream.py            # SSE streaming client for CLI invocations (httpx)
@@ -74,7 +79,8 @@ backend/
 │   ├── test_invocations.py  # Invocation router tests
 │   ├── test_latency.py      # Latency computation tests
 │   ├── test_logs.py         # Logs router tests
-│   └── test_agents_deploy.py # Deployment-specific tests
+│   ├── test_agents_deploy.py # Deployment-specific tests
+│   └── test_memories.py     # Memory resource tests
 ├── makefile
 ├── pyproject.toml
 └── requirements.txt
@@ -177,6 +183,27 @@ backend/
 | `justification` | TEXT | Request justification |
 | `status` | TEXT NOT NULL | `pending`, `approved`, `denied` |
 | `reviewer_notes` | TEXT | Reviewer notes |
+| `created_at` | DATETIME | Creation timestamp |
+| `updated_at` | DATETIME | Last update timestamp |
+
+### `memories` table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | Internal ID |
+| `name` | TEXT NOT NULL | Memory resource name |
+| `description` | TEXT | Optional description |
+| `arn` | TEXT | ARN returned after creation |
+| `memory_id` | TEXT | AWS memory resource ID |
+| `region` | TEXT NOT NULL | AWS region |
+| `account_id` | TEXT NOT NULL | AWS account ID |
+| `status` | TEXT NOT NULL | Resource status (`CREATING`, `ACTIVE`, `FAILED`, `DELETING`) |
+| `event_expiry_duration` | INTEGER NOT NULL | Duration in days before memory events expire |
+| `memory_execution_role_arn` | TEXT | IAM role ARN for the memory resource |
+| `encryption_key_arn` | TEXT | KMS key ARN for encryption |
+| `strategies_config` | TEXT | JSON: memory strategies as submitted |
+| `strategies_response` | TEXT | JSON: strategies with IDs and statuses from AWS |
+| `failure_reason` | TEXT | Failure reason if status is `FAILED` |
 | `created_at` | DATETIME | Creation timestamp |
 | `updated_at` | DATETIME | Last update timestamp |
 
@@ -334,6 +361,59 @@ The `model_id` field is optional on registration and stored as an `AGENT_CONFIG_
 | `GET` | `/api/security/permission-requests` | List permission requests. |
 | `PUT` | `/api/security/permission-requests/{req_id}/review` | Approve or deny a permission request. |
 
+### Memory Resources
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/memories` | Create a new memory resource. |
+| `GET` | `/api/memories` | List all memory resources. |
+| `GET` | `/api/memories/{memory_id}` | Get a specific memory resource. |
+| `POST` | `/api/memories/{memory_id}/refresh` | Refresh memory status from AWS. |
+| `DELETE` | `/api/memories/{memory_id}` | Delete a memory resource from AWS and local DB. |
+
+**Naming convention:** Memory names and strategy names must match `[a-zA-Z][a-zA-Z0-9_]{0,47}` — start with a letter, letters/digits/underscores only, max 48 characters. Hyphens are not allowed.
+
+**`POST /api/memories` request body:**
+```json
+{
+  "name": "my_memory",
+  "event_expiry_duration": 30,
+  "description": "Optional description",
+  "memory_execution_role_arn": "arn:aws:iam::...:role/...",
+  "encryption_key_arn": "arn:aws:kms:...",
+  "memory_strategies": [
+    {
+      "strategy_type": "semantic",
+      "name": "default-semantic",
+      "description": "Optional",
+      "namespaces": ["ns1"],
+      "configuration": {}
+    }
+  ]
+}
+```
+
+**Strategy type mapping:**
+
+| `strategy_type` | AWS Parameter Key |
+|-----------------|-------------------|
+| `semantic` | `semanticMemoryStrategy` |
+| `summary` | `summaryMemoryStrategy` |
+| `user_preference` | `userPreferenceMemoryStrategy` |
+| `episodic` | `episodicMemoryStrategy` |
+| `custom` | `customMemoryStrategy` |
+
+**Error mapping:**
+
+| AWS Exception | HTTP Status |
+|---------------|-------------|
+| `ValidationException` | 400 |
+| `ConflictException` | 409 |
+| `ResourceNotFoundException` | 404 |
+| `ServiceQuotaExceededException` | 429 |
+| `AccessDeniedException` | 403 |
+| `ThrottledException` | 429 |
+
 ### Agent Invocation (SSE Streaming)
 
 | Method | Path | Description |
@@ -425,6 +505,15 @@ Handles agent artifact build and runtime lifecycle:
 - `delete_execution_role(role_arn: str)` — deletes an IAM execution role.
 - `list_agentcore_roles() -> list[dict]` — lists IAM roles suitable for AgentCore.
 - `list_cognito_pools() -> list[dict]` — lists Cognito user pools.
+
+### `services/memory.py`
+
+Wraps `boto3.client('bedrock-agentcore-control')` for memory operations:
+
+- `create_memory(name, event_expiry_duration, ..., region) -> dict` — calls `create_memory` and returns the full response including ARN, ID, and status.
+- `get_memory(memory_id, region) -> dict` — calls `get_memory(memoryId=...)` and returns current memory state.
+- `list_memories(region) -> dict` — calls `list_memories()` and returns all memory resources.
+- `delete_memory(memory_id, region) -> dict` — calls `delete_memory(memoryId=...)`.
 
 ### `services/latency.py`
 
@@ -534,4 +623,11 @@ curl.sessions.get    # GET /api/agents/{AGENT_ID}/sessions/{SESSION_ID}
 curl.logs            # GET /api/agents/{AGENT_ID}/logs (optional QUALIFIER, LIMIT, STREAM)
 curl.logs.streams    # GET /api/agents/{AGENT_ID}/logs/streams
 curl.logs.session    # GET /api/agents/{AGENT_ID}/sessions/{SESSION_ID}/logs
+
+# Memory resource targets
+curl.memories.create # POST /api/memories (MEMORY_NAME, MEMORY_EVENT_EXPIRY_DURATION)
+curl.memories.list   # GET /api/memories
+curl.memories.get    # GET /api/memories/{MEMORY_ID}
+curl.memories.refresh # POST /api/memories/{MEMORY_ID}/refresh
+curl.memories.delete # DELETE /api/memories/{MEMORY_ID}
 ```

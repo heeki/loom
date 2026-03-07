@@ -11,6 +11,7 @@ A platform for building, testing, and operating AI agents on Amazon Bedrock Agen
 - Session liveness detection via idle timeout heuristic (no AWS API calls)
 - Prompt, thinking, and response text storage per invocation
 - Timezone-aware timestamp display (local / UTC toggle)
+- AgentCore Memory resource management with configurable strategies (semantic, summary, user preference, episodic, custom)
 - Catppuccin-themed UI (Mocha dark / Latte light)
 
 ## Project Structure
