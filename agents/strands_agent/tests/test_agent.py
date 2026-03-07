@@ -11,6 +11,7 @@ from src.config import (
     MemoryConfig,
 )
 from src.agent import build_agent
+from src.telemetry import TelemetryHook
 
 
 class TestBuildAgent(unittest.TestCase):
@@ -49,7 +50,9 @@ class TestBuildAgent(unittest.TestCase):
         call_kwargs = mock_agent_cls.call_args[1]
         self.assertEqual(call_kwargs["system_prompt"], "Test prompt")
         self.assertEqual(call_kwargs["tools"], [])
-        self.assertEqual(call_kwargs["hooks"], [])
+        # TelemetryHook is always added
+        self.assertEqual(len(call_kwargs["hooks"]), 1)
+        self.assertIsInstance(call_kwargs["hooks"][0], TelemetryHook)
 
     @patch("src.agent.setup_telemetry")
     @patch("src.agent.Agent")
@@ -126,7 +129,21 @@ class TestBuildAgent(unittest.TestCase):
         build_agent(config)
 
         call_kwargs = mock_agent_cls.call_args[1]
-        self.assertEqual(call_kwargs["hooks"], [])
+        # Only TelemetryHook, no MemoryHook
+        self.assertEqual(len(call_kwargs["hooks"]), 1)
+        self.assertIsInstance(call_kwargs["hooks"][0], TelemetryHook)
+
+    @patch("src.agent.setup_telemetry")
+    @patch("src.agent.Agent")
+    @patch("src.agent.BedrockModel")
+    def test_telemetry_hook_added(
+        self, mock_model_cls: MagicMock, mock_agent_cls: MagicMock, mock_telemetry: MagicMock
+    ) -> None:
+        config = self._make_config()
+        build_agent(config)
+        call_kwargs = mock_agent_cls.call_args[1]
+        telemetry_hooks = [h for h in call_kwargs["hooks"] if isinstance(h, TelemetryHook)]
+        self.assertEqual(len(telemetry_hooks), 1)
 
 
 if __name__ == "__main__":

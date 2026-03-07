@@ -8,7 +8,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT is not configured.
 import logging
 import os
 from contextlib import contextmanager
-from typing import Generator, Optional
+from typing import Any, Generator, Optional
 
 from opentelemetry import trace, metrics
 from opentelemetry.sdk.trace import TracerProvider
@@ -87,6 +87,19 @@ def _setup_active(resource: Resource, endpoint: str) -> None:
     reader = PeriodicExportingMetricReader(metric_exporter)
     meter_provider = MeterProvider(resource=resource, metric_readers=[reader])
     metrics.set_meter_provider(meter_provider)
+
+    _activate_auto_instrumentation()
+
+
+def _activate_auto_instrumentation() -> None:
+    """Activate ADOT auto-instrumentation for supported libraries."""
+    try:
+        from amazon.opentelemetry.distro import AwsOpenTelemetryDistro
+        distro = AwsOpenTelemetryDistro()
+        distro.configure()
+        logger.info("ADOT auto-instrumentation activated")
+    except (ImportError, Exception) as exc:
+        logger.warning("ADOT auto-instrumentation not available: %s", exc)
 
 
 def _install_log_filter() -> None:
@@ -179,3 +192,46 @@ def trace_model_call(model_id: str) -> Generator[Span, None, None]:
             span.set_status(StatusCode.ERROR, str(exc))
             span.record_exception(exc)
             raise
+
+
+# ---------------------------------------------------------------------------
+# Strands Agent telemetry hook
+# ---------------------------------------------------------------------------
+
+class TelemetryHook:
+    """Strands Agent hook that creates OTEL spans for tool and model calls."""
+
+    def __init__(self) -> None:
+        self._tool_spans: dict[str, Span] = {}
+        self._model_spans: dict[int, Span] = {}
+        self._model_call_counter: int = 0
+
+    def before_tool_use(self, tool_name: str, **kwargs: Any) -> None:
+        tracer = get_tracer()
+        span = tracer.start_span("tool.call", attributes={"tool.name": tool_name})
+        self._tool_spans[tool_name] = span
+
+    def after_tool_use(self, tool_name: str, result: Any = None, error: Exception | None = None, **kwargs: Any) -> None:
+        span = self._tool_spans.pop(tool_name, None)
+        if span:
+            if error:
+                span.set_status(StatusCode.ERROR, str(error))
+                span.record_exception(error)
+            span.end()
+
+    def before_model_invoke(self, **kwargs: Any) -> None:
+        tracer = get_tracer()
+        model_id = kwargs.get("model_id", "unknown")
+        self._model_call_counter += 1
+        span = tracer.start_span("model.call", attributes={"model.id": model_id})
+        self._model_spans[self._model_call_counter] = span
+
+    def after_model_invoke(self, result: Any = None, error: Exception | None = None, **kwargs: Any) -> None:
+        if self._model_spans:
+            key = max(self._model_spans.keys())
+            span = self._model_spans.pop(key, None)
+            if span:
+                if error:
+                    span.set_status(StatusCode.ERROR, str(error))
+                    span.record_exception(error)
+                span.end()

@@ -10,6 +10,7 @@ A platform for building, testing, and operating AI agents on Amazon Bedrock Agen
 - Active session tracking with cold-start indicators per agent
 - Session liveness detection via idle timeout heuristic (no AWS API calls)
 - Prompt, thinking, and response text storage per invocation
+- OpenTelemetry observability with ADOT auto-instrumentation (traces for invocations, tool calls, model calls)
 - Timezone-aware timestamp display (local / UTC toggle)
 - Catppuccin-themed UI (Mocha dark / Latte light)
 

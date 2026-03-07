@@ -10,7 +10,7 @@ from src.config import AgentConfig
 from src.integrations.mcp_client import create_mcp_clients
 from src.integrations.a2a_client import create_a2a_clients
 from src.integrations.memory import MemoryHook
-from src.telemetry import setup_telemetry
+from src.telemetry import setup_telemetry, TelemetryHook
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,11 @@ def build_agent(config: AgentConfig) -> Agent:
             if a2a_clients:
                 tools.extend(a2a_clients)
                 logger.info("Loaded %d A2A client(s)", len(a2a_clients))
+
+    # Telemetry hook (R7)
+    telemetry_hook = TelemetryHook()
+    hooks.append(telemetry_hook)
+    logger.info("Enabled telemetry hook")
 
     # Memory hooks (R8)
     if config.integrations.memory.enabled:
