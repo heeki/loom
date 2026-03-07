@@ -26,7 +26,7 @@ class TestInvokeHandler(unittest.TestCase):
         mock_agent = MagicMock()
 
         async def mock_stream(prompt):
-            for chunk in ["Hello ", "world"]:
+            for chunk in [{"data": "Hello "}, {"data": "world"}]:
                 yield chunk
 
         mock_agent.stream_async = mock_stream
@@ -61,7 +61,7 @@ class TestInvokeHandler(unittest.TestCase):
         async def mock_stream(prompt):
             nonlocal captured_prompt
             captured_prompt = prompt
-            yield "ok"
+            yield {"data": "ok"}
 
         mock_agent.stream_async = mock_stream
         mock_get_agent.return_value = mock_agent
@@ -70,6 +70,30 @@ class TestInvokeHandler(unittest.TestCase):
         self._run_async(self._collect_events(payload))
 
         self.assertEqual(captured_prompt, "What is 2+2?")
+
+
+    @patch("src.handler.trace_invocation")
+    @patch("src.handler._get_agent")
+    def test_invoke_calls_trace_invocation(
+        self, mock_get_agent: MagicMock, mock_trace: MagicMock
+    ) -> None:
+        mock_agent = MagicMock()
+
+        async def mock_stream(prompt):
+            yield {"data": "ok"}
+
+        mock_agent.stream_async = mock_stream
+        mock_get_agent.return_value = mock_agent
+
+        # Make trace_invocation return a context manager that yields a mock span
+        mock_span = MagicMock()
+        mock_trace.return_value.__enter__ = MagicMock(return_value=mock_span)
+        mock_trace.return_value.__exit__ = MagicMock(return_value=False)
+
+        payload = {"prompt": "Hi", "session_id": "sess-abc"}
+        self._run_async(self._collect_events(payload))
+
+        mock_trace.assert_called_once_with(invocation_id="sess-abc")
 
 
 class TestGetAgent(unittest.TestCase):

@@ -21,6 +21,7 @@ from bedrock_agentcore.runtime import BedrockAgentCoreApp
 
 from src.config import load_config
 from src.agent import build_agent
+from src.telemetry import trace_invocation
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -67,18 +68,19 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
 
     logger.info("Processing invocation session_id=%s", session_id)
 
-    stream = agent.stream_async(prompt)
-    async for event in stream:
-        # Only yield the text content from Strands events
-        if isinstance(event, dict):
-            text = None
-            data = event.get("data")
-            if isinstance(data, str):
-                text = data
-            elif isinstance(event.get("delta"), dict):
-                text = event["delta"].get("text")
-            if text:
-                yield text
+    with trace_invocation(invocation_id=session_id) as span:
+        span.set_attribute("agent.session_id", session_id)
+        stream = agent.stream_async(prompt)
+        async for event in stream:
+            if isinstance(event, dict):
+                text = None
+                data = event.get("data")
+                if isinstance(data, str):
+                    text = data
+                elif isinstance(event.get("delta"), dict):
+                    text = event["delta"].get("text")
+                if text:
+                    yield text
 
 
 def main() -> None:

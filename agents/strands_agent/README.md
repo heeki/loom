@@ -28,10 +28,11 @@ strands_agent/
 │   ├── __init__.py
 │   ├── test_config.py
 │   ├── test_agent.py
+│   ├── test_handler.py
+│   ├── test_telemetry.py
 │   ├── test_mcp_client.py
 │   ├── test_a2a_client.py
-│   ├── test_memory.py
-│   └── test_handler.py
+│   └── test_memory.py
 ├── makefile
 ├── requirements.txt
 └── README.md
@@ -150,4 +151,21 @@ When enabled, the agent uses Strands hooks to load and save conversational conte
 
 ### Observability (OTEL)
 
-The agent emits OpenTelemetry traces and metrics via the AWS Distro for OpenTelemetry (ADOT). Spans are created for agent invocations, tool calls, and model calls.
+The agent emits OpenTelemetry traces and metrics via the AWS Distro for OpenTelemetry (ADOT).
+
+**Span hierarchy:**
+- `agent.invocation` (root span per request) — created by `trace_invocation()` in `handler.py`
+  - `tool.call` (child spans) — created by `TelemetryHook.before_tool_use()`
+  - `model.call` (child spans) — created by `TelemetryHook.before_model_invoke()`
+
+**Span attributes:**
+- `agent.invocation_id` — session ID passed from the invocation payload
+- `agent.session_id` — session ID set on the root span
+- `tool.name` — name of the tool being called
+- `model.id` — model identifier for LLM calls
+
+**ADOT auto-instrumentation:** When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, `setup_telemetry()` activates ADOT auto-instrumentation which automatically traces boto3 calls, HTTP clients, and other supported libraries.
+
+**Noop mode:** When `OTEL_EXPORTER_OTLP_ENDPOINT` is not set, telemetry operates in noop mode — all tracing APIs succeed without errors and with no performance overhead. The `TelemetryHook` is always registered but produces no-op spans in this mode.
+
+**Deploy-time configuration:** The backend automatically sets `OTEL_SERVICE_NAME` to the agent name when deploying to AgentCore Runtime.
