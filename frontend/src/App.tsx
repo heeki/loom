@@ -25,7 +25,9 @@ import { InvocationDetailPage } from "@/pages/InvocationDetailPage";
 import { SecurityAdminPage } from "@/pages/SecurityAdminPage";
 import { DataIntegrationPage } from "@/pages/DataIntegrationPage";
 import type { SessionResponse, InvocationResponse } from "@/api/types";
-import { BookOpen, Shield, Wrench, Cable } from "lucide-react";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { LoginPage } from "@/pages/LoginPage";
+import { BookOpen, Shield, Wrench, Cable, LogOut, User } from "lucide-react";
 
 type Theme = "light" | "dark";
 type Persona = "catalog" | "security" | "builder" | "integrations";
@@ -119,14 +121,11 @@ function SidebarItem({
 }
 
 function AppContent() {
+  const { isAuthenticated, isLoading, user, logout } = useAuth();
   const [theme, setTheme] = useState<Theme>(() =>
     document.documentElement.classList.contains("dark") ? "dark" : "light",
   );
   const [activePersona, setActivePersona] = useState<Persona>("catalog");
-
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
-  }, [theme]);
 
   const { agents, loading, fetchAgents, registerAgent, deployAgent, redeployAgent, deleteAgent } = useAgents();
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
@@ -138,6 +137,10 @@ function AppContent() {
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) ?? null;
   const { sessions, loading: sessionsLoading, refetch: refetchSessions } =
     useSessions(selectedAgentId);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+  }, [theme]);
 
   // Fetch session detail when selected
   useEffect(() => {
@@ -156,6 +159,18 @@ function AppContent() {
     }
     void getInvocation(selectedAgentId, selectedSessionId, selectedInvocationId).then(setInvocationDetail);
   }, [selectedAgentId, selectedSessionId, selectedInvocationId]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-muted-foreground">Loading...</p>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
 
   const handleBack = () => {
     if (selectedInvocationId) {
@@ -266,6 +281,24 @@ function AppContent() {
           />
         </nav>
         <div className="p-2 border-t space-y-1">
+          {user && (
+            <div className="px-3 py-1 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="text-xs text-muted-foreground truncate">
+                  {user.email || user.username || "User"}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={logout}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                title="Sign out"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
           <div className="px-3 py-1">
             <ThemeSelector theme={theme} setTheme={setTheme} />
           </div>
@@ -383,8 +416,10 @@ function AppContent() {
 
 export default function App() {
   return (
-    <TimezoneProvider>
-      <AppContent />
-    </TimezoneProvider>
+    <AuthProvider>
+      <TimezoneProvider>
+        <AppContent />
+      </TimezoneProvider>
+    </AuthProvider>
   );
 }
