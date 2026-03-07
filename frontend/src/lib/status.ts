@@ -7,6 +7,7 @@ export function statusVariant(status: string | null): BadgeVariant {
       return "default";
     case "CREATING":
     case "UPDATING":
+    case "DELETING":
       return "secondary";
     case "FAILED":
     case "CREATE_FAILED":

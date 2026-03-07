@@ -23,12 +23,12 @@ import { AgentDetailPage } from "@/pages/AgentDetailPage";
 import { SessionDetailPage } from "@/pages/SessionDetailPage";
 import { InvocationDetailPage } from "@/pages/InvocationDetailPage";
 import { SecurityAdminPage } from "@/pages/SecurityAdminPage";
-import { DataIntegrationPage } from "@/pages/DataIntegrationPage";
+import { MemoryManagementPage } from "@/pages/MemoryManagementPage";
 import type { SessionResponse, InvocationResponse } from "@/api/types";
-import { BookOpen, Shield, Wrench, Cable } from "lucide-react";
+import { BookOpen, Shield, Wrench, Brain } from "lucide-react";
 
 type Theme = "light" | "dark";
-type Persona = "catalog" | "security" | "builder" | "integrations";
+type Persona = "catalog" | "security" | "builder" | "memory";
 
 function ThemeSelector({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) => void }) {
   return (
@@ -259,10 +259,10 @@ function AppContent() {
             onClick={() => setActivePersona("security")}
           />
           <SidebarItem
-            icon={Cable}
-            label="Integrations"
-            active={activePersona === "integrations"}
-            onClick={() => setActivePersona("integrations")}
+            icon={Brain}
+            label="Memory"
+            active={activePersona === "memory"}
+            onClick={() => setActivePersona("memory")}
           />
         </nav>
         <div className="p-2 border-t space-y-1">
@@ -372,7 +372,7 @@ function AppContent() {
           )}
 
           {activePersona === "security" && <SecurityAdminPage />}
-          {activePersona === "integrations" && <DataIntegrationPage />}
+          {activePersona === "memory" && <MemoryManagementPage />}
         </main>
       </div>
 
