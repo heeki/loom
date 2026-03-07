@@ -48,18 +48,18 @@ class TestMemoriesRouter(unittest.TestCase):
             "memoryArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-abc123",
             "memoryId": "mem-abc123",
             "status": "CREATING",
-            "memoryStrategies": [{"semanticMemoryStrategy": {"name": "default-semantic"}}],
+            "memoryStrategies": [{"semanticMemoryStrategy": {"name": "default_semantic"}}],
         }
 
         response = self.client.post("/api/memories", json={
-            "name": "test-memory",
+            "name": "test_memory",
             "event_expiry_duration": 30,
-            "memory_strategies": [{"strategy_type": "semantic", "name": "default-semantic"}],
+            "memory_strategies": [{"strategy_type": "semantic", "name": "default_semantic"}],
         })
 
         self.assertEqual(response.status_code, 201)
         data = response.json()
-        self.assertEqual(data["name"], "test-memory")
+        self.assertEqual(data["name"], "test_memory")
         self.assertEqual(data["memory_id"], "mem-abc123")
         self.assertEqual(data["status"], "CREATING")
         self.assertEqual(data["arn"], "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-abc123")
@@ -76,16 +76,16 @@ class TestMemoriesRouter(unittest.TestCase):
         }
 
         response = self.client.post("/api/memories", json={
-            "name": "summary-memory",
+            "name": "summary_memory",
             "event_expiry_duration": 60,
-            "memory_strategies": [{"strategy_type": "summary", "name": "default-summary"}],
+            "memory_strategies": [{"strategy_type": "summary", "name": "default_summary"}],
         })
 
         self.assertEqual(response.status_code, 201)
         # Verify the service was called with correct AWS tagged union format
         call_args = mock_create.call_args
         strategies = call_args.kwargs.get("memory_strategies") or call_args[1].get("memory_strategies")
-        self.assertEqual(strategies, [{"summaryMemoryStrategy": {"name": "default-summary"}}])
+        self.assertEqual(strategies, [{"summaryMemoryStrategy": {"name": "default_summary"}}])
 
     @patch("app.routers.memories.svc_create_memory")
     def test_create_memory_user_preference_strategy(self, mock_create):
@@ -97,15 +97,15 @@ class TestMemoriesRouter(unittest.TestCase):
         }
 
         response = self.client.post("/api/memories", json={
-            "name": "pref-memory",
+            "name": "pref_memory",
             "event_expiry_duration": 30,
-            "memory_strategies": [{"strategy_type": "user_preference", "name": "default-pref"}],
+            "memory_strategies": [{"strategy_type": "user_preference", "name": "default_pref"}],
         })
 
         self.assertEqual(response.status_code, 201)
         call_args = mock_create.call_args
         strategies = call_args.kwargs.get("memory_strategies") or call_args[1].get("memory_strategies")
-        self.assertEqual(strategies, [{"userPreferenceMemoryStrategy": {"name": "default-pref"}}])
+        self.assertEqual(strategies, [{"userPreferenceMemoryStrategy": {"name": "default_pref"}}])
 
     @patch("app.routers.memories.svc_create_memory")
     def test_create_memory_episodic_strategy(self, mock_create):
@@ -117,15 +117,15 @@ class TestMemoriesRouter(unittest.TestCase):
         }
 
         response = self.client.post("/api/memories", json={
-            "name": "episodic-memory",
+            "name": "episodic_memory",
             "event_expiry_duration": 30,
-            "memory_strategies": [{"strategy_type": "episodic", "name": "default-episodic"}],
+            "memory_strategies": [{"strategy_type": "episodic", "name": "default_episodic"}],
         })
 
         self.assertEqual(response.status_code, 201)
         call_args = mock_create.call_args
         strategies = call_args.kwargs.get("memory_strategies") or call_args[1].get("memory_strategies")
-        self.assertEqual(strategies, [{"episodicMemoryStrategy": {"name": "default-episodic"}}])
+        self.assertEqual(strategies, [{"episodicMemoryStrategy": {"name": "default_episodic"}}])
 
     @patch("app.routers.memories.svc_create_memory")
     def test_create_memory_custom_strategy(self, mock_create):
@@ -137,15 +137,15 @@ class TestMemoriesRouter(unittest.TestCase):
         }
 
         response = self.client.post("/api/memories", json={
-            "name": "custom-memory",
+            "name": "custom_memory",
             "event_expiry_duration": 30,
-            "memory_strategies": [{"strategy_type": "custom", "name": "my-custom"}],
+            "memory_strategies": [{"strategy_type": "custom", "name": "my_custom"}],
         })
 
         self.assertEqual(response.status_code, 201)
         call_args = mock_create.call_args
         strategies = call_args.kwargs.get("memory_strategies") or call_args[1].get("memory_strategies")
-        self.assertEqual(strategies, [{"customMemoryStrategy": {"name": "my-custom"}}])
+        self.assertEqual(strategies, [{"customMemoryStrategy": {"name": "my_custom"}}])
 
     def test_strategy_type_mapping(self):
         """Test that all strategy types are correctly mapped to AWS parameter keys."""
@@ -168,7 +168,7 @@ class TestMemoriesRouter(unittest.TestCase):
         }
 
         self.client.post("/api/memories", json={
-            "name": "memory-1",
+            "name": "memory_one",
             "event_expiry_duration": 30,
         })
 
@@ -179,7 +179,7 @@ class TestMemoriesRouter(unittest.TestCase):
         }
 
         self.client.post("/api/memories", json={
-            "name": "memory-2",
+            "name": "memory_two",
             "event_expiry_duration": 60,
         })
 
@@ -198,7 +198,7 @@ class TestMemoriesRouter(unittest.TestCase):
         }
 
         create_response = self.client.post("/api/memories", json={
-            "name": "get-test",
+            "name": "get_test",
             "event_expiry_duration": 30,
         })
         mem_id = create_response.json()["id"]
@@ -207,7 +207,7 @@ class TestMemoriesRouter(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["id"], mem_id)
-        self.assertEqual(data["name"], "get-test")
+        self.assertEqual(data["name"], "get_test")
 
     @patch("app.routers.memories.svc_get_memory")
     @patch("app.routers.memories.svc_create_memory")
@@ -220,7 +220,7 @@ class TestMemoriesRouter(unittest.TestCase):
         }
 
         create_response = self.client.post("/api/memories", json={
-            "name": "refresh-test",
+            "name": "refresh_test",
             "event_expiry_duration": 30,
         })
         mem_id = create_response.json()["id"]
@@ -248,7 +248,7 @@ class TestMemoriesRouter(unittest.TestCase):
         mock_delete.return_value = {}
 
         create_response = self.client.post("/api/memories", json={
-            "name": "delete-test",
+            "name": "delete_test",
             "event_expiry_duration": 30,
         })
         mem_id = create_response.json()["id"]
@@ -263,7 +263,7 @@ class TestMemoriesRouter(unittest.TestCase):
     def test_invalid_strategy_type(self):
         """Test that an invalid strategy type returns 400."""
         response = self.client.post("/api/memories", json={
-            "name": "bad-strategy",
+            "name": "bad_strategy",
             "event_expiry_duration": 30,
             "memory_strategies": [{"strategy_type": "nonexistent", "name": "bad"}],
         })
@@ -271,11 +271,32 @@ class TestMemoriesRouter(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("Invalid strategy type", response.json()["detail"])
 
+    def test_invalid_memory_name(self):
+        """Test that a hyphenated memory name returns 400."""
+        response = self.client.post("/api/memories", json={
+            "name": "bad-name",
+            "event_expiry_duration": 30,
+        })
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid memory name", response.json()["detail"])
+
+    def test_invalid_strategy_name(self):
+        """Test that a hyphenated strategy name returns 400."""
+        response = self.client.post("/api/memories", json={
+            "name": "valid_name",
+            "event_expiry_duration": 30,
+            "memory_strategies": [{"strategy_type": "semantic", "name": "bad-strategy-name"}],
+        })
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid strategy name", response.json()["detail"])
+
     def test_missing_required_fields(self):
         """Test that missing required fields returns 422."""
         # Missing event_expiry_duration
         response = self.client.post("/api/memories", json={
-            "name": "no-expiry",
+            "name": "no_expiry",
         })
         self.assertEqual(response.status_code, 422)
 

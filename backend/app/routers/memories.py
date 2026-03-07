@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import re
 from datetime import datetime
 from typing import Any
 
@@ -93,6 +94,22 @@ def _handle_aws_error(e: Exception) -> None:
     raise HTTPException(status_code=status_code, detail=str(e))
 
 
+AGENTCORE_NAME_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{0,47}$")
+
+
+def _validate_agentcore_name(name: str, field_label: str) -> None:
+    """Validate that a name matches the AgentCore naming convention."""
+    if not AGENTCORE_NAME_PATTERN.match(name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Invalid {field_label} '{name}'. "
+                "Must start with a letter, contain only letters, digits, and underscores, "
+                "and be at most 48 characters."
+            )
+        )
+
+
 def _transform_strategies(strategies: list[MemoryStrategyRequest]) -> list[dict]:
     """Transform simplified strategy format to AWS tagged union format."""
     aws_strategies = []
@@ -102,6 +119,7 @@ def _transform_strategies(strategies: list[MemoryStrategyRequest]) -> list[dict]
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid strategy type: '{strategy.strategy_type}'. Must be one of: {', '.join(STRATEGY_TYPE_MAP.keys())}"
             )
+        _validate_agentcore_name(strategy.name, "strategy name")
         aws_key = STRATEGY_TYPE_MAP[strategy.strategy_type]
         strategy_config: dict[str, Any] = {"name": strategy.name}
         if strategy.description:
@@ -125,6 +143,8 @@ def create_memory(
     """Create a new memory resource."""
     region = os.getenv("AWS_REGION", DEFAULT_REGION)
     account_id = os.getenv("AWS_ACCOUNT_ID", "")
+
+    _validate_agentcore_name(request.name, "memory name")
 
     # Transform strategies
     aws_strategies = None

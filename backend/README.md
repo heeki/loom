@@ -247,7 +247,7 @@ make curl.logs.streams AGENT_ID=1
 make curl.logs.session AGENT_ID=1 SESSION_ID=uuid
 
 # Memory resources
-make curl.memories.create MEMORY_NAME=loom-memory MEMORY_EVENT_EXPIRY_DURATION=30
+make curl.memories.create MEMORY_NAME=loom_memory MEMORY_EVENT_EXPIRY_DURATION=30
 make curl.memories.list
 make curl.memories.get MEMORY_ID=1
 make curl.memories.refresh MEMORY_ID=1

@@ -28,7 +28,7 @@ All runtime configuration is injected via environment variables sourced from `et
 | `LOOM_SESSION_MAX_LIFETIME_SECONDS` | Maximum session lifetime | `3600` |
 | `AWS_REGION` | AWS region for deployments | `us-east-1` |
 | `LOOM_ARTIFACT_BUCKET` | S3 bucket for agent deployment artifacts | — |
-| `MEMORY_NAME` | Default memory resource name | `loom-memory` |
+| `MEMORY_NAME` | Default memory resource name | `loom_memory` |
 | `MEMORY_EVENT_EXPIRY_DURATION` | Default memory event expiry in days | `30` |
 
 AWS credentials use the standard boto3 credential chain (environment variables, AWS profile, instance metadata).
@@ -371,10 +371,12 @@ The `model_id` field is optional on registration and stored as an `AGENT_CONFIG_
 | `POST` | `/api/memories/{memory_id}/refresh` | Refresh memory status from AWS. |
 | `DELETE` | `/api/memories/{memory_id}` | Delete a memory resource from AWS and local DB. |
 
+**Naming convention:** Memory names and strategy names must match `[a-zA-Z][a-zA-Z0-9_]{0,47}` — start with a letter, letters/digits/underscores only, max 48 characters. Hyphens are not allowed.
+
 **`POST /api/memories` request body:**
 ```json
 {
-  "name": "my-memory",
+  "name": "my_memory",
   "event_expiry_duration": 30,
   "description": "Optional description",
   "memory_execution_role_arn": "arn:aws:iam::...:role/...",

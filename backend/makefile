@@ -102,7 +102,7 @@ curl.integrations.delete:
 curl.memories.create:
 	curl -s -X POST $(BASE_URL)/api/memories \
 		-H "Content-Type: application/json" \
-		-d '{"name": "$(MEMORY_NAME)", "event_expiry_duration": $(MEMORY_EVENT_EXPIRY_DURATION), "memory_strategies": [{"strategy_type": "semantic", "name": "default-semantic"}]}' | jq
+		-d '{"name": "$(MEMORY_NAME)", "event_expiry_duration": $(MEMORY_EVENT_EXPIRY_DURATION), "memory_strategies": [{"strategy_type": "semantic", "name": "default_semantic"}]}' | jq
 
 curl.memories.list:
 	curl -s $(BASE_URL)/api/memories | jq
