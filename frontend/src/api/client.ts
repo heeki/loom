@@ -1,5 +1,15 @@
 const BASE_URL = "http://localhost:8000";
 
+let _authToken: string | null = null;
+
+export function setAuthToken(token: string | null): void {
+  _authToken = token;
+}
+
+export function getAuthToken(): string | null {
+  return _authToken;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -14,12 +24,18 @@ export async function apiFetch<T>(
   path: string,
   options?: RequestInit,
 ): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options?.headers as Record<string, string>),
+  };
+
+  if (_authToken) {
+    headers["Authorization"] = `Bearer ${_authToken}`;
+  }
+
   const response = await fetch(`${BASE_URL}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers,
-    },
     ...options,
+    headers,
   });
 
   if (!response.ok) {
