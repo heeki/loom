@@ -29,10 +29,10 @@ The frontend is organized around persona-based workflows, accessible via a sideb
 loom/
 ├── agents/                     # Agent blueprint source code
 │   └── strands_agent/          # Strands Agent blueprint
-│       ├── handler.py          # Agent handler / entry point
+│       ├── handler.py          # Agent handler / entry point (trace_invocation wrapped)
 │       ├── config.py           # Agent configuration
 │       ├── integrations.py     # Tool and service integrations
-│       └── telemetry.py        # Observability and telemetry
+│       └── telemetry.py        # OTEL setup, ADOT auto-instrumentation, TelemetryHook
 ├── backend/                    # Backend API (see backend/SPECIFICATIONS.md)
 │   ├── app/
 │   │   ├── main.py
@@ -186,7 +186,15 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Purge endpoint (DELETE /api/memories/{id}/purge) for local database cleanup after confirmed deletion.
 - View mode (card/table) state lifted to App.tsx and persisted per-page across persona switches.
 
-### Phase 5 — Advanced Operations
+### Phase 5 — AgentCore Observability *(Complete)*
+- OpenTelemetry integration with AWS Distro for OpenTelemetry (ADOT) auto-instrumentation for boto3 and HTTP clients.
+- `TelemetryHook` on the Strands Agent that creates OTEL spans for tool calls and model invocations as children of the invocation span.
+- `trace_invocation()` wraps each handler invocation with a root span carrying `agent.session_id` and `agent.invocation_id` attributes.
+- Noop mode when `OTEL_EXPORTER_OTLP_ENDPOINT` is not set — no errors, no performance overhead.
+- `OTEL_SERVICE_NAME` is automatically set to the agent name at deploy time.
+- Unit tests for telemetry setup idempotency, span creation, hook lifecycle, and noop operation.
+
+### Phase 6 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.
