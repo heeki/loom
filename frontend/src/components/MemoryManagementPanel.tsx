@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Loader2, RefreshCw, Eraser, Trash2 } from "lucide-react";
+import { Plus, Loader2, RefreshCw, Eraser, Trash2, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
@@ -146,9 +146,9 @@ export function MemoryManagementPanel() {
   // Form state
   const [formName, setFormName] = useState("");
   const [formDescription, setFormDescription] = useState("");
-  const [formExpiryDays, setFormExpiryDays] = useState(30);
+  const [formExpiryDays, setFormExpiryDays] = useState(7);
+  const [formExpiryError, setFormExpiryError] = useState("");
   const [formRoleArn, setFormRoleArn] = useState("");
-  const [formEncryptionArn, setFormEncryptionArn] = useState("");
   const [formStrategies, setFormStrategies] = useState<StrategyFormState[]>([]);
 
   const fetchMemories = useCallback(async () => {
@@ -166,17 +166,25 @@ export function MemoryManagementPanel() {
     void fetchMemories();
   }, [fetchMemories]);
 
+  const validateExpiry = (days: number) => {
+    if (days < 3 || days > 365) {
+      setFormExpiryError("Must be between 3 and 365 days");
+    } else {
+      setFormExpiryError("");
+    }
+  };
+
   const resetForm = () => {
     setFormName("");
     setFormDescription("");
-    setFormExpiryDays(30);
+    setFormExpiryDays(7);
+    setFormExpiryError("");
     setFormRoleArn("");
-    setFormEncryptionArn("");
     setFormStrategies([]);
   };
 
   const handleCreate = async () => {
-    if (!formName.trim()) return;
+    if (!formName.trim() || formExpiryError) return;
     setSubmitting(true);
     try {
       const strategies: MemoryStrategyRequest[] | undefined =
@@ -194,7 +202,6 @@ export function MemoryManagementPanel() {
         description: formDescription.trim() || undefined,
         event_expiry_duration: formExpiryDays * 86400,
         memory_execution_role_arn: formRoleArn.trim() || undefined,
-        encryption_key_arn: formEncryptionArn.trim() || undefined,
         memory_strategies: strategies,
       });
       resetForm();
@@ -292,7 +299,7 @@ export function MemoryManagementPanel() {
         <Card>
           <CardContent className="pt-4 space-y-3">
             <div className="flex gap-3">
-              <div className="flex-1 min-w-0">
+              <div className="w-1/3 min-w-0">
                 <label className="text-xs text-muted-foreground">Name *</label>
                 <Input
                   value={formName}
@@ -300,39 +307,39 @@ export function MemoryManagementPanel() {
                   placeholder="Memory resource name"
                 />
               </div>
-              <div className="w-[140px]">
+              <div className="flex-1 min-w-0">
+                <label className="text-xs text-muted-foreground">Description</label>
+                <Input
+                  value={formDescription}
+                  onChange={(e) => setFormDescription(e.target.value)}
+                  placeholder="Optional description"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <div className="w-[160px]">
                 <label className="text-xs text-muted-foreground">Event Expiry (days)</label>
                 <Input
                   type="number"
                   value={formExpiryDays}
-                  onChange={(e) => setFormExpiryDays(parseInt(e.target.value, 10) || 0)}
-                  min={1}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10) || 0;
+                    setFormExpiryDays(v);
+                    validateExpiry(v);
+                  }}
+                  min={3}
+                  max={365}
                 />
+                {formExpiryError && (
+                  <p className="text-[10px] text-destructive mt-1">{formExpiryError}</p>
+                )}
               </div>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Description</label>
-              <Input
-                value={formDescription}
-                onChange={(e) => setFormDescription(e.target.value)}
-                placeholder="Optional description"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
+              <div className="flex-1 min-w-0">
                 <label className="text-xs text-muted-foreground">Memory Execution Role ARN</label>
                 <Input
                   value={formRoleArn}
                   onChange={(e) => setFormRoleArn(e.target.value)}
                   placeholder="arn:aws:iam::..."
-                />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">Encryption Key ARN</label>
-                <Input
-                  value={formEncryptionArn}
-                  onChange={(e) => setFormEncryptionArn(e.target.value)}
-                  placeholder="arn:aws:kms::..."
                 />
               </div>
             </div>
@@ -360,7 +367,15 @@ export function MemoryManagementPanel() {
                     </Button>
                   </div>
                   <div className="flex gap-3">
-                    <div className="w-[160px]">
+                    <div className="w-[30%] min-w-0">
+                      <label className="text-xs text-muted-foreground">Name</label>
+                      <Input
+                        value={strategy.name}
+                        onChange={(e) => updateStrategy(idx, { name: e.target.value })}
+                        placeholder="Strategy name"
+                      />
+                    </div>
+                    <div className="w-[15%] min-w-0">
                       <label className="text-xs text-muted-foreground">Type</label>
                       <Select
                         value={strategy.strategy_type}
@@ -383,21 +398,13 @@ export function MemoryManagementPanel() {
                       </Select>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <label className="text-xs text-muted-foreground">Name</label>
+                      <label className="text-xs text-muted-foreground">Description</label>
                       <Input
-                        value={strategy.name}
-                        onChange={(e) => updateStrategy(idx, { name: e.target.value })}
-                        placeholder="Strategy name"
+                        value={strategy.description}
+                        onChange={(e) => updateStrategy(idx, { description: e.target.value })}
+                        placeholder="Optional description"
                       />
                     </div>
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground">Description</label>
-                    <Input
-                      value={strategy.description}
-                      onChange={(e) => updateStrategy(idx, { description: e.target.value })}
-                      placeholder="Optional description"
-                    />
                   </div>
                   <div>
                     <label className="text-xs text-muted-foreground">
@@ -406,7 +413,7 @@ export function MemoryManagementPanel() {
                     <TagInput
                       values={strategy.namespaces}
                       onChange={(namespaces) => updateStrategy(idx, { namespaces })}
-                      placeholder="Namespace"
+                      placeholder="e.g. user_preferences, conversation_history, task_context"
                     />
                   </div>
                 </div>
@@ -417,7 +424,7 @@ export function MemoryManagementPanel() {
               <Button
                 size="sm"
                 onClick={handleCreate}
-                disabled={submitting || !formName.trim()}
+                disabled={submitting || !formName.trim() || !!formExpiryError}
               >
                 {submitting ? "Creating..." : "Create"}
               </Button>
@@ -543,6 +550,18 @@ export function MemoryManagementPanel() {
           </Table>
         </div>
       )}
+
+      {/* Coming soon */}
+      <section className="space-y-3 pt-2">
+        <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Additional Configuration</h4>
+        <div className="space-y-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <Lock className="h-3.5 w-3.5" />
+            <span>Encryption Key ARN</span>
+            <span className="text-[10px] italic">Coming soon</span>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

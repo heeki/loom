@@ -21,6 +21,16 @@ Parameters:
     Type: String
     Description: Region for CloudWatch Logs resources
     Default: us-east-1
+  pIncludeMemoryPolicy:
+    Type: String
+    Description: Whether to include a memory policy for AgentCore Memory access (true/false)
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+
+Conditions:
+  IncludeMemoryPolicy: !Equals [!Ref pIncludeMemoryPolicy, "true"]
 
 Resources:
   AgentRole:
@@ -88,6 +98,19 @@ Resources:
                   - logs:GetLogEvents
                   - logs:PutLogEvents
                 Resource: !Sub "arn:aws:logs:${pLogsRegion}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/${pAgentName}*"
+        - !If
+          - IncludeMemoryPolicy
+          - PolicyName: memory
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - bedrock-agentcore:GetMemory
+                    - bedrock-agentcore:SearchMemory
+                    - bedrock-agentcore:IngestMemoryEvents
+                  Resource: !Sub "arn:aws:bedrock-agentcore:${pAgentCoreRegions}:${AWS::AccountId}:memory/*"
+          - !Ref AWS::NoValue
 
 Outputs:
   oAgentRole:
