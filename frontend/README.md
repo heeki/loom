@@ -58,7 +58,7 @@ The sidebar provides access to four persona-based workflows:
 | **Catalog** | Browse agents, invoke, view sessions and latency (default) |
 | **Builder** | Register agents by ARN or deploy new agents |
 | **Security Admin** | Manage IAM roles, authorizer configs, credentials, permission requests |
-| **Data Integration** | Manage data integrations (placeholder) |
+| **Memory** | Create and manage AgentCore Memory resources |
 
 The sidebar also includes theme toggle, timezone selector, and a live clock.
 
@@ -80,6 +80,7 @@ src/
 │   ├── agents.ts      # Agent CRUD, models, roles, cognito pools, defaults
 │   ├── invocations.ts # Session queries + SSE stream consumer
 │   ├── logs.ts        # CloudWatch log queries
+│   ├── memories.ts    # Memory resource CRUD + refresh
 │   ├── security.ts    # Roles, authorizers, credentials, permissions
 │   └── types.ts       # TypeScript interfaces mirroring backend models
 ├── contexts/     # React contexts (timezone preference)
@@ -88,6 +89,7 @@ src/
 │   ├── AgentCard.tsx              # Agent card with eraser icon deletion + overlay confirmation
 │   ├── AgentRegistrationForm.tsx  # Register (ARN + model) and Deploy (full form) tabs
 │   ├── AuthorizerManagementPanel.tsx # Authorizer config and credential management
+│   ├── MemoryManagementPanel.tsx  # Memory resource create form + list table
 │   ├── InvokePanel.tsx            # Qualifier, credential selector, model badge, prompt
 │   ├── DeploymentPanel.tsx        # Deployment details for deployed agents
 │   └── ui/
@@ -97,7 +99,7 @@ src/
 │   ├── AgentListPage.tsx       # Builder: registration form + agent grid
 │   ├── AgentDetailPage.tsx     # Sessions, invoke, latency, response
 │   ├── SecurityAdminPage.tsx   # Roles, authorizers, credentials, permissions
-│   ├── DataIntegrationPage.tsx # Placeholder
+│   ├── MemoryManagementPage.tsx # Memory resource management
 │   └── SessionDetailPage.tsx   # Session metadata, invocations, logs
 ├── lib/          # Shared utilities (cn(), format helpers, status mapping)
 ├── App.tsx       # Root: persona sidebar + navigation + timezone provider
@@ -110,8 +112,9 @@ src/
 - `api/agents.ts` — Agent operations: list, get, register (with optional model_id), deploy, delete (with optional AWS cleanup), refresh, redeploy, fetchRoles, fetchCognitoPools, fetchModels, fetchDefaults
 - `api/invocations.ts` — Session queries + `invokeAgentStream()` SSE consumer (supports `credential_id`)
 - `api/logs.ts` — CloudWatch log queries
+- `api/memories.ts` — Memory resource operations: create, list, get, refresh, delete
 - `api/security.ts` — Security admin operations: managed roles, authorizer configs, authorizer credentials, permission requests
-- `api/types.ts` — TypeScript interfaces including AgentResponse (with `model_id`), SSESessionStart (with `has_token`, `token_source`), AuthorizerCredential, ManagedRole, PermissionRequestResponse
+- `api/types.ts` — TypeScript interfaces including AgentResponse (with `model_id`), SSESessionStart (with `has_token`, `token_source`), AuthorizerCredential, ManagedRole, PermissionRequestResponse, MemoryResponse, MemoryCreateRequest, MemoryStrategyRequest
 
 ### Hooks
 
@@ -127,6 +130,7 @@ src/
 - **AgentCard** — Compact card with inline badges, eraser icon for deletion, overlay confirmation with "Also delete in AgentCore" checkbox.
 - **InvokePanel** — Qualifier selector, credential dropdown, model ID badge, prompt textarea, invoke/cancel buttons. Token indicator shown when invocation uses OAuth.
 - **AuthorizerManagementPanel** — Lists authorizer configs with expandable credential management (add/list/delete credentials per config).
+- **MemoryManagementPanel** — Create form with strategy configuration (type, name, description, namespaces), memory list table with status badges (CREATING/ACTIVE/FAILED/DELETING), refresh and delete actions with inline confirmation overlay.
 
 ### Views
 
@@ -137,7 +141,7 @@ src/
 | SessionDetailPage | Catalog | Session metadata, invocation timing, CloudWatch logs |
 | AgentListPage | Builder | Register/Deploy form + agent grid |
 | SecurityAdminPage | Security | Roles, authorizers, credentials, permissions |
-| DataIntegrationPage | Integration | Placeholder |
+| MemoryManagementPage | Memory | Memory resource create form, list, refresh, delete |
 
 ### Session Liveness
 

@@ -27,6 +27,7 @@ frontend/
 │   │   ├── agents.ts           # Agent CRUD + fetchRoles(), fetchCognitoPools(), fetchModels(), fetchDefaults()
 │   │   ├── invocations.ts      # Session queries + SSE stream consumer
 │   │   ├── logs.ts             # CloudWatch log queries
+│   │   ├── memories.ts         # Memory resource CRUD + refresh
 │   │   └── security.ts         # Security admin: roles, authorizers, credentials, permissions
 │   ├── contexts/
 │   │   └── TimezoneContext.tsx  # Timezone preference provider + hook
@@ -41,6 +42,7 @@ frontend/
 │   │   ├── AgentCard.tsx       # Agent summary card with eraser icon deletion
 │   │   ├── AgentRegistrationForm.tsx  # Tabbed form: ARN registration + agent deployment
 │   │   ├── AuthorizerManagementPanel.tsx # Authorizer config + credential management
+│   │   ├── MemoryManagementPanel.tsx    # Memory resource create form + list table
 │   │   ├── DeploymentPanel.tsx # Deployment details panel
 │   │   ├── InvokePanel.tsx     # Qualifier select, credential select, prompt input, invoke/cancel
 │   │   ├── LatencySummary.tsx  # Timing breakdown
@@ -52,7 +54,7 @@ frontend/
 │   │   ├── AgentDetailPage.tsx # Sessions, latency, invoke, response
 │   │   ├── CatalogPage.tsx     # Catalog persona: agent card grid with management
 │   │   ├── SecurityAdminPage.tsx  # Security persona: roles, authorizers, credentials, permissions
-│   │   ├── DataIntegrationPage.tsx # Integration persona (placeholder)
+│   │   ├── MemoryManagementPage.tsx # Memory persona: memory resource management
 │   │   └── SessionDetailPage.tsx  # Session metadata, invocations, logs
 │   ├── lib/
 │   │   ├── utils.ts            # shadcn cn() utility
@@ -84,7 +86,7 @@ The app uses a persona-based single-page architecture with a sidebar for workflo
 | Catalog | Browse and manage agents, invoke, view sessions | Yes |
 | Builder | Register agents by ARN or deploy new agents | |
 | Security Admin | Manage roles, authorizers, credentials, permissions | |
-| Data Integration | Manage data integrations (placeholder) | |
+| Memory | Create and manage AgentCore Memory resources | |
 
 The sidebar also contains:
 - Theme toggle (Mocha dark / Latte light)
@@ -211,7 +213,69 @@ Full deployment form with sections:
 
 ---
 
-## 8. Session Detail View
+## 8. Memory Management View
+
+**Purpose:** Create and manage AgentCore Memory resources with configurable strategies.
+
+**Layout:** Header with title/description + "Add Memory" button, followed by a create form (toggle) and memory list table.
+
+### Create Form
+
+Toggled via the "Add Memory" button. Contained in a `Card` with the following fields:
+
+- **Name** (required, flex-1) and **Event Expiry** (days, fixed 140px width) — same row
+- **Description** — full width, optional
+- **Memory Execution Role ARN** and **Encryption Key ARN** — 2-column grid, optional
+- **Strategies** — dynamic list, each strategy in a dashed-border card:
+  - **Type** (Select: Semantic, Summary, User Preference, Episodic, Custom) and **Name** — same row
+  - **Description** — full width, optional
+  - **Namespaces** — `TagInput` (press Enter to add, click × to remove)
+  - Trash icon to remove individual strategies
+  - "Add Strategy" ghost button to add more
+- **Create** button (disabled until name provided) and **Cancel** button
+
+### Memory List Table
+
+Table with columns:
+
+| Column | Description |
+|--------|-------------|
+| Name | Memory resource name (font-medium) |
+| Status | Badge with status variant + spinner for transitional states |
+| Strategies | Count of configured strategies |
+| Event Expiry | Duration in days (computed from seconds) |
+| Region | AWS region |
+| Created | Timezone-aware timestamp |
+| Actions | Refresh (RefreshCw icon) and Delete (Eraser icon) buttons |
+
+### Status Badges
+
+Status badges use `statusVariant()` mapping:
+- **ACTIVE** — default variant
+- **CREATING** — secondary variant + spinning `Loader2` icon
+- **FAILED** — destructive variant
+- **DELETING** — secondary variant + spinning `Loader2` icon
+
+### Delete Confirmation
+
+Inline overlay on the table row (absolute positioned at bottom):
+- Prompt text: "Delete this memory resource?"
+- Cancel button (ghost) and Confirm button (destructive)
+- Clicks within overlay are stopped from propagating
+
+### Notifications
+
+All operations show Sonner toast notifications:
+- Success: "Memory resource created", "Memory resource refreshed", "Memory resource deleted"
+- Error: Mapped from HTTP status codes (400→invalid request, 403→access denied, 404→not found, 409→conflict, 429→rate limited, 502→AWS service error)
+
+### Empty State
+
+When no memory resources exist: centered muted text "No memory resources yet. Add one above."
+
+---
+
+## 9. Session Detail View
 
 **Purpose:** Inspect a single session's invocations and CloudWatch logs.
 
@@ -222,10 +286,10 @@ Full deployment form with sections:
 
 ---
 
-## 9. Design Decisions
+## 10. Design Decisions
 
 ### Persona-Based Navigation
-Chose a sidebar with persona-based workflows over traditional tab navigation. Each persona represents a distinct user role (catalog browser, agent builder, security admin, data integrator) with its own page and feature set. The sidebar provides persistent access to all personas and includes theme/timezone controls.
+Chose a sidebar with persona-based workflows over traditional tab navigation. Each persona represents a distinct user role (catalog browser, agent builder, security admin, memory manager) with its own page and feature set. The sidebar provides persistent access to all personas and includes theme/timezone controls.
 
 ### Navigation: Lifted State vs. Router
 Chose lifted state in `App.tsx` over React Router. Persona selection and drill-down navigation (within Catalog) are managed via state variables. A router would add unnecessary complexity for this use case.
@@ -274,7 +338,7 @@ Computed server-side using `LOOM_SESSION_IDLE_TIMEOUT_SECONDS`. The frontend dis
 
 ---
 
-## 10. Future Work
+## 11. Future Work
 
 - **Markdown rendering** for agent responses
 - **MCP server integration** configuration
@@ -285,4 +349,4 @@ Computed server-side using `LOOM_SESSION_IDLE_TIMEOUT_SECONDS`. The frontend dis
 - **Real-time auto-refresh** of sessions and metrics
 - **Log stream selection** and agent-level log viewer
 - **Latency charts** using Recharts
-- **Data Integration** persona implementation
+- **Memory integration** with agent deployment (attach memory to agents)

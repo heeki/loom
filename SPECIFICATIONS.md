@@ -17,7 +17,7 @@ The frontend is organized around four persona-based workflows, accessible via a 
 - **Catalog** (default) — Browse, invoke, and manage registered/deployed agents.
 - **Builder** — Register agents by ARN or deploy new agents to AgentCore Runtime.
 - **Security Admin** — Manage IAM roles, authorizer configurations, credentials, and permission requests.
-- **Data Integration** — Manage data integrations (placeholder for future work).
+- **Memory** — Create and manage AgentCore Memory resources with configurable strategies.
 
 ---
 
@@ -101,7 +101,7 @@ loom/
 Detailed specifications for each component are maintained in their respective directories:
 
 - **Backend:** [`backend/SPECIFICATIONS.md`](backend/SPECIFICATIONS.md) — API endpoints, database schema, service modules, streaming architecture, latency measurement flow, security management, memory resource management.
-- **Frontend:** [`frontend/SPECIFICATIONS.md`](frontend/SPECIFICATIONS.md) — Technology stack, persona-based navigation, Catalog/Builder/Security Admin workflows, streaming behavior.
+- **Frontend:** [`frontend/SPECIFICATIONS.md`](frontend/SPECIFICATIONS.md) — Technology stack, persona-based navigation, Catalog/Builder/Security Admin/Memory workflows, streaming behavior.
 
 ---
 
@@ -159,7 +159,7 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Account ID extraction from runtime ARN on deploy and refresh.
 
 ### Phase 3 — Persona-Based Workflows *(Complete)*
-- Persona-based frontend navigation: Catalog, Builder, Security Admin, Data Integration.
+- Persona-based frontend navigation: Catalog, Builder, Security Admin, Memory.
 - Catalog page with agent cards: eraser icon for deletion, overlay confirmation with "Also delete in AgentCore" checkbox, no refresh button on cards.
 - Builder page with register and deploy tabs, collapsible role permissions, grouped searchable model selectors.
 - Security Admin page for managing IAM roles, authorizer configs, authorizer credentials, and permission requests.
@@ -176,6 +176,7 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Refresh endpoint to poll AWS for latest memory status.
 - AWS error mapping: ValidationException→400, ConflictException→409, ResourceNotFoundException→404, AccessDeniedException→403, ThrottledException/ServiceQuotaExceededException→429.
 - Makefile curl targets for manual testing of all memory endpoints.
+- Frontend Memory persona: create form with strategy configuration, memory list table with status badges, refresh and delete actions, toast notifications for all operations.
 
 ### Phase 5 — Advanced Operations
 - Real-time metrics auto-refresh.

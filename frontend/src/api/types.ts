@@ -303,6 +303,43 @@ export interface PermissionRequestReviewRequest {
   reviewer_notes?: string;
 }
 
+// Memory types
+export interface MemoryStrategyRequest {
+  strategy_type: "semantic" | "summary" | "user_preference" | "episodic" | "custom";
+  name: string;
+  description?: string;
+  namespaces?: string[];
+  configuration?: Record<string, unknown>;
+}
+
+export interface MemoryCreateRequest {
+  name: string;
+  description?: string;
+  event_expiry_duration: number;
+  memory_execution_role_arn?: string;
+  encryption_key_arn?: string;
+  memory_strategies?: MemoryStrategyRequest[];
+}
+
+export interface MemoryResponse {
+  id: number;
+  name: string;
+  description: string | null;
+  arn: string | null;
+  memory_id: string | null;
+  status: string;
+  event_expiry_duration: number;
+  strategies_config: unknown[] | null;
+  strategies_response: unknown[] | null;
+  failure_reason: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  region: string;
+  account_id: string;
+  memory_execution_role_arn: string | null;
+  encryption_key_arn: string | null;
+}
+
 // SSE event types
 export interface SSESessionStart {
   session_id: string;
