@@ -1,6 +1,6 @@
 # Loom Backend
 
-FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, and security administration.
+FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, and security administration.
 
 ## Technology Stack
 
@@ -45,6 +45,8 @@ Runtime configuration is sourced from `etc/environment.sh`:
 | `LOOM_SESSION_MAX_LIFETIME_SECONDS` | Maximum session lifetime | `3600` |
 | `AWS_REGION` | AWS region for deployments | `us-east-1` |
 | `LOOM_ARTIFACT_BUCKET` | S3 bucket for agent deployment artifacts | — |
+| `MEMORY_NAME` | Default memory resource name | `loom_memory` |
+| `MEMORY_EVENT_EXPIRY_DURATION` | Default memory event expiry in days | `30` |
 
 AWS credentials use the standard boto3 credential chain (environment variables, AWS profile, instance metadata).
 
@@ -171,12 +173,14 @@ Stores per-invocation timing measurements and status. Fields include `client_inv
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/memories` | Create a memory resource |
+| `POST` | `/api/memories/import` | Import an existing memory by AWS memory ID |
 | `GET` | `/api/memories` | List all memory resources |
 | `GET` | `/api/memories/{memory_id}` | Get a specific memory resource |
 | `POST` | `/api/memories/{memory_id}/refresh` | Refresh memory status from AWS |
-| `DELETE` | `/api/memories/{memory_id}` | Delete a memory resource |
+| `DELETE` | `/api/memories/{memory_id}?cleanup_aws=true` | Delete a memory resource; optionally delete from AWS |
+| `DELETE` | `/api/memories/{memory_id}/purge` | Remove from local DB only (no AWS call) |
 
-Supports five memory strategy types: semantic, summary, user_preference, episodic, and custom. Strategies are mapped to AWS tagged union format on creation.
+Supports five memory strategy types: semantic, summary, user_preference, episodic, and custom. Strategies are mapped to AWS tagged union format on creation. The delete endpoint supports async deletion: when `cleanup_aws=true`, it initiates deletion in AWS and marks the resource as DELETING. The frontend polls via refresh and uses purge to clean up locally after AWS confirms deletion (404).
 
 ### Agent Invocation (SSE Streaming)
 
@@ -248,10 +252,12 @@ make curl.logs.session AGENT_ID=1 SESSION_ID=uuid
 
 # Memory resources
 make curl.memories.create MEMORY_NAME=loom_memory MEMORY_EVENT_EXPIRY_DURATION=30
+make curl.memories.import MEMORY_AWS_ID=my_memory-zYcvlyGXsK
 make curl.memories.list
 make curl.memories.get MEMORY_ID=1
 make curl.memories.refresh MEMORY_ID=1
 make curl.memories.delete MEMORY_ID=1
+make curl.memories.purge MEMORY_ID=1
 ```
 
 ## Tests

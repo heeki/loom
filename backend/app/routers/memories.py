@@ -56,6 +56,11 @@ class MemoryCreateRequest(BaseModel):
     memory_strategies: list[MemoryStrategyRequest] | None = Field(None, description="Memory strategy configurations")
 
 
+class MemoryImportRequest(BaseModel):
+    """Request body for importing an existing memory resource by its AWS memory ID."""
+    memory_id: str = Field(..., description="AWS memory ID (e.g. my_memory-zYcvlyGXsK)")
+
+
 class MemoryResponse(BaseModel):
     """Response model for memory resource details."""
     id: int
@@ -164,10 +169,15 @@ def create_memory(
     except Exception as e:
         _handle_aws_error(e)
 
-    memory_arn = response.get("memoryArn", "")
-    memory_id = response.get("memoryId", "")
+    # Response is nested: {"memory": {"arn": ..., "id": ..., "status": ..., ...}}
+    mem_data = response.get("memory", {})
+    logger.info("create_memory response: %s", json.dumps(mem_data, default=str))
+
+    memory_arn = mem_data.get("arn", "")
+    memory_id = mem_data.get("id", "")
 
     # Extract account_id from ARN if available
+    # ARN format: arn:aws:bedrock-agentcore:{region}:{account_id}:memory/{memory_id}
     if memory_arn:
         try:
             parts = memory_arn.split(":")
@@ -176,14 +186,16 @@ def create_memory(
         except (IndexError, ValueError):
             pass
 
+    logger.info("create_memory resolved: memory_id=%s memory_arn=%s account_id=%s", memory_id, memory_arn, account_id)
+
     memory = Memory(
-        name=request.name,
+        name=mem_data.get("name", request.name),
         description=request.description,
         arn=memory_arn,
         memory_id=memory_id,
         region=region,
         account_id=account_id,
-        status=response.get("status", "CREATING"),
+        status=mem_data.get("status", "CREATING"),
         event_expiry_duration=request.event_expiry_duration,
         memory_execution_role_arn=request.memory_execution_role_arn,
         encryption_key_arn=request.encryption_key_arn,
@@ -192,7 +204,76 @@ def create_memory(
     if aws_strategies:
         memory.set_strategies_config(aws_strategies)
 
-    strategies_resp = response.get("memoryStrategies")
+    strategies_resp = mem_data.get("strategies")
+    if strategies_resp:
+        memory.set_strategies_response(strategies_resp)
+
+    db.add(memory)
+    db.commit()
+    db.refresh(memory)
+
+    return MemoryResponse(**memory.to_dict())
+
+
+@router.post("/import", response_model=MemoryResponse, status_code=status.HTTP_201_CREATED)
+def import_memory(
+    request: MemoryImportRequest,
+    db: Session = Depends(get_db),
+) -> MemoryResponse:
+    """Import an existing memory resource from AWS by its memory ID."""
+    region = os.getenv("AWS_REGION", DEFAULT_REGION)
+    account_id = os.getenv("AWS_ACCOUNT_ID", "")
+
+    # Check if already imported
+    existing = db.query(Memory).filter(Memory.memory_id == request.memory_id).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Memory '{request.memory_id}' is already imported (id={existing.id})"
+        )
+
+    try:
+        response = svc_get_memory(request.memory_id, region)
+    except Exception as e:
+        _handle_aws_error(e)
+
+    # Response is nested: {"memory": {"arn": ..., "id": ..., "status": ..., ...}}
+    mem_data = response.get("memory", {})
+
+    memory_arn = mem_data.get("arn", "")
+    memory_name = mem_data.get("name", request.memory_id)
+    memory_status = mem_data.get("status", "UNKNOWN")
+    description = mem_data.get("description")
+    event_expiry = mem_data.get("eventExpiryDuration", 0)
+    encryption_key_arn = mem_data.get("encryptionKeyArn")
+    memory_execution_role_arn = mem_data.get("memoryExecutionRoleArn")
+
+    # Extract account_id from ARN
+    if memory_arn:
+        try:
+            parts = memory_arn.split(":")
+            if len(parts) >= 5:
+                account_id = parts[4]
+        except (IndexError, ValueError):
+            pass
+
+    logger.info("import_memory: memoryId=%s name=%s status=%s arn=%s",
+                request.memory_id, memory_name, memory_status, memory_arn)
+
+    memory = Memory(
+        name=memory_name,
+        description=description,
+        arn=memory_arn,
+        memory_id=mem_data.get("id", request.memory_id),
+        region=region,
+        account_id=account_id,
+        status=memory_status,
+        event_expiry_duration=event_expiry,
+        memory_execution_role_arn=memory_execution_role_arn,
+        encryption_key_arn=encryption_key_arn,
+    )
+
+    strategies_resp = mem_data.get("strategies")
     if strategies_resp:
         memory.set_strategies_response(strategies_resp)
 
@@ -232,22 +313,42 @@ def refresh_memory(memory_id: int, db: Session = Depends(get_db)) -> MemoryRespo
             detail=f"Memory with id {memory_id} not found"
         )
 
-    if not memory.memory_id:
+    # Resolve the AWS memory ID: prefer stored memory_id, fallback to ARN extraction
+    aws_memory_id = memory.memory_id
+    if not aws_memory_id and memory.arn:
+        try:
+            resource = memory.arn.split(":")[-1]
+            if resource.startswith("memory/"):
+                aws_memory_id = resource[len("memory/"):]
+                logger.info("refresh_memory: extracted memory_id from ARN: %s", aws_memory_id)
+        except (IndexError, ValueError):
+            pass
+
+    if not aws_memory_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Memory does not have an AWS memory_id"
         )
 
+    logger.info("refresh_memory: using aws_memory_id=%s for DB id=%d", aws_memory_id, memory_id)
+
     try:
-        response = svc_get_memory(memory.memory_id, memory.region)
+        response = svc_get_memory(aws_memory_id, memory.region)
     except Exception as e:
         _handle_aws_error(e)
 
-    memory.status = response.get("status", memory.status)
-    memory.arn = response.get("memoryArn", memory.arn)
-    memory.failure_reason = response.get("failureReason", memory.failure_reason)
+    # Response is nested: {"memory": {"arn": ..., "id": ..., "status": ..., ...}}
+    mem_data = response.get("memory", {})
 
-    strategies_resp = response.get("memoryStrategies")
+    # Backfill memory_id if it was missing
+    if not memory.memory_id and aws_memory_id:
+        memory.memory_id = aws_memory_id
+
+    memory.status = mem_data.get("status", memory.status)
+    memory.arn = mem_data.get("arn", memory.arn)
+    memory.failure_reason = mem_data.get("failureReason", memory.failure_reason)
+
+    strategies_resp = mem_data.get("strategies")
     if strategies_resp:
         memory.set_strategies_response(strategies_resp)
 
@@ -258,9 +359,13 @@ def refresh_memory(memory_id: int, db: Session = Depends(get_db)) -> MemoryRespo
     return MemoryResponse(**memory.to_dict())
 
 
-@router.delete("/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_memory(memory_id: int, db: Session = Depends(get_db)) -> None:
-    """Delete a memory resource."""
+@router.delete("/{memory_id}", response_model=MemoryResponse)
+def delete_memory(
+    memory_id: int,
+    cleanup_aws: bool = True,
+    db: Session = Depends(get_db),
+) -> MemoryResponse:
+    """Delete a memory resource. When cleanup_aws=True, initiates async deletion in AWS."""
     memory = db.query(Memory).filter(Memory.id == memory_id).first()
     if not memory:
         raise HTTPException(
@@ -268,12 +373,42 @@ def delete_memory(memory_id: int, db: Session = Depends(get_db)) -> None:
             detail=f"Memory with id {memory_id} not found"
         )
 
-    # Delete from AWS if we have a memory_id
-    if memory.memory_id:
-        try:
-            svc_delete_memory(memory.memory_id, memory.region)
-        except Exception as e:
-            logger.warning("Failed to delete memory %s from AWS: %s", memory.memory_id, e)
+    # If not cleaning up AWS, just remove from DB
+    if not cleanup_aws or not memory.memory_id or memory.status in ("FAILED",):
+        result = MemoryResponse(**memory.to_dict())
+        db.delete(memory)
+        db.commit()
+        return result
 
+    # Initiate async deletion in AWS
+    try:
+        svc_delete_memory(memory.memory_id, memory.region)
+    except Exception as e:
+        error_name = type(e).__name__
+        if error_name == "ResourceNotFoundException":
+            # Already gone from AWS — remove locally
+            result = MemoryResponse(**memory.to_dict())
+            db.delete(memory)
+            db.commit()
+            return result
+        logger.warning("Failed to delete memory %s from AWS: %s", memory.memory_id, e)
+
+    # Mark as DELETING so the frontend can poll for completion
+    memory.status = "DELETING"
+    memory.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(memory)
+    return MemoryResponse(**memory.to_dict())
+
+
+@router.delete("/{memory_id}/purge", status_code=status.HTTP_204_NO_CONTENT)
+def purge_memory(memory_id: int, db: Session = Depends(get_db)) -> None:
+    """Remove a memory resource from the local database (no AWS call)."""
+    memory = db.query(Memory).filter(Memory.id == memory_id).first()
+    if not memory:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Memory with id {memory_id} not found"
+        )
     db.delete(memory)
     db.commit()

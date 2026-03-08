@@ -45,10 +45,14 @@ class TestMemoriesRouter(unittest.TestCase):
     def test_create_memory_semantic_strategy(self, mock_create):
         """Test creating a memory with a semantic strategy."""
         mock_create.return_value = {
-            "memoryArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-abc123",
-            "memoryId": "mem-abc123",
-            "status": "CREATING",
-            "memoryStrategies": [{"semanticMemoryStrategy": {"name": "default_semantic"}}],
+            "memory": {
+                "arn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-abc123",
+                "id": "mem-abc123",
+                "name": "test_memory",
+                "status": "CREATING",
+                "eventExpiryDuration": 30,
+                "strategies": [{"name": "default_semantic", "type": "SEMANTIC"}],
+            }
         }
 
         response = self.client.post("/api/memories", json={
@@ -70,9 +74,13 @@ class TestMemoriesRouter(unittest.TestCase):
     def test_create_memory_summary_strategy(self, mock_create):
         """Test creating a memory with a summary strategy."""
         mock_create.return_value = {
-            "memoryArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-sum123",
-            "memoryId": "mem-sum123",
-            "status": "CREATING",
+            "memory": {
+                "arn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-sum123",
+                "id": "mem-sum123",
+                "name": "summary_memory",
+                "status": "CREATING",
+                "eventExpiryDuration": 60,
+            }
         }
 
         response = self.client.post("/api/memories", json={
@@ -91,9 +99,13 @@ class TestMemoriesRouter(unittest.TestCase):
     def test_create_memory_user_preference_strategy(self, mock_create):
         """Test creating a memory with a user_preference strategy."""
         mock_create.return_value = {
-            "memoryArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-up123",
-            "memoryId": "mem-up123",
-            "status": "CREATING",
+            "memory": {
+                "arn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-up123",
+                "id": "mem-up123",
+                "name": "pref_memory",
+                "status": "CREATING",
+                "eventExpiryDuration": 30,
+            }
         }
 
         response = self.client.post("/api/memories", json={
@@ -111,9 +123,13 @@ class TestMemoriesRouter(unittest.TestCase):
     def test_create_memory_episodic_strategy(self, mock_create):
         """Test creating a memory with an episodic strategy."""
         mock_create.return_value = {
-            "memoryArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-ep123",
-            "memoryId": "mem-ep123",
-            "status": "CREATING",
+            "memory": {
+                "arn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-ep123",
+                "id": "mem-ep123",
+                "name": "episodic_memory",
+                "status": "CREATING",
+                "eventExpiryDuration": 30,
+            }
         }
 
         response = self.client.post("/api/memories", json={
@@ -131,9 +147,13 @@ class TestMemoriesRouter(unittest.TestCase):
     def test_create_memory_custom_strategy(self, mock_create):
         """Test creating a memory with a custom strategy."""
         mock_create.return_value = {
-            "memoryArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-cust123",
-            "memoryId": "mem-cust123",
-            "status": "CREATING",
+            "memory": {
+                "arn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-cust123",
+                "id": "mem-cust123",
+                "name": "custom_memory",
+                "status": "CREATING",
+                "eventExpiryDuration": 30,
+            }
         }
 
         response = self.client.post("/api/memories", json={
@@ -162,9 +182,13 @@ class TestMemoriesRouter(unittest.TestCase):
     def test_list_memories(self, mock_create):
         """Test listing memory resources."""
         mock_create.return_value = {
-            "memoryArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-1",
-            "memoryId": "mem-1",
-            "status": "ACTIVE",
+            "memory": {
+                "arn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-1",
+                "id": "mem-1",
+                "name": "memory_one",
+                "status": "ACTIVE",
+                "eventExpiryDuration": 30,
+            }
         }
 
         self.client.post("/api/memories", json={
@@ -173,9 +197,13 @@ class TestMemoriesRouter(unittest.TestCase):
         })
 
         mock_create.return_value = {
-            "memoryArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-2",
-            "memoryId": "mem-2",
-            "status": "ACTIVE",
+            "memory": {
+                "arn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-2",
+                "id": "mem-2",
+                "name": "memory_two",
+                "status": "ACTIVE",
+                "eventExpiryDuration": 60,
+            }
         }
 
         self.client.post("/api/memories", json={
@@ -192,9 +220,13 @@ class TestMemoriesRouter(unittest.TestCase):
     def test_get_memory(self, mock_create):
         """Test getting a single memory resource."""
         mock_create.return_value = {
-            "memoryArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-get1",
-            "memoryId": "mem-get1",
-            "status": "ACTIVE",
+            "memory": {
+                "arn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-get1",
+                "id": "mem-get1",
+                "name": "get_test",
+                "status": "ACTIVE",
+                "eventExpiryDuration": 30,
+            }
         }
 
         create_response = self.client.post("/api/memories", json={
@@ -214,9 +246,13 @@ class TestMemoriesRouter(unittest.TestCase):
     def test_refresh_memory(self, mock_create, mock_get):
         """Test refreshing memory status from AWS."""
         mock_create.return_value = {
-            "memoryArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-ref1",
-            "memoryId": "mem-ref1",
-            "status": "CREATING",
+            "memory": {
+                "arn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-ref1",
+                "id": "mem-ref1",
+                "name": "refresh_test",
+                "status": "CREATING",
+                "eventExpiryDuration": 30,
+            }
         }
 
         create_response = self.client.post("/api/memories", json={
@@ -226,9 +262,13 @@ class TestMemoriesRouter(unittest.TestCase):
         mem_id = create_response.json()["id"]
 
         mock_get.return_value = {
-            "status": "ACTIVE",
-            "memoryArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-ref1",
-            "memoryStrategies": [{"semanticMemoryStrategy": {"name": "default"}}],
+            "memory": {
+                "arn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-ref1",
+                "id": "mem-ref1",
+                "name": "refresh_test",
+                "status": "ACTIVE",
+                "strategies": [{"name": "default", "type": "SEMANTIC"}],
+            }
         }
 
         response = self.client.post(f"/api/memories/{mem_id}/refresh")
@@ -239,13 +279,17 @@ class TestMemoriesRouter(unittest.TestCase):
     @patch("app.routers.memories.svc_delete_memory")
     @patch("app.routers.memories.svc_create_memory")
     def test_delete_memory(self, mock_create, mock_delete):
-        """Test deleting a memory resource."""
+        """Test deleting a memory resource (async deletion)."""
         mock_create.return_value = {
-            "memoryArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-del1",
-            "memoryId": "mem-del1",
-            "status": "ACTIVE",
+            "memory": {
+                "arn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-del1",
+                "id": "mem-del1",
+                "name": "delete_test",
+                "status": "ACTIVE",
+                "eventExpiryDuration": 30,
+            }
         }
-        mock_delete.return_value = {}
+        mock_delete.return_value = {"memoryId": "mem-del1", "status": "DELETING"}
 
         create_response = self.client.post("/api/memories", json={
             "name": "delete_test",
@@ -253,10 +297,22 @@ class TestMemoriesRouter(unittest.TestCase):
         })
         mem_id = create_response.json()["id"]
 
+        # Delete initiates async deletion — returns DELETING status
         response = self.client.delete(f"/api/memories/{mem_id}")
-        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["status"], "DELETING")
 
-        # Verify it's gone
+        # Record still exists in DB with DELETING status
+        get_response = self.client.get(f"/api/memories/{mem_id}")
+        self.assertEqual(get_response.status_code, 200)
+        self.assertEqual(get_response.json()["status"], "DELETING")
+
+        # Purge removes from DB
+        purge_response = self.client.delete(f"/api/memories/{mem_id}/purge")
+        self.assertEqual(purge_response.status_code, 204)
+
+        # Now it's gone
         get_response = self.client.get(f"/api/memories/{mem_id}")
         self.assertEqual(get_response.status_code, 404)
 

@@ -12,12 +12,14 @@ The platform tracks session liveness using a local idle timeout heuristic, provi
 
 ### Persona-Based Workflows
 
-The frontend is organized around four persona-based workflows, accessible via a sidebar:
+The frontend is organized around persona-based workflows, accessible via a sidebar:
 
-- **Catalog** (default) — Browse, invoke, and manage registered/deployed agents.
-- **Builder** — Register agents by ARN or deploy new agents to AgentCore Runtime.
+- **Platform Catalog** (default) — Browse and manage agents, memory resources, and other platform resources. Includes sections for MCP Servers and A2A Agents (coming soon).
+- **Agents** — Deploy new agents or import existing ones. Includes agent listing with card/table view toggle.
 - **Security Admin** — Manage IAM roles, authorizer configurations, credentials, and permission requests.
-- **Data Integration** — Manage data integrations (placeholder for future work).
+- **Memory** — Create new AgentCore Memory resources with configurable strategies or import existing ones.
+- **MCP Servers** (coming soon) — Disabled sidebar entry for future MCP server management.
+- **A2A Agents** (coming soon) — Disabled sidebar entry for future A2A agent management.
 
 ---
 
@@ -101,7 +103,7 @@ loom/
 Detailed specifications for each component are maintained in their respective directories:
 
 - **Backend:** [`backend/SPECIFICATIONS.md`](backend/SPECIFICATIONS.md) — API endpoints, database schema, service modules, streaming architecture, latency measurement flow, security management, memory resource management.
-- **Frontend:** [`frontend/SPECIFICATIONS.md`](frontend/SPECIFICATIONS.md) — Technology stack, persona-based navigation, Catalog/Builder/Security Admin workflows, streaming behavior.
+- **Frontend:** [`frontend/SPECIFICATIONS.md`](frontend/SPECIFICATIONS.md) — Technology stack, persona-based navigation, Platform Catalog/Agents/Security Admin/Memory workflows, streaming behavior.
 
 ---
 
@@ -159,9 +161,9 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Account ID extraction from runtime ARN on deploy and refresh.
 
 ### Phase 3 — Persona-Based Workflows *(Complete)*
-- Persona-based frontend navigation: Catalog, Builder, Security Admin, Data Integration.
-- Catalog page with agent cards: eraser icon for deletion, overlay confirmation with "Also delete in AgentCore" checkbox, no refresh button on cards.
-- Builder page with register and deploy tabs, collapsible role permissions, grouped searchable model selectors.
+- Persona-based frontend navigation: Platform Catalog, Agents, Security Admin, Memory, MCP Servers (coming soon), A2A Agents (coming soon).
+- Platform Catalog page with sections for agents, memory resources, MCP servers (coming soon), and A2A agents (coming soon). Card/table view toggle with cards as default.
+- Agents page (formerly Builder) with agent listing (card/table view toggle), Add Agent button with Deploy/Import tabs.
 - Security Admin page for managing IAM roles, authorizer configs, authorizer credentials, and permission requests.
 - Model selector on both register and deploy forms with no default selection.
 - Model ID tracked on agent responses for display on invoke page.
@@ -176,6 +178,13 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Refresh endpoint to poll AWS for latest memory status.
 - AWS error mapping: ValidationException→400, ConflictException→409, ResourceNotFoundException→404, AccessDeniedException→403, ThrottledException/ServiceQuotaExceededException→429.
 - Makefile curl targets for manual testing of all memory endpoints.
+- Frontend Memory persona: memory card and table views with card/table toggle (cards default), create form with strategy configuration, status badges, refresh and delete actions, toast notifications for all operations.
+- Memory import endpoint (POST /api/memories/import) for importing existing AgentCore Memory resources.
+- Async deletion flow: backend returns DELETING status, frontend polls for updates, detects 404 when resource is fully deleted, then purges locally.
+- "Also delete in AgentCore" checkbox on memory deletion for optional upstream cleanup.
+- Timer persistence across navigation using server timestamps.
+- Purge endpoint (DELETE /api/memories/{id}/purge) for local database cleanup after confirmed deletion.
+- View mode (card/table) state lifted to App.tsx and persisted per-page across persona switches.
 
 ### Phase 5 — Advanced Operations
 - Real-time metrics auto-refresh.

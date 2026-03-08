@@ -310,7 +310,7 @@ export function AuthorizerManagementPanel() {
         </div>
       </div>
       <div className="flex gap-2">
-        <Button size="sm" onClick={() => isEdit && id ? handleUpdate(id) : handleCreate()} disabled={submitting || !formName.trim()}>
+        <Button size="sm" className="min-w-[120px]" onClick={() => isEdit && id ? handleUpdate(id) : handleCreate()} disabled={submitting || !formName.trim()}>
           {submitting ? "Saving..." : isEdit ? "Save" : "Create"}
         </Button>
         <Button size="sm" variant="ghost" onClick={() => { isEdit ? setEditingId(null) : setShowAddForm(false); resetForm(); }}>

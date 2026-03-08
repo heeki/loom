@@ -366,10 +366,12 @@ The `model_id` field is optional on registration and stored as an `AGENT_CONFIG_
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/memories` | Create a new memory resource. |
+| `POST` | `/api/memories/import` | Import an existing memory resource by AWS memory ID. |
 | `GET` | `/api/memories` | List all memory resources. |
 | `GET` | `/api/memories/{memory_id}` | Get a specific memory resource. |
 | `POST` | `/api/memories/{memory_id}/refresh` | Refresh memory status from AWS. |
-| `DELETE` | `/api/memories/{memory_id}` | Delete a memory resource from AWS and local DB. |
+| `DELETE` | `/api/memories/{memory_id}?cleanup_aws=true` | Delete a memory resource; optionally delete from AWS. |
+| `DELETE` | `/api/memories/{memory_id}/purge` | Remove from local DB only (no AWS call). |
 
 **Naming convention:** Memory names and strategy names must match `[a-zA-Z][a-zA-Z0-9_]{0,47}` — start with a letter, letters/digits/underscores only, max 48 characters. Hyphens are not allowed.
 
@@ -392,6 +394,21 @@ The `model_id` field is optional on registration and stored as an `AGENT_CONFIG_
   ]
 }
 ```
+
+**`POST /api/memories/import` request body:**
+```json
+{
+  "memory_id": "my_memory-zYcvlyGXsK"
+}
+```
+
+Fetches the memory details from AWS via `get_memory` and stores them locally. Returns 409 if the memory is already imported.
+
+**`DELETE /api/memories/{memory_id}?cleanup_aws=true`:**
+When `cleanup_aws=true` (default), initiates async deletion in AWS and marks status as DELETING. When `cleanup_aws=false`, removes from local DB only. For FAILED memories, always removes locally without AWS call.
+
+**`DELETE /api/memories/{memory_id}/purge`:**
+Removes the memory record from the local database without any AWS API call. Used by the frontend after confirming that AWS deletion is complete (404 on refresh). Returns 204 No Content.
 
 **Strategy type mapping:**
 
@@ -625,9 +642,11 @@ curl.logs.streams    # GET /api/agents/{AGENT_ID}/logs/streams
 curl.logs.session    # GET /api/agents/{AGENT_ID}/sessions/{SESSION_ID}/logs
 
 # Memory resource targets
-curl.memories.create # POST /api/memories (MEMORY_NAME, MEMORY_EVENT_EXPIRY_DURATION)
-curl.memories.list   # GET /api/memories
-curl.memories.get    # GET /api/memories/{MEMORY_ID}
+curl.memories.create  # POST /api/memories (MEMORY_NAME, MEMORY_EVENT_EXPIRY_DURATION)
+curl.memories.import  # POST /api/memories/import (MEMORY_AWS_ID)
+curl.memories.list    # GET /api/memories
+curl.memories.get     # GET /api/memories/{MEMORY_ID}
 curl.memories.refresh # POST /api/memories/{MEMORY_ID}/refresh
-curl.memories.delete # DELETE /api/memories/{MEMORY_ID}
+curl.memories.delete  # DELETE /api/memories/{MEMORY_ID}?cleanup_aws=true
+curl.memories.purge   # DELETE /api/memories/{MEMORY_ID}/purge
 ```

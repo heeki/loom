@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, Eraser } from "lucide-react";
+import { Loader2, Eraser, RefreshCw } from "lucide-react";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { statusVariant } from "@/lib/status";
@@ -11,6 +11,7 @@ import type { AgentResponse } from "@/api/types";
 interface AgentCardProps {
   agent: AgentResponse;
   onSelect: (id: number) => void;
+  onRefresh: (id: number) => void;
   onDelete: (id: number, cleanupAws: boolean) => void;
 }
 
@@ -27,10 +28,33 @@ function existsInAgentCore(agent: AgentResponse): boolean {
   return !!agent.runtime_id;
 }
 
-export function AgentCard({ agent, onSelect, onDelete }: AgentCardProps) {
+export function AgentCard({ agent, onSelect, onRefresh, onDelete }: AgentCardProps) {
   const { timezone } = useTimezone();
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [cleanupAws, setCleanupAws] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const creating = isCreating(agent);
+
+  useEffect(() => {
+    if (creating) {
+      if (!timerRef.current) {
+        timerRef.current = setInterval(() => setNow(Date.now()), 1000);
+      }
+    } else {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    }
+    return () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
+  }, [creating]);
+
+  const elapsedSeconds = (() => {
+    if (!creating) return 0;
+    const ts = agent.deployed_at ?? agent.registered_at;
+    if (!ts) return 0;
+    return Math.max(0, Math.floor((now - new Date(ts).getTime()) / 1000));
+  })();
 
   const showCleanupOption = existsInAgentCore(agent);
 
@@ -53,8 +77,13 @@ export function AgentCard({ agent, onSelect, onDelete }: AgentCardProps) {
             <Badge variant={statusVariant(agent.status)} className="text-[10px] px-1.5 py-0">
               {agent.status ?? "unknown"}
             </Badge>
-            {isCreating(agent) && (
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+            {creating && (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                <span className="text-[10px] text-muted-foreground">
+                  ({elapsedSeconds}s)
+                </span>
+              </>
             )}
             {agent.active_session_count > 0 && (
               <span className="inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-primary text-primary-foreground text-[10px] font-medium">
@@ -62,17 +91,36 @@ export function AgentCard({ agent, onSelect, onDelete }: AgentCardProps) {
               </span>
             )}
           </div>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setConfirmingRemove(true);
-            }}
-            className="text-muted-foreground/50 hover:text-destructive transition-colors"
-            title="Remove agent"
-          >
-            <Eraser className="h-3.5 w-3.5" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={async (e) => {
+                e.stopPropagation();
+                setRefreshing(true);
+                try { onRefresh(agent.id); } finally { setRefreshing(false); }
+              }}
+              disabled={refreshing}
+              className="text-muted-foreground/50 hover:text-foreground transition-colors"
+              title="Refresh"
+            >
+              {refreshing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmingRemove(true);
+              }}
+              className="text-muted-foreground/50 hover:text-destructive transition-colors"
+              title="Remove agent"
+            >
+              <Eraser className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-3 text-xs text-muted-foreground">
