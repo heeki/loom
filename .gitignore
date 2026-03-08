@@ -1,5 +1,6 @@
 # directories
 __pycache__
+.claude/worktrees
 .pytest_cache
 .venv
 node_modules
