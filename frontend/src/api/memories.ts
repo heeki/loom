@@ -9,6 +9,14 @@ export function createMemory(request: MemoryCreateRequest): Promise<MemoryRespon
   });
 }
 
+export function importMemory(memoryId: string): Promise<MemoryResponse> {
+  return apiFetch<MemoryResponse>("/api/memories/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ memory_id: memoryId }),
+  });
+}
+
 export function listMemories(): Promise<MemoryResponse[]> {
   return apiFetch<MemoryResponse[]>("/api/memories");
 }
@@ -23,8 +31,14 @@ export function refreshMemory(id: number): Promise<MemoryResponse> {
   });
 }
 
-export function deleteMemory(id: number): Promise<void> {
-  return apiFetch<void>(`/api/memories/${id}`, {
+export function deleteMemory(id: number, cleanupAws = true): Promise<MemoryResponse> {
+  return apiFetch<MemoryResponse>(`/api/memories/${id}?cleanup_aws=${cleanupAws}`, {
+    method: "DELETE",
+  });
+}
+
+export function purgeMemory(id: number): Promise<void> {
+  return apiFetch<void>(`/api/memories/${id}/purge`, {
     method: "DELETE",
   });
 }

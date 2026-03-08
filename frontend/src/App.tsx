@@ -25,7 +25,7 @@ import { InvocationDetailPage } from "@/pages/InvocationDetailPage";
 import { SecurityAdminPage } from "@/pages/SecurityAdminPage";
 import { MemoryManagementPage } from "@/pages/MemoryManagementPage";
 import type { SessionResponse, InvocationResponse } from "@/api/types";
-import { BookOpen, Shield, Wrench, Brain } from "lucide-react";
+import { BookOpen, Shield, Bot, Brain, Network, Users } from "lucide-react";
 
 type Theme = "light" | "dark";
 type Persona = "catalog" | "security" | "builder" | "memory";
@@ -96,24 +96,32 @@ function SidebarItem({
   label,
   active,
   onClick,
+  disabled,
+  badge,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   active: boolean;
   onClick: () => void;
+  disabled?: boolean;
+  badge?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-        active
-          ? "bg-primary text-primary-foreground"
-          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+      disabled={disabled}
+      className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm whitespace-nowrap transition-colors ${
+        disabled
+          ? "text-muted-foreground/50 cursor-not-allowed"
+          : active
+            ? "bg-primary text-primary-foreground"
+            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
       }`}
     >
       <Icon className="h-4 w-4 shrink-0" />
-      <span>{label}</span>
+      <span className="truncate">{label}</span>
+      {badge && <span className="text-[10px] italic shrink-0">{badge}</span>}
     </button>
   );
 }
@@ -128,7 +136,11 @@ function AppContent() {
     document.documentElement.classList.toggle("dark", theme === "dark");
   }, [theme]);
 
-  const { agents, loading, fetchAgents, registerAgent, deployAgent, redeployAgent, deleteAgent } = useAgents();
+  const { agents, loading, fetchAgents, registerAgent, deployAgent, redeployAgent, refreshAgent, deleteAgent } = useAgents();
+  type ViewMode = "cards" | "table";
+  const [catalogViewMode, setCatalogViewMode] = useState<ViewMode>("cards");
+  const [agentsViewMode, setAgentsViewMode] = useState<ViewMode>("cards");
+  const [memoryViewMode, setMemoryViewMode] = useState<ViewMode>("cards");
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessionDetail, setSessionDetail] = useState<SessionResponse | null>(null);
@@ -247,10 +259,16 @@ function AppContent() {
             onClick={() => setActivePersona("catalog")}
           />
           <SidebarItem
-            icon={Wrench}
-            label="Builder"
+            icon={Bot}
+            label="Agents"
             active={activePersona === "builder"}
             onClick={() => setActivePersona("builder")}
+          />
+          <SidebarItem
+            icon={Brain}
+            label="Memory"
+            active={activePersona === "memory"}
+            onClick={() => setActivePersona("memory")}
           />
           <SidebarItem
             icon={Shield}
@@ -259,10 +277,18 @@ function AppContent() {
             onClick={() => setActivePersona("security")}
           />
           <SidebarItem
-            icon={Brain}
-            label="Memory"
-            active={activePersona === "memory"}
-            onClick={() => setActivePersona("memory")}
+            icon={Network}
+            label="MCP Servers"
+            active={false}
+            onClick={() => {}}
+            disabled
+          />
+          <SidebarItem
+            icon={Users}
+            label="A2A Agents"
+            active={false}
+            onClick={() => {}}
+            disabled
           />
         </nav>
         <div className="p-2 border-t space-y-1">
@@ -322,7 +348,10 @@ function AppContent() {
                 <CatalogPage
                   agents={agents}
                   loading={loading}
+                  viewMode={catalogViewMode}
+                  onViewModeChange={setCatalogViewMode}
                   onSelectAgent={setSelectedAgentId}
+                  onRefreshAgent={refreshAgent}
                   onDelete={handleDelete}
                 />
               )}
@@ -358,21 +387,29 @@ function AppContent() {
 
           {activePersona === "builder" && (
             <AgentListPage
+              agents={agents}
+              loading={loading}
+              viewMode={agentsViewMode}
+              onViewModeChange={setAgentsViewMode}
               onRegister={async (arn, modelId) => {
                 await registerAgent(arn, modelId);
                 await fetchAgents();
-                setActivePersona("catalog");
               }}
               onDeploy={async (req) => {
                 await deployAgent(req);
                 await fetchAgents();
+              }}
+              onSelectAgent={(id) => {
+                setSelectedAgentId(id);
                 setActivePersona("catalog");
               }}
+              onRefreshAgent={refreshAgent}
+              onDelete={handleDelete}
             />
           )}
 
           {activePersona === "security" && <SecurityAdminPage />}
-          {activePersona === "memory" && <MemoryManagementPage />}
+          {activePersona === "memory" && <MemoryManagementPage viewMode={memoryViewMode} onViewModeChange={setMemoryViewMode} />}
         </main>
       </div>
 

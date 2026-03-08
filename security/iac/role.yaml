@@ -21,16 +21,13 @@ Parameters:
     Type: String
     Description: Region for CloudWatch Logs resources
     Default: us-east-1
-  pIncludeMemoryPolicy:
+  pMemoryArn:
     Type: String
-    Description: Whether to include a memory policy for AgentCore Memory access (true/false)
-    Default: "false"
-    AllowedValues:
-      - "true"
-      - "false"
+    Description: ARN of an AgentCore Memory resource to grant access to (leave empty to skip memory policy)
+    Default: ""
 
 Conditions:
-  IncludeMemoryPolicy: !Equals [!Ref pIncludeMemoryPolicy, "true"]
+  IncludeMemoryPolicy: !Not [!Equals [!Ref pMemoryArn, ""]]
 
 Resources:
   AgentRole:
@@ -109,7 +106,7 @@ Resources:
                     - bedrock-agentcore:GetMemory
                     - bedrock-agentcore:SearchMemory
                     - bedrock-agentcore:IngestMemoryEvents
-                  Resource: !Sub "arn:aws:bedrock-agentcore:${pAgentCoreRegions}:${AWS::AccountId}:memory/*"
+                  Resource: !Ref pMemoryArn
           - !Ref AWS::NoValue
 
 Outputs:

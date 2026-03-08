@@ -39,9 +39,10 @@ frontend/
 │   │   └── useDeployment.ts    # Agent config, credential providers, integrations hooks
 │   ├── components/
 │   │   ├── ui/                 # shadcn primitives + searchable-select.tsx
-│   │   ├── AgentCard.tsx       # Agent summary card with eraser icon deletion
+│   │   ├── AgentCard.tsx       # Agent summary card with refresh + eraser icon deletion
 │   │   ├── AgentRegistrationForm.tsx  # Tabbed form: ARN registration + agent deployment
 │   │   ├── AuthorizerManagementPanel.tsx # Authorizer config + credential management
+│   │   ├── MemoryCard.tsx              # Memory resource summary card
 │   │   ├── MemoryManagementPanel.tsx    # Memory resource create form + list table
 │   │   ├── DeploymentPanel.tsx # Deployment details panel
 │   │   ├── InvokePanel.tsx     # Qualifier select, credential select, prompt input, invoke/cancel
@@ -50,9 +51,9 @@ frontend/
 │   │   ├── InvocationTable.tsx # Invocation timing data
 │   │   └── LogViewer.tsx       # Scrollable log viewer
 │   ├── pages/
-│   │   ├── AgentListPage.tsx   # Builder persona: registration form + agent grid
+│   │   ├── AgentListPage.tsx   # Agents persona: registration form + agent grid
 │   │   ├── AgentDetailPage.tsx # Sessions, latency, invoke, response
-│   │   ├── CatalogPage.tsx     # Catalog persona: agent card grid with management
+│   │   ├── CatalogPage.tsx     # Platform Catalog: agents, memory, MCP, A2A sections
 │   │   ├── SecurityAdminPage.tsx  # Security persona: roles, authorizers, credentials, permissions
 │   │   ├── MemoryManagementPage.tsx # Memory persona: memory resource management
 │   │   └── SessionDetailPage.tsx  # Session metadata, invocations, logs
@@ -81,17 +82,20 @@ The app uses a persona-based single-page architecture with a sidebar for workflo
 
 ### Persona Navigation (Sidebar)
 
-| Persona | Description | Default |
-|---------|-------------|---------|
-| Catalog | Browse and manage agents, invoke, view sessions | Yes |
-| Builder | Register agents by ARN or deploy new agents | |
-| Security Admin | Manage roles, authorizers, credentials, permissions | |
-| Memory | Create and manage AgentCore Memory resources | |
+| Persona | Icon | Description | Default |
+|---------|------|-------------|---------|
+| Platform Catalog | BookOpen | Browse agents, memory resources, MCP servers (coming soon), A2A agents (coming soon) | Yes |
+| Agents | Bot | Deploy new agents or import existing ones | |
+| Memory | Brain | Create and manage AgentCore Memory resources | |
+| Security Admin | Shield | Manage roles, authorizers, credentials, permissions | |
+| MCP Servers | Network | Future MCP server management (disabled) | |
+| A2A Agents | Users | Future A2A agent management (disabled) | |
 
 The sidebar also contains:
 - Theme toggle (Mocha dark / Latte light)
 - Timezone selector (local / UTC)
 - Live clock display
+- Version badge
 
 ### Drill-Down Navigation (Catalog)
 
@@ -107,14 +111,18 @@ Catalog  >  [Agent Name]  >  [Session ID]
 
 ---
 
-## 4. Catalog (Home View)
+## 4. Platform Catalog (Home View)
 
-**Purpose:** Browse registered/deployed agents, invoke them, and manage agent lifecycle.
+**Purpose:** Browse and manage registered agents, memory resources, and other platform resources.
 
 **Content:**
-- Responsive grid of `AgentCard` components (3 columns on large screens)
+- Page header: "Platform Catalog" with card/table view toggle (top-right)
+- Organized into sections: Agents, Memory Resources, MCP Servers (coming soon), A2A Agents (coming soon)
+- Card/table view toggle applies to all sections on the page
+- Agents section: responsive grid of `AgentCard` components (3 columns on large screens) or table view
+- Memory Resources section: responsive grid of `MemoryCard` components (read-only, no create/delete) or table view
 - Loading skeleton placeholders during data fetch
-- Empty state with instructions when no agents exist
+- Empty state with instructions when no agents/memories exist
 
 ### AgentCard
 
@@ -125,7 +133,7 @@ Each card displays:
 - Spinner animation when agent is in a creating/deploying state
 - Active session count badge (when > 0)
 - Region, Account ID, Network mode, Available qualifiers, Registered timestamp
-- Eraser icon (top-right) for deletion
+- Refresh button (RefreshCw icon) and Eraser icon (top-right) for refresh/deletion
 
 ### Delete Confirmation
 
@@ -137,20 +145,23 @@ Clicking the eraser icon triggers an overlay confirmation panel:
 
 ---
 
-## 5. Builder View
+## 5. Agents View (Agent Administration)
 
-**Purpose:** Register agents by ARN and deploy new agents to AgentCore Runtime.
+**Purpose:** Deploy new agents or import existing ones to AgentCore Runtime.
 
 **Content:**
-- `AgentRegistrationForm` with two tabs: Register and Deploy
-- Below the form: responsive grid of `AgentCard` components
+- Page header: "Agent Administration" with card/table view toggle (top-right)
+- Sub-header: "Agents" with description and "Add Agent" button (right-aligned)
+- "Add Agent" toggles a Card containing Deploy/Import tab switcher and `AgentRegistrationForm`
+- Below the form: responsive grid of `AgentCard` components (cards default) or table view
+- Bottom section: "Additional Configuration" with MCP Servers and A2A Agents placeholders (coming soon)
 
-### Register Tab
+### Import Tab
 
 - ARN text input and Model selector on the same line (ARN fills remaining space, model is fixed width)
 - Labels: "AgentCore Runtime ARN" and "Model Used"
 - Model selector uses `SearchableSelect` with grouped options (Anthropic / Amazon), no default selection
-- Register button with `min-w-[120px]` to prevent layout shift during loading spinner
+- Import button with `min-w-[120px]` to prevent layout shift during loading spinner
 
 ### Deploy Tab
 
@@ -213,11 +224,11 @@ Full deployment form with sections:
 
 ---
 
-## 8. Memory Management View
+## 8. Memory Management View (Memory Administration)
 
-**Purpose:** Create and manage AgentCore Memory resources with configurable strategies.
+**Purpose:** Create new AgentCore Memory resources with configurable strategies or import existing ones.
 
-**Layout:** Header with title/description + "Add Memory" button, followed by a create form (toggle) and memory list table.
+**Layout:** Page header "Memory Administration" with card/table view toggle (top-right), followed by "Add Memory" button, create form (toggle), and memory list (cards default or table).
 
 ### Create Form
 
@@ -234,9 +245,11 @@ Toggled via the "Add Memory" button. Contained in a `Card` with the following fi
   - "Add Strategy" ghost button to add more
 - **Create** button (disabled until name provided) and **Cancel** button
 
-### Memory List Table
+### Memory List (Card View / Table View)
 
-Table with columns:
+**Card view** (default): Responsive grid of `MemoryCard` components (3 columns on large screens). Each card displays name, status badge, spinner+timer for transitional states, region, account, event expiry, strategies count, registered timestamp, refresh and delete buttons.
+
+**Table view**: Table with columns:
 
 | Column | Description |
 |--------|-------------|
@@ -245,7 +258,7 @@ Table with columns:
 | Strategies | Count of configured strategies |
 | Event Expiry | Duration in days (computed from seconds) |
 | Region | AWS region |
-| Created | Timezone-aware timestamp |
+| Registered | Timezone-aware timestamp |
 | Actions | Refresh (RefreshCw icon) and Delete (Eraser icon) buttons |
 
 ### Status Badges
@@ -258,7 +271,8 @@ Status badges use `statusVariant()` mapping:
 
 ### Delete Confirmation
 
-Inline overlay on the table row (absolute positioned at bottom):
+Inline overlay on the card or table row (absolute positioned at bottom):
+- "Also delete in AgentCore" checkbox (shown when memory has a memory_id)
 - Prompt text: "Delete this memory resource?"
 - Cancel button (ghost) and Confirm button (destructive)
 - Clicks within overlay are stopped from propagating
@@ -332,6 +346,9 @@ Cognito client secrets are password-masked in forms. Secrets are sent to the bac
 
 ### Session Liveness Display
 Computed server-side using `LOOM_SESSION_IDLE_TIMEOUT_SECONDS`. The frontend displays `live_status` with color-coded badges and `active_session_count` on agent cards.
+
+### View Mode Persistence
+Card/table view mode state is lifted to `App.tsx` with separate state variables per page (`catalogViewMode`, `agentsViewMode`, `memoryViewMode`). Each page receives its mode and setter as props. This ensures the selection persists when switching between personas — the page components unmount but the state lives in the parent.
 
 ### SSE Stream Consumer
 `invokeAgentStream()` uses `ReadableStream` to consume POST-based SSE responses with buffer-based line parsing, typed callback dispatch, and `AbortSignal` for cancellation.

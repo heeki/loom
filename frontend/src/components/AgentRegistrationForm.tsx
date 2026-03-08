@@ -75,6 +75,9 @@ function TagInput({
   );
 }
 
+// Module-level deploy start timestamp — survives component unmount/remount
+let deployStartTime: number | null = null;
+
 type Mode = "register" | "deploy";
 
 interface AgentRegistrationFormProps {
@@ -122,17 +125,24 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
   const [mcpServersEnabled] = useState(false);
   const [a2aAgentsEnabled] = useState(false);
 
-  // Deploy elapsed timer
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  // Deploy elapsed timer — persists across navigation via module-level timestamp
+  const [elapsedSeconds, setElapsedSeconds] = useState(() => {
+    if (deployStartTime) return Math.floor((Date.now() - deployStartTime) / 1000);
+    return 0;
+  });
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (isLoading && mode === "deploy") {
-      setElapsedSeconds(0);
+      if (!deployStartTime) deployStartTime = Date.now();
+      setElapsedSeconds(Math.floor((Date.now() - deployStartTime) / 1000));
       timerRef.current = setInterval(() => {
-        setElapsedSeconds((s) => s + 1);
+        setElapsedSeconds(
+          deployStartTime ? Math.floor((Date.now() - deployStartTime) / 1000) : 0,
+        );
       }, 1000);
     } else {
+      deployStartTime = null;
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
@@ -266,32 +276,30 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {mode === "register" ? (
-        <div className="space-y-3">
-          <div className="flex gap-3 items-end">
-            <div className="flex-1 min-w-0">
-              <label className="text-xs text-muted-foreground">AgentCore Runtime ARN</label>
-              <Input
-                placeholder="arn:aws:bedrock-agentcore:region:account:runtime/id"
-                value={arn}
-                onChange={(e) => setArn(e.target.value)}
-              />
+            <div className="flex gap-3 items-end">
+              <div className="flex-1 min-w-0">
+                <label className="text-xs text-muted-foreground">AgentCore Runtime ARN</label>
+                <Input
+                  placeholder="arn:aws:bedrock-agentcore:region:account:runtime/id"
+                  value={arn}
+                  onChange={(e) => setArn(e.target.value)}
+                />
+              </div>
+              <div className="w-1/4 min-w-0">
+                <label className="text-xs text-muted-foreground">Model Used</label>
+                <SearchableSelect
+                  options={models.map((m) => ({ value: m.model_id, label: m.display_name, group: m.group }))}
+                  value={modelId}
+                  onValueChange={setModelId}
+                  placeholder="Select model..."
+                />
+              </div>
+              <Button type="submit" disabled={isLoading || !arn.trim()} className="min-w-[120px]">
+                {isLoading ? "Registering..." : "Register"}
+              </Button>
             </div>
-            <div className="w-1/4 min-w-0">
-              <label className="text-xs text-muted-foreground">Model Used</label>
-              <SearchableSelect
-                options={models.map((m) => ({ value: m.model_id, label: m.display_name, group: m.group }))}
-                value={modelId}
-                onValueChange={setModelId}
-                placeholder="Select model..."
-              />
-            </div>
-            <Button type="submit" disabled={isLoading || !arn.trim()} className="min-w-[120px]">
-              {isLoading ? "Registering..." : "Register"}
-            </Button>
-          </div>
-        </div>
       ) : (
-        <div className="space-y-5">
+          <div className="space-y-5">
               {/* Agent Identity */}
               <section className="space-y-3">
                 <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Agent Identity</h4>
@@ -579,21 +587,52 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
                 </div>
               </section>
 
-              <Button
-                type="submit"
-                disabled={isLoading || !name.trim() || !modelId || !selectedRoleId || !onDeploy || hasValidationErrors}
-                className="w-full"
-              >
-                {isLoading ? (
-                  <span className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Deploying... ({elapsedSeconds}s)
-                  </span>
-                ) : (
-                  "Deploy Agent"
-                )}
-              </Button>
-        </div>
+              <div className="space-y-1.5">
+              <p className="text-[10px] text-muted-foreground italic">
+                Deployment typically takes ~1 minute
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="submit"
+                  size="sm"
+                  className="min-w-[120px]"
+                  disabled={isLoading || !name.trim() || !modelId || !selectedRoleId || !onDeploy || hasValidationErrors}
+                >
+                  {isLoading ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Deploying... ({elapsedSeconds}s)
+                    </span>
+                  ) : (
+                    "Deploy"
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setName("");
+                    setDescription("");
+                    setAgentDescription("");
+                    setBehavioralGuidelines("");
+                    setOutputExpectations("");
+                    setModelId("");
+                    setSelectedRoleId("");
+                    setNetworkMode("PUBLIC");
+                    setSelectedAuthConfigId("");
+                    setIdleTimeout("");
+                    setMaxLifetime("");
+                    setIdleTimeoutError("");
+                    setMaxLifetimeError("");
+                  }}
+                  disabled={isLoading}
+                >
+                  Cancel
+                </Button>
+              </div>
+              </div>
+          </div>
       )}
     </form>
   );
