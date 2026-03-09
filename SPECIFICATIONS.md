@@ -192,7 +192,8 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - `trace_invocation()` wraps each handler invocation with a root span carrying `agent.session_id` and `agent.invocation_id` attributes.
 - Noop mode when running locally without the `opentelemetry-instrument` wrapper — no errors, no performance overhead.
 - `OTEL_SERVICE_NAME` is automatically set to the agent name at deploy time.
-- Unit tests for telemetry setup idempotency, span creation, hook lifecycle, and noop operation.
+- Console script shebang fix: the build pipeline rewrites `opentelemetry-instrument` (and `opentelemetry-bootstrap`) scripts with a portable `#!/usr/bin/env python3` shebang so they execute correctly on the Linux-based AgentCore Runtime container.
+- Unit tests for telemetry setup idempotency, span creation, hook lifecycle, shebang fix, and noop operation.
 
 ### Phase 6 — Advanced Operations
 - Real-time metrics auto-refresh.

@@ -400,5 +400,49 @@ class TestStoreLargeConfig(unittest.TestCase):
         self.assertEqual(result, "s3://my-bucket/my-agent/config/large-config")
 
 
+class TestFixConsoleScriptShebangs(unittest.TestCase):
+    """Test cases for _fix_console_script_shebangs function."""
+
+    def test_fixes_opentelemetry_instrument_shebang(self) -> None:
+        """Test that macOS shebangs are replaced with portable shebangs."""
+        import tempfile
+        import shutil
+        from app.services.deployment import _fix_console_script_shebangs
+
+        tmp = tempfile.mkdtemp()
+        try:
+            bin_dir = os.path.join(tmp, "bin")
+            os.makedirs(bin_dir)
+            script_path = os.path.join(bin_dir, "opentelemetry-instrument")
+            with open(script_path, "w") as f:
+                f.write("#!/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12\n"
+                        "import sys\n"
+                        "from opentelemetry.instrumentation.auto_instrumentation import run\n"
+                        "if __name__ == '__main__':\n"
+                        "    sys.exit(run())\n")
+
+            _fix_console_script_shebangs(tmp)
+
+            with open(script_path) as f:
+                content = f.read()
+            self.assertTrue(content.startswith("#!/usr/bin/env python3\n"))
+            self.assertIn("from opentelemetry.instrumentation.auto_instrumentation import run", content)
+            self.assertEqual(os.stat(script_path).st_mode & 0o777, 0o755)
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_no_bin_dir_is_noop(self) -> None:
+        """Test that missing bin/ directory doesn't raise."""
+        import tempfile
+        import shutil
+        from app.services.deployment import _fix_console_script_shebangs
+
+        tmp = tempfile.mkdtemp()
+        try:
+            _fix_console_script_shebangs(tmp)  # should not raise
+        finally:
+            shutil.rmtree(tmp)
+
+
 if __name__ == "__main__":
     unittest.main()

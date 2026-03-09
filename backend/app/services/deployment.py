@@ -35,6 +35,52 @@ def _merge_tags(extra: dict[str, str] | None = None) -> dict[str, str]:
     return tags
 
 
+_KNOWN_CONSOLE_SCRIPTS: dict[str, tuple[str, str]] = {
+    "opentelemetry-instrument": (
+        "opentelemetry.instrumentation.auto_instrumentation",
+        "run",
+    ),
+    "opentelemetry-bootstrap": (
+        "opentelemetry.instrumentation.bootstrap",
+        "run",
+    ),
+}
+
+
+def _fix_console_script_shebangs(target_dir: str) -> None:
+    """Rewrite known console scripts with a portable shebang.
+
+    ``pip install --target`` generates scripts whose shebang points to the
+    local Python interpreter (e.g. ``#!/usr/local/bin/python3.12``).  On a
+    Linux-based AgentCore Runtime container this path does not exist, so the
+    script fails to execute.  This function regenerates the known OTEL
+    console scripts with ``#!/usr/bin/env python3``.
+    """
+    bin_dir = os.path.join(target_dir, "bin")
+    if not os.path.isdir(bin_dir):
+        return
+
+    for script_name, (module_path, func_name) in _KNOWN_CONSOLE_SCRIPTS.items():
+        script_path = os.path.join(bin_dir, script_name)
+        if not os.path.exists(script_path):
+            continue
+
+        content = (
+            "#!/usr/bin/env python3\n"
+            "# -*- coding: utf-8 -*-\n"
+            "import re\n"
+            "import sys\n"
+            f"from {module_path} import {func_name}\n"
+            "if __name__ == '__main__':\n"
+            "    sys.argv[0] = re.sub(r'(-script\\.pyw|\\.exe)?$', '', sys.argv[0])\n"
+            f"    sys.exit({func_name}())\n"
+        )
+        with open(script_path, "w") as f:
+            f.write(content)
+        os.chmod(script_path, 0o755)
+        logger.info("Fixed shebang for %s", script_name)
+
+
 def build_agent_artifact(region: str) -> tuple[str, str]:
     """
     Build and upload the strands_agent artifact to S3.
@@ -82,6 +128,13 @@ def build_agent_artifact(region: str) -> tuple[str, str]:
             check=True,
             capture_output=True,
         )
+
+        # Fix console script shebangs for Linux deployment.
+        # pip generates scripts with the local Python path (e.g.
+        # #!/Library/Frameworks/.../python3.12) which won't work on
+        # the Linux-based AgentCore Runtime.  Rewrite known OTEL
+        # scripts with a portable #!/usr/bin/env python3 shebang.
+        _fix_console_script_shebangs(tmp_dir)
 
         # Create zip
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
