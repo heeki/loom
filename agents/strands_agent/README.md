@@ -164,8 +164,8 @@ The agent emits OpenTelemetry traces and metrics via the AWS Distro for OpenTele
 - `tool.name` — name of the tool being called
 - `model.id` — model identifier for LLM calls
 
-**ADOT auto-instrumentation:** When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, `setup_telemetry()` activates ADOT auto-instrumentation which automatically traces boto3 calls, HTTP clients, and other supported libraries.
+**ADOT auto-instrumentation:** The deployment entry point uses `opentelemetry-instrument` as a wrapper (`["opentelemetry-instrument", "src/handler.py"]`), which activates ADOT auto-instrumentation at process startup — before any application code runs. This automatically traces boto3 calls, HTTP clients, and other supported libraries without any manual provider configuration.
 
-**Noop mode:** When `OTEL_EXPORTER_OTLP_ENDPOINT` is not set, telemetry operates in noop mode — all tracing APIs succeed without errors and with no performance overhead. The `TelemetryHook` is always registered but produces no-op spans in this mode.
+**Noop mode:** When running locally without the `opentelemetry-instrument` wrapper, the OpenTelemetry API falls back to noop providers — all tracing APIs succeed without errors and with no performance overhead. The `TelemetryHook` is always registered but produces no-op spans in this mode.
 
 **Deploy-time configuration:** The backend automatically sets `OTEL_SERVICE_NAME` to the agent name when deploying to AgentCore Runtime.

@@ -187,10 +187,10 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - View mode (card/table) state lifted to App.tsx and persisted per-page across persona switches.
 
 ### Phase 5 — AgentCore Observability *(Complete)*
-- OpenTelemetry integration with AWS Distro for OpenTelemetry (ADOT) auto-instrumentation for boto3 and HTTP clients.
+- Deployment entry point wrapped with `opentelemetry-instrument` CLI for ADOT auto-instrumentation of boto3, HTTP clients, and other libraries at process startup.
 - `TelemetryHook` on the Strands Agent that creates OTEL spans for tool calls and model invocations as children of the invocation span.
 - `trace_invocation()` wraps each handler invocation with a root span carrying `agent.session_id` and `agent.invocation_id` attributes.
-- Noop mode when `OTEL_EXPORTER_OTLP_ENDPOINT` is not set — no errors, no performance overhead.
+- Noop mode when running locally without the `opentelemetry-instrument` wrapper — no errors, no performance overhead.
 - `OTEL_SERVICE_NAME` is automatically set to the agent name at deploy time.
 - Unit tests for telemetry setup idempotency, span creation, hook lifecycle, and noop operation.
 

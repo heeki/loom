@@ -79,6 +79,27 @@ class TestCreateRuntime(unittest.TestCase):
         self.assertEqual(result["agentRuntimeId"], "rt-123")
 
     @patch("boto3.client")
+    def test_create_runtime_entry_point_uses_otel_instrument(self, mock_boto_client: MagicMock) -> None:
+        """Test that the entry point wraps handler with opentelemetry-instrument."""
+        mock_client = MagicMock()
+        mock_boto_client.return_value = mock_client
+        mock_client.create_agent_runtime.return_value = {"agentRuntimeId": "rt-789"}
+
+        create_runtime(
+            name="otel-agent",
+            description="",
+            role_arn="arn:aws:iam::123:role/r",
+            env_vars={},
+            artifact_bucket="b",
+            artifact_prefix="p",
+            region="us-east-1",
+        )
+
+        call_kwargs = mock_client.create_agent_runtime.call_args[1]
+        entry_point = call_kwargs["agentRuntimeArtifact"]["codeConfiguration"]["entryPoint"]
+        self.assertEqual(entry_point, ["opentelemetry-instrument", "src/handler.py"])
+
+    @patch("boto3.client")
     def test_create_runtime_with_lifecycle_and_authorizer(self, mock_boto_client: MagicMock) -> None:
         """Test create_runtime with optional lifecycle and authorizer configs."""
         mock_client = MagicMock()

@@ -1,7 +1,5 @@
 """Tests for telemetry module."""
 
-import logging
-import os
 import unittest
 from typing import Sequence
 from unittest.mock import patch, MagicMock
@@ -68,37 +66,19 @@ class TestSetupTelemetry(unittest.TestCase):
     def tearDown(self) -> None:
         telemetry_module._telemetry_initialized = False
 
-    def test_noop_mode_no_endpoint(self) -> None:
-        """When OTEL_EXPORTER_OTLP_ENDPOINT is absent, setup succeeds without error."""
-        env = os.environ.copy()
-        env.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
-        with patch.dict(os.environ, env, clear=True):
-            setup_telemetry()
+    def test_setup_succeeds(self) -> None:
+        """setup_telemetry() installs the log filter without error."""
+        setup_telemetry()
         self.assertTrue(telemetry_module._telemetry_initialized)
 
     def test_idempotency(self) -> None:
         """Calling setup_telemetry() twice should be a no-op the second time."""
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
-            setup_telemetry()
-            self.assertTrue(telemetry_module._telemetry_initialized)
+        setup_telemetry()
+        self.assertTrue(telemetry_module._telemetry_initialized)
 
-            with patch.object(telemetry_module, "_setup_active") as mock_active:
-                setup_telemetry()
-                mock_active.assert_not_called()
-
-    @patch("src.telemetry._activate_auto_instrumentation")
-    @patch("src.telemetry.OTLPMetricExporter")
-    @patch("src.telemetry.OTLPSpanExporter")
-    def test_active_mode_with_endpoint(
-        self, mock_span_exp: MagicMock, mock_metric_exp: MagicMock, mock_auto: MagicMock
-    ) -> None:
-        """When OTEL_EXPORTER_OTLP_ENDPOINT is set, active exporters are wired."""
-        with patch.dict(os.environ, {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4317"}):
+        with patch.object(telemetry_module, "_install_log_filter") as mock_filter:
             setup_telemetry()
-        mock_span_exp.assert_called_once()
-        mock_metric_exp.assert_called_once()
-        mock_auto.assert_called_once()
+            mock_filter.assert_not_called()
 
 
 class TestTraceInvocation(_OtelTestBase):
@@ -214,17 +194,6 @@ class TestTelemetryHook(_OtelTestBase):
     def test_after_model_invoke_without_before_is_safe(self) -> None:
         hook = TelemetryHook()
         hook.after_model_invoke(result="ok")
-
-
-class TestActivateAutoInstrumentation(unittest.TestCase):
-    """Tests for _activate_auto_instrumentation."""
-
-    @patch("src.telemetry.logger")
-    def test_graceful_fallback_on_import_error(self, mock_logger: MagicMock) -> None:
-        """When ADOT distro is not available, should log warning and not raise."""
-        with patch.dict("sys.modules", {"amazon.opentelemetry.distro": None, "amazon": None}):
-            telemetry_module._activate_auto_instrumentation()
-        mock_logger.warning.assert_called_once()
 
 
 class TestNoopOperations(unittest.TestCase):

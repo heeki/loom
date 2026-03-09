@@ -158,7 +158,7 @@ def create_runtime(
                     }
                 },
                 "runtime": "PYTHON_3_13",
-                "entryPoint": ["src/handler.py"],
+                "entryPoint": ["opentelemetry-instrument", "src/handler.py"],
             }
         },
         "roleArn": role_arn,
