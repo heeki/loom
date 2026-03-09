@@ -419,6 +419,7 @@ def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
     env_vars = {
         "AGENT_CONFIG_JSON": config_json,
         "OTEL_SERVICE_NAME": request.name,
+        "AGENT_OBSERVABILITY_ENABLED": "true",
     }
 
     # Use a unique placeholder for ARN until deployment completes
