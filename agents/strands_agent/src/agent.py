@@ -10,7 +10,7 @@ from src.config import AgentConfig
 from src.integrations.mcp_client import create_mcp_clients
 from src.integrations.a2a_client import create_a2a_clients
 from src.integrations.memory import MemoryHook
-from src.telemetry import setup_telemetry, TelemetryHook
+from src.telemetry import TelemetryHook
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +29,9 @@ def build_agent(config: AgentConfig) -> Agent:
     Returns:
         A configured Strands Agent instance.
     """
-    setup_telemetry()
-
     model = BedrockModel(
         model_id=config.model_id,
+        max_tokens=config.max_tokens,
         streaming=True,
     )
     logger.info("Initialized BedrockModel with model_id=%s", config.model_id)

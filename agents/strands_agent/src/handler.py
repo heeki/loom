@@ -12,24 +12,17 @@ The handler is async and yields streaming events via
 generated (R5).
 """
 
-import json
-import logging
-import os
 from typing import Any, AsyncGenerator
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
+from strands.types.exceptions import MaxTokensReachedException
 
 from src.config import load_config
 from src.agent import build_agent
 from src.telemetry import trace_invocation
 
-logging.basicConfig(
-    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
-    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
-
 app = BedrockAgentCoreApp()
+logger = app.logger
 
 # Module-level agent instance, initialized once at cold start
 _agent = None
@@ -70,17 +63,21 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
 
     with trace_invocation(invocation_id=session_id) as span:
         span.set_attribute("agent.session_id", session_id)
-        stream = agent.stream_async(prompt)
-        async for event in stream:
-            if isinstance(event, dict):
-                text = None
-                data = event.get("data")
-                if isinstance(data, str):
-                    text = data
-                elif isinstance(event.get("delta"), dict):
-                    text = event["delta"].get("text")
-                if text:
-                    yield text
+        try:
+            stream = agent.stream_async(prompt)
+            async for event in stream:
+                if isinstance(event, dict):
+                    text = None
+                    data = event.get("data")
+                    if isinstance(data, str):
+                        text = data
+                    elif isinstance(event.get("delta"), dict):
+                        text = event["delta"].get("text")
+                    if text:
+                        yield text
+        except MaxTokensReachedException:
+            logger.warning("Max tokens reached for session_id=%s", session_id)
+            yield "\n\n[Response truncated: the model reached its maximum output token limit. Try a shorter prompt or a model with a higher token limit.]"
 
 
 def main() -> None:

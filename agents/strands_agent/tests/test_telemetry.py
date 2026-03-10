@@ -4,17 +4,13 @@ import unittest
 from typing import Sequence
 from unittest.mock import patch, MagicMock
 
-from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider, ReadableSpan
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
 from opentelemetry.trace import StatusCode
 
 import src.telemetry as telemetry_module
 from src.telemetry import (
-    setup_telemetry,
     trace_invocation,
-    trace_tool_call,
-    trace_model_call,
     TelemetryHook,
 )
 
@@ -40,7 +36,6 @@ class _OtelTestBase(unittest.TestCase):
     """Base class that patches get_tracer to use a test TracerProvider."""
 
     def setUp(self) -> None:
-        telemetry_module._telemetry_initialized = False
         self.exporter = _InMemorySpanExporter()
         self.provider = TracerProvider()
         self.provider.add_span_processor(SimpleSpanProcessor(self.exporter))
@@ -54,31 +49,6 @@ class _OtelTestBase(unittest.TestCase):
     def tearDown(self) -> None:
         self._patcher.stop()
         self.provider.shutdown()
-        telemetry_module._telemetry_initialized = False
-
-
-class TestSetupTelemetry(unittest.TestCase):
-    """Tests for setup_telemetry()."""
-
-    def setUp(self) -> None:
-        telemetry_module._telemetry_initialized = False
-
-    def tearDown(self) -> None:
-        telemetry_module._telemetry_initialized = False
-
-    def test_setup_succeeds(self) -> None:
-        """setup_telemetry() installs the log filter without error."""
-        setup_telemetry()
-        self.assertTrue(telemetry_module._telemetry_initialized)
-
-    def test_idempotency(self) -> None:
-        """Calling setup_telemetry() twice should be a no-op the second time."""
-        setup_telemetry()
-        self.assertTrue(telemetry_module._telemetry_initialized)
-
-        with patch.object(telemetry_module, "_install_log_filter") as mock_filter:
-            setup_telemetry()
-            mock_filter.assert_not_called()
 
 
 class TestTraceInvocation(_OtelTestBase):
@@ -111,110 +81,86 @@ class TestTraceInvocation(_OtelTestBase):
         self.assertEqual(spans[0].status.status_code, StatusCode.ERROR)
 
 
-class TestTraceToolCall(_OtelTestBase):
-    """Tests for trace_tool_call context manager."""
-
-    def test_creates_span_with_tool_name(self) -> None:
-        with trace_tool_call("my_tool") as span:
-            self.assertIsNotNone(span)
-
-        spans = self.exporter.get_finished_spans()
-        self.assertEqual(len(spans), 1)
-        self.assertEqual(spans[0].name, "tool.call")
-        self.assertEqual(spans[0].attributes["tool.name"], "my_tool")
-
-    def test_records_exception_on_error(self) -> None:
-        with self.assertRaises(ValueError):
-            with trace_tool_call("bad_tool"):
-                raise ValueError("tool failed")
-
-        spans = self.exporter.get_finished_spans()
-        self.assertEqual(spans[0].status.status_code, StatusCode.ERROR)
-
-
-class TestTraceModelCall(_OtelTestBase):
-    """Tests for trace_model_call context manager."""
-
-    def test_creates_span_with_model_id(self) -> None:
-        with trace_model_call("claude-v3") as span:
-            self.assertIsNotNone(span)
-
-        spans = self.exporter.get_finished_spans()
-        self.assertEqual(len(spans), 1)
-        self.assertEqual(spans[0].name, "model.call")
-        self.assertEqual(spans[0].attributes["model.id"], "claude-v3")
-
-
 class TestTelemetryHook(_OtelTestBase):
     """Tests for TelemetryHook class."""
 
-    def test_before_after_tool_use_creates_span(self) -> None:
+    def _make_before_tool_event(self, tool_name: str) -> MagicMock:
+        event = MagicMock()
+        event.tool_use = {"name": tool_name, "toolUseId": "test-id"}
+        return event
+
+    def _make_after_tool_event(self, tool_name: str, exception: Exception | None = None) -> MagicMock:
+        event = MagicMock()
+        event.tool_use = {"name": tool_name, "toolUseId": "test-id"}
+        event.exception = exception
+        return event
+
+    def _make_before_model_event(self) -> MagicMock:
+        return MagicMock()
+
+    def _make_after_model_event(self, exception: Exception | None = None) -> MagicMock:
+        event = MagicMock()
+        event.exception = exception
+        return event
+
+    def test_register_hooks_registers_callbacks(self) -> None:
         hook = TelemetryHook()
-        hook.before_tool_use("calculator")
-        hook.after_tool_use("calculator", result="42")
+        registry = MagicMock()
+        hook.register_hooks(registry)
+        self.assertEqual(registry.add_callback.call_count, 4)
+
+    def test_before_after_tool_call_creates_span(self) -> None:
+        hook = TelemetryHook()
+        hook._on_before_tool_call(self._make_before_tool_event("calculator"))
+        hook._on_after_tool_call(self._make_after_tool_event("calculator"))
 
         spans = self.exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
         self.assertEqual(spans[0].name, "tool.call")
         self.assertEqual(spans[0].attributes["tool.name"], "calculator")
 
-    def test_after_tool_use_with_error_sets_error_status(self) -> None:
+    def test_after_tool_call_with_error_sets_error_status(self) -> None:
         hook = TelemetryHook()
         err = RuntimeError("tool exploded")
-        hook.before_tool_use("bad_tool")
-        hook.after_tool_use("bad_tool", error=err)
+        hook._on_before_tool_call(self._make_before_tool_event("bad_tool"))
+        hook._on_after_tool_call(self._make_after_tool_event("bad_tool", exception=err))
 
         spans = self.exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
         self.assertEqual(spans[0].status.status_code, StatusCode.ERROR)
 
-    def test_before_after_model_invoke_creates_span(self) -> None:
+    def test_before_after_model_call_creates_span(self) -> None:
         hook = TelemetryHook()
-        hook.before_model_invoke(model_id="claude-v3")
-        hook.after_model_invoke(result="response")
+        hook._on_before_model_call(self._make_before_model_event())
+        hook._on_after_model_call(self._make_after_model_event())
 
         spans = self.exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
         self.assertEqual(spans[0].name, "model.call")
-        self.assertEqual(spans[0].attributes["model.id"], "claude-v3")
 
-    def test_after_model_invoke_with_error_sets_error_status(self) -> None:
+    def test_after_model_call_with_error_sets_error_status(self) -> None:
         hook = TelemetryHook()
-        hook.before_model_invoke(model_id="claude-v3")
-        hook.after_model_invoke(error=RuntimeError("model failed"))
+        hook._on_before_model_call(self._make_before_model_event())
+        hook._on_after_model_call(self._make_after_model_event(exception=RuntimeError("model failed")))
 
         spans = self.exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
         self.assertEqual(spans[0].status.status_code, StatusCode.ERROR)
 
-    def test_after_tool_use_without_before_is_safe(self) -> None:
+    def test_after_tool_call_without_before_is_safe(self) -> None:
         hook = TelemetryHook()
-        hook.after_tool_use("unknown_tool", result="ok")
+        hook._on_after_tool_call(self._make_after_tool_event("unknown_tool"))
 
-    def test_after_model_invoke_without_before_is_safe(self) -> None:
+    def test_after_model_call_without_before_is_safe(self) -> None:
         hook = TelemetryHook()
-        hook.after_model_invoke(result="ok")
+        hook._on_after_model_call(self._make_after_model_event())
 
 
 class TestNoopOperations(unittest.TestCase):
     """Verify tracing operations succeed even without setup (noop mode)."""
 
-    def setUp(self) -> None:
-        telemetry_module._telemetry_initialized = False
-
-    def tearDown(self) -> None:
-        telemetry_module._telemetry_initialized = False
-
     def test_trace_invocation_noop(self) -> None:
         with trace_invocation(invocation_id="noop-1") as span:
-            self.assertIsNotNone(span)
-
-    def test_trace_tool_call_noop(self) -> None:
-        with trace_tool_call("noop_tool") as span:
-            self.assertIsNotNone(span)
-
-    def test_trace_model_call_noop(self) -> None:
-        with trace_model_call("noop_model") as span:
             self.assertIsNotNone(span)
 
 

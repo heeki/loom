@@ -155,14 +155,13 @@ The agent emits OpenTelemetry traces and metrics via the AWS Distro for OpenTele
 
 **Span hierarchy:**
 - `agent.invocation` (root span per request) — created by `trace_invocation()` in `handler.py`
-  - `tool.call` (child spans) — created by `TelemetryHook.before_tool_use()`
-  - `model.call` (child spans) — created by `TelemetryHook.before_model_invoke()`
+  - `tool.call` (child spans) — created by `TelemetryHook` via `BeforeToolCallEvent`
+  - `model.call` (child spans) — created by `TelemetryHook` via `BeforeModelCallEvent`
 
 **Span attributes:**
 - `agent.invocation_id` — session ID passed from the invocation payload
 - `agent.session_id` — session ID set on the root span
 - `tool.name` — name of the tool being called
-- `model.id` — model identifier for LLM calls
 
 **ADOT auto-instrumentation:** The deployment entry point uses `opentelemetry-instrument` as a wrapper (`["opentelemetry-instrument", "src/handler.py"]`), which activates ADOT auto-instrumentation at process startup — before any application code runs. This automatically traces boto3 calls, HTTP clients, and other supported libraries without any manual provider configuration.
 
