@@ -5,12 +5,14 @@ import os
 from typing import Any
 
 import boto3
+from strands.hooks.registry import HookRegistry
+from strands.hooks.events import BeforeInvocationEvent, AfterInvocationEvent
 
 logger = logging.getLogger(__name__)
 
 
 class MemoryHook:
-    """Strands hook that loads/saves conversation context via AgentCore Memory.
+    """Strands HookProvider that loads/saves conversation context via AgentCore Memory.
 
     The hook reads the memory store ID from the ``MEMORY_STORE_ID``
     environment variable. If the variable is unset or empty the hook
@@ -33,23 +35,36 @@ class MemoryHook:
             self._client = boto3.client("bedrock-agentcore")
         return self._client
 
-    def pre_invoke(self, context: dict[str, Any]) -> None:
-        """Load conversation history from AgentCore Memory before invocation.
+    def register_hooks(self, registry: HookRegistry, **kwargs: Any) -> None:
+        """Register callbacks for invocation lifecycle events."""
+        registry.add_callback(BeforeInvocationEvent, self._on_before_invocation)
+        registry.add_callback(AfterInvocationEvent, self._on_after_invocation)
 
-        Args:
-            context: Strands invocation context dict.
-        """
+    def _on_before_invocation(self, event: BeforeInvocationEvent) -> None:
+        """Load conversation history from AgentCore Memory before invocation."""
         if not self.memory_store_id:
             return
 
         try:
+            query = ""
+            if event.messages:
+                for msg in reversed(event.messages):
+                    content = msg.get("content", [])
+                    if isinstance(content, list):
+                        for block in content:
+                            if isinstance(block, dict) and "text" in block:
+                                query = block["text"]
+                                break
+                    if query:
+                        break
+
             response = self.client.retrieve_memory(
                 memoryStoreId=self.memory_store_id,
-                query=context.get("input", ""),
+                query=query,
             )
             memories = response.get("memories", [])
             if memories:
-                context["memory"] = memories
+                event.invocation_state["memory"] = memories
                 logger.debug(
                     "Loaded %d memory item(s) from store '%s'",
                     len(memories),
@@ -61,17 +76,18 @@ class MemoryHook:
                 self.memory_store_id,
             )
 
-    def post_invoke(self, context: dict[str, Any]) -> None:
-        """Save updated conversation context to AgentCore Memory after invocation.
-
-        Args:
-            context: Strands invocation context dict.
-        """
+    def _on_after_invocation(self, event: AfterInvocationEvent) -> None:
+        """Save updated conversation context to AgentCore Memory after invocation."""
         if not self.memory_store_id:
             return
 
         try:
-            messages = context.get("messages", [])
+            result = event.result
+            if not result:
+                logger.debug("No result to save to memory store")
+                return
+
+            messages = getattr(result, "messages", None) or []
             if not messages:
                 logger.debug("No messages to save to memory store")
                 return

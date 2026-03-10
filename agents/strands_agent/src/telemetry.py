@@ -1,113 +1,37 @@
 """OpenTelemetry instrumentation for the Loom Strands agent.
 
-Provides tracing, metrics, and structured logging with trace context
-using AWS Distro for OpenTelemetry (ADOT). Operates in noop mode when
-OTEL_EXPORTER_OTLP_ENDPOINT is not configured.
+Provides application-level tracing spans for invocations, tool calls,
+and model calls.  Provider configuration (exporters, resource, etc.)
+is handled by the ``opentelemetry-instrument`` CLI wrapper that
+AgentCore Runtime uses as the process entry point.  When running
+locally without the wrapper the OpenTelemetry API falls back to
+noop providers automatically.
 """
 
 import logging
-import os
 from contextlib import contextmanager
-from typing import Generator, Optional
+from typing import Any, Generator, Optional
 
-from opentelemetry import trace, metrics
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.sdk.metrics import MeterProvider
-from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
-from opentelemetry.sdk.resources import Resource
+from opentelemetry import trace
 from opentelemetry.trace import Span, StatusCode
+
+from strands.hooks.registry import HookRegistry
+from strands.hooks.events import (
+    BeforeToolCallEvent,
+    AfterToolCallEvent,
+    BeforeModelCallEvent,
+    AfterModelCallEvent,
+)
 
 logger = logging.getLogger(__name__)
 
-_SERVICE_NAME_DEFAULT = "loom-agent"
 _TRACER_SCOPE = "loom.strands_agent"
-_METER_SCOPE = "loom.strands_agent"
-_telemetry_initialized = False
-
-
-class _TraceContextFilter(logging.Filter):
-    """Injects trace context into log records."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        span = trace.get_current_span()
-        ctx = span.get_span_context()
-        if ctx and ctx.is_valid:
-            record.trace_id = format(ctx.trace_id, "032x")
-            record.span_id = format(ctx.span_id, "016x")
-            record.trace_flags = format(ctx.trace_flags, "02x")
-        else:
-            record.trace_id = "0" * 32
-            record.span_id = "0" * 16
-            record.trace_flags = "00"
-        return True
-
-
-def setup_telemetry() -> None:
-    """Initialise OpenTelemetry tracing, metrics, and logging.
-
-    Reads configuration from environment variables:
-      - ``OTEL_SERVICE_NAME`` – logical service name (default ``loom-agent``)
-      - ``OTEL_EXPORTER_OTLP_ENDPOINT`` – OTLP gRPC endpoint
-
-    When the endpoint is not set the function configures noop providers so
-    that call-sites can use the same API without branching.
-    """
-    global _telemetry_initialized
-    if _telemetry_initialized:
-        return
-
-    service_name = os.environ.get("OTEL_SERVICE_NAME", _SERVICE_NAME_DEFAULT)
-    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
-
-    resource = Resource.create({"service.name": service_name})
-
-    if endpoint:
-        _setup_active(resource, endpoint)
-        logger.info("OpenTelemetry initialised (endpoint=%s, service=%s)", endpoint, service_name)
-    else:
-        logger.info("OTEL_EXPORTER_OTLP_ENDPOINT not set; telemetry in noop mode")
-
-    _install_log_filter()
-    _telemetry_initialized = True
-
-
-def _setup_active(resource: Resource, endpoint: str) -> None:
-    """Wire up real exporters for traces and metrics."""
-    # Traces
-    tracer_provider = TracerProvider(resource=resource)
-    span_exporter = OTLPSpanExporter(endpoint=endpoint, insecure=True)
-    tracer_provider.add_span_processor(BatchSpanProcessor(span_exporter))
-    trace.set_tracer_provider(tracer_provider)
-
-    # Metrics
-    metric_exporter = OTLPMetricExporter(endpoint=endpoint, insecure=True)
-    reader = PeriodicExportingMetricReader(metric_exporter)
-    meter_provider = MeterProvider(resource=resource, metric_readers=[reader])
-    metrics.set_meter_provider(meter_provider)
-
-
-def _install_log_filter() -> None:
-    """Add trace-context filter to the root logger."""
-    root = logging.getLogger()
-    root.addFilter(_TraceContextFilter())
 
 
 def get_tracer() -> trace.Tracer:
     """Return a tracer scoped to the strands agent."""
     return trace.get_tracer(_TRACER_SCOPE)
 
-
-def get_meter() -> metrics.Meter:
-    """Return a meter scoped to the strands agent."""
-    return metrics.get_meter(_METER_SCOPE)
-
-
-# ---------------------------------------------------------------------------
-# Convenience context managers for common span patterns
-# ---------------------------------------------------------------------------
 
 @contextmanager
 def trace_invocation(
@@ -137,45 +61,52 @@ def trace_invocation(
             raise
 
 
-@contextmanager
-def trace_tool_call(tool_name: str) -> Generator[Span, None, None]:
-    """Create a child span for an MCP tool call.
+# ---------------------------------------------------------------------------
+# Strands Agent telemetry hook
+# ---------------------------------------------------------------------------
 
-    Args:
-        tool_name: Name of the tool being invoked.
+class TelemetryHook:
+    """Strands Agent HookProvider that creates OTEL spans for tool and model calls."""
 
-    Yields:
-        The active ``Span``.
-    """
-    tracer = get_tracer()
-    with tracer.start_as_current_span(
-        "tool.call", attributes={"tool.name": tool_name}
-    ) as span:
-        try:
-            yield span
-        except Exception as exc:
-            span.set_status(StatusCode.ERROR, str(exc))
-            span.record_exception(exc)
-            raise
+    def __init__(self) -> None:
+        self._tool_spans: dict[str, Span] = {}
+        self._model_spans: dict[int, Span] = {}
+        self._model_call_counter: int = 0
 
+    def register_hooks(self, registry: HookRegistry, **kwargs: Any) -> None:
+        """Register callbacks for tool and model lifecycle events."""
+        registry.add_callback(BeforeToolCallEvent, self._on_before_tool_call)
+        registry.add_callback(AfterToolCallEvent, self._on_after_tool_call)
+        registry.add_callback(BeforeModelCallEvent, self._on_before_model_call)
+        registry.add_callback(AfterModelCallEvent, self._on_after_model_call)
 
-@contextmanager
-def trace_model_call(model_id: str) -> Generator[Span, None, None]:
-    """Create a child span for a model / LLM call.
+    def _on_before_tool_call(self, event: BeforeToolCallEvent) -> None:
+        tool_name = event.tool_use.get("name", "unknown")
+        tracer = get_tracer()
+        span = tracer.start_span("tool.call", attributes={"tool.name": tool_name})
+        self._tool_spans[tool_name] = span
 
-    Args:
-        model_id: Identifier of the model being called.
+    def _on_after_tool_call(self, event: AfterToolCallEvent) -> None:
+        tool_name = event.tool_use.get("name", "unknown")
+        span = self._tool_spans.pop(tool_name, None)
+        if span:
+            if event.exception:
+                span.set_status(StatusCode.ERROR, str(event.exception))
+                span.record_exception(event.exception)
+            span.end()
 
-    Yields:
-        The active ``Span``.
-    """
-    tracer = get_tracer()
-    with tracer.start_as_current_span(
-        "model.call", attributes={"model.id": model_id}
-    ) as span:
-        try:
-            yield span
-        except Exception as exc:
-            span.set_status(StatusCode.ERROR, str(exc))
-            span.record_exception(exc)
-            raise
+    def _on_before_model_call(self, event: BeforeModelCallEvent) -> None:
+        tracer = get_tracer()
+        self._model_call_counter += 1
+        span = tracer.start_span("model.call")
+        self._model_spans[self._model_call_counter] = span
+
+    def _on_after_model_call(self, event: AfterModelCallEvent) -> None:
+        if self._model_spans:
+            key = max(self._model_spans.keys())
+            span = self._model_spans.pop(key, None)
+            if span:
+                if event.exception:
+                    span.set_status(StatusCode.ERROR, str(event.exception))
+                    span.record_exception(event.exception)
+                span.end()

@@ -79,6 +79,27 @@ class TestCreateRuntime(unittest.TestCase):
         self.assertEqual(result["agentRuntimeId"], "rt-123")
 
     @patch("boto3.client")
+    def test_create_runtime_entry_point_uses_otel_instrument(self, mock_boto_client: MagicMock) -> None:
+        """Test that the entry point wraps handler with opentelemetry-instrument."""
+        mock_client = MagicMock()
+        mock_boto_client.return_value = mock_client
+        mock_client.create_agent_runtime.return_value = {"agentRuntimeId": "rt-789"}
+
+        create_runtime(
+            name="otel-agent",
+            description="",
+            role_arn="arn:aws:iam::123:role/r",
+            env_vars={},
+            artifact_bucket="b",
+            artifact_prefix="p",
+            region="us-east-1",
+        )
+
+        call_kwargs = mock_client.create_agent_runtime.call_args[1]
+        entry_point = call_kwargs["agentRuntimeArtifact"]["codeConfiguration"]["entryPoint"]
+        self.assertEqual(entry_point, ["opentelemetry-instrument", "src/handler.py"])
+
+    @patch("boto3.client")
     def test_create_runtime_with_lifecycle_and_authorizer(self, mock_boto_client: MagicMock) -> None:
         """Test create_runtime with optional lifecycle and authorizer configs."""
         mock_client = MagicMock()
@@ -377,6 +398,50 @@ class TestStoreLargeConfig(unittest.TestCase):
             ContentType="text/plain",
         )
         self.assertEqual(result, "s3://my-bucket/my-agent/config/large-config")
+
+
+class TestFixConsoleScriptShebangs(unittest.TestCase):
+    """Test cases for _fix_console_script_shebangs function."""
+
+    def test_fixes_opentelemetry_instrument_shebang(self) -> None:
+        """Test that macOS shebangs are replaced with portable shebangs."""
+        import tempfile
+        import shutil
+        from app.services.deployment import _fix_console_script_shebangs
+
+        tmp = tempfile.mkdtemp()
+        try:
+            bin_dir = os.path.join(tmp, "bin")
+            os.makedirs(bin_dir)
+            script_path = os.path.join(bin_dir, "opentelemetry-instrument")
+            with open(script_path, "w") as f:
+                f.write("#!/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12\n"
+                        "import sys\n"
+                        "from opentelemetry.instrumentation.auto_instrumentation import run\n"
+                        "if __name__ == '__main__':\n"
+                        "    sys.exit(run())\n")
+
+            _fix_console_script_shebangs(tmp)
+
+            with open(script_path) as f:
+                content = f.read()
+            self.assertTrue(content.startswith("#!/usr/bin/env python3\n"))
+            self.assertIn("from opentelemetry.instrumentation.auto_instrumentation import run", content)
+            self.assertEqual(os.stat(script_path).st_mode & 0o777, 0o755)
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_no_bin_dir_is_noop(self) -> None:
+        """Test that missing bin/ directory doesn't raise."""
+        import tempfile
+        import shutil
+        from app.services.deployment import _fix_console_script_shebangs
+
+        tmp = tempfile.mkdtemp()
+        try:
+            _fix_console_script_shebangs(tmp)  # should not raise
+        finally:
+            shutil.rmtree(tmp)
 
 
 if __name__ == "__main__":

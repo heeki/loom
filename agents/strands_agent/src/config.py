@@ -58,6 +58,7 @@ class AgentConfig:
 
     system_prompt: str
     model_id: str
+    max_tokens: int = 4096
     integrations: IntegrationsConfig = field(default_factory=IntegrationsConfig)
 
 
@@ -130,6 +131,7 @@ def _parse_config(data: dict) -> AgentConfig:
     return AgentConfig(
         system_prompt=system_prompt,
         model_id=data["model_id"],
+        max_tokens=data.get("max_tokens", 4096),
         integrations=_parse_integrations(data.get("integrations")),
     )
 

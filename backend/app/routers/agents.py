@@ -24,7 +24,6 @@ from app.services.agentcore import describe_runtime, list_runtime_endpoints
 from app.services.deployment import (
     build_agent_artifact,
     create_runtime,
-    create_runtime_endpoint,
     delete_runtime,
     delete_runtime_endpoint,
     get_runtime,
@@ -46,16 +45,16 @@ router = APIRouter(prefix="/api/agents", tags=["agents"])
 DEFAULT_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 SUPPORTED_MODELS = [
-    {"model_id": "us.anthropic.claude-opus-4-6-v1", "display_name": "Claude Opus 4.6", "group": "Anthropic"},
-    {"model_id": "us.anthropic.claude-sonnet-4-6", "display_name": "Claude Sonnet 4.6", "group": "Anthropic"},
-    {"model_id": "us.anthropic.claude-opus-4-5-20251101-v1:0", "display_name": "Claude Opus 4.5", "group": "Anthropic"},
-    {"model_id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "display_name": "Claude Sonnet 4.5", "group": "Anthropic"},
-    {"model_id": "us.anthropic.claude-haiku-4-5-20251001-v1:0", "display_name": "Claude Haiku 4.5", "group": "Anthropic"},
-    {"model_id": "us.amazon.nova-2-lite-v1:0", "display_name": "Nova 2 Lite", "group": "Amazon"},
-    {"model_id": "us.amazon.nova-premier-v1:0", "display_name": "Nova Premier", "group": "Amazon"},
-    {"model_id": "us.amazon.nova-pro-v1:0", "display_name": "Nova Pro", "group": "Amazon"},
-    {"model_id": "us.amazon.nova-lite-v1:0", "display_name": "Nova Lite", "group": "Amazon"},
-    {"model_id": "us.amazon.nova-micro-v1:0", "display_name": "Nova Micro", "group": "Amazon"},
+    {"model_id": "us.anthropic.claude-opus-4-6-v1", "display_name": "Claude Opus 4.6", "group": "Anthropic", "max_tokens": 16384},
+    {"model_id": "us.anthropic.claude-sonnet-4-6", "display_name": "Claude Sonnet 4.6", "group": "Anthropic", "max_tokens": 16384},
+    {"model_id": "us.anthropic.claude-opus-4-5-20251101-v1:0", "display_name": "Claude Opus 4.5", "group": "Anthropic", "max_tokens": 16384},
+    {"model_id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "display_name": "Claude Sonnet 4.5", "group": "Anthropic", "max_tokens": 16384},
+    {"model_id": "us.anthropic.claude-haiku-4-5-20251001-v1:0", "display_name": "Claude Haiku 4.5", "group": "Anthropic", "max_tokens": 8192},
+    {"model_id": "us.amazon.nova-2-lite-v1:0", "display_name": "Nova 2 Lite", "group": "Amazon", "max_tokens": 5120},
+    {"model_id": "us.amazon.nova-premier-v1:0", "display_name": "Nova Premier", "group": "Amazon", "max_tokens": 5120},
+    {"model_id": "us.amazon.nova-pro-v1:0", "display_name": "Nova Pro", "group": "Amazon", "max_tokens": 5120},
+    {"model_id": "us.amazon.nova-lite-v1:0", "display_name": "Nova Lite", "group": "Amazon", "max_tokens": 5120},
+    {"model_id": "us.amazon.nova-micro-v1:0", "display_name": "Nova Micro", "group": "Amazon", "max_tokens": 5120},
 ]
 
 
@@ -407,9 +406,15 @@ def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
 
     # Build config JSON (includes system prompt, model, and integrations)
     system_prompt = _build_system_prompt(request)
+    # Look up the model's max output tokens from SUPPORTED_MODELS
+    model_max_tokens = next(
+        (m["max_tokens"] for m in SUPPORTED_MODELS if m["model_id"] == request.model_id),
+        4096,
+    )
     config_json = json.dumps({
         "system_prompt": system_prompt,
         "model_id": request.model_id,
+        "max_tokens": model_max_tokens,
         "integrations": {
             "mcp_servers": request.mcp_servers,
             "a2a_agents": request.a2a_agents,
@@ -418,6 +423,8 @@ def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
     })
     env_vars = {
         "AGENT_CONFIG_JSON": config_json,
+        "OTEL_SERVICE_NAME": request.name,
+        "AGENT_OBSERVABILITY_ENABLED": "true",
     }
 
     # Use a unique placeholder for ARN until deployment completes
@@ -650,21 +657,9 @@ def get_agent_status(agent_id: int, db: Session = Depends(get_db)) -> AgentRespo
         except Exception as e:
             logger.warning("Failed to poll runtime status for %s: %s", agent.runtime_id, e)
 
-        # If runtime is READY and no endpoint exists, create one
+        # Use the DEFAULT endpoint that is auto-created with the runtime
         if agent.status == "READY" and not agent.endpoint_name:
-            try:
-                ep_response = create_runtime_endpoint(
-                    runtime_id=agent.runtime_id,
-                    name=f"{agent.name}-ep",
-                    description=f"Endpoint for {agent.name}",
-                    region=agent.region,
-                )
-                agent.endpoint_name = ep_response.get("name", f"{agent.name}-ep")
-                agent.endpoint_arn = ep_response.get("agentRuntimeEndpointArn")
-                agent.endpoint_status = ep_response.get("status", "CREATING")
-                agent.deployment_status = "ENDPOINT_CREATING"
-            except Exception as e:
-                logger.warning("Failed to create endpoint for %s: %s", agent.runtime_id, e)
+            agent.endpoint_name = "DEFAULT"
 
         # If endpoint exists, check its status
         if agent.endpoint_name:

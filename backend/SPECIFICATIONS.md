@@ -546,8 +546,9 @@ Wraps `boto3.client('bedrock-agentcore-control')` for memory operations:
 3. Builds the deployment artifact:
    - Copies source from `agents/strands_agent/src/`.
    - Runs `pip install` against `requirements.txt` targeting `linux/arm64` (`manylinux2014_aarch64`).
+   - Fixes console script shebangs (e.g. `opentelemetry-instrument`) to use `#!/usr/bin/env python3` for Linux compatibility.
    - Zips the package and uploads it to S3.
-4. Calls `create_agent_runtime` with the artifact location, environment variables, network/protocol/lifecycle/authorizer configuration.
+4. Calls `create_agent_runtime` with the artifact location, environment variables (including `OTEL_SERVICE_NAME` set to the agent name and `AGENT_OBSERVABILITY_ENABLED=true` to activate the `aws-opentelemetry-distro` export pipeline), network/protocol/lifecycle/authorizer configuration.
 5. Stores authorizer config on the agent record. Stores the Cognito `client_id` as a config entry. Stores the `client_secret` in AWS Secrets Manager and saves the resulting ARN as a config entry.
 6. On delete with `cleanup_aws=true`: deletes the endpoint, deletes the runtime, and cleans up the Secrets Manager secret.
 

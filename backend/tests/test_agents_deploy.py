@@ -436,15 +436,9 @@ class TestAgentsDeployRouter(unittest.TestCase):
         )
         agent_id = create_resp.json()["id"]
 
-        with patch("app.routers.agents.create_runtime_endpoint") as mock_ep:
-            mock_ep.return_value = {
-                "name": "status-agent-ep",
-                "agentRuntimeEndpointArn": "arn:ep",
-                "status": "CREATING",
-            }
-            with patch("app.routers.agents.get_runtime_endpoint") as mock_get_ep:
-                mock_get_ep.return_value = {"status": "CREATING", "agentRuntimeEndpointArn": "arn:ep"}
-                response = self.client.get(f"/api/agents/{agent_id}/status")
+        with patch("app.routers.agents.get_runtime_endpoint") as mock_get_ep:
+            mock_get_ep.return_value = {"status": "READY", "agentRuntimeEndpointArn": "arn:ep"}
+            response = self.client.get(f"/api/agents/{agent_id}/status")
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -484,7 +478,7 @@ class TestAgentsDeployRouter(unittest.TestCase):
         data = response.json()
         self.assertTrue(len(data) > 0)
         model_ids = [m["model_id"] for m in data]
-        self.assertIn("us.anthropic.claude-sonnet-4-6-v1", model_ids)
+        self.assertIn("us.anthropic.claude-sonnet-4-6", model_ids)
 
 
 if __name__ == "__main__":
