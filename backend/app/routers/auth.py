@@ -16,10 +16,8 @@ def get_auth_config() -> dict:
     """
     region = os.getenv("LOOM_COGNITO_REGION", os.getenv("AWS_REGION", "us-east-1"))
     user_pool_id = os.getenv("LOOM_COGNITO_USER_POOL_ID", "")
-    user_client_id = os.getenv("LOOM_COGNITO_USER_CLIENT_ID", "")
 
     return {
         "user_pool_id": user_pool_id,
-        "user_client_id": user_client_id,
         "region": region,
     }

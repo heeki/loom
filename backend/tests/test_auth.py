@@ -23,16 +23,14 @@ class TestAuthConfigEndpoint(unittest.TestCase):
 
     @patch.dict("os.environ", {
         "LOOM_COGNITO_USER_POOL_ID": "us-east-1_TestPool",
-        "LOOM_COGNITO_USER_CLIENT_ID": "test-client-id-123",
         "LOOM_COGNITO_REGION": "us-west-2",
     })
     def test_get_auth_config_returns_expected_fields(self) -> None:
-        """Test that auth config returns pool ID, client ID, and region."""
+        """Test that auth config returns pool ID and region."""
         response = self.client.get("/api/auth/config")
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["user_pool_id"], "us-east-1_TestPool")
-        self.assertEqual(data["user_client_id"], "test-client-id-123")
         self.assertEqual(data["region"], "us-west-2")
 
     @patch.dict("os.environ", {}, clear=True)
@@ -42,7 +40,6 @@ class TestAuthConfigEndpoint(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["user_pool_id"], "")
-        self.assertEqual(data["user_client_id"], "")
         self.assertEqual(data["region"], "us-east-1")
 
 

@@ -111,7 +111,11 @@ src/
 
 ### Authentication
 
-When the backend has Cognito configured (`LOOM_COGNITO_USER_POOL_ID` and `LOOM_COGNITO_USER_CLIENT_ID`), users must sign in before accessing the app. The login page handles the `USER_PASSWORD_AUTH` flow and `NEW_PASSWORD_REQUIRED` challenge. Tokens are stored in memory only (not persisted across page reloads). The access token is automatically attached to all API requests.
+When Cognito is configured, users must sign in before accessing the app. Configuration requires:
+- **Backend:** `LOOM_COGNITO_USER_POOL_ID` in `backend/etc/environment.sh`
+- **Frontend:** `VITE_COGNITO_USER_CLIENT_ID` in `frontend/.env`
+
+The login page handles the `USER_PASSWORD_AUTH` flow and `NEW_PASSWORD_REQUIRED` challenge. Tokens are stored in memory only (not persisted across page reloads). The access token is automatically attached to all API requests. The `.env` file is the standard Vite mechanism for environment variables — any variable prefixed with `VITE_` is exposed via `import.meta.env`.
 
 ### API Layer
 

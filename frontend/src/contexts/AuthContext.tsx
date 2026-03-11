@@ -70,7 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((cfg) => {
         setConfig(cfg);
         // If no pool configured, skip auth
-        if (!cfg.user_pool_id || !cfg.user_client_id) {
+        if (!cfg.user_pool_id || !import.meta.env.VITE_COGNITO_USER_CLIENT_ID) {
           setIsLoading(false);
         }
       })
@@ -81,7 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Mark loading done once config is loaded (if pool is configured, user must log in)
   useEffect(() => {
-    if (config && config.user_pool_id && config.user_client_id) {
+    if (config && config.user_pool_id && import.meta.env.VITE_COGNITO_USER_CLIENT_ID) {
       setIsLoading(false);
     }
   }, [config]);
@@ -103,7 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           try {
             const result = await refreshTokens(
               refreshToken,
-              config.user_client_id,
+              import.meta.env.VITE_COGNITO_USER_CLIENT_ID,
               config.region,
             );
             if (result.AuthenticationResult) {
@@ -168,7 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const result = await initiateAuth(
         username,
         password,
-        config.user_client_id,
+        import.meta.env.VITE_COGNITO_USER_CLIENT_ID,
         config.region,
       );
       processAuthResult(result);
@@ -184,7 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         session,
         username,
         newPassword,
-        config.user_client_id,
+        import.meta.env.VITE_COGNITO_USER_CLIENT_ID,
         config.region,
       );
       processAuthResult(result);
@@ -211,7 +211,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const isConfigured = Boolean(
-    config?.user_pool_id && config?.user_client_id,
+    config?.user_pool_id && import.meta.env.VITE_COGNITO_USER_CLIENT_ID,
   );
 
   return (

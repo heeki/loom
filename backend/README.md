@@ -48,12 +48,11 @@ Runtime configuration is sourced from `etc/environment.sh`:
 | `MEMORY_NAME` | Default memory resource name | `loom_memory` |
 | `MEMORY_EVENT_EXPIRY_DURATION` | Default memory event expiry in days | `30` |
 | `LOOM_COGNITO_USER_POOL_ID` | Cognito User Pool ID for user authentication | — |
-| `LOOM_COGNITO_USER_CLIENT_ID` | Cognito user-facing app client ID | — |
 | `LOOM_COGNITO_REGION` | Region of the Cognito pool | `AWS_REGION` |
 
 AWS credentials use the standard boto3 credential chain (environment variables, AWS profile, instance metadata).
 
-When the `LOOM_COGNITO_USER_POOL_ID` and `LOOM_COGNITO_USER_CLIENT_ID` variables are set, the backend validates user JWTs and forwards user tokens to AgentCore for authenticated invocations. When not set, the app runs without user authentication.
+When `LOOM_COGNITO_USER_POOL_ID` is set, the backend validates user JWTs and forwards user tokens to AgentCore for authenticated invocations. When not set, the app runs without user authentication. The user client ID is configured on the frontend side (via `VITE_COGNITO_USER_CLIENT_ID` in the frontend `.env` file), not the backend.
 
 ## Project Structure
 
@@ -181,7 +180,7 @@ Stores per-invocation timing measurements and status. Fields include `client_inv
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/auth/config` | Return Cognito config (pool ID, client ID, region) for frontend |
+| `GET` | `/api/auth/config` | Return Cognito config (pool ID, region) for frontend |
 
 ### Memory Resources
 

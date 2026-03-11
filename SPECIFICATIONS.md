@@ -86,10 +86,13 @@ loom/
 │   ├── tsconfig.json
 │   ├── vite.config.ts
 │   └── SPECIFICATIONS.md
-├── security/                   # Security IaC templates
-│   └── iac/
-│       ├── role.yaml           # SAM template for IAM roles
-│       └── cognito.yaml        # SAM template for Cognito pools
+├── security/                   # Security IaC templates + user management
+│   ├── iac/
+│   │   ├── role.yaml           # SAM template for IAM roles
+│   │   └── cognito.yaml        # SAM template for Cognito pools, groups, users, scopes
+│   ├── etc/
+│   │   └── environment.sh      # Security configuration (Cognito pool, passwords)
+│   └── makefile                # Cognito stack deploy, user password management
 ├── etc/
 │   └── environment.sh          # Source-of-truth for injectable parameters
 ├── tmp/
@@ -125,15 +128,29 @@ Detailed specifications for each component are maintained in their respective di
 
 ### User Authentication
 
-- Users authenticate via a pre-existing AWS Cognito User Pool using the `USER_PASSWORD_AUTH` flow.
+- Users authenticate via an AWS Cognito User Pool using the `USER_PASSWORD_AUTH` flow.
 - The frontend stores tokens (id, access, refresh) in React state only — never in localStorage or cookies.
 - The backend validates user JWTs against the Cognito JWKS endpoint (keys cached for 1 hour).
-- The `GET /api/auth/config` endpoint exposes only the pool ID, user client ID, and region — never client secrets.
+- The `GET /api/auth/config` endpoint exposes only the pool ID and region — never client IDs or secrets.
+- The user client ID is configured on the frontend via the `VITE_COGNITO_USER_CLIENT_ID` environment variable (Vite `.env` file). The user client has `GenerateSecret: false` since browser-based apps cannot safely store client secrets.
 - When a user is authenticated, their access token is forwarded to AgentCore for agent invocations, replacing the M2M client credentials flow.
 - Unauthenticated requests are allowed to pass through with a warning (no breaking change to existing flows).
 - The `NEW_PASSWORD_REQUIRED` Cognito challenge is handled on first login for admin-created users.
 - Access tokens are automatically refreshed before expiry using the refresh token.
 - Token persistence across browser refreshes is out of scope — users must re-login after page reload.
+
+### Cognito User Pool Configuration
+
+The Cognito User Pool is managed via CloudFormation (`security/iac/cognito.yaml`) and includes:
+
+- **Password policy:** Minimum 12 characters, uppercase, lowercase, numbers required; symbols not required.
+- **Resource server scopes:** `invoke`, `agent:read`, `agent:write`, `security:read`, `security:write`, `data:read`, `data:write`.
+- **Groups:** `admins`, `security-admins`, `data-stewards`, `builders`, `operators`.
+- **Users:** `admin`, `secadmin`, `datasteward`, `builder`, `operator` — each assigned to their respective group via `UserPoolUserToGroupAttachment`.
+- **Clients:**
+  - **M2MClient** — `client_credentials` flow with secret, scoped to `invoke`.
+  - **UserClient** — `USER_PASSWORD_AUTH` + `REFRESH_TOKEN_AUTH` flows without secret, scoped to all custom scopes plus `openid`, `email`, `profile`.
+- User passwords are set via `make cognito.set-passwords` in the `security/` directory.
 
 ---
 
@@ -216,12 +233,14 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Cognito-based user authentication with `USER_PASSWORD_AUTH` flow.
 - Login page with `NEW_PASSWORD_REQUIRED` challenge handling for admin-created users.
 - `AuthContext` provider with login, logout, and automatic token refresh.
-- User indicator and logout button in the sidebar.
+- User indicator (username) and logout button in the sidebar.
 - JWT validation middleware on the backend (JWKS caching, token claim extraction).
 - User access token forwarded to AgentCore for authenticated invocations (priority over M2M flow).
 - Graceful fallback to existing M2M client credentials flow when no user token is present.
-- `GET /api/auth/config` endpoint for frontend to discover Cognito configuration.
+- `GET /api/auth/config` endpoint returns pool ID and region; user client ID is configured on the frontend via `VITE_COGNITO_USER_CLIENT_ID`.
 - Tokens stored in memory only (not localStorage); authentication does not persist across page reloads.
+- Cognito User Pool IaC: resource server with custom scopes (`agent:read/write`, `security:read/write`, `data:read/write`, `invoke`), user groups (`admins`, `security-admins`, `data-stewards`, `builders`, `operators`), users with group assignments, password policy (12+ chars, no symbols required).
+- Security makefile with `cognito.set-passwords` target for setting permanent user passwords.
 
 ### Phase 7 — Advanced Operations
 - Real-time metrics auto-refresh.

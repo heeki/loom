@@ -31,7 +31,6 @@ All runtime configuration is injected via environment variables sourced from `et
 | `MEMORY_NAME` | Default memory resource name | `loom_memory` |
 | `MEMORY_EVENT_EXPIRY_DURATION` | Default memory event expiry in days | `30` |
 | `LOOM_COGNITO_USER_POOL_ID` | Cognito User Pool ID for user authentication | — |
-| `LOOM_COGNITO_USER_CLIENT_ID` | Cognito user-facing app client ID | — |
 | `LOOM_COGNITO_REGION` | Region of the Cognito pool | `AWS_REGION` |
 
 AWS credentials use the standard boto3 credential chain (environment variables, AWS profile, instance metadata).
@@ -276,9 +275,9 @@ All endpoints are prefixed `/api`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/auth/config` | Return Cognito pool ID, user client ID, and region for frontend auth flow. |
+| `GET` | `/api/auth/config` | Return Cognito pool ID and region for frontend auth flow. |
 
-The `/api/auth/config` endpoint does **not** expose client secrets. It returns only the information the frontend needs to initiate the `USER_PASSWORD_AUTH` flow directly with Cognito.
+The `/api/auth/config` endpoint returns only the pool ID and region. The user client ID is configured on the frontend via the `VITE_COGNITO_USER_CLIENT_ID` environment variable. No client secrets are exposed.
 
 ### Agent Registration and Deployment
 

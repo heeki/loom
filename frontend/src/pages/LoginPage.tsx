@@ -83,9 +83,6 @@ export function LoginPage() {
             alt="Loom"
             className="h-16 mx-auto dark:hidden block"
           />
-          <p className="text-sm text-muted-foreground mt-2">
-            Sign in to continue
-          </p>
         </div>
 
         <div className="rounded-lg border bg-card p-6 shadow-sm">

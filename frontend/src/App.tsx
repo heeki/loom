@@ -312,7 +312,7 @@ function AppContent() {
               <div className="flex items-center gap-2 min-w-0">
                 <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 <span className="text-xs text-muted-foreground truncate">
-                  {user.email || user.username || "User"}
+                  {user.username || "User"}
                 </span>
               </div>
               <button

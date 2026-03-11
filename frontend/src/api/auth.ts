@@ -2,7 +2,6 @@ import { apiFetch } from "./client";
 
 export interface AuthConfig {
   user_pool_id: string;
-  user_client_id: string;
   region: string;
 }
 

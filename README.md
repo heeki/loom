@@ -26,7 +26,7 @@ loom/
 ├── agents/            # Agent blueprint source code (Strands Agent)
 ├── backend/           # FastAPI backend (Python, SQLAlchemy, boto3)
 ├── frontend/          # React/TypeScript frontend (Vite, shadcn, Tailwind CSS)
-├── security/          # Security IaC templates (IAM roles, Cognito)
+├── security/          # Security IaC templates (IAM roles, Cognito) + makefile + etc/
 ├── etc/               # Configuration (environment.sh)
 ├── iac/               # Infrastructure as Code (CloudFormation, SAM)
 ├── makefile           # Root orchestration
@@ -63,15 +63,41 @@ npm run dev
 
 ### Authentication (Optional)
 
-To enable Cognito-based user authentication, set these environment variables before starting the backend:
+Cognito-based user authentication requires configuration on both the backend and frontend:
 
+**Backend** — Set these environment variables in `backend/etc/environment.sh`:
 ```bash
 export LOOM_COGNITO_USER_POOL_ID=<your-pool-id>
-export LOOM_COGNITO_USER_CLIENT_ID=<your-user-client-id>
 export LOOM_COGNITO_REGION=<your-region>  # defaults to AWS_REGION
 ```
 
-When configured, users must log in before accessing the application. When not configured, the app runs without authentication (existing behavior).
+**Frontend** — Set the user client ID in `frontend/.env`:
+```bash
+VITE_COGNITO_USER_CLIENT_ID=<your-user-client-id>
+```
+
+When both are configured, users must log in before accessing the application. When not configured, the app runs without authentication.
+
+### Cognito Setup
+
+The `security/` directory contains CloudFormation templates for provisioning the Cognito User Pool with groups, users, scopes, and clients. See `security/iac/cognito.yaml` for the full template.
+
+**Groups and scopes:**
+
+| Group | Scopes |
+|-------|--------|
+| `admins` | agent:read, agent:write, security:read, security:write, data:read, data:write |
+| `security-admins` | security:read, security:write |
+| `data-stewards` | data:read, data:write |
+| `builders` | agent:read, agent:write |
+| `operators` | agent:read, security:read, data:read |
+
+**Deploying and managing users:**
+```bash
+cd security
+make cognito             # Deploy Cognito stack
+make cognito.set-passwords  # Set permanent passwords for all users
+```
 
 ### Configuration
 

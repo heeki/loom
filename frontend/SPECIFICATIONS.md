@@ -95,7 +95,7 @@ The app uses a persona-based single-page architecture with a sidebar for workflo
 | A2A Agents | Users | Future A2A agent management (disabled) | |
 
 The sidebar also contains:
-- User indicator with email/username display and logout button (when authenticated)
+- User indicator with username display and logout button (when authenticated)
 - Theme toggle (Mocha dark / Latte light)
 - Timezone selector (local / UTC)
 - Live clock display
@@ -347,10 +347,11 @@ Cognito client secrets are password-masked in forms. Secrets are sent to the bac
 ### User Authentication
 - `AuthContext` provides login, logout, token refresh, and user state to the entire app.
 - Tokens (id, access, refresh) are stored in React state only — never in localStorage or cookies.
-- The `AuthProvider` wraps the app at the top level (outside `TimezoneProvider`). If Cognito is not configured (empty pool ID/client ID), authentication is bypassed and the app loads normally.
+- The `AuthProvider` wraps the app at the top level (outside `TimezoneProvider`). If Cognito is not configured (empty pool ID from backend or missing `VITE_COGNITO_USER_CLIENT_ID`), authentication is bypassed and the app loads normally.
+- The user client ID is configured via the `VITE_COGNITO_USER_CLIENT_ID` Vite environment variable (in `frontend/.env`), not fetched from the backend. The backend only provides the pool ID and region via `GET /api/auth/config`.
 - `LoginPage` renders when the user is not authenticated. It handles the `NEW_PASSWORD_REQUIRED` challenge for admin-created Cognito users.
 - Access tokens are automatically refreshed 60 seconds before expiry using the refresh token.
-- The user indicator (email/username + logout button) is shown in the sidebar footer, above the theme selector.
+- The user indicator (username + logout button) is shown in the sidebar footer, above the theme selector.
 - `apiFetch` and `invokeAgentStream` automatically include the `Authorization: Bearer` header when a token is available, via a module-level token setter (`setAuthToken`/`getAuthToken`).
 
 ### API Layer Design
