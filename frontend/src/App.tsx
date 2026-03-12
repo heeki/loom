@@ -129,7 +129,7 @@ function SidebarItem({
 }
 
 function AppContent() {
-  const { isAuthenticated, isLoading, user, logout } = useAuth();
+  const { isAuthenticated, isLoading, user, logout, hasScope } = useAuth();
   const [theme, setTheme] = useState<Theme>(() =>
     document.documentElement.classList.contains("dark") ? "dark" : "light",
   );
@@ -273,38 +273,48 @@ function AppContent() {
             active={activePersona === "catalog"}
             onClick={() => setActivePersona("catalog")}
           />
-          <SidebarItem
-            icon={Bot}
-            label="Agents"
-            active={activePersona === "builder"}
-            onClick={() => setActivePersona("builder")}
-          />
-          <SidebarItem
-            icon={Brain}
-            label="Memory"
-            active={activePersona === "memory"}
-            onClick={() => setActivePersona("memory")}
-          />
-          <SidebarItem
-            icon={Shield}
-            label="Security"
-            active={activePersona === "security"}
-            onClick={() => setActivePersona("security")}
-          />
-          <SidebarItem
-            icon={Network}
-            label="MCP Servers"
-            active={false}
-            onClick={() => {}}
-            disabled
-          />
-          <SidebarItem
-            icon={Users}
-            label="A2A Agents"
-            active={false}
-            onClick={() => {}}
-            disabled
-          />
+          {(hasScope("agent:read") || hasScope("agent:write")) && (
+            <SidebarItem
+              icon={Bot}
+              label="Agents"
+              active={activePersona === "builder"}
+              onClick={() => setActivePersona("builder")}
+            />
+          )}
+          {(hasScope("data:read") || hasScope("data:write")) && (
+            <SidebarItem
+              icon={Brain}
+              label="Memory"
+              active={activePersona === "memory"}
+              onClick={() => setActivePersona("memory")}
+            />
+          )}
+          {(hasScope("security:read") || hasScope("security:write")) && (
+            <SidebarItem
+              icon={Shield}
+              label="Security"
+              active={activePersona === "security"}
+              onClick={() => setActivePersona("security")}
+            />
+          )}
+          {(hasScope("data:read") || hasScope("data:write")) && (
+            <>
+              <SidebarItem
+                icon={Network}
+                label="MCP Servers"
+                active={false}
+                onClick={() => {}}
+                disabled
+              />
+              <SidebarItem
+                icon={Users}
+                label="A2A Agents"
+                active={false}
+                onClick={() => {}}
+                disabled
+              />
+            </>
+          )}
         </nav>
         <div className="p-2 border-t space-y-1">
           {user && (
@@ -386,6 +396,7 @@ function AppContent() {
                   onSelectAgent={setSelectedAgentId}
                   onRefreshAgent={refreshAgent}
                   onDelete={handleDelete}
+                  readOnly={!hasScope("agent:write")}
                 />
               )}
 
@@ -438,11 +449,12 @@ function AppContent() {
               }}
               onRefreshAgent={refreshAgent}
               onDelete={handleDelete}
+              readOnly={!hasScope("agent:write")}
             />
           )}
 
-          {activePersona === "security" && <SecurityAdminPage />}
-          {activePersona === "memory" && <MemoryManagementPage viewMode={memoryViewMode} onViewModeChange={setMemoryViewMode} />}
+          {activePersona === "security" && <SecurityAdminPage readOnly={!hasScope("security:write")} />}
+          {activePersona === "memory" && <MemoryManagementPage viewMode={memoryViewMode} onViewModeChange={setMemoryViewMode} readOnly={!hasScope("data:write")} />}
         </main>
       </div>
 

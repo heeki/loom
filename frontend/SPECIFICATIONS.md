@@ -85,14 +85,16 @@ The app uses a persona-based single-page architecture with a sidebar for workflo
 
 ### Persona Navigation (Sidebar)
 
-| Persona | Icon | Description | Default |
-|---------|------|-------------|---------|
-| Platform Catalog | BookOpen | Browse agents, memory resources, MCP servers (coming soon), A2A agents (coming soon) | Yes |
-| Agents | Bot | Deploy new agents or import existing ones | |
-| Memory | Brain | Create and manage AgentCore Memory resources | |
-| Security Admin | Shield | Manage roles, authorizers, credentials, permissions | |
-| MCP Servers | Network | Future MCP server management (disabled) | |
-| A2A Agents | Users | Future A2A agent management (disabled) | |
+| Persona | Icon | Description | Required Scope | Default |
+|---------|------|-------------|----------------|---------|
+| Platform Catalog | BookOpen | Browse agents, memory resources, MCP servers (coming soon), A2A agents (coming soon) | Always visible | Yes |
+| Agents | Bot | Deploy new agents or import existing ones | `agent:read` or `agent:write` | |
+| Memory | Brain | Create and manage AgentCore Memory resources | `data:read` or `data:write` | |
+| Security Admin | Shield | Manage roles, authorizers, credentials, permissions | `security:read` or `security:write` | |
+| MCP Servers | Network | Future MCP server management (disabled) | `data:read` or `data:write` | |
+| A2A Agents | Users | Future A2A agent management (disabled) | `data:read` or `data:write` | |
+
+Sidebar items are conditionally rendered based on the user's scopes derived from their Cognito group membership. When auth is not configured, all items are visible.
 
 The sidebar also contains:
 - User indicator with username display and logout button (when authenticated)
@@ -345,14 +347,22 @@ Inline component for adding/removing tag-style values (clients, scopes). Single 
 Cognito client secrets are password-masked in forms. Secrets are sent to the backend which stores them in AWS Secrets Manager — they never persist in the frontend or local database.
 
 ### User Authentication
-- `AuthContext` provides login, logout, token refresh, and user state to the entire app.
+- `AuthContext` provides login, logout, token refresh, user state, and scope-based authorization to the entire app.
 - Tokens (id, access, refresh) are stored in React state only — never in localStorage or cookies.
-- The `AuthProvider` wraps the app at the top level (outside `TimezoneProvider`). If Cognito is not configured (empty pool ID from backend or missing `VITE_COGNITO_USER_CLIENT_ID`), authentication is bypassed and the app loads normally.
+- The `AuthProvider` wraps the app at the top level (outside `TimezoneProvider`). If Cognito is not configured (empty pool ID from backend or missing `VITE_COGNITO_USER_CLIENT_ID`), authentication is bypassed and all scopes are granted.
 - The user client ID is configured via the `VITE_COGNITO_USER_CLIENT_ID` Vite environment variable (in `frontend/.env`), not fetched from the backend. The backend only provides the pool ID and region via `GET /api/auth/config`.
 - `LoginPage` renders when the user is not authenticated. It handles the `NEW_PASSWORD_REQUIRED` challenge for admin-created Cognito users.
 - Access tokens are automatically refreshed 60 seconds before expiry using the refresh token.
 - The user indicator (username + logout button) is shown in the sidebar footer, above the theme selector.
 - `apiFetch` and `invokeAgentStream` automatically include the `Authorization: Bearer` header when a token is available, via a module-level token setter (`setAuthToken`/`getAuthToken`).
+
+### Scope-Based Authorization
+- `AuthContext` extracts `cognito:groups` from the decoded ID token and maps them to scopes using a `GROUP_SCOPES` lookup table. The `hasScope(scope)` function is exposed to the entire app.
+- Scopes: `agent:read`, `agent:write`, `security:read`, `security:write`, `data:read`, `data:write`.
+- Sidebar visibility is controlled by scopes — each persona item is rendered only when the user has the corresponding `*:read` or `*:write` scope. The Platform Catalog is always visible.
+- Write operations are gated by a `readOnly` prop propagated from `App.tsx` through page components to individual UI elements. When `readOnly` is true, add/edit/delete buttons are disabled or hidden.
+- Pages and their `readOnly` mapping: `AgentListPage` and `CatalogPage` use `!hasScope("agent:write")`, `SecurityAdminPage` uses `!hasScope("security:write")`, `MemoryManagementPage` uses `!hasScope("data:write")`.
+- Components that respect `readOnly`: `AgentCard`, `AgentListPage`, `CatalogPage`, `SecurityAdminPage`, `RoleManagementPanel`, `AuthorizerManagementPanel`, `PermissionRequestsPanel`, `MemoryManagementPage`, `MemoryManagementPanel`, `MemoryCard`.
 
 ### API Layer Design
 - `apiFetch<T>()` is a thin wrapper around `fetch` with JSON parsing, `ApiError` class, and automatic auth token injection

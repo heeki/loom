@@ -15,6 +15,7 @@ interface MemoryCardProps {
   submitting: boolean;
   onRefresh: (id: number) => void;
   onDelete: (id: number, deleteInAws: boolean) => void;
+  readOnly?: boolean;
 }
 
 function isTransitional(status: string): boolean {
@@ -28,6 +29,7 @@ export function MemoryCard({
   submitting,
   onRefresh,
   onDelete,
+  readOnly,
 }: MemoryCardProps) {
   const { timezone } = useTimezone();
   const [confirmingRemove, setConfirmingRemove] = useState(false);
@@ -80,14 +82,16 @@ export function MemoryCard({
                 <RefreshCw className="h-3.5 w-3.5" />
               )}
             </button>
-            <button
-              type="button"
-              onClick={() => setConfirmingRemove(true)}
-              className="text-muted-foreground/50 hover:text-destructive transition-colors"
-              title="Delete memory"
-            >
-              <Eraser className="h-3.5 w-3.5" />
-            </button>
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={() => setConfirmingRemove(true)}
+                className="text-muted-foreground/50 hover:text-destructive transition-colors"
+                title="Delete memory"
+              >
+                <Eraser className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         </div>
       </CardHeader>

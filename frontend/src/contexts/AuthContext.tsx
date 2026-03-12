@@ -22,7 +22,31 @@ interface CognitoUser {
   sub: string;
   email?: string;
   username?: string;
+  groups?: string[];
   [key: string]: unknown;
+}
+
+export type Scope = "agent:read" | "agent:write" | "security:read" | "security:write" | "data:read" | "data:write";
+
+const GROUP_SCOPES: Record<string, Scope[]> = {
+  admins: ["agent:read", "agent:write", "security:read", "security:write", "data:read", "data:write"],
+  "security-admins": ["security:read", "security:write"],
+  "data-stewards": ["data:read", "data:write"],
+  builders: ["agent:read", "agent:write"],
+  operators: ["agent:read", "security:read", "data:read"],
+};
+
+function deriveScopes(groups: string[]): Set<Scope> {
+  const scopes = new Set<Scope>();
+  for (const group of groups) {
+    const groupScopes = GROUP_SCOPES[group];
+    if (groupScopes) {
+      for (const scope of groupScopes) {
+        scopes.add(scope);
+      }
+    }
+  }
+  return scopes;
 }
 
 interface AuthContextValue {
@@ -30,6 +54,8 @@ interface AuthContextValue {
   isLoading: boolean;
   user: CognitoUser | null;
   accessToken: string | null;
+  scopes: Set<Scope>;
+  hasScope: (scope: Scope) => boolean;
   login: (username: string, password: string) => Promise<CognitoAuthResult>;
   completeNewPassword: (
     session: string,
@@ -39,11 +65,16 @@ interface AuthContextValue {
   logout: () => void;
 }
 
+const ALL_SCOPES = new Set<Scope>(["agent:read", "agent:write", "security:read", "security:write", "data:read", "data:write"]);
+const EMPTY_SCOPES = new Set<Scope>();
+
 const AuthContext = createContext<AuthContextValue>({
   isAuthenticated: false,
   isLoading: true,
   user: null,
   accessToken: null,
+  scopes: EMPTY_SCOPES,
+  hasScope: () => false,
   login: async () => ({}),
   completeNewPassword: async () => {},
   logout: () => {},
@@ -145,11 +176,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Decode id token for user info
         try {
           const claims = decodeJwtPayload(newTokens.idToken);
+          const groups = (claims["cognito:groups"] as string[] | undefined) ?? [];
           setUser({
             sub: claims.sub as string,
             email: claims.email as string | undefined,
             username:
               (claims["cognito:username"] as string) || (claims.sub as string),
+            groups,
           });
         } catch {
           // Fallback user
@@ -214,6 +247,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     config?.user_pool_id && import.meta.env.VITE_COGNITO_USER_CLIENT_ID,
   );
 
+  // When auth is not configured, grant all scopes
+  const scopes = !isConfigured
+    ? ALL_SCOPES
+    : user?.groups
+      ? deriveScopes(user.groups)
+      : EMPTY_SCOPES;
+
+  const hasScope = useCallback(
+    (scope: Scope) => scopes.has(scope),
+    [scopes],
+  );
+
   return (
     <AuthContext.Provider
       value={{
@@ -221,6 +266,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isLoading,
         user,
         accessToken: tokens?.accessToken ?? null,
+        scopes,
+        hasScope,
         login,
         completeNewPassword,
         logout,

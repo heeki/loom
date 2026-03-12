@@ -27,6 +27,7 @@ interface CatalogPageProps {
   onSelectAgent: (id: number) => void;
   onRefreshAgent: (id: number) => void;
   onDelete: (id: number, cleanupAws: boolean) => void;
+  readOnly?: boolean;
 }
 
 export function CatalogPage({
@@ -37,6 +38,7 @@ export function CatalogPage({
   onSelectAgent,
   onRefreshAgent,
   onDelete,
+  readOnly,
 }: CatalogPageProps) {
   const { timezone } = useTimezone();
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
@@ -117,6 +119,7 @@ export function CatalogPage({
                     onSelect={onSelectAgent}
                     onRefresh={onRefreshAgent}
                     onDelete={onDelete}
+                    readOnly={readOnly}
                   />
                 ))}
               </div>
@@ -160,18 +163,20 @@ export function CatalogPage({
                           {formatTimestamp(agent.registered_at, timezone)}
                         </TableCell>
                         <TableCell>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-6 w-6 p-0"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setConfirmDeleteId(agent.id);
-                            }}
-                            title="Delete"
-                          >
-                            <Eraser className="h-3 w-3" />
-                          </Button>
+                          {!readOnly && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 w-6 p-0"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmDeleteId(agent.id);
+                              }}
+                              title="Delete"
+                            >
+                              <Eraser className="h-3 w-3" />
+                            </Button>
+                          )}
                           {confirmDeleteId === agent.id && (
                             <div
                               className="absolute inset-x-0 bottom-0 rounded-b-lg border-t bg-card px-4 py-2 space-y-1.5"
@@ -237,7 +242,7 @@ export function CatalogPage({
             ))}
           </div>
         ) : memories.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-8">
+          <p className="text-sm text-muted-foreground py-8">
             No memory resources. Use the Memory page to create or import one.
           </p>
         ) : viewMode === "cards" ? (

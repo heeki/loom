@@ -76,7 +76,9 @@ export LOOM_COGNITO_REGION=<your-region>  # defaults to AWS_REGION
 VITE_COGNITO_USER_CLIENT_ID=<your-user-client-id>
 ```
 
-When both are configured, users must log in before accessing the application. When not configured, the app runs without authentication.
+When both are configured, users must log in before accessing the application. When not configured, the app runs without authentication and all features are accessible.
+
+The frontend enforces scope-based authorization: sidebar items are shown or hidden based on the user's Cognito group membership, and write operations (add, edit, delete) are disabled for users who lack the corresponding `*:write` scope.
 
 ### Cognito Setup
 

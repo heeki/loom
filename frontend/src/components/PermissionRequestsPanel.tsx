@@ -13,7 +13,7 @@ import { usePermissionRequests } from "@/hooks/useSecurity";
 import { CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
-export function PermissionRequestsPanel() {
+export function PermissionRequestsPanel({ readOnly }: { readOnly?: boolean }) {
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
   const { requests, loading, error, reviewRequest } = usePermissionRequests(statusFilter);
   const [denyingId, setDenyingId] = useState<number | null>(null);
@@ -72,7 +72,7 @@ export function PermissionRequestsPanel() {
       </div>
 
       {requests.length === 0 ? (
-        <p className="text-sm text-muted-foreground text-center py-8">No permission requests.</p>
+        <p className="text-sm text-muted-foreground py-8">No permission requests.</p>
       ) : (
         <div className="space-y-2">
           {requests.map((req) => (
@@ -112,7 +112,7 @@ export function PermissionRequestsPanel() {
                     </div>
                   )}
                 </div>
-                {req.status === "pending" && (
+                {req.status === "pending" && !readOnly && (
                   <div className="flex gap-1 shrink-0">
                     <Button
                       size="sm"

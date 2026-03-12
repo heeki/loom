@@ -152,6 +152,22 @@ The Cognito User Pool is managed via CloudFormation (`security/iac/cognito.yaml`
   - **UserClient** — `USER_PASSWORD_AUTH` + `REFRESH_TOKEN_AUTH` flows without secret, scoped to all custom scopes plus `openid`, `email`, `profile`.
 - User passwords are set via `make cognito.set-passwords` in the `security/` directory.
 
+### Scope-Based Frontend Authorization
+
+The frontend enforces scope-based access control derived from Cognito group membership:
+
+| Group | Scopes | Sidebar Access | Write Access |
+|-------|--------|----------------|--------------|
+| `admins` | agent:read/write, security:read/write, data:read/write | All pages | All actions |
+| `security-admins` | security:read, security:write | Security | Security actions |
+| `data-stewards` | data:read, data:write | Memory, MCP Servers, A2A Agents | Memory actions |
+| `builders` | agent:read, agent:write | Agents | Agent actions |
+| `operators` | agent:read, security:read, data:read | Agents, Security | Read-only |
+
+- **Sidebar visibility:** Each sidebar item is shown only when the user has the corresponding `*:read` or `*:write` scope. The Platform Catalog is always visible.
+- **Write protection:** Components receive a `readOnly` prop that disables or hides add, edit, and delete buttons when the user lacks `*:write` scopes.
+- **Bypass mode:** When authentication is not configured (no Cognito pool ID or client ID), all scopes are granted and all features are accessible.
+
 ---
 
 ## 5. Supported Foundation Models
@@ -241,6 +257,7 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Tokens stored in memory only (not localStorage); authentication does not persist across page reloads.
 - Cognito User Pool IaC: resource server with custom scopes (`agent:read/write`, `security:read/write`, `data:read/write`, `invoke`), user groups (`admins`, `security-admins`, `data-stewards`, `builders`, `operators`), users with group assignments, password policy (12+ chars, no symbols required).
 - Security makefile with `cognito.set-passwords` target for setting permanent user passwords.
+- Scope-based frontend authorization: `AuthContext` extracts `cognito:groups` from the ID token, maps groups to scopes, and exposes `hasScope()`. Sidebar items are conditionally rendered based on user scopes. Write operations (add, edit, delete buttons) are disabled or hidden via a `readOnly` prop when the user lacks `*:write` scopes. When auth is not configured, all scopes are granted.
 
 ### Phase 7 — Advanced Operations
 - Real-time metrics auto-refresh.

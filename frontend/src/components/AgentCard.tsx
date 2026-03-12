@@ -13,6 +13,7 @@ interface AgentCardProps {
   onSelect: (id: number) => void;
   onRefresh: (id: number) => void;
   onDelete: (id: number, cleanupAws: boolean) => void;
+  readOnly?: boolean;
 }
 
 function isCreating(agent: AgentResponse): boolean {
@@ -28,7 +29,7 @@ function existsInAgentCore(agent: AgentResponse): boolean {
   return !!agent.runtime_id;
 }
 
-export function AgentCard({ agent, onSelect, onRefresh, onDelete }: AgentCardProps) {
+export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly }: AgentCardProps) {
   const { timezone } = useTimezone();
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [cleanupAws, setCleanupAws] = useState(false);
@@ -109,17 +110,19 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete }: AgentCardPro
                 <RefreshCw className="h-3.5 w-3.5" />
               )}
             </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setConfirmingRemove(true);
-              }}
-              className="text-muted-foreground/50 hover:text-destructive transition-colors"
-              title="Remove agent"
-            >
-              <Eraser className="h-3.5 w-3.5" />
-            </button>
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setConfirmingRemove(true);
+                }}
+                className="text-muted-foreground/50 hover:text-destructive transition-colors"
+                title="Remove agent"
+              >
+                <Eraser className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         </div>
       </CardHeader>

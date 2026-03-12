@@ -137,9 +137,10 @@ function parseApiError(e: unknown): string {
 
 interface MemoryManagementPanelProps {
   viewMode: "cards" | "table";
+  readOnly?: boolean;
 }
 
-export function MemoryManagementPanel({ viewMode }: MemoryManagementPanelProps) {
+export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPanelProps) {
   const { timezone } = useTimezone();
   const [memories, setMemories] = useState<MemoryResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -386,6 +387,7 @@ export function MemoryManagementPanel({ viewMode }: MemoryManagementPanelProps) 
             setShowAddForm(!showAddForm);
             resetForm();
           }}
+          disabled={readOnly}
         >
           <Plus className="h-3.5 w-3.5 mr-1" />
           Add Memory
@@ -600,7 +602,7 @@ export function MemoryManagementPanel({ viewMode }: MemoryManagementPanelProps) 
       )}
 
       {memories.length === 0 ? (
-        <p className="text-sm text-muted-foreground text-center py-8">
+        <p className="text-sm text-muted-foreground py-8">
           No memory resources yet. Add one above.
         </p>
       ) : (
@@ -616,6 +618,7 @@ export function MemoryManagementPanel({ viewMode }: MemoryManagementPanelProps) 
                   submitting={submitting}
                   onRefresh={handleRefresh}
                   onDelete={handleDelete}
+                  readOnly={readOnly}
                 />
               ))}
             </div>
@@ -678,18 +681,20 @@ export function MemoryManagementPanel({ viewMode }: MemoryManagementPanelProps) 
                               <RefreshCw className="h-3 w-3" />
                             )}
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-6 w-6 p-0"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setConfirmDeleteId(mem.id);
-                            }}
-                            title="Delete"
-                          >
-                            <Eraser className="h-3 w-3" />
-                          </Button>
+                          {!readOnly && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 w-6 p-0"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmDeleteId(mem.id);
+                              }}
+                              title="Delete"
+                            >
+                              <Eraser className="h-3 w-3" />
+                            </Button>
+                          )}
                         </div>
                         {confirmDeleteId === mem.id && (
                           <div

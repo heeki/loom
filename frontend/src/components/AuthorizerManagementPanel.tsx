@@ -75,7 +75,7 @@ function TagInput({
   );
 }
 
-export function AuthorizerManagementPanel() {
+export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) {
   const { configs, loading, error, createConfig, updateConfig, deleteConfig } = useAuthorizerConfigs();
   const [showAddForm, setShowAddForm] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -339,7 +339,7 @@ export function AuthorizerManagementPanel() {
             Authorizer management is the responsibility of the security team.
           </p>
         </div>
-        <Button size="sm" variant="outline" className="shrink-0 ml-4" onClick={() => { setShowAddForm(!showAddForm); resetForm(); }}>
+        <Button size="sm" variant="outline" className="shrink-0 ml-4" onClick={() => { setShowAddForm(!showAddForm); resetForm(); }} disabled={readOnly}>
           <Plus className="h-3.5 w-3.5 mr-1" />
           Add Authorizer
         </Button>
@@ -354,7 +354,7 @@ export function AuthorizerManagementPanel() {
       )}
 
       {configs.length === 0 ? (
-        <p className="text-sm text-muted-foreground text-center py-8">No authorizer configs yet. Add one above.</p>
+        <p className="text-sm text-muted-foreground py-8">No authorizer configs yet. Add one above.</p>
       ) : (
         <div className="space-y-2">
           {configs.map((config) => (
@@ -379,12 +379,16 @@ export function AuthorizerManagementPanel() {
                     <div className="text-xs text-muted-foreground">{config.authorizer_type === "cognito" ? "Amazon Cognito" : config.authorizer_type}</div>
                   </div>
                   <div className="flex gap-1 shrink-0">
-                    <Button size="sm" variant="ghost" onClick={() => startEdit(config.id)}>
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setConfirmDeleteId(config.id)}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    {!readOnly && (
+                      <>
+                        <Button size="sm" variant="ghost" onClick={() => startEdit(config.id)}>
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setConfirmDeleteId(config.id)}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -422,20 +426,22 @@ export function AuthorizerManagementPanel() {
                           <Key className="h-3.5 w-3.5" />
                           Credentials
                         </div>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-6 text-xs"
-                          onClick={() => {
-                            setShowAddCred(showAddCred === config.id ? null : config.id);
-                            setCredLabel("");
-                            setCredClientId("");
-                            setCredClientSecret("");
-                          }}
-                        >
-                          <Plus className="h-3 w-3 mr-1" />
-                          Add
-                        </Button>
+                        {!readOnly && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 text-xs"
+                            onClick={() => {
+                              setShowAddCred(showAddCred === config.id ? null : config.id);
+                              setCredLabel("");
+                              setCredClientId("");
+                              setCredClientSecret("");
+                            }}
+                          >
+                            <Plus className="h-3 w-3 mr-1" />
+                            Add
+                          </Button>
+                        )}
                       </div>
 
                       {showAddCred === config.id && (
@@ -507,38 +513,40 @@ export function AuthorizerManagementPanel() {
                                   </span>
                                 )}
                               </div>
-                              <div>
-                                {confirmDeleteCredId?.authId === config.id && confirmDeleteCredId?.credId === cred.id ? (
-                                  <div className="flex items-center gap-1">
-                                    <Button
-                                      size="sm"
-                                      variant="destructive"
-                                      className="h-6 text-xs"
-                                      onClick={() => handleDeleteCredential(config.id, cred.id)}
-                                      disabled={credSubmitting}
-                                    >
-                                      Confirm
-                                    </Button>
+                              {!readOnly && (
+                                <div>
+                                  {confirmDeleteCredId?.authId === config.id && confirmDeleteCredId?.credId === cred.id ? (
+                                    <div className="flex items-center gap-1">
+                                      <Button
+                                        size="sm"
+                                        variant="destructive"
+                                        className="h-6 text-xs"
+                                        onClick={() => handleDeleteCredential(config.id, cred.id)}
+                                        disabled={credSubmitting}
+                                      >
+                                        Confirm
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-6 text-xs"
+                                        onClick={() => setConfirmDeleteCredId(null)}
+                                      >
+                                        Cancel
+                                      </Button>
+                                    </div>
+                                  ) : (
                                     <Button
                                       size="sm"
                                       variant="ghost"
-                                      className="h-6 text-xs"
-                                      onClick={() => setConfirmDeleteCredId(null)}
+                                      className="h-6 w-6 p-0"
+                                      onClick={() => setConfirmDeleteCredId({ authId: config.id, credId: cred.id })}
                                     >
-                                      Cancel
+                                      <Trash2 className="h-3 w-3" />
                                     </Button>
-                                  </div>
-                                ) : (
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="h-6 w-6 p-0"
-                                    onClick={() => setConfirmDeleteCredId({ authId: config.id, credId: cred.id })}
-                                  >
-                                    <Trash2 className="h-3 w-3" />
-                                  </Button>
-                                )}
-                              </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>
