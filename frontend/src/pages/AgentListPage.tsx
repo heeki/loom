@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Plus, LayoutGrid, TableIcon, Eraser, Network, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +18,8 @@ import { toast } from "sonner";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { statusVariant } from "@/lib/status";
-import type { AgentDeployRequest, AgentResponse } from "@/api/types";
+import { listTagPolicies } from "@/api/settings";
+import type { AgentDeployRequest, AgentResponse, TagPolicy } from "@/api/types";
 
 type BuilderTab = "register" | "deploy";
 
@@ -53,6 +54,13 @@ export function AgentListPage({
   const [showAddForm, setShowAddForm] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [cleanupAws, setCleanupAws] = useState(false);
+  const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
+
+  useEffect(() => {
+    void listTagPolicies().then(setTagPolicies).catch(() => {});
+  }, []);
+
+  const showOnCardKeys = tagPolicies.filter(tp => tp.show_on_card).map(tp => tp.key);
 
   const handleRegister = async (arn: string, modelId?: string) => {
     setSubmitting(true);
@@ -188,6 +196,7 @@ export function AgentListPage({
                     onRefresh={onRefreshAgent}
                     onDelete={onDelete}
                     readOnly={readOnly}
+                    showOnCardKeys={showOnCardKeys}
                   />
                 ))}
               </div>

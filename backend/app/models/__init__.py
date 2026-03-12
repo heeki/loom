@@ -10,10 +10,11 @@ from app.models.authorizer_config import AuthorizerConfig
 from app.models.permission_request import PermissionRequest
 from app.models.authorizer_credential import AuthorizerCredential
 from app.models.memory import Memory
+from app.models.tag_policy import TagPolicy
 
 __all__ = [
     "Agent", "InvocationSession", "Invocation", "ConfigEntry",
     "CredentialProvider", "Integration",
     "ManagedRole", "AuthorizerConfig", "PermissionRequest",
-    "AuthorizerCredential", "Memory",
+    "AuthorizerCredential", "Memory", "TagPolicy",
 ]

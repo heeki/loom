@@ -13,15 +13,22 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TAGS: dict[str, str] = {
-    "deployed-by": "loom",
-    "owner": "heeki",
-    "team": "aws",
-}
+def _iam_tags(
+    tag_policies: list[dict[str, Any]] | None = None,
+    extra: dict[str, str] | None = None,
+) -> list[dict[str, str]]:
+    """Build IAM-format tags from tag policies and extra overrides.
 
-
-def _iam_tags(extra: dict[str, str] | None = None) -> list[dict[str, str]]:
-    tags = dict(DEFAULT_TAGS)
+    Args:
+        tag_policies: List of dicts with keys: key, default_value, source.
+        extra: Additional tag key-value pairs that override policy defaults.
+    """
+    tags: dict[str, str] = {}
+    if tag_policies:
+        for policy in tag_policies:
+            val = policy.get("default_value")
+            if val:
+                tags[policy["key"]] = val
     if extra:
         tags.update(extra)
     return [{"Key": k, "Value": v} for k, v in tags.items()]
@@ -113,6 +120,8 @@ def create_execution_role(
     runtime_id: str,
     region: str,
     account_id: str,
+    tag_policies: list[dict[str, Any]] | None = None,
+    extra_tags: dict[str, str] | None = None,
 ) -> str:
     """
     Create an IAM execution role for an agent runtime.
@@ -139,7 +148,7 @@ def create_execution_role(
         AssumeRolePolicyDocument=json.dumps(trust_policy),
         Description=f"Execution role for Loom agent: {agent_name}",
         MaxSessionDuration=3600,
-        Tags=_iam_tags(),
+        Tags=_iam_tags(tag_policies=tag_policies, extra=extra_tags),
     )
 
     client.put_role_policy(

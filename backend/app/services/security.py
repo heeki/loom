@@ -37,7 +37,13 @@ def get_role_policy_details(role_name: str, region: str) -> dict[str, Any]:
     return {"statements": policy_statements}
 
 
-def create_iam_role_with_policy(role_name: str, policy_document: dict, region: str, account_id: str) -> str:
+def create_iam_role_with_policy(
+    role_name: str,
+    policy_document: dict,
+    region: str,
+    account_id: str,
+    tags: list[dict[str, str]] | None = None,
+) -> str:
     """Create a new IAM role with trust policy for bedrock-agentcore and attach inline policy."""
     iam = boto3.client("iam", region_name=region)
 
@@ -52,14 +58,15 @@ def create_iam_role_with_policy(role_name: str, policy_document: dict, region: s
         ],
     }
 
+    iam_tags = tags if tags else [
+        {"Key": "managed-by", "Value": "loom"},
+    ]
+
     resp = iam.create_role(
         RoleName=role_name,
         AssumeRolePolicyDocument=json.dumps(trust_policy),
         Description=f"Managed role for Loom agents: {role_name}",
-        Tags=[
-            {"Key": "managed-by", "Value": "loom"},
-            {"Key": "team", "Value": "aws"},
-        ],
+        Tags=iam_tags,
     )
     role_arn = resp["Role"]["Arn"]
 

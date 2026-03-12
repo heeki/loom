@@ -5,6 +5,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -17,7 +24,8 @@ import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { statusVariant } from "@/lib/status";
 import { listMemories } from "@/api/memories";
-import type { AgentResponse, MemoryResponse } from "@/api/types";
+import { listTagPolicies } from "@/api/settings";
+import type { AgentResponse, MemoryResponse, TagPolicy } from "@/api/types";
 
 interface CatalogPageProps {
   agents: AgentResponse[];
@@ -43,6 +51,24 @@ export function CatalogPage({
   const { timezone } = useTimezone();
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [cleanupAws, setCleanupAws] = useState(false);
+
+  // Tag filter state
+  const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
+  const [tagFilters, setTagFilters] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    void listTagPolicies().then(setTagPolicies).catch(() => {});
+  }, []);
+
+  const showOnCardPolicies = tagPolicies.filter(tp => tp.show_on_card);
+  const showOnCardKeys = showOnCardPolicies.map(tp => tp.key);
+
+  const filteredAgents = agents.filter(agent => {
+    return Object.entries(tagFilters).every(([key, value]) => {
+      if (!value) return true;
+      return agent.tags?.[key] === value;
+    });
+  });
 
   // Memory data
   const [memories, setMemories] = useState<MemoryResponse[]>([]);
@@ -94,6 +120,50 @@ export function CatalogPage({
         </div>
       </div>
 
+      {/* Tag Filters */}
+      {showOnCardPolicies.length > 0 && agents.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          {showOnCardPolicies.map(tp => {
+            const distinctValues = [...new Set(
+              agents.map(a => a.tags?.[tp.key]).filter(Boolean)
+            )] as string[];
+            if (distinctValues.length === 0) return null;
+            return (
+              <div key={tp.key} className="space-y-1">
+                <label className="text-[10px] text-muted-foreground">{tp.key}</label>
+                <Select
+                  value={tagFilters[tp.key] || ""}
+                  onValueChange={(v) => setTagFilters(prev => ({ ...prev, [tp.key]: v === "__all__" ? "" : v }))}
+                >
+                  <SelectTrigger className="h-7 w-[140px] text-xs">
+                    <SelectValue placeholder="All" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">All</SelectItem>
+                    {distinctValues.sort().map(v => (
+                      <SelectItem key={v} value={v}>{v}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            );
+          })}
+          {Object.values(tagFilters).some(v => v) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => setTagFilters({})}
+            >
+              Clear filters
+            </Button>
+          )}
+          <span className="text-xs text-muted-foreground ml-auto">
+            Showing {filteredAgents.length} of {agents.length} agents
+          </span>
+        </div>
+      )}
+
       {/* Agents Section */}
       <section className="space-y-3">
         <h3 className="text-sm font-medium">Agents</h3>
@@ -104,15 +174,17 @@ export function CatalogPage({
               <Skeleton key={i} className="h-48" />
             ))}
           </div>
-        ) : agents.length === 0 ? (
+        ) : filteredAgents.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-8">
-            No agents registered. Use the Builder page to register or deploy an agent.
+            {agents.length === 0
+              ? "No agents registered. Use the Builder page to register or deploy an agent."
+              : "No agents match the selected filters."}
           </p>
         ) : (
           <>
             {viewMode === "cards" ? (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {agents.map((agent) => (
+                {filteredAgents.map((agent) => (
                   <AgentCard
                     key={agent.id}
                     agent={agent}
@@ -120,6 +192,7 @@ export function CatalogPage({
                     onRefresh={onRefreshAgent}
                     onDelete={onDelete}
                     readOnly={readOnly}
+                    showOnCardKeys={showOnCardKeys}
                   />
                 ))}
               </div>
@@ -138,7 +211,7 @@ export function CatalogPage({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {agents.map((agent) => (
+                    {filteredAgents.map((agent) => (
                       <TableRow
                         key={agent.id}
                         className="relative bg-input-bg hover:bg-input-bg/80 cursor-pointer"

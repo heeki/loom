@@ -23,6 +23,7 @@ export interface AgentResponse {
   network_mode: string | null;
   model_id: string | null;
   deployed_at: string | null;
+  tags: Record<string, string>;
 }
 
 export interface AgentRegisterRequest {
@@ -54,6 +55,7 @@ export interface AgentDeployRequest {
   memory_enabled: boolean;
   mcp_servers: unknown[];
   a2a_agents: unknown[];
+  tags?: Record<string, string>;
 }
 
 export interface IamRole {
@@ -366,4 +368,31 @@ export interface SSESessionEnd {
 
 export interface SSEError {
   message: string;
+}
+
+// Tag policy types
+export interface TagPolicy {
+  id: number;
+  key: string;
+  default_value: string | null;
+  source: "deploy-time" | "build-time";
+  required: boolean;
+  show_on_card: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface TagPolicyCreateRequest {
+  key: string;
+  default_value?: string;
+  source: "deploy-time" | "build-time";
+  required?: boolean;
+  show_on_card?: boolean;
+}
+
+export interface TagPolicyUpdateRequest {
+  default_value?: string;
+  source?: "deploy-time" | "build-time";
+  required?: boolean;
+  show_on_card?: boolean;
 }

@@ -1,6 +1,6 @@
 # Loom Frontend
 
-Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, session liveness tracking, memory resource management, and security administration.
+Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, session liveness tracking, memory resource management, security administration, and resource tag management.
 
 ## Prerequisites
 
@@ -84,6 +84,7 @@ src/
 │   ├── logs.ts        # CloudWatch log queries
 │   ├── memories.ts    # Memory resource CRUD + refresh
 │   ├── security.ts    # Roles, authorizers, credentials, permissions
+│   ├── settings.ts    # Tag policy CRUD operations
 │   └── types.ts       # TypeScript interfaces mirroring backend models
 ├── contexts/     # React contexts (auth, timezone preference)
 ├── hooks/        # Custom React hooks for data fetching
@@ -128,7 +129,8 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 - `api/logs.ts` — CloudWatch log queries
 - `api/memories.ts` — Memory resource operations: create, import, list, get, refresh, delete, purge
 - `api/security.ts` — Security admin operations: managed roles, authorizer configs, authorizer credentials, permission requests
-- `api/types.ts` — TypeScript interfaces including AgentResponse (with `model_id`), SSESessionStart (with `has_token`, `token_source`), AuthorizerCredential, ManagedRole, PermissionRequestResponse, MemoryResponse, MemoryCreateRequest, MemoryStrategyRequest
+- `api/settings.ts` — Tag policy operations: list, create, update, delete
+- `api/types.ts` — TypeScript interfaces including AgentResponse (with `model_id`, `tags`), SSESessionStart (with `has_token`, `token_source`), AuthorizerCredential, ManagedRole, PermissionRequestResponse, MemoryResponse, MemoryCreateRequest, MemoryStrategyRequest, TagPolicy, TagPolicyCreateRequest, TagPolicyUpdateRequest
 
 ### Hooks
 
@@ -141,7 +143,7 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 ### Key Components
 
 - **SearchableSelect** — Combobox with search, filter, optional group headers (Anthropic/Amazon), and click-outside detection. Searches both label and value fields.
-- **AgentCard** — Compact card with inline badges, refresh button, eraser icon for deletion, overlay confirmation with "Also delete in AgentCore" checkbox.
+- **AgentCard** — Compact card with inline badges, refresh button, eraser icon for deletion, overlay confirmation with "Also delete in AgentCore" checkbox. Displays tag bubbles for tags marked `show_on_card` in the tag policy.
 - **MemoryCard** — Memory resource card with name, status badge, spinner+timer for transitional states, region/account/expiry metadata, refresh and delete buttons with overlay confirmation.
 - **InvokePanel** — Qualifier selector, credential dropdown, model ID badge, prompt textarea, invoke/cancel buttons. Token indicator shown when invocation uses OAuth.
 - **AuthorizerManagementPanel** — Lists authorizer configs with expandable credential management (add/list/delete credentials per config).
@@ -152,10 +154,10 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 | View | Persona | Description |
 |------|---------|-------------|
 | LoginPage | — | Cognito login + set new password |
-| CatalogPage | Platform Catalog | Agents, memory resources, MCP servers, A2A agents sections |
+| CatalogPage | Platform Catalog | Agents (with tag filter bar), memory resources, MCP servers, A2A agents sections |
 | AgentDetailPage | Platform Catalog | Sessions, invoke, latency, streaming response, deployment details |
 | SessionDetailPage | Platform Catalog | Session metadata, invocation timing, CloudWatch logs |
-| AgentListPage | Agents | Deploy/Import form + agent card/table grid |
+| AgentListPage | Agents | Deploy/Import form (with build-time tag inputs) + agent card/table grid |
 | SecurityAdminPage | Security | Roles, authorizers, credentials, permissions |
 | MemoryManagementPage | Memory | Memory resource create/import form, card/table list, refresh, delete |
 

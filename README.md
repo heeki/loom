@@ -9,6 +9,7 @@ A platform for building, testing, and operating AI agents on Amazon Bedrock Agen
 - **Agent Management** — Deploy new agents or import existing AgentCore Runtime agents
 - **Memory Management** — Create and manage AgentCore Memory resources with configurable strategies (semantic, summary, user preference, episodic, custom)
 - **Security Administration** — Manage IAM roles, authorizer configs, credentials, and permission requests
+- **Resource Tagging** — Configurable tag policies with deploy-time and build-time tags, tag bubbles on agent cards, and catalog filtering by tags
 - SSE streaming invocation with real-time response display
 - Authenticated agent invocations using user tokens or M2M credentials
 - Cold-start latency measurement via automatic CloudWatch log parsing

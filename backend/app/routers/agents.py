@@ -18,10 +18,12 @@ from app.models.agent import Agent
 from app.models.config_entry import ConfigEntry
 from app.models.session import InvocationSession
 from app.models.invocation import Invocation
+from app.models.tag_policy import TagPolicy
 from app.routers.utils import get_agent_or_404
 
 from app.services.agentcore import describe_runtime, list_runtime_endpoints
 from app.services.deployment import (
+    _merge_tags,
     build_agent_artifact,
     create_runtime,
     delete_runtime,
@@ -31,6 +33,7 @@ from app.services.deployment import (
     update_runtime,
 )
 from app.services.iam import (
+    _iam_tags,
     create_execution_role,
     delete_execution_role,
     list_agentcore_roles,
@@ -91,6 +94,7 @@ class AgentDeployRequest(BaseModel):
     memory_enabled: bool = Field(default=False, description="Enable memory integration")
     mcp_servers: list = Field(default_factory=list, description="MCP server configs")
     a2a_agents: list = Field(default_factory=list, description="A2A agent configs")
+    tags: dict[str, str] | None = Field(None, description="Build-time tag values")
 
 
 class AgentCreateRequest(BaseModel):
@@ -120,6 +124,7 @@ class AgentCreateRequest(BaseModel):
     memory_enabled: bool = Field(default=False, description="Enable memory integration")
     mcp_servers: list = Field(default_factory=list, description="MCP server configs")
     a2a_agents: list = Field(default_factory=list, description="A2A agent configs")
+    tags: dict[str, str] | None = Field(None, description="Build-time tag values")
 
 
 class AgentResponse(BaseModel):
@@ -142,6 +147,7 @@ class AgentResponse(BaseModel):
     endpoint_status: str | None = None
     protocol: str | None = None
     network_mode: str | None = None
+    tags: dict[str, str] = {}
     model_id: str | None = None
     deployed_at: str | None = None
     registered_at: str | None
@@ -233,6 +239,45 @@ def _agent_response(agent: Agent, db: Session) -> AgentResponse:
         model_id=model_id,
         active_session_count=compute_active_session_count(agent.id, db)
     )
+
+
+def _resolve_tags(
+    db: Session,
+    user_tags: dict[str, str] | None = None,
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
+    """Resolve final tag values from tag policies and user-supplied build-time tags.
+
+    Returns:
+        Tuple of (resolved_tags dict, tag_policies as list of dicts).
+    Raises:
+        HTTPException if required build-time tags are missing.
+    """
+    policies = db.query(TagPolicy).all()
+    policy_dicts = [{"key": p.key, "default_value": p.default_value, "source": p.source, "required": p.required} for p in policies]
+
+    resolved: dict[str, str] = {}
+    missing: list[str] = []
+    user_tags = user_tags or {}
+
+    for p in policies:
+        if p.source == "deploy-time":
+            if p.default_value:
+                resolved[p.key] = p.default_value
+        elif p.source == "build-time":
+            if p.key in user_tags:
+                resolved[p.key] = user_tags[p.key]
+            elif p.default_value:
+                resolved[p.key] = p.default_value
+            elif p.required:
+                missing.append(p.key)
+
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Missing required build-time tags: {', '.join(missing)}",
+        )
+
+    return resolved, policy_dicts
 
 
 def _build_system_prompt(request: AgentCreateRequest) -> str:
@@ -358,6 +403,18 @@ def _register_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
     db.commit()
     db.refresh(agent)
 
+    # Fetch tags from AWS for registered agents
+    try:
+        import boto3
+        control_client = boto3.client("bedrock-agentcore-control", region_name=region)
+        tag_response = control_client.list_tags_for_resource(resourceArn=request.arn)
+        aws_tags = tag_response.get("tags", {})
+        if aws_tags:
+            agent.set_tags(aws_tags)
+            db.commit()
+    except Exception as e:
+        logger.debug("Could not fetch tags for registered agent %s: %s", request.arn, e)
+
     # Store model_id as config entry if provided
     if request.model_id:
         config_json = json.dumps({"model_id": request.model_id})
@@ -403,6 +460,9 @@ def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
 
     region = os.getenv("AWS_REGION", DEFAULT_REGION)
     account_id = os.getenv("AWS_ACCOUNT_ID", "")
+
+    # Resolve tags from tag policies + user-supplied build-time values
+    resolved_tags, tag_policy_dicts = _resolve_tags(db, request.tags)
 
     # Build config JSON (includes system prompt, model, and integrations)
     system_prompt = _build_system_prompt(request)
@@ -470,6 +530,8 @@ def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
                 runtime_id=f"pending-{agent.id}",
                 region=region,
                 account_id=account_id,
+                tag_policies=tag_policy_dicts,
+                extra_tags=resolved_tags,
             )
             created_role = True
             agent.execution_role_arn = execution_role_arn
@@ -542,6 +604,7 @@ def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
             authorizer_config=authorizer_config,
             artifact_bucket=artifact_bucket,
             artifact_prefix=artifact_key,
+            tags=resolved_tags,
             region=region,
         )
 
@@ -563,6 +626,7 @@ def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
         agent.last_refreshed_at = datetime.utcnow()
         agent.log_group = derive_log_group(runtime_id, "DEFAULT") if runtime_id else None
         agent.set_available_qualifiers(["DEFAULT"])
+        agent.set_tags(resolved_tags)
 
         # Persist authorizer config for token retrieval at invoke time
         if request.authorizer_type:

@@ -14,7 +14,8 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { PolicyViewer } from "@/components/PolicyViewer";
 import * as agentsApi from "@/api/agents";
 import * as securityApi from "@/api/security";
-import type { AgentDeployRequest, ModelOption, ManagedRole, AuthorizerConfigResponse } from "@/api/types";
+import * as settingsApi from "@/api/settings";
+import type { AgentDeployRequest, ModelOption, ManagedRole, AuthorizerConfigResponse, TagPolicy } from "@/api/types";
 import { toast } from "sonner";
 
 function TagInput({
@@ -125,6 +126,10 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
   const [mcpServersEnabled] = useState(false);
   const [a2aAgentsEnabled] = useState(false);
 
+  // Tag state
+  const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
+  const [tagValues, setTagValues] = useState<Record<string, string>>({});
+
   // Deploy elapsed timer — persists across navigation via module-level timestamp
   const [elapsedSeconds, setElapsedSeconds] = useState(() => {
     if (deployStartTime) return Math.floor((Date.now() - deployStartTime) / 1000);
@@ -165,6 +170,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
     if (mode === "deploy") {
       void securityApi.listManagedRoles().then(setManagedRoles).catch(() => {});
       void securityApi.listAuthorizerConfigs().then(setAuthConfigs).catch(() => {});
+      void settingsApi.listTagPolicies().then(setTagPolicies).catch(() => {});
     }
   }, [mode]);
 
@@ -217,6 +223,9 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
   };
 
   const hasValidationErrors = nameError !== "" || idleTimeoutError !== "" || maxLifetimeError !== "";
+  const hasRequiredTags = tagPolicies
+    .filter(tp => tp.source === "build-time" && tp.required)
+    .every(tp => tagValues[tp.key]?.trim());
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -255,6 +264,9 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
         memory_enabled: memoryEnabled,
         mcp_servers: [],
         a2a_agents: [],
+        tags: Object.fromEntries(
+          Object.entries(tagValues).filter(([, v]) => v.trim() !== "")
+        ),
       };
       await onDeploy(request);
       setName("");
@@ -270,6 +282,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
       setMaxLifetime("");
       setIdleTimeoutError("");
       setMaxLifetimeError("");
+      setTagValues({});
     }
   };
 
@@ -565,6 +578,33 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
                 </div>
               </section>
 
+              {/* Resource Tags */}
+              {tagPolicies.filter(tp => tp.source === "build-time").length > 0 && (
+                <section className="space-y-3">
+                  <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Resource Tags</h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    {tagPolicies.filter(tp => tp.source === "build-time").map(tp => (
+                      <div key={tp.key} className="space-y-1">
+                        <label className="text-xs text-muted-foreground">
+                          {tp.key}{tp.required && <span className="text-destructive"> *</span>}
+                        </label>
+                        <Input
+                          placeholder={tp.default_value || `Enter ${tp.key}`}
+                          value={tagValues[tp.key] || ""}
+                          onChange={(e) => setTagValues(prev => ({ ...prev, [tp.key]: e.target.value }))}
+                          className="text-sm"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  {tagPolicies.filter(tp => tp.source === "deploy-time").length > 0 && (
+                    <p className="text-[10px] text-muted-foreground italic">
+                      Deploy-time tags ({tagPolicies.filter(tp => tp.source === "deploy-time").map(tp => `${tp.key}=${tp.default_value}`).join(", ")}) are applied automatically.
+                    </p>
+                  )}
+                </section>
+              )}
+
               {/* Integrations */}
               <section className="space-y-3">
                 <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Integrations</h4>
@@ -596,7 +636,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
                   type="submit"
                   size="sm"
                   className="min-w-[120px]"
-                  disabled={isLoading || !name.trim() || !modelId || !selectedRoleId || !onDeploy || hasValidationErrors}
+                  disabled={isLoading || !name.trim() || !modelId || !selectedRoleId || !onDeploy || hasValidationErrors || !hasRequiredTags}
                 >
                   {isLoading ? (
                     <span className="flex items-center gap-2">
@@ -625,6 +665,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
                     setMaxLifetime("");
                     setIdleTimeoutError("");
                     setMaxLifetimeError("");
+                    setTagValues({});
                   }}
                   disabled={isLoading}
                 >

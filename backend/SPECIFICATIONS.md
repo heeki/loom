@@ -54,13 +54,15 @@ backend/
 │   │   ├── authorizer_config.py    # AuthorizerConfig ORM model
 │   │   ├── authorizer_credential.py # AuthorizerCredential ORM model
 │   │   ├── permission_request.py   # PermissionRequest ORM model
-│   │   └── memory.py        # Memory ORM model (AgentCore Memory resources)
+│   │   ├── memory.py        # Memory ORM model (AgentCore Memory resources)
+│   │   └── tag_policy.py    # TagPolicy ORM model (configurable resource tagging)
 │   ├── dependencies/
 │   │   ├── __init__.py
 │   │   └── auth.py          # Auth dependencies (get_current_user_token, get_token_claims)
 │   ├── routers/
 │   │   ├── auth.py          # Authentication config endpoint (GET /api/auth/config)
-│   │   ├── agents.py        # Agent CRUD + ARN parsing + log group derivation
+│   │   ├── agents.py        # Agent CRUD + ARN parsing + log group derivation + tag resolution
+│   │   ├── settings.py      # Settings endpoints (tag policy CRUD)
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
 │   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
 │   │   ├── memories.py      # Memory resource CRUD + strategy mapping
@@ -87,7 +89,8 @@ backend/
 │   ├── test_latency.py      # Latency computation tests
 │   ├── test_logs.py         # Logs router tests
 │   ├── test_agents_deploy.py # Deployment-specific tests
-│   └── test_memories.py     # Memory resource tests
+│   ├── test_memories.py     # Memory resource tests
+│   └── test_tags.py         # Tag policy and tag enforcement tests
 ├── makefile
 ├── pyproject.toml
 └── requirements.txt
@@ -121,6 +124,7 @@ backend/
 | `protocol` | TEXT | `HTTP`, `MCP`, or `A2A` |
 | `network_mode` | TEXT | `PUBLIC` or `VPC` |
 | `authorizer_config` | TEXT | JSON: `{type, pool_id, discovery_url, allowed_clients, allowed_scopes}` |
+| `tags` | TEXT | JSON dict of resolved tags applied to this agent's AWS resources |
 | `registered_at` | DATETIME | Timestamp of local registration |
 | `deployed_at` | DATETIME | Deployment timestamp |
 | `last_refreshed_at` | DATETIME | Last time metadata was fetched from AWS |
@@ -192,6 +196,28 @@ backend/
 | `reviewer_notes` | TEXT | Reviewer notes |
 | `created_at` | DATETIME | Creation timestamp |
 | `updated_at` | DATETIME | Last update timestamp |
+
+### `tag_policies` table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | Internal ID |
+| `key` | TEXT UNIQUE NOT NULL | Tag key name (e.g., `deployed-by`, `team`) |
+| `default_value` | TEXT | Optional default value |
+| `source` | TEXT NOT NULL | `deploy-time` (auto-applied) or `build-time` (user-supplied) |
+| `required` | BOOLEAN NOT NULL | Whether this tag must be present on all resources |
+| `show_on_card` | BOOLEAN NOT NULL | Whether to display on agent cards in the catalog |
+| `created_at` | DATETIME | Creation timestamp |
+| `updated_at` | DATETIME | Last update timestamp |
+
+**Default seed data** (created on first startup):
+
+| Key | Source | Default Value | Required | Show on Card |
+|-----|--------|---------------|----------|--------------|
+| `deployed-by` | deploy-time | `loom` | Yes | No |
+| `application` | build-time | — | Yes | Yes |
+| `team` | build-time | — | Yes | Yes |
+| `owner` | build-time | — | Yes | Yes |
 
 ### `memories` table
 
@@ -332,8 +358,10 @@ The `model_id` field is optional on registration and stored as an `AGENT_CONFIG_
 | `memory_enabled` | Whether memory is enabled |
 | `mcp_servers` | MCP server configuration |
 | `a2a_agents` | A2A agent configuration |
+| `tags` | Build-time tag values (e.g., `{"team": "aws", "owner": "heeki"}`) |
 
 **`GET /api/agents` response includes:**
+- `tags` — resolved tags (deploy-time + build-time) stored on the agent record
 - `model_id` — extracted from the agent's `AGENT_CONFIG_JSON` config entry
 - `active_session_count` — computed at query time based on `LOOM_SESSION_IDLE_TIMEOUT_SECONDS`
 
@@ -352,6 +380,22 @@ The `model_id` field is optional on registration and stored as an `AGENT_CONFIG_
   "max_lifetime_seconds": 3600
 }
 ```
+
+### Tag Policy Management (Settings)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/settings/tags` | List all tag policies. |
+| `POST` | `/api/settings/tags` | Create a new tag policy. |
+| `PUT` | `/api/settings/tags/{tag_id}` | Update an existing tag policy. |
+| `DELETE` | `/api/settings/tags/{tag_id}` | Delete a tag policy. |
+
+**Tag resolution during deployment:**
+- Deploy-time tags are applied automatically from their `default_value`.
+- Build-time tags require user input; the deploy request includes a `tags: dict[str, str]` field.
+- All required build-time tags must have values or the deployment is rejected (400).
+- Resolved tags are stored on the Agent record and included in `AgentResponse`.
+- For registered agents, tags are fetched from AWS via `list_tags_for_resource` and stored locally.
 
 ### Security Administration
 

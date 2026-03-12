@@ -1,6 +1,6 @@
 # Loom Backend
 
-FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, and security administration.
+FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, security administration, and resource tag policy management.
 
 ## Technology Stack
 
@@ -70,7 +70,8 @@ backend/
 │   │   ├── authorizer_config.py    # AuthorizerConfig ORM model
 │   │   ├── authorizer_credential.py # AuthorizerCredential ORM model
 │   │   ├── permission_request.py   # PermissionRequest ORM model
-│   │   └── memory.py        # Memory ORM model (AgentCore Memory resources)
+│   │   ├── memory.py        # Memory ORM model (AgentCore Memory resources)
+│   │   └── tag_policy.py    # TagPolicy ORM model (configurable tag policies)
 │   ├── dependencies/
 │   │   └── auth.py          # Auth dependencies (token extraction, validation)
 │   ├── routers/
@@ -80,6 +81,7 @@ backend/
 │   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
 │   │   ├── memories.py      # Memory resource CRUD + strategy mapping
 │   │   ├── security.py      # Security admin: roles, authorizers, credentials, permissions
+│   │   ├── settings.py      # Tag policy CRUD (GET/POST/PUT/DELETE /api/settings/tags)
 │   │   └── utils.py         # Shared router utilities
 │   └── services/
 │       ├── agentcore.py     # boto3 wrapper: describe, list endpoints, invoke
@@ -104,7 +106,7 @@ backend/
 
 ### `agents`
 
-Stores registered and deployed AgentCore Runtime agents. Uses an auto-incrementing integer PK for internal references; `arn` and `runtime_id` are stored as indexed columns for AWS lookups. Includes columns for: `source`, `deployment_status`, `execution_role_arn`, `endpoint_name`, `endpoint_arn`, `endpoint_status`, `protocol`, `network_mode`, `authorizer_config`, and `deployed_at`.
+Stores registered and deployed AgentCore Runtime agents. Uses an auto-incrementing integer PK for internal references; `arn` and `runtime_id` are stored as indexed columns for AWS lookups. Includes columns for: `source`, `deployment_status`, `execution_role_arn`, `endpoint_name`, `endpoint_arn`, `endpoint_status`, `protocol`, `network_mode`, `authorizer_config`, `deployed_at`, and `tags` (JSON dict of resolved tag key-value pairs).
 
 ### `agent_config_entries`
 
@@ -125,6 +127,10 @@ Stores OAuth credentials per authorizer config. Each credential has a label, cli
 ### `permission_requests`
 
 Stores permission escalation requests against managed roles. Includes requested actions, resources, justification, and review status (pending/approved/denied).
+
+### `tag_policies`
+
+Stores configurable tag policies for AWS resource tagging. Each policy defines a tag key, optional default value, source (`deploy-time` for auto-applied tags, `build-time` for user-supplied tags), whether the tag is required, and whether it should display on agent cards (`show_on_card`). Seeded with default policies (`Application`, `ManagedBy`) on database initialization.
 
 ### `memories`
 
@@ -175,6 +181,15 @@ Stores per-invocation timing measurements and status. Fields include `client_inv
 | `POST` | `/api/security/permission-requests` | Create a permission request |
 | `GET` | `/api/security/permission-requests` | List permission requests |
 | `PUT` | `/api/security/permission-requests/{req_id}/review` | Review a permission request |
+
+### Tag Policy Management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/settings/tags` | List all tag policies |
+| `POST` | `/api/settings/tags` | Create a tag policy (409 if key exists) |
+| `PUT` | `/api/settings/tags/{tag_id}` | Update a tag policy |
+| `DELETE` | `/api/settings/tags/{tag_id}` | Delete a tag policy |
 
 ### Authentication
 
@@ -237,6 +252,8 @@ Cold-start latency is computed automatically during the invoke flow:
 ## Agent Deployment
 
 Deploy creates a Strands Agent runtime on AgentCore. The build step cross-compiles an ARM64 artifact (pip install into a target directory, zips the result, and uploads to S3). Model and IAM role are required fields. The deployment supports configurable protocol (HTTP), network mode (PUBLIC), authorizer, and lifecycle settings. Cognito client secrets are stored in Secrets Manager and never persisted in the local database. Deletion optionally cleans up the AgentCore runtime and associated Secrets Manager entries. The deployment automatically sets `OTEL_SERVICE_NAME` to the agent name for AgentCore Observability integration.
+
+Tags are resolved from the tag policy system at deploy time. Deploy-time tags are auto-applied from their default values; build-time tags must be supplied by the user. Required tags that are missing cause deployment to fail with a 400 error. Resolved tags are applied to the AgentCore runtime, IAM execution role, and stored on the agent record. The deploy request accepts an optional `tags` field (key-value dict) for build-time tag values. For registered agents, tags are fetched from AWS via `list_tags_for_resource`.
 
 ## Authenticated Invocation
 

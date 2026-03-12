@@ -29,7 +29,8 @@ frontend/
 │   │   ├── invocations.ts      # Session queries + SSE stream consumer (with auth header)
 │   │   ├── logs.ts             # CloudWatch log queries
 │   │   ├── memories.ts         # Memory resource CRUD + refresh
-│   │   └── security.ts         # Security admin: roles, authorizers, credentials, permissions
+│   │   ├── security.ts         # Security admin: roles, authorizers, credentials, permissions
+│   │   └── settings.ts        # Settings API: tag policy CRUD
 │   ├── contexts/
 │   │   ├── AuthContext.tsx      # Cognito auth provider (login, logout, token refresh)
 │   │   └── TimezoneContext.tsx  # Timezone preference provider + hook
@@ -124,6 +125,7 @@ Catalog  >  [Agent Name]  >  [Session ID]
 **Content:**
 - Page header: "Platform Catalog" with card/table view toggle (top-right)
 - Organized into sections: Agents, Memory Resources, MCP Servers (coming soon), A2A Agents (coming soon)
+- Tag-based filter bar above the agents grid, with Select dropdowns for each tag policy with `show_on_card=true`. Client-side AND filtering with "Clear filters" button and agent count display (e.g., "Showing 3 of 12 agents")
 - Card/table view toggle applies to all sections on the page
 - Agents section: responsive grid of `AgentCard` components (3 columns on large screens) or table view
 - Memory Resources section: responsive grid of `MemoryCard` components (read-only, no create/delete) or table view
@@ -139,6 +141,7 @@ Each card displays:
 - Spinner animation when agent is in a creating/deploying state
 - Active session count badge (when > 0)
 - Region, Account ID, Network mode, Available qualifiers, Registered timestamp
+- Tag badges (secondary variant) for tags marked `show_on_card` in tag policies, formatted as `key: value`
 - Refresh button (RefreshCw icon) and Eraser icon (top-right) for refresh/deletion
 
 ### Delete Confirmation
@@ -180,6 +183,7 @@ Full deployment form with sections:
   - Cognito: searchable Cognito pool select (30% width), auto-populated discovery URL, tag inputs for allowed clients and scopes, app client ID and client secret fields
   - Other: textbox for discovery URL, tag inputs for allowed clients and scopes
 - **Lifecycle**: idle timeout and max lifetime fields with dynamic placeholders fetched from `/api/agents/defaults` (e.g., "300" and "3600")
+- **Resource Tags**: build-time tag inputs fetched from `/api/settings/tags`. Deploy-time tags are shown as informational text. Required build-time tags are validated before submit.
 - **Integrations**: Memory, MCP Servers, A2A Agents — all shown as disabled checkboxes with "coming soon" labels
 
 ---
@@ -363,6 +367,12 @@ Cognito client secrets are password-masked in forms. Secrets are sent to the bac
 - Write operations are gated by a `readOnly` prop propagated from `App.tsx` through page components to individual UI elements. When `readOnly` is true, add/edit/delete buttons are disabled or hidden.
 - Pages and their `readOnly` mapping: `AgentListPage` and `CatalogPage` use `!hasScope("agent:write")`, `SecurityAdminPage` uses `!hasScope("security:write")`, `MemoryManagementPage` uses `!hasScope("data:write")`.
 - Components that respect `readOnly`: `AgentCard`, `AgentListPage`, `CatalogPage`, `SecurityAdminPage`, `RoleManagementPanel`, `AuthorizerManagementPanel`, `PermissionRequestsPanel`, `MemoryManagementPage`, `MemoryManagementPanel`, `MemoryCard`.
+
+### Resource Tagging
+- Tag policies are fetched from `/api/settings/tags` and used to render build-time tag inputs in the deploy form, tag badges on agent cards, and filter dropdowns in the catalog.
+- `showOnCardKeys` (derived from tag policies with `show_on_card=true`) is passed as a prop to `AgentCard` components from both `CatalogPage` and `AgentListPage`.
+- Tag badges use `variant="secondary"` to visually distinguish them from status and protocol badges.
+- Catalog filtering is client-side with AND logic across selected tag values.
 
 ### API Layer Design
 - `apiFetch<T>()` is a thin wrapper around `fetch` with JSON parsing, `ApiError` class, and automatic auth token injection

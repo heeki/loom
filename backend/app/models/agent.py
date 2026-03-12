@@ -42,6 +42,7 @@ class Agent(Base):
     protocol = Column(String, nullable=True)  # HTTP, MCP, A2A
     network_mode = Column(String, nullable=True)  # PUBLIC or VPC
     authorizer_config = Column(Text, nullable=True)  # JSON: {type, pool_id, discovery_url, client_id, client_secret}
+    tags = Column(Text, nullable=True)  # JSON dict of resolved tags
     deployed_at = Column(DateTime, nullable=True)
     registered_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     last_refreshed_at = Column(DateTime, nullable=True)
@@ -78,6 +79,19 @@ class Agent(Base):
         """Serialize raw_metadata to JSON text."""
         self.raw_metadata = json.dumps(metadata, cls=DateTimeEncoder)
 
+    def get_tags(self) -> dict[str, str]:
+        """Parse tags from JSON text."""
+        if not self.tags:
+            return {}
+        try:
+            return json.loads(self.tags)
+        except json.JSONDecodeError:
+            return {}
+
+    def set_tags(self, tags: dict[str, str]) -> None:
+        """Serialize tags to JSON text."""
+        self.tags = json.dumps(tags)
+
     def get_authorizer_config(self) -> dict | None:
         """Parse authorizer_config from JSON text."""
         if not self.authorizer_config:
@@ -112,6 +126,7 @@ class Agent(Base):
             "endpoint_status": self.endpoint_status,
             "protocol": self.protocol,
             "network_mode": self.network_mode,
+            "tags": self.get_tags(),
             "deployed_at": (self.deployed_at.isoformat() + "Z") if self.deployed_at else None,
             "registered_at": (self.registered_at.isoformat() + "Z") if self.registered_at else None,
             "last_refreshed_at": (self.last_refreshed_at.isoformat() + "Z") if self.last_refreshed_at else None,

@@ -259,7 +259,20 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Security makefile with `cognito.set-passwords` target for setting permanent user passwords.
 - Scope-based frontend authorization: `AuthContext` extracts `cognito:groups` from the ID token, maps groups to scopes, and exposes `hasScope()`. Sidebar items are conditionally rendered based on user scopes. Write operations (add, edit, delete buttons) are disabled or hidden via a `readOnly` prop when the user lacks `*:write` scopes. When auth is not configured, all scopes are granted.
 
-### Phase 7 — Advanced Operations
+### Phase 7 — Resource Tagging *(Complete)*
+- Configurable tag policy system: `TagPolicy` model with key, default_value, source (deploy-time/build-time), required, and show_on_card fields.
+- Tag policy CRUD API under `/api/settings/tags` with default seed data (deployed-by, application, team, owner).
+- Deploy-time tags are automatically applied from policy defaults; build-time tags require user input during agent deployment.
+- Required build-time tag validation before deployment — missing tags return HTTP 400.
+- All AWS resources that support tags (AgentCore runtimes, runtime endpoints, IAM execution roles, managed roles) receive the resolved tags.
+- Registered agents fetch existing tags from AWS via `list_tags_for_resource` and store them locally.
+- Resolved tags stored on the Agent record as a JSON column, included in `AgentResponse`.
+- Agent cards display tag badges (`variant="secondary"`) for tags with `show_on_card=true`.
+- Catalog page provides tag-based filtering with Select dropdowns, AND logic, clear button, and agent count display.
+- Frontend deploy form renders build-time tag input fields with required-tag validation.
+- 27 new backend tests covering tag policy CRUD, tag resolution, validation, and agent tag storage.
+
+### Phase 8 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.
