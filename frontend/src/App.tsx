@@ -25,7 +25,9 @@ import { InvocationDetailPage } from "@/pages/InvocationDetailPage";
 import { SecurityAdminPage } from "@/pages/SecurityAdminPage";
 import { MemoryManagementPage } from "@/pages/MemoryManagementPage";
 import type { SessionResponse, InvocationResponse } from "@/api/types";
-import { BookOpen, Shield, Bot, Brain, Network, Users } from "lucide-react";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { LoginPage } from "@/pages/LoginPage";
+import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User } from "lucide-react";
 
 type Theme = "light" | "dark";
 type Persona = "catalog" | "security" | "builder" | "memory";
@@ -127,6 +129,7 @@ function SidebarItem({
 }
 
 function AppContent() {
+  const { isAuthenticated, isLoading, user, logout, hasScope } = useAuth();
   const [theme, setTheme] = useState<Theme>(() =>
     document.documentElement.classList.contains("dark") ? "dark" : "light",
   );
@@ -168,6 +171,18 @@ function AppContent() {
     }
     void getInvocation(selectedAgentId, selectedSessionId, selectedInvocationId).then(setInvocationDetail);
   }, [selectedAgentId, selectedSessionId, selectedInvocationId]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-muted-foreground">Loading...</p>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
 
   const handleBack = () => {
     if (selectedInvocationId) {
@@ -258,40 +273,68 @@ function AppContent() {
             active={activePersona === "catalog"}
             onClick={() => setActivePersona("catalog")}
           />
-          <SidebarItem
-            icon={Bot}
-            label="Agents"
-            active={activePersona === "builder"}
-            onClick={() => setActivePersona("builder")}
-          />
-          <SidebarItem
-            icon={Brain}
-            label="Memory"
-            active={activePersona === "memory"}
-            onClick={() => setActivePersona("memory")}
-          />
-          <SidebarItem
-            icon={Shield}
-            label="Security"
-            active={activePersona === "security"}
-            onClick={() => setActivePersona("security")}
-          />
-          <SidebarItem
-            icon={Network}
-            label="MCP Servers"
-            active={false}
-            onClick={() => {}}
-            disabled
-          />
-          <SidebarItem
-            icon={Users}
-            label="A2A Agents"
-            active={false}
-            onClick={() => {}}
-            disabled
-          />
+          {(hasScope("agent:read") || hasScope("agent:write")) && (
+            <SidebarItem
+              icon={Bot}
+              label="Agents"
+              active={activePersona === "builder"}
+              onClick={() => setActivePersona("builder")}
+            />
+          )}
+          {(hasScope("data:read") || hasScope("data:write")) && (
+            <SidebarItem
+              icon={Brain}
+              label="Memory"
+              active={activePersona === "memory"}
+              onClick={() => setActivePersona("memory")}
+            />
+          )}
+          {(hasScope("security:read") || hasScope("security:write")) && (
+            <SidebarItem
+              icon={Shield}
+              label="Security"
+              active={activePersona === "security"}
+              onClick={() => setActivePersona("security")}
+            />
+          )}
+          {(hasScope("data:read") || hasScope("data:write")) && (
+            <>
+              <SidebarItem
+                icon={Network}
+                label="MCP Servers"
+                active={false}
+                onClick={() => {}}
+                disabled
+              />
+              <SidebarItem
+                icon={Users}
+                label="A2A Agents"
+                active={false}
+                onClick={() => {}}
+                disabled
+              />
+            </>
+          )}
         </nav>
         <div className="p-2 border-t space-y-1">
+          {user && (
+            <div className="px-3 py-1 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="text-xs text-muted-foreground truncate">
+                  {user.username || "User"}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={logout}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                title="Sign out"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
           <div className="px-3 py-1">
             <ThemeSelector theme={theme} setTheme={setTheme} />
           </div>
@@ -353,6 +396,7 @@ function AppContent() {
                   onSelectAgent={setSelectedAgentId}
                   onRefreshAgent={refreshAgent}
                   onDelete={handleDelete}
+                  readOnly={!hasScope("agent:write")}
                 />
               )}
 
@@ -405,11 +449,12 @@ function AppContent() {
               }}
               onRefreshAgent={refreshAgent}
               onDelete={handleDelete}
+              readOnly={!hasScope("agent:write")}
             />
           )}
 
-          {activePersona === "security" && <SecurityAdminPage />}
-          {activePersona === "memory" && <MemoryManagementPage viewMode={memoryViewMode} onViewModeChange={setMemoryViewMode} />}
+          {activePersona === "security" && <SecurityAdminPage readOnly={!hasScope("security:write")} />}
+          {activePersona === "memory" && <MemoryManagementPage viewMode={memoryViewMode} onViewModeChange={setMemoryViewMode} readOnly={!hasScope("data:write")} />}
         </main>
       </div>
 
@@ -420,8 +465,10 @@ function AppContent() {
 
 export default function App() {
   return (
-    <TimezoneProvider>
-      <AppContent />
-    </TimezoneProvider>
+    <AuthProvider>
+      <TimezoneProvider>
+        <AppContent />
+      </TimezoneProvider>
+    </AuthProvider>
   );
 }

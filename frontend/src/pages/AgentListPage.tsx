@@ -32,6 +32,7 @@ interface AgentListPageProps {
   onSelectAgent: (id: number) => void;
   onRefreshAgent: (id: number) => void;
   onDelete: (id: number, cleanupAws: boolean) => void;
+  readOnly?: boolean;
 }
 
 export function AgentListPage({
@@ -44,6 +45,7 @@ export function AgentListPage({
   onSelectAgent,
   onRefreshAgent,
   onDelete,
+  readOnly,
 }: AgentListPageProps) {
   const { timezone } = useTimezone();
   const [submitting, setSubmitting] = useState(false);
@@ -123,6 +125,7 @@ export function AgentListPage({
             variant="outline"
             className="shrink-0 ml-4"
             onClick={() => setShowAddForm(!showAddForm)}
+            disabled={readOnly}
           >
             <Plus className="h-3.5 w-3.5 mr-1" />
             Add Agent
@@ -170,7 +173,7 @@ export function AgentListPage({
             ))}
           </div>
         ) : agents.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-8">
+          <p className="text-sm text-muted-foreground py-8">
             No agents yet. Add one above.
           </p>
         ) : (
@@ -184,6 +187,7 @@ export function AgentListPage({
                     onSelect={onSelectAgent}
                     onRefresh={onRefreshAgent}
                     onDelete={onDelete}
+                    readOnly={readOnly}
                   />
                 ))}
               </div>
@@ -227,18 +231,20 @@ export function AgentListPage({
                           {formatTimestamp(agent.registered_at, timezone)}
                         </TableCell>
                         <TableCell>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-6 w-6 p-0"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setConfirmDeleteId(agent.id);
-                            }}
-                            title="Delete"
-                          >
-                            <Eraser className="h-3 w-3" />
-                          </Button>
+                          {!readOnly && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 w-6 p-0"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmDeleteId(agent.id);
+                              }}
+                              title="Delete"
+                            >
+                              <Eraser className="h-3 w-3" />
+                            </Button>
+                          )}
                           {confirmDeleteId === agent.id && (
                             <div
                               className="absolute inset-x-0 bottom-0 rounded-b-lg border-t bg-card px-4 py-2 space-y-1.5"

@@ -47,7 +47,10 @@ loom/
 │   │   │   ├── authorizer_credential.py
 │   │   │   ├── permission_request.py
 │   │   │   └── memory.py
+│   │   ├── dependencies/
+│   │   │   └── auth.py
 │   │   ├── routers/
+│   │   │   ├── auth.py
 │   │   │   ├── agents.py
 │   │   │   ├── invocations.py
 │   │   │   ├── logs.py
@@ -62,6 +65,7 @@ loom/
 │   │       ├── credential.py
 │   │       ├── deployment.py
 │   │       ├── iam.py
+│   │       ├── jwt_validator.py
 │   │       └── latency.py
 │   ├── scripts/
 │   ├── tests/
@@ -82,10 +86,13 @@ loom/
 │   ├── tsconfig.json
 │   ├── vite.config.ts
 │   └── SPECIFICATIONS.md
-├── security/                   # Security IaC templates
-│   └── iac/
-│       ├── role.yaml           # SAM template for IAM roles
-│       └── cognito.yaml        # SAM template for Cognito pools
+├── security/                   # Security IaC templates + user management
+│   ├── iac/
+│   │   ├── role.yaml           # SAM template for IAM roles
+│   │   └── cognito.yaml        # SAM template for Cognito pools, groups, users, scopes
+│   ├── etc/
+│   │   └── environment.sh      # Security configuration (Cognito pool, passwords)
+│   └── makefile                # Cognito stack deploy, user password management
 ├── etc/
 │   └── environment.sh          # Source-of-truth for injectable parameters
 ├── tmp/
@@ -118,6 +125,48 @@ Detailed specifications for each component are maintained in their respective di
 - The backend retrieves secrets at invocation time with in-memory caching (5-minute TTL).
 - Secrets are cleaned up from Secrets Manager when authorizer credentials or agents are deleted.
 - Security administration (roles, authorizers, credentials, permissions) is managed through a dedicated persona workflow.
+
+### User Authentication
+
+- Users authenticate via an AWS Cognito User Pool using the `USER_PASSWORD_AUTH` flow.
+- The frontend stores tokens (id, access, refresh) in React state only — never in localStorage or cookies.
+- The backend validates user JWTs against the Cognito JWKS endpoint (keys cached for 1 hour).
+- The `GET /api/auth/config` endpoint exposes only the pool ID and region — never client IDs or secrets.
+- The user client ID is configured on the frontend via the `VITE_COGNITO_USER_CLIENT_ID` environment variable (Vite `.env` file). The user client has `GenerateSecret: false` since browser-based apps cannot safely store client secrets.
+- When a user is authenticated, their access token is forwarded to AgentCore for agent invocations, replacing the M2M client credentials flow.
+- Unauthenticated requests are allowed to pass through with a warning (no breaking change to existing flows).
+- The `NEW_PASSWORD_REQUIRED` Cognito challenge is handled on first login for admin-created users.
+- Access tokens are automatically refreshed before expiry using the refresh token.
+- Token persistence across browser refreshes is out of scope — users must re-login after page reload.
+
+### Cognito User Pool Configuration
+
+The Cognito User Pool is managed via CloudFormation (`security/iac/cognito.yaml`) and includes:
+
+- **Password policy:** Minimum 12 characters, uppercase, lowercase, numbers required; symbols not required.
+- **Resource server scopes:** `invoke`, `agent:read`, `agent:write`, `security:read`, `security:write`, `data:read`, `data:write`.
+- **Groups:** `admins`, `security-admins`, `data-stewards`, `builders`, `operators`.
+- **Users:** `admin`, `secadmin`, `datasteward`, `builder`, `operator` — each assigned to their respective group via `UserPoolUserToGroupAttachment`.
+- **Clients:**
+  - **M2MClient** — `client_credentials` flow with secret, scoped to `invoke`.
+  - **UserClient** — `USER_PASSWORD_AUTH` + `REFRESH_TOKEN_AUTH` flows without secret, scoped to all custom scopes plus `openid`, `email`, `profile`.
+- User passwords are set via `make cognito.set-passwords` in the `security/` directory.
+
+### Scope-Based Frontend Authorization
+
+The frontend enforces scope-based access control derived from Cognito group membership:
+
+| Group | Scopes | Sidebar Access | Write Access |
+|-------|--------|----------------|--------------|
+| `admins` | agent:read/write, security:read/write, data:read/write | All pages | All actions |
+| `security-admins` | security:read, security:write | Security | Security actions |
+| `data-stewards` | data:read, data:write | Memory, MCP Servers, A2A Agents | Memory actions |
+| `builders` | agent:read, agent:write | Agents | Agent actions |
+| `operators` | agent:read, security:read, data:read | Agents, Security | Read-only |
+
+- **Sidebar visibility:** Each sidebar item is shown only when the user has the corresponding `*:read` or `*:write` scope. The Platform Catalog is always visible.
+- **Write protection:** Components receive a `readOnly` prop that disables or hides add, edit, and delete buttons when the user lacks `*:write` scopes.
+- **Bypass mode:** When authentication is not configured (no Cognito pool ID or client ID), all scopes are granted and all features are accessible.
 
 ---
 
@@ -196,11 +245,25 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Console script shebang fix: the build pipeline rewrites `opentelemetry-instrument` (and `opentelemetry-bootstrap`) scripts with a portable `#!/usr/bin/env python3` shebang so they execute correctly on the Linux-based AgentCore Runtime container.
 - Unit tests for telemetry setup idempotency, span creation, hook lifecycle, shebang fix, and noop operation.
 
-### Phase 6 — Advanced Operations
+### Phase 6 — User Authentication *(Complete)*
+- Cognito-based user authentication with `USER_PASSWORD_AUTH` flow.
+- Login page with `NEW_PASSWORD_REQUIRED` challenge handling for admin-created users.
+- `AuthContext` provider with login, logout, and automatic token refresh.
+- User indicator (username) and logout button in the sidebar.
+- JWT validation middleware on the backend (JWKS caching, token claim extraction).
+- User access token forwarded to AgentCore for authenticated invocations (priority over M2M flow).
+- Graceful fallback to existing M2M client credentials flow when no user token is present.
+- `GET /api/auth/config` endpoint returns pool ID and region; user client ID is configured on the frontend via `VITE_COGNITO_USER_CLIENT_ID`.
+- Tokens stored in memory only (not localStorage); authentication does not persist across page reloads.
+- Cognito User Pool IaC: resource server with custom scopes (`agent:read/write`, `security:read/write`, `data:read/write`, `invoke`), user groups (`admins`, `security-admins`, `data-stewards`, `builders`, `operators`), users with group assignments, password policy (12+ chars, no symbols required).
+- Security makefile with `cognito.set-passwords` target for setting permanent user passwords.
+- Scope-based frontend authorization: `AuthContext` extracts `cognito:groups` from the ID token, maps groups to scopes, and exposes `hasScope()`. Sidebar items are conditionally rendered based on user scopes. Write operations (add, edit, delete buttons) are disabled or hidden via a `readOnly` prop when the user lacks `*:write` scopes. When auth is not configured, all scopes are granted.
+
+### Phase 7 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.
-- Authentication and authorization.
+- Role-based access control within Loom.
 
 ---
 

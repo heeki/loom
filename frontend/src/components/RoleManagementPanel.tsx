@@ -8,7 +8,7 @@ import { useManagedRoles } from "@/hooks/useSecurity";
 import { ChevronDown, ChevronRight, Trash2, Plus } from "lucide-react";
 import { toast } from "sonner";
 
-export function RoleManagementPanel() {
+export function RoleManagementPanel({ readOnly }: { readOnly?: boolean }) {
   const { roles, loading, error, createRole, deleteRole } = useManagedRoles();
   const [showAddForm, setShowAddForm] = useState(false);
   const [importArn, setImportArn] = useState("");
@@ -63,7 +63,7 @@ export function RoleManagementPanel() {
             Role management is the responsibility of the security team.
           </p>
         </div>
-        <Button size="sm" variant="outline" className="shrink-0 ml-4" onClick={() => setShowAddForm(!showAddForm)}>
+        <Button size="sm" variant="outline" className="shrink-0 ml-4" onClick={() => setShowAddForm(!showAddForm)} disabled={readOnly}>
           <Plus className="h-3.5 w-3.5 mr-1" />
           Add Role
         </Button>
@@ -88,7 +88,7 @@ export function RoleManagementPanel() {
       )}
 
       {roles.length === 0 ? (
-        <p className="text-sm text-muted-foreground text-center py-8">No managed roles yet. Add one above.</p>
+        <p className="text-sm text-muted-foreground py-8">No managed roles yet. Add one above.</p>
       ) : (
         <div className="space-y-2">
           {roles.map((role) => (
@@ -109,15 +109,17 @@ export function RoleManagementPanel() {
                   <div className="text-xs text-muted-foreground hidden sm:block max-w-[30%] truncate">
                     {role.description}
                   </div>
-                  <div className="flex gap-1 shrink-0">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setConfirmDeleteId(role.id)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
+                  {!readOnly && (
+                    <div className="flex gap-1 shrink-0">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setConfirmDeleteId(role.id)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
 
                 {confirmDeleteId === role.id && (

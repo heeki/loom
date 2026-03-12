@@ -62,7 +62,7 @@ The sidebar provides access to persona-based workflows:
 | **MCP Servers** | Network | Coming soon (disabled) |
 | **A2A Agents** | Users | Coming soon (disabled) |
 
-The sidebar also includes theme toggle, timezone selector, live clock, and version badge. Each listing page has a card/table view toggle; the selection persists per-page across persona switches.
+The sidebar also includes a user indicator (when authenticated), theme toggle, timezone selector, live clock, and version badge. Each listing page has a card/table view toggle; the selection persists per-page across persona switches.
 
 ### Drill-Down Navigation
 
@@ -85,7 +85,7 @@ src/
 │   ├── memories.ts    # Memory resource CRUD + refresh
 │   ├── security.ts    # Roles, authorizers, credentials, permissions
 │   └── types.ts       # TypeScript interfaces mirroring backend models
-├── contexts/     # React contexts (timezone preference)
+├── contexts/     # React contexts (auth, timezone preference)
 ├── hooks/        # Custom React hooks for data fetching
 ├── components/   # Application components + shadcn ui/ primitives
 │   ├── AgentCard.tsx              # Agent card with refresh + eraser icon deletion + overlay confirmation
@@ -105,15 +105,26 @@ src/
 │   ├── MemoryManagementPage.tsx # Memory resource management
 │   └── SessionDetailPage.tsx   # Session metadata, invocations, logs
 ├── lib/          # Shared utilities (cn(), format helpers, status mapping)
-├── App.tsx       # Root: persona sidebar + navigation + timezone provider
+├── App.tsx       # Root: auth gate + persona sidebar + navigation
 └── main.tsx      # Entry point
 ```
 
+### Authentication
+
+When Cognito is configured, users must sign in before accessing the app. Configuration requires:
+- **Backend:** `LOOM_COGNITO_USER_POOL_ID` in `backend/etc/environment.sh`
+- **Frontend:** `VITE_COGNITO_USER_CLIENT_ID` in `frontend/.env`
+
+The login page handles the `USER_PASSWORD_AUTH` flow and `NEW_PASSWORD_REQUIRED` challenge. Tokens are stored in memory only (not persisted across page reloads). The access token is automatically attached to all API requests. The `.env` file is the standard Vite mechanism for environment variables — any variable prefixed with `VITE_` is exposed via `import.meta.env`.
+
+The `AuthContext` also provides scope-based authorization. User groups are extracted from the `cognito:groups` claim in the ID token and mapped to scopes (`agent:read/write`, `security:read/write`, `data:read/write`). Sidebar items are conditionally rendered based on scopes, and write operations are disabled via a `readOnly` prop for users without the corresponding `*:write` scope. When auth is not configured, all scopes are granted.
+
 ### API Layer
 
-- `api/client.ts` — `apiFetch<T>()` wrapper with `ApiError` class
+- `api/client.ts` — `apiFetch<T>()` wrapper with `ApiError` class and automatic auth token injection
+- `api/auth.ts` — Cognito auth API: `fetchAuthConfig`, `initiateAuth`, `respondToNewPasswordChallenge`, `refreshTokens`
 - `api/agents.ts` — Agent operations: list, get, register (with optional model_id), deploy, delete (with optional AWS cleanup), refresh, redeploy, fetchRoles, fetchCognitoPools, fetchModels, fetchDefaults
-- `api/invocations.ts` — Session queries + `invokeAgentStream()` SSE consumer (supports `credential_id`)
+- `api/invocations.ts` — Session queries + `invokeAgentStream()` SSE consumer (supports `credential_id`, includes auth header)
 - `api/logs.ts` — CloudWatch log queries
 - `api/memories.ts` — Memory resource operations: create, import, list, get, refresh, delete, purge
 - `api/security.ts` — Security admin operations: managed roles, authorizer configs, authorizer credentials, permission requests
@@ -140,6 +151,7 @@ src/
 
 | View | Persona | Description |
 |------|---------|-------------|
+| LoginPage | — | Cognito login + set new password |
 | CatalogPage | Platform Catalog | Agents, memory resources, MCP servers, A2A agents sections |
 | AgentDetailPage | Platform Catalog | Sessions, invoke, latency, streaming response, deployment details |
 | SessionDetailPage | Platform Catalog | Session metadata, invocation timing, CloudWatch logs |

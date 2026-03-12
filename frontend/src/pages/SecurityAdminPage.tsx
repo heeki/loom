@@ -5,7 +5,7 @@ import { PermissionRequestsPanel } from "@/components/PermissionRequestsPanel";
 
 type SecurityTab = "roles" | "authorizers" | "permissions";
 
-export function SecurityAdminPage() {
+export function SecurityAdminPage({ readOnly }: { readOnly?: boolean }) {
   const [activeTab, setActiveTab] = useState<SecurityTab>("roles");
 
   const tabs: { key: SecurityTab; label: string }[] = [
@@ -44,9 +44,9 @@ export function SecurityAdminPage() {
         ))}
       </div>
 
-      {activeTab === "roles" && <RoleManagementPanel />}
-      {activeTab === "authorizers" && <AuthorizerManagementPanel />}
-      {activeTab === "permissions" && <PermissionRequestsPanel />}
+      {activeTab === "roles" && <RoleManagementPanel readOnly={readOnly} />}
+      {activeTab === "authorizers" && <AuthorizerManagementPanel readOnly={readOnly} />}
+      {activeTab === "permissions" && <PermissionRequestsPanel readOnly={readOnly} />}
     </div>
   );
 }

@@ -9,6 +9,8 @@ build
 tmp
 
 # files
+.env
+.env.*
 environment.sh
 loom.db
 notes.md

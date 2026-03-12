@@ -1,4 +1,4 @@
-import { apiFetch, BASE_URL } from "./client";
+import { apiFetch, BASE_URL, getAuthToken } from "./client";
 import type {
   InvokeRequest,
   InvocationResponse,
@@ -45,9 +45,15 @@ export async function invokeAgentStream(
   callbacks: StreamCallbacks,
   signal?: AbortSignal,
 ): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = getAuthToken();
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
   const response = await fetch(`${BASE_URL}/api/agents/${agentId}/invoke`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(request),
     signal,
   });

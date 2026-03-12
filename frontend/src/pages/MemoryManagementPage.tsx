@@ -4,9 +4,10 @@ import { MemoryManagementPanel } from "../components/MemoryManagementPanel";
 interface MemoryManagementPageProps {
   viewMode: "cards" | "table";
   onViewModeChange: (mode: "cards" | "table") => void;
+  readOnly?: boolean;
 }
 
-export function MemoryManagementPage({ viewMode, onViewModeChange }: MemoryManagementPageProps) {
+export function MemoryManagementPage({ viewMode, onViewModeChange, readOnly }: MemoryManagementPageProps) {
 
   return (
     <div className="space-y-6">
@@ -38,7 +39,7 @@ export function MemoryManagementPage({ viewMode, onViewModeChange }: MemoryManag
           </button>
         </div>
       </div>
-      <MemoryManagementPanel viewMode={viewMode} />
+      <MemoryManagementPanel viewMode={viewMode} readOnly={readOnly} />
     </div>
   );
 }

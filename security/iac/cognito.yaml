@@ -28,6 +28,13 @@ Resources:
       UserPoolName: !Ref pPoolName
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
 
   CognitoUserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
@@ -44,6 +51,135 @@ Resources:
       Scopes:
         - ScopeName: invoke
           ScopeDescription: Invoke agent through AgentCore
+        - ScopeName: agent:read
+          ScopeDescription: Read agents
+        - ScopeName: agent:write
+          ScopeDescription: Write agents
+        - ScopeName: security:read
+          ScopeDescription: Read security configurations
+        - ScopeName: security:write
+          ScopeDescription: Write security configurations
+        - ScopeName: data:read
+          ScopeDescription: Read data resources
+        - ScopeName: data:write
+          ScopeDescription: Write data resources
+
+  AdminsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: admins
+      Description: Full access to all resources
+      UserPoolId: !Ref CognitoUserPool
+
+  SecurityAdminsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: security-admins
+      Description: Manage security configurations
+      UserPoolId: !Ref CognitoUserPool
+
+  DataStewardsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: data-stewards
+      Description: Manage data resources
+      UserPoolId: !Ref CognitoUserPool
+
+  BuildersGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: builders
+      Description: Build and manage agents
+      UserPoolId: !Ref CognitoUserPool
+
+  OperatorsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: operators
+      Description: Read-only operational access
+      UserPoolId: !Ref CognitoUserPool
+
+  # Users
+  AdminUser:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: admin
+      UserAttributes:
+        - Name: email
+          Value: admin@heeki.cloud
+
+  SecadminUser:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: secadmin
+      UserAttributes:
+        - Name: email
+          Value: secadmin@heeki.cloud
+
+  DatastewardUser:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: datasteward
+      UserAttributes:
+        - Name: email
+          Value: datasteward@heeki.cloud
+
+  BuilderUser:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: builder
+      UserAttributes:
+        - Name: email
+          Value: builder@heeki.cloud
+
+  OperatorUser:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: operator
+      UserAttributes:
+        - Name: email
+          Value: operator@heeki.cloud
+
+  # User-to-group assignments
+  AdminToAdmins:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref AdminUser
+      GroupName: !Ref AdminsGroup
+
+  SecadminToSecurityAdmins:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref SecadminUser
+      GroupName: !Ref SecurityAdminsGroup
+
+  DatastewardToDataStewards:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DatastewardUser
+      GroupName: !Ref DataStewardsGroup
+
+  BuilderToBuilders:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref BuilderUser
+      GroupName: !Ref BuildersGroup
+
+  OperatorToOperators:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref OperatorUser
+      GroupName: !Ref OperatorsGroup
 
   # Machine-to-machine client (client_credentials flow, access token only)
   M2MClient:
@@ -69,7 +205,7 @@ Resources:
     Properties:
       ClientName: !Sub "${pPoolName}-user-client"
       UserPoolId: !Ref CognitoUserPool
-      GenerateSecret: true
+      GenerateSecret: false
       ExplicitAuthFlows:
         - ALLOW_USER_PASSWORD_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
@@ -81,6 +217,12 @@ Resources:
         - email
         - profile
         - !Sub "${pResourceServerIdentifier}/invoke"
+        - !Sub "${pResourceServerIdentifier}/agent:read"
+        - !Sub "${pResourceServerIdentifier}/agent:write"
+        - !Sub "${pResourceServerIdentifier}/security:read"
+        - !Sub "${pResourceServerIdentifier}/security:write"
+        - !Sub "${pResourceServerIdentifier}/data:read"
+        - !Sub "${pResourceServerIdentifier}/data:write"
       CallbackURLs: !Ref pCallbackUrls
       SupportedIdentityProviders:
         - COGNITO
