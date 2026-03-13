@@ -582,14 +582,19 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
               {tagPolicies.filter(tp => tp.source === "build-time").length > 0 && (
                 <section className="space-y-3">
                   <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Resource Tags</h4>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="flex gap-3">
                     {tagPolicies.filter(tp => tp.source === "build-time").map(tp => (
-                      <div key={tp.key} className="space-y-1">
+                      <div key={tp.key} className="flex-1 min-w-0 space-y-1">
                         <label className="text-xs text-muted-foreground">
                           {tp.key}{tp.required && <span className="text-destructive"> *</span>}
                         </label>
                         <Input
-                          placeholder={tp.default_value || `Enter ${tp.key}`}
+                          placeholder={
+                            tp.key === "loom:application" ? "Identifier for the application" :
+                            tp.key === "loom:group" ? "Group for the application, e.g., team, line of business, use case" :
+                            tp.key === "loom:owner" ? "Identifier or email alias for the owner" :
+                            tp.default_value || `Enter ${tp.key}`
+                          }
                           value={tagValues[tp.key] || ""}
                           onChange={(e) => setTagValues(prev => ({ ...prev, [tp.key]: e.target.value }))}
                           className="text-sm"

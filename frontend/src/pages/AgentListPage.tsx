@@ -12,6 +12,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { AgentRegistrationForm } from "@/components/AgentRegistrationForm";
 import { AgentCard } from "@/components/AgentCard";
 import { toast } from "sonner";
@@ -55,12 +62,21 @@ export function AgentListPage({
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [cleanupAws, setCleanupAws] = useState(false);
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
+  const [tagFilters, setTagFilters] = useState<Record<string, string>>({});
 
   useEffect(() => {
     void listTagPolicies().then(setTagPolicies).catch(() => {});
   }, []);
 
-  const showOnCardKeys = tagPolicies.filter(tp => tp.show_on_card).map(tp => tp.key);
+  const showOnCardPolicies = tagPolicies.filter(tp => tp.show_on_card);
+  const showOnCardKeys = showOnCardPolicies.map(tp => tp.key);
+
+  const filteredAgents = agents.filter(agent => {
+    return Object.entries(tagFilters).every(([key, value]) => {
+      if (!value) return true;
+      return agent.tags?.[key] === value;
+    });
+  });
 
   const handleRegister = async (arn: string, modelId?: string) => {
     setSubmitting(true);
@@ -174,21 +190,67 @@ export function AgentListPage({
           </Card>
         )}
 
+        {/* Tag Filters */}
+        {showOnCardPolicies.length > 0 && agents.length > 0 && (
+          <div className="flex flex-wrap items-center gap-3">
+            {showOnCardPolicies.map(tp => {
+              const distinctValues = [...new Set(
+                agents.map(a => a.tags?.[tp.key]).filter(Boolean)
+              )] as string[];
+              if (distinctValues.length === 0) return null;
+              return (
+                <div key={tp.key} className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground">{tp.key.replace(/^loom:/, "")}</label>
+                  <Select
+                    value={tagFilters[tp.key] || ""}
+                    onValueChange={(v) => setTagFilters(prev => ({ ...prev, [tp.key]: v === "__all__" ? "" : v }))}
+                  >
+                    <SelectTrigger className="h-7 w-[140px] text-xs">
+                      <SelectValue placeholder="All" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">All</SelectItem>
+                      {distinctValues.sort().map(v => (
+                        <SelectItem key={v} value={v}>{v}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              );
+            })}
+            {Object.values(tagFilters).some(v => v) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => setTagFilters({})}
+              >
+                Clear filters
+              </Button>
+            )}
+            <span className="text-xs text-muted-foreground ml-auto">
+              Showing {filteredAgents.length} of {agents.length} agents
+            </span>
+          </div>
+        )}
+
         {loading ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 3 }).map((_, i) => (
               <Skeleton key={i} className="h-48" />
             ))}
           </div>
-        ) : agents.length === 0 ? (
+        ) : filteredAgents.length === 0 ? (
           <p className="text-sm text-muted-foreground py-8">
-            No agents yet. Add one above.
+            {agents.length === 0
+              ? "No agents yet. Add one above."
+              : "No agents match the selected filters."}
           </p>
         ) : (
           <>
             {viewMode === "cards" ? (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {agents.map((agent) => (
+                {filteredAgents.map((agent) => (
                   <AgentCard
                     key={agent.id}
                     agent={agent}
@@ -215,7 +277,7 @@ export function AgentListPage({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {agents.map((agent) => (
+                    {filteredAgents.map((agent) => (
                       <TableRow
                         key={agent.id}
                         className="relative bg-input-bg hover:bg-input-bg/80 cursor-pointer"

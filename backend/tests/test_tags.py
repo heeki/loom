@@ -38,31 +38,29 @@ class TestTagPolicyModel(unittest.TestCase):
         Base.metadata.create_all(bind=self.engine)
 
     def test_seed_default_tags(self):
-        """Test that _seed_default_tags creates the four default tag policies."""
+        """Test that _seed_default_tags creates the three default tag policies."""
         _seed_default_tags(self.engine)
         policies = self.session.query(TagPolicy).all()
         keys = {p.key for p in policies}
-        self.assertEqual(keys, {"deployed-by", "application", "team", "owner"})
-
-        # Verify deployed-by has default_value
-        deployed_by = self.session.query(TagPolicy).filter(TagPolicy.key == "deployed-by").first()
-        self.assertEqual(deployed_by.default_value, "loom")
-        self.assertEqual(deployed_by.source, "deploy-time")
-        self.assertTrue(deployed_by.required)
-        self.assertFalse(deployed_by.show_on_card)
+        self.assertEqual(keys, {"loom:application", "loom:group", "loom:owner"})
 
         # Verify build-time tags
-        app_tag = self.session.query(TagPolicy).filter(TagPolicy.key == "application").first()
+        app_tag = self.session.query(TagPolicy).filter(TagPolicy.key == "loom:application").first()
         self.assertIsNone(app_tag.default_value)
         self.assertEqual(app_tag.source, "build-time")
         self.assertTrue(app_tag.show_on_card)
+
+        group_tag = self.session.query(TagPolicy).filter(TagPolicy.key == "loom:group").first()
+        self.assertIsNone(group_tag.default_value)
+        self.assertEqual(group_tag.source, "build-time")
+        self.assertTrue(group_tag.show_on_card)
 
     def test_seed_default_tags_idempotent(self):
         """Test that seeding twice does not duplicate tags."""
         _seed_default_tags(self.engine)
         _seed_default_tags(self.engine)
         count = self.session.query(TagPolicy).count()
-        self.assertEqual(count, 4)
+        self.assertEqual(count, 3)
 
     def test_tag_policy_to_dict(self):
         """Test TagPolicy.to_dict() serialization."""
@@ -229,19 +227,19 @@ class TestMergeTags(unittest.TestCase):
     def test_merge_tags_with_policies(self):
         """Test _merge_tags uses default values from policies."""
         policies = [
-            {"key": "deployed-by", "default_value": "loom", "source": "deploy-time"},
-            {"key": "team", "default_value": "platform", "source": "build-time"},
+            {"key": "loom:application", "default_value": "myapp", "source": "build-time"},
+            {"key": "loom:group", "default_value": "platform", "source": "build-time"},
         ]
         result = _merge_tags(tag_policies=policies)
-        self.assertEqual(result, {"deployed-by": "loom", "team": "platform"})
+        self.assertEqual(result, {"loom:application": "myapp", "loom:group": "platform"})
 
     def test_merge_tags_extra_overrides(self):
         """Test _merge_tags extra overrides policy defaults."""
         policies = [
-            {"key": "team", "default_value": "old", "source": "build-time"},
+            {"key": "loom:group", "default_value": "old", "source": "build-time"},
         ]
-        result = _merge_tags(tag_policies=policies, extra={"team": "new", "custom": "val"})
-        self.assertEqual(result["team"], "new")
+        result = _merge_tags(tag_policies=policies, extra={"loom:group": "new", "custom": "val"})
+        self.assertEqual(result["loom:group"], "new")
         self.assertEqual(result["custom"], "val")
 
     def test_merge_tags_skips_none_defaults(self):
@@ -259,10 +257,10 @@ class TestIamTags(unittest.TestCase):
     def test_iam_tags_with_policies(self):
         """Test _iam_tags returns IAM-format tags from policies."""
         policies = [
-            {"key": "deployed-by", "default_value": "loom", "source": "deploy-time"},
+            {"key": "loom:application", "default_value": "myapp", "source": "build-time"},
         ]
         result = _iam_tags(tag_policies=policies)
-        self.assertEqual(result, [{"Key": "deployed-by", "Value": "loom"}])
+        self.assertEqual(result, [{"Key": "loom:application", "Value": "myapp"}])
 
     def test_iam_tags_no_policies(self):
         """Test _iam_tags with no policies returns empty list."""
@@ -306,11 +304,11 @@ class TestAgentTagModel(unittest.TestCase):
 
         self.assertEqual(agent.get_tags(), {})
 
-        agent.set_tags({"team": "platform", "owner": "alice"})
+        agent.set_tags({"loom:group": "platform", "loom:owner": "alice"})
         self.session.commit()
         self.session.refresh(agent)
 
-        self.assertEqual(agent.get_tags(), {"team": "platform", "owner": "alice"})
+        self.assertEqual(agent.get_tags(), {"loom:group": "platform", "loom:owner": "alice"})
 
     def test_tags_in_to_dict(self):
         """Test that tags appear in Agent.to_dict() output."""
@@ -321,13 +319,13 @@ class TestAgentTagModel(unittest.TestCase):
             region="us-east-1",
             account_id="123456789012",
         )
-        agent.set_tags({"deployed-by": "loom"})
+        agent.set_tags({"loom:application": "myapp"})
         self.session.add(agent)
         self.session.commit()
         self.session.refresh(agent)
 
         d = agent.to_dict()
-        self.assertEqual(d["tags"], {"deployed-by": "loom"})
+        self.assertEqual(d["tags"], {"loom:application": "myapp"})
 
 
 class TestDeployWithTags(unittest.TestCase):
@@ -369,8 +367,8 @@ class TestDeployWithTags(unittest.TestCase):
     ):
         """Test that tags are resolved and stored on the agent after deployment."""
         # Seed tag policies
-        self.session.add(TagPolicy(key="deployed-by", default_value="loom", source="deploy-time", required=True))
-        self.session.add(TagPolicy(key="team", default_value=None, source="build-time", required=True, show_on_card=True))
+        self.session.add(TagPolicy(key="loom:application", default_value=None, source="build-time", required=True, show_on_card=True))
+        self.session.add(TagPolicy(key="loom:group", default_value=None, source="build-time", required=True, show_on_card=True))
         self.session.commit()
 
         mock_create_role.return_value = "arn:aws:iam::123456789012:role/test"
@@ -385,18 +383,18 @@ class TestDeployWithTags(unittest.TestCase):
             "source": "deploy",
             "name": "tagged_agent",
             "model_id": "us.anthropic.claude-sonnet-4-6",
-            "tags": {"team": "platform"},
+            "tags": {"loom:application": "myapp", "loom:group": "platform"},
         })
 
         self.assertEqual(response.status_code, 201)
         data = response.json()
-        self.assertEqual(data["tags"]["deployed-by"], "loom")
-        self.assertEqual(data["tags"]["team"], "platform")
+        self.assertEqual(data["tags"]["loom:application"], "myapp")
+        self.assertEqual(data["tags"]["loom:group"], "platform")
 
     def test_deploy_missing_required_build_time_tag(self):
         """Test that deployment fails when required build-time tags are missing."""
         # Seed tag policies with required build-time tag
-        self.session.add(TagPolicy(key="team", default_value=None, source="build-time", required=True))
+        self.session.add(TagPolicy(key="loom:group", default_value=None, source="build-time", required=True))
         self.session.commit()
 
         response = self.client.post("/api/agents", json={
@@ -407,7 +405,7 @@ class TestDeployWithTags(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("Missing required build-time tags", response.json()["detail"])
-        self.assertIn("team", response.json()["detail"])
+        self.assertIn("loom:group", response.json()["detail"])
 
     @patch("app.routers.agents.create_runtime")
     @patch("app.routers.agents.build_agent_artifact")
@@ -440,7 +438,7 @@ class TestDeployWithTags(unittest.TestCase):
         self, mock_create_role, mock_build_artifact, mock_create_runtime
     ):
         """Test that resolved tags are passed to create_runtime."""
-        self.session.add(TagPolicy(key="deployed-by", default_value="loom", source="deploy-time", required=True))
+        self.session.add(TagPolicy(key="loom:application", default_value="testapp", source="deploy-time", required=True))
         self.session.commit()
 
         mock_create_role.return_value = "arn:aws:iam::123456789012:role/test"
@@ -459,7 +457,7 @@ class TestDeployWithTags(unittest.TestCase):
 
         call_kwargs = mock_create_runtime.call_args[1]
         self.assertIn("tags", call_kwargs)
-        self.assertEqual(call_kwargs["tags"]["deployed-by"], "loom")
+        self.assertEqual(call_kwargs["tags"]["loom:application"], "testapp")
 
     @patch("app.routers.agents.create_runtime")
     @patch("app.routers.agents.build_agent_artifact")
@@ -468,7 +466,7 @@ class TestDeployWithTags(unittest.TestCase):
         self, mock_create_role, mock_build_artifact, mock_create_runtime
     ):
         """Test that agent list/detail endpoints include tags."""
-        self.session.add(TagPolicy(key="deployed-by", default_value="loom", source="deploy-time", required=True))
+        self.session.add(TagPolicy(key="loom:application", default_value="testapp", source="deploy-time", required=True))
         self.session.commit()
 
         mock_create_role.return_value = "arn:aws:iam::123456789012:role/test"
@@ -490,7 +488,7 @@ class TestDeployWithTags(unittest.TestCase):
         get_resp = self.client.get(f"/api/agents/{agent_id}")
         self.assertEqual(get_resp.status_code, 200)
         self.assertIn("tags", get_resp.json())
-        self.assertEqual(get_resp.json()["tags"]["deployed-by"], "loom")
+        self.assertEqual(get_resp.json()["tags"]["loom:application"], "testapp")
 
         # List agents
         list_resp = self.client.get("/api/agents")
@@ -544,7 +542,7 @@ class TestRegisterWithTags(unittest.TestCase):
         mock_control_client = MagicMock()
         mock_boto_client.return_value = mock_control_client
         mock_control_client.list_tags_for_resource.return_value = {
-            "tags": {"team": "data", "owner": "bob"},
+            "tags": {"loom:group": "data", "loom:owner": "bob"},
         }
 
         response = self.client.post("/api/agents", json={
@@ -553,8 +551,8 @@ class TestRegisterWithTags(unittest.TestCase):
         })
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json()["tags"]["team"], "data")
-        self.assertEqual(response.json()["tags"]["owner"], "bob")
+        self.assertEqual(response.json()["tags"]["loom:group"], "data")
+        self.assertEqual(response.json()["tags"]["loom:owner"], "bob")
 
     @patch("boto3.client")
     @patch("app.routers.agents.describe_runtime")

@@ -89,10 +89,9 @@ def _seed_default_tags(eng) -> None:
     session = sessionmaker(bind=eng)()
     try:
         defaults = [
-            {"key": "deployed-by", "default_value": "loom", "source": "deploy-time", "required": True, "show_on_card": False},
-            {"key": "application", "default_value": None, "source": "build-time", "required": True, "show_on_card": True},
-            {"key": "team", "default_value": None, "source": "build-time", "required": True, "show_on_card": True},
-            {"key": "owner", "default_value": None, "source": "build-time", "required": True, "show_on_card": True},
+            {"key": "loom:application", "default_value": None, "source": "build-time", "required": True, "show_on_card": True},
+            {"key": "loom:group", "default_value": None, "source": "build-time", "required": True, "show_on_card": True},
+            {"key": "loom:owner", "default_value": None, "source": "build-time", "required": True, "show_on_card": True},
         ]
         for tag_def in defaults:
             existing = session.query(TagPolicy).filter(TagPolicy.key == tag_def["key"]).first()

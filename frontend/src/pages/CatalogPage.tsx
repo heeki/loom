@@ -130,7 +130,7 @@ export function CatalogPage({
             if (distinctValues.length === 0) return null;
             return (
               <div key={tp.key} className="space-y-1">
-                <label className="text-[10px] text-muted-foreground">{tp.key}</label>
+                <label className="text-[10px] text-muted-foreground">{tp.key.replace(/^loom:/, "")}</label>
                 <Select
                   value={tagFilters[tp.key] || ""}
                   onValueChange={(v) => setTagFilters(prev => ({ ...prev, [tp.key]: v === "__all__" ? "" : v }))}

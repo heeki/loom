@@ -154,7 +154,7 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
               .filter(key => agent.tags[key])
               .map(key => (
                 <Badge key={key} variant="secondary" className="text-[10px] px-1.5 py-0 font-normal">
-                  {key}: {agent.tags[key]}
+                  {key.replace(/^loom:/, "")}: {agent.tags[key]}
                 </Badge>
               ))}
           </div>
