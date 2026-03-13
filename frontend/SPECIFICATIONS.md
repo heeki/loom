@@ -30,7 +30,7 @@ frontend/
 │   │   ├── logs.ts             # CloudWatch log queries
 │   │   ├── memories.ts         # Memory resource CRUD + refresh
 │   │   ├── security.ts         # Security admin: roles, authorizers, credentials, permissions
-│   │   └── settings.ts        # Settings API: tag policy CRUD
+│   │   └── settings.ts        # Settings API: tag policy + tag profile CRUD
 │   ├── contexts/
 │   │   ├── AuthContext.tsx      # Cognito auth provider (login, logout, token refresh)
 │   │   └── TimezoneContext.tsx  # Timezone preference provider + hook
@@ -41,12 +41,13 @@ frontend/
 │   │   ├── useLogs.ts          # Session log fetching
 │   │   └── useDeployment.ts    # Agent config, credential providers, integrations hooks
 │   ├── components/
-│   │   ├── ui/                 # shadcn primitives + searchable-select.tsx
+│   │   ├── ui/                 # shadcn primitives + searchable-select.tsx + multi-select.tsx
 │   │   ├── AgentCard.tsx       # Agent summary card with refresh + eraser icon deletion
 │   │   ├── AgentRegistrationForm.tsx  # Tabbed form: ARN registration + agent deployment
 │   │   ├── AuthorizerManagementPanel.tsx # Authorizer config + credential management
 │   │   ├── MemoryCard.tsx              # Memory resource summary card
 │   │   ├── MemoryManagementPanel.tsx    # Memory resource create form + list table
+│   │   ├── ResourceTagFields.tsx       # Shared tag profile selector + tag resolution
 │   │   ├── DeploymentPanel.tsx # Deployment details panel
 │   │   ├── InvokePanel.tsx     # Qualifier select, credential select, prompt input, invoke/cancel
 │   │   ├── LatencySummary.tsx  # Timing breakdown
@@ -60,6 +61,7 @@ frontend/
 │   │   ├── SecurityAdminPage.tsx  # Security persona: roles, authorizers, credentials, permissions
 │   │   ├── LoginPage.tsx        # Cognito login + NEW_PASSWORD_REQUIRED challenge
 │   │   ├── MemoryManagementPage.tsx # Memory persona: memory resource management
+│   │   ├── SettingsPage.tsx        # Settings persona: tag profile CRUD
 │   │   └── SessionDetailPage.tsx  # Session metadata, invocations, logs
 │   ├── lib/
 │   │   ├── utils.ts            # shadcn cn() utility
@@ -92,6 +94,7 @@ The app uses a persona-based single-page architecture with a sidebar for workflo
 | Agents | Bot | Deploy new agents or import existing ones | `agent:read` or `agent:write` | |
 | Memory | Brain | Create and manage AgentCore Memory resources | `data:read` or `data:write` | |
 | Security Admin | Shield | Manage roles, authorizers, credentials, permissions | `security:read` or `security:write` | |
+| Settings | Settings | Manage tag profiles and configuration | Always visible | |
 | MCP Servers | Network | Future MCP server management (disabled) | `data:read` or `data:write` | |
 | A2A Agents | Users | Future A2A agent management (disabled) | `data:read` or `data:write` | |
 
@@ -125,7 +128,7 @@ Catalog  >  [Agent Name]  >  [Session ID]
 **Content:**
 - Page header: "Platform Catalog" with card/table view toggle (top-right)
 - Organized into sections: Agents, Memory Resources, MCP Servers (coming soon), A2A Agents (coming soon)
-- Tag-based filter bar above the agents grid, with Select dropdowns for each tag policy with `show_on_card=true`. Client-side AND filtering with "Clear filters" button and agent count display (e.g., "Showing 3 of 12 agents")
+- Tag-based filter bar above the agents grid, with multi-select dropdowns (checkbox-based) for each tag policy with `show_on_card=true`. Client-side AND filtering with "Clear filters" button and agent count display (e.g., "Showing 3 of 12 agents")
 - Card/table view toggle applies to all sections on the page
 - Agents section: responsive grid of `AgentCard` components (3 columns on large screens) or table view
 - Memory Resources section: responsive grid of `MemoryCard` components (read-only, no create/delete) or table view
@@ -183,7 +186,7 @@ Full deployment form with sections:
   - Cognito: searchable Cognito pool select (30% width), auto-populated discovery URL, tag inputs for allowed clients and scopes, app client ID and client secret fields
   - Other: textbox for discovery URL, tag inputs for allowed clients and scopes
 - **Lifecycle**: idle timeout and max lifetime fields with dynamic placeholders fetched from `/api/agents/defaults` (e.g., "300" and "3600")
-- **Resource Tags**: build-time tag inputs fetched from `/api/settings/tags`. Deploy-time tags are shown as informational text. Required build-time tags are validated before submit.
+- **Resource Tags**: `ResourceTagFields` component with tag profile dropdown (persisted in `sessionStorage`). Deploy-time tags are auto-applied; build-time tags are resolved from the selected tag profile.
 - **Integrations**: Memory, MCP Servers, A2A Agents — all shown as disabled checkboxes with "coming soon" labels
 
 ---
@@ -253,11 +256,12 @@ Toggled via the "Add Memory" button. Contained in a `Card` with the following fi
   - **Namespaces** — `TagInput` (press Enter to add, click × to remove)
   - Trash icon to remove individual strategies
   - "Add Strategy" ghost button to add more
+- **Resource Tags**: `ResourceTagFields` component (same as agent deploy form) — tag profile dropdown with `sessionStorage` persistence
 - **Create** button (disabled until name provided) and **Cancel** button
 
 ### Memory List (Card View / Table View)
 
-**Card view** (default): Responsive grid of `MemoryCard` components (3 columns on large screens). Each card displays name, status badge, spinner+timer for transitional states, region, account, event expiry, strategies count, registered timestamp, refresh and delete buttons.
+**Card view** (default): Responsive grid of `MemoryCard` components (3 columns on large screens). Each card displays name, status badge, spinner+timer for transitional states, region, account, event expiry, strategies count, registered timestamp, tag badges (for tags with `show_on_card=true`), refresh and delete buttons. Multi-select tag filter bar above the grid with AND logic.
 
 **Table view**: Table with columns:
 
@@ -299,7 +303,22 @@ When no memory resources exist: centered muted text "No memory resources yet. Ad
 
 ---
 
-## 9. Session Detail View
+## 9. Settings View
+
+**Purpose:** Manage tag profiles and other platform configuration.
+
+**Content:**
+- Page header: "Settings" with description
+- **Tag Profiles** section: list, create, edit, delete named tag presets
+  - Each profile card shows: name, timestamps, and tag value badges
+  - Create/edit form: profile name input (maxLength 128) + input fields for each build-time tag policy (maxLength 128)
+  - Accessible to all scopes; `*:write` can create, edit, and delete; `*:read` can only view
+  - Delete with inline confirmation (Confirm/Cancel)
+- Always visible in the sidebar (no scope guard for visibility)
+
+---
+
+## 10. Session Detail View
 
 **Purpose:** Inspect a single session's invocations and CloudWatch logs.
 
@@ -310,7 +329,7 @@ When no memory resources exist: centered muted text "No memory resources yet. Ad
 
 ---
 
-## 10. Design Decisions
+## 11. Design Decisions
 
 ### Persona-Based Navigation
 Chose a sidebar with persona-based workflows over traditional tab navigation. Each persona represents a distinct user role (catalog browser, agent builder, security admin, memory manager) with its own page and feature set. The sidebar provides persistent access to all personas and includes theme/timezone controls.
@@ -369,10 +388,14 @@ Cognito client secrets are password-masked in forms. Secrets are sent to the bac
 - Components that respect `readOnly`: `AgentCard`, `AgentListPage`, `CatalogPage`, `SecurityAdminPage`, `RoleManagementPanel`, `AuthorizerManagementPanel`, `PermissionRequestsPanel`, `MemoryManagementPage`, `MemoryManagementPanel`, `MemoryCard`.
 
 ### Resource Tagging
-- Tag policies are fetched from `/api/settings/tags` and used to render build-time tag inputs in the deploy form, tag badges on agent cards, and filter dropdowns in the catalog.
-- `showOnCardKeys` (derived from tag policies with `show_on_card=true`) is passed as a prop to `AgentCard` components from both `CatalogPage` and `AgentListPage`.
+- Tag policies are fetched from `/api/settings/tags` and used to derive `showOnCardKeys` for tag badge display and filter dropdowns.
+- Tag profiles are named presets managed via the Settings page. The `ResourceTagFields` shared component renders a profile dropdown (persisted in `sessionStorage` as `loom:selectedTagProfileId`), resolves tags from the selected profile + policy defaults, and calls `onChange(tags)`. Used by both agent deploy and memory create forms.
+- `showOnCardKeys` (derived from tag policies with `show_on_card=true`) is passed as a prop to `AgentCard` and `MemoryCard` components from all listing pages.
 - Tag badges use `variant="secondary"` to visually distinguish them from status and protocol badges.
-- Catalog filtering is client-side with AND logic across selected tag values.
+- All listing pages (CatalogPage, AgentListPage, MemoryManagementPanel) use multi-select tag filter dropdowns (`MultiSelect` component with checkboxes) with AND logic. Filter state uses `Record<string, string[]>` to support multiple selected values per tag key.
+
+### MultiSelect Component
+Custom dropdown with checkboxes for multi-value selection. Uses `min-w-[140px]` with auto-expanding width to fit content (no truncation). Closes on outside click via `mousedown` event listener. Shows "All" when no values selected, the value when one is selected, or "N selected" for multiple. Uses `bg-input-bg` to match the existing `Select` component styling.
 
 ### API Layer Design
 - `apiFetch<T>()` is a thin wrapper around `fetch` with JSON parsing, `ApiError` class, and automatic auth token injection
@@ -389,7 +412,7 @@ Card/table view mode state is lifted to `App.tsx` with separate state variables 
 
 ---
 
-## 11. Future Work
+## 12. Future Work
 
 - **Markdown rendering** for agent responses
 - **MCP server integration** configuration

@@ -70,6 +70,7 @@ def _migrate_add_columns(eng) -> None:
         ("agents", "protocol", "VARCHAR"),
         ("agents", "network_mode", "VARCHAR"),
         ("agents", "tags", "TEXT"),
+        ("memories", "tags", "TEXT"),
     ]
 
     for table, column, col_type in migrations:

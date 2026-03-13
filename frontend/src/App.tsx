@@ -24,13 +24,14 @@ import { SessionDetailPage } from "@/pages/SessionDetailPage";
 import { InvocationDetailPage } from "@/pages/InvocationDetailPage";
 import { SecurityAdminPage } from "@/pages/SecurityAdminPage";
 import { MemoryManagementPage } from "@/pages/MemoryManagementPage";
+import { SettingsPage } from "@/pages/SettingsPage";
 import type { SessionResponse, InvocationResponse } from "@/api/types";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { LoginPage } from "@/pages/LoginPage";
-import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User } from "lucide-react";
+import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings } from "lucide-react";
 
 type Theme = "light" | "dark";
-type Persona = "catalog" | "security" | "builder" | "memory";
+type Persona = "catalog" | "security" | "builder" | "memory" | "settings";
 
 function ThemeSelector({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) => void }) {
   return (
@@ -297,6 +298,12 @@ function AppContent() {
               onClick={() => setActivePersona("security")}
             />
           )}
+          <SidebarItem
+            icon={Settings}
+            label="Settings"
+            active={activePersona === "settings"}
+            onClick={() => setActivePersona("settings")}
+          />
           {(hasScope("data:read") || hasScope("data:write")) && (
             <>
               <SidebarItem
@@ -455,6 +462,7 @@ function AppContent() {
 
           {activePersona === "security" && <SecurityAdminPage readOnly={!hasScope("security:write")} />}
           {activePersona === "memory" && <MemoryManagementPage viewMode={memoryViewMode} onViewModeChange={setMemoryViewMode} readOnly={!hasScope("data:write")} />}
+          {activePersona === "settings" && <SettingsPage readOnly={!(hasScope("agent:write") || hasScope("security:write") || hasScope("data:write"))} />}
         </main>
       </div>
 

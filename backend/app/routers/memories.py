@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models.memory import Memory
+from app.models.tag_policy import TagPolicy
 from app.services.memory import (
     create_memory as svc_create_memory,
     get_memory as svc_get_memory,
@@ -54,6 +55,7 @@ class MemoryCreateRequest(BaseModel):
     memory_execution_role_arn: str | None = Field(None, description="IAM role ARN for memory execution")
     encryption_key_arn: str | None = Field(None, description="KMS key ARN for encryption")
     memory_strategies: list[MemoryStrategyRequest] | None = Field(None, description="Memory strategy configurations")
+    tags: dict[str, str] | None = Field(None, description="Build-time tag values from a tag profile")
 
 
 class MemoryImportRequest(BaseModel):
@@ -72,6 +74,7 @@ class MemoryResponse(BaseModel):
     event_expiry_duration: int
     strategies_config: Any | None = None
     strategies_response: Any | None = None
+    tags: dict[str, str] = {}
     failure_reason: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
@@ -151,6 +154,21 @@ def create_memory(
 
     _validate_agentcore_name(request.name, "memory name")
 
+    # Resolve tags from tag policies + user-supplied profile tags
+    resolved_tags: dict[str, str] = {}
+    user_tags = request.tags or {}
+    policies = db.query(TagPolicy).all()
+    for p in policies:
+        if p.source == "deploy-time" and p.default_value:
+            resolved_tags[p.key] = p.default_value
+        elif p.source == "build-time":
+            if p.key in user_tags:
+                resolved_tags[p.key] = user_tags[p.key]
+            elif p.default_value:
+                resolved_tags[p.key] = p.default_value
+            elif p.required:
+                resolved_tags[p.key] = "missing"
+
     # Transform strategies
     aws_strategies = None
     if request.memory_strategies:
@@ -164,6 +182,7 @@ def create_memory(
             encryption_key_arn=request.encryption_key_arn,
             memory_execution_role_arn=request.memory_execution_role_arn,
             memory_strategies=aws_strategies,
+            tags=resolved_tags or None,
             region=region,
         )
     except Exception as e:
@@ -207,6 +226,9 @@ def create_memory(
     strategies_resp = mem_data.get("strategies")
     if strategies_resp:
         memory.set_strategies_response(strategies_resp)
+
+    if resolved_tags:
+        memory.set_tags(resolved_tags)
 
     db.add(memory)
     db.commit()
@@ -276,6 +298,27 @@ def import_memory(
     strategies_resp = mem_data.get("strategies")
     if strategies_resp:
         memory.set_strategies_response(strategies_resp)
+
+    # Enforce tag policies: fetch AWS tags and fill missing required tags with "missing"
+    aws_tags: dict[str, str] = {}
+    try:
+        import boto3
+        control_client = boto3.client("bedrock-agentcore-control", region_name=region)
+        tag_response = control_client.list_tags_for_resource(resourceArn=memory_arn)
+        aws_tags = tag_response.get("tags", {})
+    except Exception as e:
+        logger.debug("Could not fetch tags for imported memory %s: %s", request.memory_id, e)
+
+    policies = db.query(TagPolicy).all()
+    for p in policies:
+        if p.key not in aws_tags:
+            if p.default_value:
+                aws_tags[p.key] = p.default_value
+            elif p.required:
+                aws_tags[p.key] = "missing"
+
+    if aws_tags:
+        memory.set_tags(aws_tags)
 
     db.add(memory)
     db.commit()

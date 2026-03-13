@@ -404,16 +404,27 @@ def _register_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
     db.refresh(agent)
 
     # Fetch tags from AWS for registered agents
+    aws_tags: dict[str, str] = {}
     try:
         import boto3
         control_client = boto3.client("bedrock-agentcore-control", region_name=region)
         tag_response = control_client.list_tags_for_resource(resourceArn=request.arn)
         aws_tags = tag_response.get("tags", {})
-        if aws_tags:
-            agent.set_tags(aws_tags)
-            db.commit()
     except Exception as e:
         logger.debug("Could not fetch tags for registered agent %s: %s", request.arn, e)
+
+    # Enforce tag policies: add missing required tags with value "missing"
+    policies = db.query(TagPolicy).all()
+    for p in policies:
+        if p.key not in aws_tags:
+            if p.default_value:
+                aws_tags[p.key] = p.default_value
+            elif p.required:
+                aws_tags[p.key] = "missing"
+
+    if aws_tags:
+        agent.set_tags(aws_tags)
+        db.commit()
 
     # Store model_id as config entry if provided
     if request.model_id:

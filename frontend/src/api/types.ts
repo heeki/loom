@@ -321,6 +321,7 @@ export interface MemoryCreateRequest {
   memory_execution_role_arn?: string;
   encryption_key_arn?: string;
   memory_strategies?: MemoryStrategyRequest[];
+  tags?: Record<string, string>;
 }
 
 export interface MemoryResponse {
@@ -333,6 +334,7 @@ export interface MemoryResponse {
   event_expiry_duration: number;
   strategies_config: unknown[] | null;
   strategies_response: unknown[] | null;
+  tags: Record<string, string>;
   failure_reason: string | null;
   created_at: string | null;
   updated_at: string | null;
@@ -395,4 +397,18 @@ export interface TagPolicyUpdateRequest {
   source?: "deploy-time" | "build-time";
   required?: boolean;
   show_on_card?: boolean;
+}
+
+// Tag profile types
+export interface TagProfile {
+  id: number;
+  name: string;
+  tags: Record<string, string>;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface TagProfileCreateRequest {
+  name: string;
+  tags: Record<string, string>;
 }

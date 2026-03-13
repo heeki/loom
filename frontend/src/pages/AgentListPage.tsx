@@ -12,13 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { MultiSelect } from "@/components/ui/multi-select";
 import { AgentRegistrationForm } from "@/components/AgentRegistrationForm";
 import { AgentCard } from "@/components/AgentCard";
 import { toast } from "sonner";
@@ -62,7 +56,7 @@ export function AgentListPage({
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [cleanupAws, setCleanupAws] = useState(false);
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
-  const [tagFilters, setTagFilters] = useState<Record<string, string>>({});
+  const [tagFilters, setTagFilters] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
     void listTagPolicies().then(setTagPolicies).catch(() => {});
@@ -72,9 +66,9 @@ export function AgentListPage({
   const showOnCardKeys = showOnCardPolicies.map(tp => tp.key);
 
   const filteredAgents = agents.filter(agent => {
-    return Object.entries(tagFilters).every(([key, value]) => {
-      if (!value) return true;
-      return agent.tags?.[key] === value;
+    return Object.entries(tagFilters).every(([key, values]) => {
+      if (values.length === 0) return true;
+      return values.includes(agent.tags?.[key] ?? "");
     });
   });
 
@@ -201,24 +195,15 @@ export function AgentListPage({
               return (
                 <div key={tp.key} className="space-y-1">
                   <label className="text-[10px] text-muted-foreground">{tp.key.replace(/^loom:/, "")}</label>
-                  <Select
-                    value={tagFilters[tp.key] || ""}
-                    onValueChange={(v) => setTagFilters(prev => ({ ...prev, [tp.key]: v === "__all__" ? "" : v }))}
-                  >
-                    <SelectTrigger className="h-7 w-[140px] text-xs">
-                      <SelectValue placeholder="All" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__all__">All</SelectItem>
-                      {distinctValues.sort().map(v => (
-                        <SelectItem key={v} value={v}>{v}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <MultiSelect
+                    values={tagFilters[tp.key] ?? []}
+                    options={distinctValues.sort()}
+                    onChange={(v) => setTagFilters(prev => ({ ...prev, [tp.key]: v }))}
+                  />
                 </div>
               );
             })}
-            {Object.values(tagFilters).some(v => v) && (
+            {Object.values(tagFilters).some(v => v.length > 0) && (
               <Button
                 variant="ghost"
                 size="sm"

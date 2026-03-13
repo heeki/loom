@@ -55,14 +55,15 @@ backend/
 │   │   ├── authorizer_credential.py # AuthorizerCredential ORM model
 │   │   ├── permission_request.py   # PermissionRequest ORM model
 │   │   ├── memory.py        # Memory ORM model (AgentCore Memory resources)
-│   │   └── tag_policy.py    # TagPolicy ORM model (configurable resource tagging)
+│   │   ├── tag_policy.py    # TagPolicy ORM model (configurable resource tagging)
+│   │   └── tag_profile.py   # TagProfile ORM model (named tag presets)
 │   ├── dependencies/
 │   │   ├── __init__.py
 │   │   └── auth.py          # Auth dependencies (get_current_user_token, get_token_claims)
 │   ├── routers/
 │   │   ├── auth.py          # Authentication config endpoint (GET /api/auth/config)
 │   │   ├── agents.py        # Agent CRUD + ARN parsing + log group derivation + tag resolution
-│   │   ├── settings.py      # Settings endpoints (tag policy CRUD)
+│   │   ├── settings.py      # Settings endpoints (tag policy CRUD, tag profile CRUD)
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
 │   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
 │   │   ├── memories.py      # Memory resource CRUD + strategy mapping
@@ -214,10 +215,22 @@ backend/
 
 | Key | Source | Default Value | Required | Show on Card |
 |-----|--------|---------------|----------|--------------|
-| `deployed-by` | deploy-time | `loom` | Yes | No |
-| `application` | build-time | — | Yes | Yes |
-| `team` | build-time | — | Yes | Yes |
-| `owner` | build-time | — | Yes | Yes |
+| `loom:deployed-by` | deploy-time | `loom` | Yes | No |
+| `loom:application` | build-time | — | Yes | Yes |
+| `loom:group` | build-time | — | Yes | Yes |
+| `loom:owner` | build-time | — | Yes | Yes |
+
+### `tag_profiles` table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | Internal ID |
+| `name` | TEXT UNIQUE NOT NULL | Profile name (e.g., "Team Alpha - Production") |
+| `tags` | TEXT NOT NULL | JSON dict of tag key-value pairs |
+| `created_at` | DATETIME | Creation timestamp |
+| `updated_at` | DATETIME | Last update timestamp |
+
+Tag profiles are named presets of tag values that satisfy build-time tag policies. When a profile is selected during deployment, its tag values are merged with deploy-time policy defaults and applied to all created AWS resources. Tag values are limited to 128 characters.
 
 ### `memories` table
 
@@ -236,6 +249,7 @@ backend/
 | `encryption_key_arn` | TEXT | KMS key ARN for encryption |
 | `strategies_config` | TEXT | JSON: memory strategies as submitted |
 | `strategies_response` | TEXT | JSON: strategies with IDs and statuses from AWS |
+| `tags` | TEXT | JSON dict of resolved tags applied to this memory's AWS resources |
 | `failure_reason` | TEXT | Failure reason if status is `FAILED` |
 | `created_at` | DATETIME | Creation timestamp |
 | `updated_at` | DATETIME | Last update timestamp |
@@ -392,10 +406,21 @@ The `model_id` field is optional on registration and stored as an `AGENT_CONFIG_
 
 **Tag resolution during deployment:**
 - Deploy-time tags are applied automatically from their `default_value`.
-- Build-time tags require user input; the deploy request includes a `tags: dict[str, str]` field.
+- Build-time tags are resolved from the selected tag profile; the deploy request includes a `tags: dict[str, str]` field.
 - All required build-time tags must have values or the deployment is rejected (400).
-- Resolved tags are stored on the Agent record and included in `AgentResponse`.
-- For registered agents, tags are fetched from AWS via `list_tags_for_resource` and stored locally.
+- Resolved tags are stored on Agent and Memory records and included in API responses.
+- For registered agents and imported memories, tags are fetched from AWS via `list_tags_for_resource` and stored locally. Missing required tags are filled with `"missing"`.
+
+### Tag Profile Management (Settings)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/settings/tag-profiles` | List all tag profiles. |
+| `POST` | `/api/settings/tag-profiles` | Create a new tag profile. |
+| `PUT` | `/api/settings/tag-profiles/{profile_id}` | Update an existing tag profile. |
+| `DELETE` | `/api/settings/tag-profiles/{profile_id}` | Delete a tag profile. |
+
+Tag profiles are named presets of tag key-value pairs. When creating or updating a profile, all required build-time tag policies must have values in the profile's tags.
 
 ### Security Administration
 
@@ -450,7 +475,8 @@ The `model_id` field is optional on registration and stored as an `AGENT_CONFIG_
       "namespaces": ["ns1"],
       "configuration": {}
     }
-  ]
+  ],
+  "tags": {"loom:application": "my-app", "loom:group": "my-team", "loom:owner": "owner@example.com"}
 }
 ```
 

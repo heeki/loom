@@ -1,6 +1,6 @@
 # Loom Frontend
 
-Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, session liveness tracking, memory resource management, security administration, and resource tag management.
+Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, session liveness tracking, memory resource management, security administration, resource tag management, and tag profile management.
 
 ## Prerequisites
 
@@ -59,6 +59,7 @@ The sidebar provides access to persona-based workflows:
 | **Agents** | Bot | Deploy new agents or import existing ones |
 | **Memory** | Brain | Create and manage AgentCore Memory resources |
 | **Security Admin** | Shield | Manage IAM roles, authorizer configs, credentials, permission requests |
+| **Settings** | Settings | Manage tag profiles and configuration |
 | **MCP Servers** | Network | Coming soon (disabled) |
 | **A2A Agents** | Users | Coming soon (disabled) |
 
@@ -92,18 +93,21 @@ src/
 │   ├── AgentCard.tsx              # Agent card with refresh + eraser icon deletion + overlay confirmation
 │   ├── AgentRegistrationForm.tsx  # Import (ARN + model) and Deploy (full form) tabs
 │   ├── AuthorizerManagementPanel.tsx # Authorizer config and credential management
-│   ├── MemoryCard.tsx             # Memory resource card with status, refresh, delete
-│   ├── MemoryManagementPanel.tsx  # Memory resource create form + card/table list
+│   ├── MemoryCard.tsx             # Memory resource card with status, tags, refresh, delete
+│   ├── MemoryManagementPanel.tsx  # Memory resource create form + card/table list + tag filters
+│   ├── ResourceTagFields.tsx      # Shared tag profile selector + tag resolution
 │   ├── InvokePanel.tsx            # Qualifier, credential selector, model badge, prompt
 │   ├── DeploymentPanel.tsx        # Deployment details for deployed agents
 │   └── ui/
-│       └── searchable-select.tsx  # Searchable dropdown with group headers
+│       ├── searchable-select.tsx  # Searchable dropdown with group headers
+│       └── multi-select.tsx       # Checkbox-based multi-select dropdown
 ├── pages/        # Page-level view components
 │   ├── CatalogPage.tsx         # Platform Catalog: agents, memory, MCP, A2A sections
 │   ├── AgentListPage.tsx       # Agents: Deploy/Import form + agent grid
 │   ├── AgentDetailPage.tsx     # Sessions, invoke, latency, response
 │   ├── SecurityAdminPage.tsx   # Roles, authorizers, credentials, permissions
 │   ├── MemoryManagementPage.tsx # Memory resource management
+│   ├── SettingsPage.tsx        # Tag profile management
 │   └── SessionDetailPage.tsx   # Session metadata, invocations, logs
 ├── lib/          # Shared utilities (cn(), format helpers, status mapping)
 ├── App.tsx       # Root: auth gate + persona sidebar + navigation
@@ -129,8 +133,8 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 - `api/logs.ts` — CloudWatch log queries
 - `api/memories.ts` — Memory resource operations: create, import, list, get, refresh, delete, purge
 - `api/security.ts` — Security admin operations: managed roles, authorizer configs, authorizer credentials, permission requests
-- `api/settings.ts` — Tag policy operations: list, create, update, delete
-- `api/types.ts` — TypeScript interfaces including AgentResponse (with `model_id`, `tags`), SSESessionStart (with `has_token`, `token_source`), AuthorizerCredential, ManagedRole, PermissionRequestResponse, MemoryResponse, MemoryCreateRequest, MemoryStrategyRequest, TagPolicy, TagPolicyCreateRequest, TagPolicyUpdateRequest
+- `api/settings.ts` — Tag policy and tag profile operations: list, create, update, delete
+- `api/types.ts` — TypeScript interfaces including AgentResponse (with `model_id`, `tags`), SSESessionStart (with `has_token`, `token_source`), AuthorizerCredential, ManagedRole, PermissionRequestResponse, MemoryResponse (with `tags`), MemoryCreateRequest (with `tags`), MemoryStrategyRequest, TagPolicy, TagPolicyCreateRequest, TagPolicyUpdateRequest, TagProfile, TagProfileCreateRequest
 
 ### Hooks
 
@@ -143,8 +147,10 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 ### Key Components
 
 - **SearchableSelect** — Combobox with search, filter, optional group headers (Anthropic/Amazon), and click-outside detection. Searches both label and value fields.
-- **AgentCard** — Compact card with inline badges, refresh button, eraser icon for deletion, overlay confirmation with "Also delete in AgentCore" checkbox. Displays tag bubbles for tags marked `show_on_card` in the tag policy.
-- **MemoryCard** — Memory resource card with name, status badge, spinner+timer for transitional states, region/account/expiry metadata, refresh and delete buttons with overlay confirmation.
+- **AgentCard** — Compact card with inline badges, refresh button, eraser icon for deletion, overlay confirmation with "Also delete in AgentCore" checkbox. Displays tag badges for tags marked `show_on_card` in the tag policy.
+- **MemoryCard** — Memory resource card with name, status badge, spinner+timer for transitional states, region/account/expiry metadata, tag badges, refresh and delete buttons with overlay confirmation.
+- **ResourceTagFields** — Shared component for tag profile selection and tag resolution. Fetches tag policies and profiles, renders a profile dropdown (persisted in `sessionStorage`), resolves tags from the selected profile + policy defaults. Used by both agent deploy and memory create forms.
+- **MultiSelect** — Checkbox-based multi-select dropdown with auto-expanding width. Used for tag filtering on all listing pages.
 - **InvokePanel** — Qualifier selector, credential dropdown, model ID badge, prompt textarea, invoke/cancel buttons. Token indicator shown when invocation uses OAuth.
 - **AuthorizerManagementPanel** — Lists authorizer configs with expandable credential management (add/list/delete credentials per config).
 - **MemoryManagementPanel** — Create/import form with strategy configuration (type, name, description, namespaces), memory card/table list with status badges (CREATING/ACTIVE/FAILED/DELETING), refresh and delete actions with inline confirmation overlay.
@@ -154,12 +160,13 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 | View | Persona | Description |
 |------|---------|-------------|
 | LoginPage | — | Cognito login + set new password |
-| CatalogPage | Platform Catalog | Agents (with tag filter bar), memory resources, MCP servers, A2A agents sections |
+| CatalogPage | Platform Catalog | Agents (with multi-select tag filter bar), memory resources (with tag badges), MCP servers, A2A agents sections |
 | AgentDetailPage | Platform Catalog | Sessions, invoke, latency, streaming response, deployment details |
 | SessionDetailPage | Platform Catalog | Session metadata, invocation timing, CloudWatch logs |
-| AgentListPage | Agents | Deploy/Import form (with build-time tag inputs) + agent card/table grid |
+| AgentListPage | Agents | Deploy/Import form (with tag profile selector) + agent card/table grid with multi-select tag filters |
 | SecurityAdminPage | Security | Roles, authorizers, credentials, permissions |
-| MemoryManagementPage | Memory | Memory resource create/import form, card/table list, refresh, delete |
+| MemoryManagementPage | Memory | Memory resource create/import form (with tag profile selector), card/table list with tag badges and multi-select tag filters |
+| SettingsPage | Settings | Tag profile CRUD (create, edit, delete named tag presets) |
 
 ### Session Liveness
 

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models.tag_policy import TagPolicy
+from app.models.tag_profile import TagProfile
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -118,4 +119,109 @@ def delete_tag_policy(
     if not policy:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag policy not found")
     db.delete(policy)
+    db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Tag Profile CRUD
+# ---------------------------------------------------------------------------
+class TagProfileRequest(BaseModel):
+    """Request body for creating/updating a tag profile."""
+    name: str = Field(..., description="Profile name")
+    tags: dict[str, str] = Field(..., description="Tag key-value pairs")
+
+
+class TagProfileResponse(BaseModel):
+    """Response model for a tag profile."""
+    id: int
+    name: str
+    tags: dict[str, str]
+    created_at: str | None
+    updated_at: str | None
+
+
+@router.get("/tag-profiles", response_model=list[TagProfileResponse])
+def list_tag_profiles(db: Session = Depends(get_db)) -> list[TagProfileResponse]:
+    """List all tag profiles."""
+    profiles = db.query(TagProfile).order_by(TagProfile.name).all()
+    return [TagProfileResponse(**p.to_dict()) for p in profiles]
+
+
+@router.post("/tag-profiles", response_model=TagProfileResponse, status_code=status.HTTP_201_CREATED)
+def create_tag_profile(
+    request: TagProfileRequest,
+    db: Session = Depends(get_db),
+) -> TagProfileResponse:
+    """Create a new tag profile."""
+    existing = db.query(TagProfile).filter(TagProfile.name == request.name).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Tag profile with name '{request.name}' already exists",
+        )
+
+    # Validate that all required build-time tag policies have values
+    policies = db.query(TagPolicy).filter(TagPolicy.source == "build-time", TagPolicy.required == True).all()
+    missing = [p.key for p in policies if not request.tags.get(p.key, "").strip()]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Missing required tag values: {', '.join(missing)}",
+        )
+
+    profile = TagProfile(name=request.name)
+    profile.set_tags(request.tags)
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+    return TagProfileResponse(**profile.to_dict())
+
+
+@router.put("/tag-profiles/{profile_id}", response_model=TagProfileResponse)
+def update_tag_profile(
+    profile_id: int,
+    request: TagProfileRequest,
+    db: Session = Depends(get_db),
+) -> TagProfileResponse:
+    """Update an existing tag profile."""
+    profile = db.query(TagProfile).filter(TagProfile.id == profile_id).first()
+    if not profile:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag profile not found")
+
+    # Check name uniqueness if changed
+    if request.name != profile.name:
+        conflict = db.query(TagProfile).filter(TagProfile.name == request.name).first()
+        if conflict:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Tag profile with name '{request.name}' already exists",
+            )
+
+    # Validate required build-time tags
+    policies = db.query(TagPolicy).filter(TagPolicy.source == "build-time", TagPolicy.required == True).all()
+    missing = [p.key for p in policies if not request.tags.get(p.key, "").strip()]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Missing required tag values: {', '.join(missing)}",
+        )
+
+    profile.name = request.name
+    profile.set_tags(request.tags)
+    profile.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(profile)
+    return TagProfileResponse(**profile.to_dict())
+
+
+@router.delete("/tag-profiles/{profile_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_tag_profile(
+    profile_id: int,
+    db: Session = Depends(get_db),
+) -> None:
+    """Delete a tag profile."""
+    profile = db.query(TagProfile).filter(TagProfile.id == profile_id).first()
+    if not profile:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag profile not found")
+    db.delete(profile)
     db.commit()

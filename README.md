@@ -9,7 +9,8 @@ A platform for building, testing, and operating AI agents on Amazon Bedrock Agen
 - **Agent Management** — Deploy new agents or import existing AgentCore Runtime agents
 - **Memory Management** — Create and manage AgentCore Memory resources with configurable strategies (semantic, summary, user preference, episodic, custom)
 - **Security Administration** — Manage IAM roles, authorizer configs, credentials, and permission requests
-- **Resource Tagging** — Configurable tag policies with deploy-time and build-time tags, tag bubbles on agent cards, and catalog filtering by tags
+- **Resource Tagging** — Configurable tag policies and named tag profiles applied to all deployed resources (agents, memory, IAM roles), tag badges on cards, multi-select filtering on all listing pages
+- **Settings** — Tag profile management (create, edit, delete named tag presets) accessible to all users
 - SSE streaming invocation with real-time response display
 - Authenticated agent invocations using user tokens or M2M credentials
 - Cold-start latency measurement via automatic CloudWatch log parsing
@@ -120,5 +121,5 @@ make -C frontend dev    # Start frontend dev server
 
 - **Backend:** FastAPI with SQLAlchemy (SQLite), boto3 for AWS interactions, SSE streaming via `StreamingResponse`
 - **Frontend:** React 18, TypeScript, Vite, shadcn/ui, Tailwind CSS v4
-- **Persona Navigation:** Sidebar with Platform Catalog, Agents, Memory, Security Admin, plus MCP Servers and A2A Agents (coming soon)
+- **Persona Navigation:** Sidebar with Platform Catalog, Agents, Memory, Security Admin, Settings, plus MCP Servers and A2A Agents (coming soon)
 - **Session Liveness:** Computed locally using an idle timeout heuristic (`LOOM_SESSION_IDLE_TIMEOUT_SECONDS`). No AWS control plane APIs are called — the Bedrock AgentCore SDK does not expose session listing/querying APIs.
