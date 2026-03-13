@@ -93,6 +93,10 @@ def _seed_default_tags(eng) -> None:
             {"key": "loom:group", "default_value": None, "source": "build-time", "required": True, "show_on_card": True},
             {"key": "loom:owner", "default_value": None, "source": "build-time", "required": True, "show_on_card": True},
         ]
+        # Remove legacy tags replaced by loom:* prefixed versions
+        legacy_keys = ["application", "team", "owner", "deployed-by"]
+        session.query(TagPolicy).filter(TagPolicy.key.in_(legacy_keys)).delete(synchronize_session="fetch")
+
         for tag_def in defaults:
             existing = session.query(TagPolicy).filter(TagPolicy.key == tag_def["key"]).first()
             if not existing:
