@@ -18,6 +18,7 @@ The frontend is organized around persona-based workflows, accessible via a sideb
 - **Agents** — Deploy new agents or import existing ones. Includes agent listing with card/table view toggle.
 - **Security Admin** — Manage IAM roles, authorizer configurations, credentials, and permission requests.
 - **Memory** — Create new AgentCore Memory resources with configurable strategies or import existing ones.
+- **Settings** — Manage tag profiles and other configuration. Accessible to all scopes; write operations require `*:write`.
 - **MCP Servers** (coming soon) — Disabled sidebar entry for future MCP server management.
 - **A2A Agents** (coming soon) — Disabled sidebar entry for future A2A agent management.
 
@@ -46,7 +47,8 @@ loom/
 │   │   │   ├── authorizer_config.py
 │   │   │   ├── authorizer_credential.py
 │   │   │   ├── permission_request.py
-│   │   │   └── memory.py
+│   │   │   ├── memory.py
+│   │   │   └── tag_profile.py
 │   │   ├── dependencies/
 │   │   │   └── auth.py
 │   │   ├── routers/
@@ -56,6 +58,7 @@ loom/
 │   │   │   ├── logs.py
 │   │   │   ├── memories.py
 │   │   │   ├── security.py
+│   │   │   ├── settings.py
 │   │   │   └── utils.py
 │   │   └── services/
 │   │       ├── agentcore.py
@@ -109,8 +112,8 @@ loom/
 
 Detailed specifications for each component are maintained in their respective directories:
 
-- **Backend:** [`backend/SPECIFICATIONS.md`](backend/SPECIFICATIONS.md) — API endpoints, database schema, service modules, streaming architecture, latency measurement flow, security management, memory resource management.
-- **Frontend:** [`frontend/SPECIFICATIONS.md`](frontend/SPECIFICATIONS.md) — Technology stack, persona-based navigation, Platform Catalog/Agents/Security Admin/Memory workflows, streaming behavior.
+- **Backend:** [`backend/SPECIFICATIONS.md`](backend/SPECIFICATIONS.md) — API endpoints, database schema, service modules, streaming architecture, latency measurement flow, security management, memory resource management, tag policies and profiles.
+- **Frontend:** [`frontend/SPECIFICATIONS.md`](frontend/SPECIFICATIONS.md) — Technology stack, persona-based navigation, Platform Catalog/Agents/Security Admin/Memory/Settings workflows, streaming behavior.
 
 ---
 
@@ -259,7 +262,23 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Security makefile with `cognito.set-passwords` target for setting permanent user passwords.
 - Scope-based frontend authorization: `AuthContext` extracts `cognito:groups` from the ID token, maps groups to scopes, and exposes `hasScope()`. Sidebar items are conditionally rendered based on user scopes. Write operations (add, edit, delete buttons) are disabled or hidden via a `readOnly` prop when the user lacks `*:write` scopes. When auth is not configured, all scopes are granted.
 
-### Phase 7 — Advanced Operations
+### Phase 7 — Resource Tagging *(Complete)*
+- Configurable tag policy system: `TagPolicy` model with key, default_value, source (deploy-time/build-time), required, and show_on_card fields.
+- Tag policy CRUD API under `/api/settings/tags` with default seed data (loom:deployed-by, loom:application, loom:group, loom:owner).
+- Tag profile system: `TagProfile` model for named sets of tag values. CRUD API under `/api/settings/tag-profiles`. Profiles satisfy build-time tag policies and are applied to all deployed resources.
+- `ResourceTagFields` shared component: fetches tag policies and profiles, renders a profile dropdown with `sessionStorage` persistence (`loom:selectedTagProfileId`), resolves tags from the selected profile + policy defaults, and passes resolved tags to the parent form via `onChange`. Used by both the agent deploy form and memory create form.
+- Deploy-time tags are automatically applied from policy defaults; build-time tags are resolved from the selected tag profile.
+- Required build-time tag validation before deployment — missing tags return HTTP 400.
+- All AWS resources that support tags (AgentCore runtimes, runtime endpoints, IAM execution roles, managed roles, memory resources) receive the resolved tags.
+- Memory resources: `tags` column added to the `memories` table. Tags are resolved from tag policies + selected profile on creation, passed to AWS `create_memory`, and stored locally. Imported memories fetch existing tags from AWS via `list_tags_for_resource` and enforce tag policies (missing required tags default to "missing").
+- Registered agents fetch existing tags from AWS via `list_tags_for_resource` and enforce tag policies (missing required tags default to "missing").
+- Resolved tags stored on Agent and Memory records as JSON columns, included in API responses.
+- Agent and memory cards display tag badges (`variant="secondary"`) for tags with `show_on_card=true`.
+- All listing pages (Platform Catalog, Agents, Memory) provide tag-based filtering with multi-select dropdowns (checkbox-based), AND logic, clear button, and item count display.
+- Settings persona: new sidebar entry accessible to all scopes. `SettingsPage` provides tag profile CRUD. `*:write` scopes can create, edit, and delete profiles; `*:read` scopes can only view. Tag value inputs enforce a 128-character maximum length.
+- 27 new backend tests covering tag policy CRUD, tag resolution, validation, and agent tag storage.
+
+### Phase 8 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

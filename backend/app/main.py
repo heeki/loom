@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import init_db
-from app.routers import agents, auth, credentials, integrations, invocations, logs, memories, security
+from app.routers import agents, auth, credentials, integrations, invocations, logs, memories, security, settings
 
 # Configure logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "info").upper()
@@ -77,6 +77,7 @@ app.include_router(invocations.router)
 app.include_router(logs.router)
 app.include_router(memories.router)
 app.include_router(security.router)
+app.include_router(settings.router)
 
 
 @app.get("/")

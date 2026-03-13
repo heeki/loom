@@ -19,15 +19,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { MultiSelect } from "@/components/ui/multi-select";
 import { Plus, Loader2, RefreshCw, Eraser, Trash2, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { statusVariant } from "@/lib/status";
 import { listMemories, createMemory, importMemory, refreshMemory, deleteMemory, purgeMemory } from "@/api/memories";
+import { listTagPolicies } from "@/api/settings";
 import { ApiError } from "@/api/client";
-import type { MemoryResponse, MemoryStrategyRequest } from "@/api/types";
+import type { MemoryResponse, MemoryStrategyRequest, TagPolicy } from "@/api/types";
 import { MemoryCard } from "./MemoryCard";
+import { ResourceTagFields } from "./ResourceTagFields";
 
 const STRATEGY_TYPES = [
   { value: "semantic", label: "Semantic" },
@@ -162,6 +165,11 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
   const [formExpiryError, setFormExpiryError] = useState("");
   const [formStrategies, setFormStrategies] = useState<StrategyFormState[]>([]);
 
+  // Tag state
+  const [tagValues, setTagValues] = useState<Record<string, string>>({});
+  const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
+  const [tagFilters, setTagFilters] = useState<Record<string, string[]>>({});
+
   // Import form state
   const [importMemoryId, setImportMemoryId] = useState("");
 
@@ -178,6 +186,7 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
 
   useEffect(() => {
     void fetchMemories();
+    void listTagPolicies().then(setTagPolicies).catch(() => {});
   }, [fetchMemories]);
 
   // 1-second tick for elapsed display, 3-second poll for AWS status
@@ -277,6 +286,7 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
         description: formDescription.trim() || undefined,
         event_expiry_duration: formExpiryDays,
         memory_strategies: strategies,
+        tags: Object.keys(tagValues).length > 0 ? tagValues : undefined,
       });
       resetForm();
       setShowAddForm(false);
@@ -351,6 +361,16 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
   const updateStrategy = (index: number, updates: Partial<StrategyFormState>) => {
     setFormStrategies(formStrategies.map((s, i) => (i === index ? { ...s, ...updates } : s)));
   };
+
+  const showOnCardPolicies = tagPolicies.filter(tp => tp.show_on_card);
+  const showOnCardKeys = showOnCardPolicies.map(tp => tp.key);
+
+  const filteredMemories = memories.filter(mem => {
+    return Object.entries(tagFilters).every(([key, values]) => {
+      if (values.length === 0) return true;
+      return values.includes(mem.tags?.[key] ?? "");
+    });
+  });
 
   const isTransitional = (status: string) => status === "CREATING" || status === "DELETING";
 
@@ -455,6 +475,9 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
                     )}
                   </div>
                 </div>
+
+                {/* Resource Tags */}
+                <ResourceTagFields onChange={setTagValues} />
 
                 {/* Long-Term Strategies */}
                 <div className="space-y-2">
@@ -601,15 +624,52 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
         </Card>
       )}
 
-      {memories.length === 0 ? (
+      {/* Tag Filters */}
+      {showOnCardPolicies.length > 0 && memories.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          {showOnCardPolicies.map(tp => {
+            const distinctValues = [...new Set(
+              memories.map(m => m.tags?.[tp.key]).filter(Boolean)
+            )] as string[];
+            if (distinctValues.length === 0) return null;
+            return (
+              <div key={tp.key} className="space-y-1">
+                <label className="text-[10px] text-muted-foreground">{tp.key.replace(/^loom:/, "")}</label>
+                <MultiSelect
+                  values={tagFilters[tp.key] ?? []}
+                  options={distinctValues.sort()}
+                  onChange={(v) => setTagFilters(prev => ({ ...prev, [tp.key]: v }))}
+                />
+              </div>
+            );
+          })}
+          {Object.values(tagFilters).some(v => v.length > 0) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => setTagFilters({})}
+            >
+              Clear filters
+            </Button>
+          )}
+          <span className="text-xs text-muted-foreground ml-auto">
+            Showing {filteredMemories.length} of {memories.length} memories
+          </span>
+        </div>
+      )}
+
+      {filteredMemories.length === 0 ? (
         <p className="text-sm text-muted-foreground py-8">
-          No memory resources yet. Add one above.
+          {memories.length === 0
+            ? "No memory resources yet. Add one above."
+            : "No memories match the selected filters."}
         </p>
       ) : (
         <>
           {viewMode === "cards" ? (
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {memories.map((mem) => (
+              {filteredMemories.map((mem) => (
                 <MemoryCard
                   key={mem.id}
                   memory={mem}
@@ -619,6 +679,7 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
                   onRefresh={handleRefresh}
                   onDelete={handleDelete}
                   readOnly={readOnly}
+                  showOnCardKeys={showOnCardKeys}
                 />
               ))}
             </div>
@@ -637,7 +698,7 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {memories.map((mem) => (
+                  {filteredMemories.map((mem) => (
                     <TableRow key={mem.id} className="relative bg-input-bg hover:bg-input-bg/80">
                       <TableCell className="font-medium text-sm">{mem.name}</TableCell>
                       <TableCell>

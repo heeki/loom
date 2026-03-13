@@ -16,6 +16,7 @@ interface MemoryCardProps {
   onRefresh: (id: number) => void;
   onDelete: (id: number, deleteInAws: boolean) => void;
   readOnly?: boolean;
+  showOnCardKeys?: string[];
 }
 
 function isTransitional(status: string): boolean {
@@ -30,6 +31,7 @@ export function MemoryCard({
   onRefresh,
   onDelete,
   readOnly,
+  showOnCardKeys,
 }: MemoryCardProps) {
   const { timezone } = useTimezone();
   const [confirmingRemove, setConfirmingRemove] = useState(false);
@@ -105,6 +107,17 @@ export function MemoryCard({
             <div>Registered: {formatTimestamp(memory.created_at, timezone)}</div>
           )}
         </div>
+        {showOnCardKeys && showOnCardKeys.length > 0 && memory.tags && Object.keys(memory.tags).length > 0 && (
+          <div className="flex flex-wrap gap-1 pt-1">
+            {showOnCardKeys
+              .filter(key => memory.tags[key])
+              .map(key => (
+                <Badge key={key} variant="secondary" className="text-[10px] px-1.5 py-0 font-normal">
+                  {key.replace(/^loom:/, "")}: {memory.tags[key]}
+                </Badge>
+              ))}
+          </div>
+        )}
         {confirmingRemove && (
           <div
             className="absolute inset-x-0 bottom-0 rounded-b-lg border-t bg-card px-4 py-2 space-y-1.5"

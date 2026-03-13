@@ -19,17 +19,26 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TAGS: dict[str, str] = {
-    "deployed-by": "loom",
-    "owner": "heeki",
-    "team": "aws",
-}
-
 AGENT_SOURCE_DIR = Path(__file__).resolve().parents[3] / "agents" / "strands_agent"
 
 
-def _merge_tags(extra: dict[str, str] | None = None) -> dict[str, str]:
-    tags = dict(DEFAULT_TAGS)
+def _merge_tags(
+    tag_policies: list[dict[str, Any]] | None = None,
+    extra: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Build a merged tag dict from tag policies and extra overrides.
+
+    Args:
+        tag_policies: List of dicts with keys: key, default_value, source.
+            If None, returns only extra tags (backwards-compatible fallback).
+        extra: Additional tag key-value pairs that override policy defaults.
+    """
+    tags: dict[str, str] = {}
+    if tag_policies:
+        for policy in tag_policies:
+            val = policy.get("default_value")
+            if val:
+                tags[policy["key"]] = val
     if extra:
         tags.update(extra)
     return tags
@@ -218,7 +227,7 @@ def create_runtime(
         "networkConfiguration": {"networkMode": network_mode},
         "protocolConfiguration": {"serverProtocol": protocol},
         "environmentVariables": env_vars,
-        "tags": _merge_tags(tags),
+        "tags": _merge_tags(extra=tags),
     }
 
     if lifecycle_config is not None:
@@ -258,7 +267,7 @@ def create_runtime_endpoint(
         agentRuntimeId=runtime_id,
         name=name,
         description=description,
-        tags=_merge_tags(tags),
+        tags=_merge_tags(extra=tags),
     )
     return response
 

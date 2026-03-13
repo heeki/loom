@@ -14,6 +14,7 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { PolicyViewer } from "@/components/PolicyViewer";
 import * as agentsApi from "@/api/agents";
 import * as securityApi from "@/api/security";
+import { ResourceTagFields } from "@/components/ResourceTagFields";
 import type { AgentDeployRequest, ModelOption, ManagedRole, AuthorizerConfigResponse } from "@/api/types";
 import { toast } from "sonner";
 
@@ -124,6 +125,9 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
   const [memoryEnabled] = useState(false);
   const [mcpServersEnabled] = useState(false);
   const [a2aAgentsEnabled] = useState(false);
+
+  // Tag state (populated by ResourceTagFields via profile selection)
+  const [tagValues, setTagValues] = useState<Record<string, string>>({});
 
   // Deploy elapsed timer — persists across navigation via module-level timestamp
   const [elapsedSeconds, setElapsedSeconds] = useState(() => {
@@ -255,6 +259,9 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
         memory_enabled: memoryEnabled,
         mcp_servers: [],
         a2a_agents: [],
+        tags: Object.fromEntries(
+          Object.entries(tagValues).filter(([, v]) => v.trim() !== "")
+        ),
       };
       await onDeploy(request);
       setName("");
@@ -270,6 +277,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
       setMaxLifetime("");
       setIdleTimeoutError("");
       setMaxLifetimeError("");
+      setTagValues({});
     }
   };
 
@@ -565,6 +573,9 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
                 </div>
               </section>
 
+              {/* Resource Tags */}
+              <ResourceTagFields onChange={setTagValues} />
+
               {/* Integrations */}
               <section className="space-y-3">
                 <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Integrations</h4>
@@ -625,6 +636,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
                     setMaxLifetime("");
                     setIdleTimeoutError("");
                     setMaxLifetimeError("");
+                    setTagValues({});
                   }}
                   disabled={isLoading}
                 >

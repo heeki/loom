@@ -69,6 +69,8 @@ def _migrate_add_columns(eng) -> None:
         ("agents", "endpoint_status", "VARCHAR"),
         ("agents", "protocol", "VARCHAR"),
         ("agents", "network_mode", "VARCHAR"),
+        ("agents", "tags", "TEXT"),
+        ("memories", "tags", "TEXT"),
     ]
 
     for table, column, col_type in migrations:
@@ -81,6 +83,33 @@ def _migrate_add_columns(eng) -> None:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
 
 
+def _seed_default_tags(eng) -> None:
+    """Seed default tag policies if they do not already exist."""
+    from app.models.tag_policy import TagPolicy
+
+    session = sessionmaker(bind=eng)()
+    try:
+        defaults = [
+            {"key": "loom:application", "default_value": None, "source": "build-time", "required": True, "show_on_card": True},
+            {"key": "loom:group", "default_value": None, "source": "build-time", "required": True, "show_on_card": True},
+            {"key": "loom:owner", "default_value": None, "source": "build-time", "required": True, "show_on_card": True},
+        ]
+        # Remove legacy tags replaced by loom:* prefixed versions
+        legacy_keys = ["application", "team", "owner", "deployed-by"]
+        session.query(TagPolicy).filter(TagPolicy.key.in_(legacy_keys)).delete(synchronize_session="fetch")
+
+        for tag_def in defaults:
+            existing = session.query(TagPolicy).filter(TagPolicy.key == tag_def["key"]).first()
+            if not existing:
+                session.add(TagPolicy(**tag_def))
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 def init_db() -> None:
     """
     Initialize the database by creating all tables.
@@ -89,3 +118,4 @@ def init_db() -> None:
     """
     Base.metadata.create_all(bind=engine)
     _migrate_add_columns(engine)
+    _seed_default_tags(engine)

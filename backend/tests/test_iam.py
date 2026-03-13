@@ -29,11 +29,16 @@ class TestCreateExecutionRole(unittest.TestCase):
             }
         }
 
+        tag_policies = [
+            {"key": "deployed-by", "default_value": "loom", "source": "deploy-time"},
+            {"key": "owner", "default_value": "heeki", "source": "build-time"},
+        ]
         result = create_execution_role(
             agent_name="test-agent",
             runtime_id="rt-123",
             region="us-east-1",
             account_id="123456789012",
+            tag_policies=tag_policies,
         )
 
         mock_client.create_role.assert_called_once()
