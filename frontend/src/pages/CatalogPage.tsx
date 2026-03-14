@@ -6,12 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MultiSelect } from "@/components/ui/multi-select";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-} from "@/components/ui/select";
+import { AddFilterDropdown } from "@/components/ui/add-filter-dropdown";
 import {
   Table,
   TableBody,
@@ -20,7 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { LayoutGrid, TableIcon, Eraser, Network, Users, Plus, X, Eye, EyeOff } from "lucide-react";
+import { LayoutGrid, TableIcon, Network, Users, X, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
@@ -52,9 +47,6 @@ export function CatalogPage({
   readOnly,
 }: CatalogPageProps) {
   const { timezone } = useTimezone();
-  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
-  const [cleanupAws, setCleanupAws] = useState(false);
-
   // Tag filter state
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
   const [tagFilters, setTagFilters] = useState<Record<string, string[]>>({});
@@ -67,21 +59,24 @@ export function CatalogPage({
   const showOnCardKeys = showOnCardPolicies.map(tp => tp.key);
 
   // R3: Progressive disclosure filtering
-  const requiredPolicies = showOnCardPolicies.filter(tp => tp.key.startsWith("loom:"));
-  const customFilterPolicies = showOnCardPolicies.filter(tp => !tp.key.startsWith("loom:"));
+  const requiredPolicies = showOnCardPolicies.filter(tp => tp.required);
+  const customFilterPolicies = showOnCardPolicies.filter(tp => !tp.required);
   const [activeCustomFilterKeys, setActiveCustomFilterKeys] = useState<string[]>([]);
   const activePolicies = [...requiredPolicies, ...customFilterPolicies.filter(p => activeCustomFilterKeys.includes(p.key))];
 
   // R4: Custom tag show/hide toggle
   const [showCustomTags, setShowCustomTags] = useState(() => localStorage.getItem("loom:showCustomTags") !== "false");
-  const effectiveShowOnCardKeys = showCustomTags ? showOnCardKeys : showOnCardKeys.filter(k => k.startsWith("loom:"));
+  const requiredKeySet = new Set(requiredPolicies.map(tp => tp.key));
+  const effectiveShowOnCardKeys = showCustomTags ? showOnCardKeys : showOnCardKeys.filter(k => requiredKeySet.has(k));
 
-  const filteredAgents = agents.filter(agent => {
+  const matchesFilters = (tags: Record<string, string> | undefined) => {
     return Object.entries(tagFilters).every(([key, values]) => {
       if (values.length === 0) return true;
-      return values.includes(agent.tags?.[key] ?? "");
+      return values.includes(tags?.[key] ?? "");
     });
-  });
+  };
+
+  const filteredAgents = agents.filter(agent => matchesFilters(agent.tags));
 
   // Memory data
   const [memories, setMemories] = useState<MemoryResponse[]>([]);
@@ -89,6 +84,7 @@ export function CatalogPage({
   const [submitting, setSubmitting] = useState(false);
   const [refreshingId, setRefreshingId] = useState<number | null>(null);
   const [deleteStartTimes, setDeleteStartTimes] = useState<Record<number, number>>({});
+  const filteredMemories = memories.filter(mem => matchesFilters(mem.tags));
 
   // Elapsed timer for transitional states
   const [now, setNow] = useState(Date.now());
@@ -227,14 +223,15 @@ export function CatalogPage({
       </div>
 
       {/* Tag Filters */}
-      {showOnCardPolicies.length > 0 && agents.length > 0 && (
-        <div className="flex flex-wrap items-center gap-3">
+      {showOnCardPolicies.length > 0 && (agents.length > 0 || memories.length > 0) && (
+        <div className="flex flex-wrap items-end gap-3">
           {activePolicies.map(tp => {
-            const isCustom = !tp.key.startsWith("loom:");
-            const distinctValues = [...new Set(
-              agents.map(a => a.tags?.[tp.key]).filter(Boolean)
-            )] as string[];
-            if (distinctValues.length === 0) return null;
+            const isCustom = !tp.required;
+            const distinctValues = [...new Set([
+              ...agents.map(a => a.tags?.[tp.key]).filter(Boolean),
+              ...memories.map(m => m.tags?.[tp.key]).filter(Boolean),
+            ])] as string[];
+            if (distinctValues.length === 0 && !isCustom) return null;
             return (
               <div key={tp.key} className="space-y-1">
                 <div className="flex items-center gap-1">
@@ -267,22 +264,13 @@ export function CatalogPage({
           })}
           {customFilterPolicies.filter(p => !activeCustomFilterKeys.includes(p.key)).length > 0 && (
             <div className="space-y-1">
-              <label className="text-[10px] text-muted-foreground">&nbsp;</label>
-              <Select value="" onValueChange={(v) => setActiveCustomFilterKeys(prev => [...prev, v])}>
-                <SelectTrigger className="h-8 w-[120px] text-xs">
-                  <div className="flex items-center gap-1">
-                    <Plus className="h-3 w-3" />
-                    <span>Add filter</span>
-                  </div>
-                </SelectTrigger>
-                <SelectContent>
-                  {customFilterPolicies
-                    .filter(p => !activeCustomFilterKeys.includes(p.key))
-                    .map(p => (
-                      <SelectItem key={p.key} value={p.key}>{p.key}</SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+              <label className="text-[10px] text-muted-foreground">custom filters</label>
+              <AddFilterDropdown
+                options={customFilterPolicies
+                  .filter(p => !activeCustomFilterKeys.includes(p.key))
+                  .map(p => ({ key: p.key, label: p.key }))}
+                onSelect={(v) => setActiveCustomFilterKeys(prev => [...prev, v])}
+              />
             </div>
           )}
           {(Object.values(tagFilters).some(v => v.length > 0) || activeCustomFilterKeys.length > 0) && (
@@ -312,7 +300,7 @@ export function CatalogPage({
             </Button>
           </div>
           <span className="text-xs text-muted-foreground ml-auto self-end">
-            Showing {filteredAgents.length} of {agents.length} agents
+            Showing {filteredAgents.length} of {agents.length} agents, {filteredMemories.length} of {memories.length} memories
           </span>
         </div>
       )}
@@ -353,23 +341,22 @@ export function CatalogPage({
               />
             ) : (
               <div className="rounded-md border overflow-hidden">
-                <Table>
+                <Table className="table-fixed">
                   <TableHeader>
                     <TableRow className="bg-card hover:bg-card">
-                      <TableHead>Name</TableHead>
-                      <TableHead className="w-[160px]">Status</TableHead>
-                      <TableHead>Protocol</TableHead>
-                      <TableHead>Network</TableHead>
-                      <TableHead>Region</TableHead>
-                      <TableHead>Registered</TableHead>
-                      <TableHead className="w-[60px]" />
+                      <TableHead className="w-[30%]">Name</TableHead>
+                      <TableHead className="w-[12%]">Status</TableHead>
+                      <TableHead className="w-[14%]">Protocol</TableHead>
+                      <TableHead className="w-[14%]">Network</TableHead>
+                      <TableHead className="w-[14%]">Region</TableHead>
+                      <TableHead className="w-[16%]">Registered</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredAgents.map((agent) => (
                       <TableRow
                         key={agent.id}
-                        className="relative bg-input-bg hover:bg-input-bg/80 cursor-pointer"
+                        className="bg-input-bg hover:bg-input-bg/80 cursor-pointer"
                         onClick={() => onSelectAgent(agent.id)}
                       >
                         <TableCell className="font-medium text-sm">
@@ -389,65 +376,6 @@ export function CatalogPage({
                         <TableCell className="text-xs text-muted-foreground">{agent.region}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {formatTimestamp(agent.registered_at, timezone)}
-                        </TableCell>
-                        <TableCell>
-                          {!readOnly && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-6 w-6 p-0"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setConfirmDeleteId(agent.id);
-                              }}
-                              title="Delete"
-                            >
-                              <Eraser className="h-3 w-3" />
-                            </Button>
-                          )}
-                          {confirmDeleteId === agent.id && (
-                            <div
-                              className="absolute inset-x-0 bottom-0 rounded-b-lg border-t bg-card px-4 py-2 space-y-1.5"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {agent.runtime_id && (
-                                <label className="flex items-end justify-end gap-2 cursor-pointer select-none">
-                                  <span className="text-[11px] whitespace-nowrap">Also delete in AgentCore</span>
-                                  <input
-                                    type="checkbox"
-                                    checked={cleanupAws}
-                                    onChange={(e) => setCleanupAws(e.target.checked)}
-                                    className="h-3.5 w-3.5 shrink-0 mb-0.5"
-                                  />
-                                </label>
-                              )}
-                              <div className="flex items-center justify-end gap-2">
-                                <span className="text-xs text-muted-foreground mr-auto">
-                                  Delete this agent?
-                                </span>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-6 text-xs"
-                                  onClick={() => { setConfirmDeleteId(null); setCleanupAws(false); }}
-                                >
-                                  Cancel
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="destructive"
-                                  className="h-6 text-xs"
-                                  onClick={() => {
-                                    onDelete(agent.id, cleanupAws);
-                                    setConfirmDeleteId(null);
-                                    setCleanupAws(false);
-                                  }}
-                                >
-                                  Confirm
-                                </Button>
-                              </div>
-                            </div>
-                          )}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -469,13 +397,15 @@ export function CatalogPage({
               <Skeleton key={i} className="h-40" />
             ))}
           </div>
-        ) : memories.length === 0 ? (
+        ) : filteredMemories.length === 0 ? (
           <p className="text-sm text-muted-foreground py-8">
-            No memory resources. Use the Memory page to create or import one.
+            {memories.length === 0
+              ? "No memory resources. Use the Memory page to create or import one."
+              : "No memory resources match the selected filters."}
           </p>
         ) : viewMode === "cards" ? (
           <SortableCardGrid
-            items={memories}
+            items={filteredMemories}
             getId={(m) => String(m.id)}
             storageKey="catalog-memories"
             renderItem={(mem) => (
@@ -487,26 +417,26 @@ export function CatalogPage({
                 onRefresh={handleMemoryRefresh}
                 onDelete={handleMemoryDelete}
                 readOnly={readOnly}
-                showOnCardKeys={showOnCardKeys}
+                showOnCardKeys={effectiveShowOnCardKeys}
                 deleteStartTime={deleteStartTimes[mem.id]}
               />
             )}
           />
         ) : (
           <div className="rounded-md border overflow-hidden">
-            <Table>
+            <Table className="table-fixed">
               <TableHeader>
                 <TableRow className="bg-card hover:bg-card">
-                  <TableHead>Name</TableHead>
-                  <TableHead className="w-[160px]">Status</TableHead>
-                  <TableHead>Strategies</TableHead>
-                  <TableHead>Event Expiry</TableHead>
-                  <TableHead>Region</TableHead>
-                  <TableHead>Registered</TableHead>
+                  <TableHead className="w-[30%]">Name</TableHead>
+                  <TableHead className="w-[12%]">Status</TableHead>
+                  <TableHead className="w-[14%]">Strategies</TableHead>
+                  <TableHead className="w-[14%]">Event Expiry</TableHead>
+                  <TableHead className="w-[14%]">Region</TableHead>
+                  <TableHead className="w-[16%]">Registered</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {memories.map((mem) => (
+                {filteredMemories.map((mem) => (
                   <TableRow key={mem.id} className="bg-input-bg hover:bg-input-bg/80">
                     <TableCell className="font-medium text-sm">{mem.name}</TableCell>
                     <TableCell>
