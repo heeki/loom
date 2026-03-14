@@ -42,9 +42,9 @@ frontend/
 │   │   ├── useLogs.ts          # Session log fetching
 │   │   └── useDeployment.ts    # Agent config, credential providers, integrations hooks
 │   ├── components/
-│   │   ├── ui/                 # shadcn primitives + searchable-select.tsx + multi-select.tsx
+│   │   ├── ui/                 # shadcn primitives + searchable-select.tsx + multi-select.tsx + add-filter-dropdown.tsx
 │   │   ├── SortableCardGrid.tsx — Drag-to-reorder card grid using @dnd-kit, localStorage persistence
-│   │   ├── AgentCard.tsx       # Agent summary card with refresh + eraser icon deletion
+│   │   ├── AgentCard.tsx       # Agent summary card with refresh + Trash2 icon deletion
 │   │   ├── AgentRegistrationForm.tsx  # Tabbed form: ARN registration + agent deployment
 │   │   ├── AuthorizerManagementPanel.tsx # Authorizer config + credential management
 │   │   ├── MemoryCard.tsx              # Memory resource summary card
@@ -152,11 +152,11 @@ Each card displays:
 - Active session count badge (when > 0)
 - Region, Account ID, Network mode, Available qualifiers, Authorizer (name, "Cognito", "external", or "None"), Registered timestamp
 - Tag badges (secondary variant) for tags marked `show_on_card` in tag policies, formatted as `key: value`
-- Refresh button (RefreshCw icon) and Eraser icon (top-right) for refresh/deletion
+- Refresh button (RefreshCw icon) and Trash2 icon (top-right) for refresh/deletion
 
 ### Delete Confirmation
 
-Clicking the eraser icon triggers an overlay confirmation panel:
+Clicking the Trash2 icon triggers an overlay confirmation panel:
 - Absolutely positioned at the bottom of the card (`absolute inset-x-0 bottom-0`) to prevent other cards in the grid from changing height
 - "Also delete in AgentCore" checkbox (right-aligned, shown only when agent has a runtime_id)
 - Cancel and Confirm buttons (right-aligned)
@@ -279,17 +279,16 @@ Toggled via the "Add Memory" button. Contained in a `Card` with the following fi
 
 **Card view** (default): Responsive grid of `MemoryCard` components (3 columns on large screens). Each card displays name, status badge, spinner+timer for transitional states, region, account, event expiry, strategies count, registered timestamp, tag badges (for tags with `show_on_card=true`), refresh and delete buttons. Multi-select tag filter bar above the grid with AND logic.
 
-**Table view**: Table with columns:
+**Table view**: Table with columns (using `table-fixed` layout with percentage-based widths matching agent tables):
 
-| Column | Description |
-|--------|-------------|
-| Name | Memory resource name (font-medium) |
-| Status | Badge with status variant + spinner for transitional states |
-| Strategies | Count of configured strategies |
-| Event Expiry | Duration in days (computed from seconds) |
-| Region | AWS region |
-| Registered | Timezone-aware timestamp |
-| Actions | Refresh (RefreshCw icon) and Delete (Eraser icon) buttons |
+| Column | Width | Description |
+|--------|-------|-------------|
+| Name | 30% | Memory resource name (font-medium) |
+| Status | 12% | Badge with status variant + spinner for transitional states |
+| Strategies | 14% | Count of configured strategies |
+| Event Expiry | 14% | Duration in days (computed from seconds) |
+| Region | 14% | AWS region |
+| Registered | 16% | Timezone-aware timestamp |
 
 ### Status Badges
 
@@ -434,18 +433,25 @@ Cognito client secrets are password-masked in forms. Secrets are sent to the bac
 - Components that respect `readOnly`: `AgentCard`, `AgentListPage`, `CatalogPage`, `SecurityAdminPage`, `RoleManagementPanel`, `AuthorizerManagementPanel`, `PermissionRequestsPanel`, `MemoryManagementPage`, `MemoryManagementPanel`, `MemoryCard`.
 
 ### Resource Tagging
-- Tag policies use a two-tier designation system: `platform:required` (keys starting with `loom:`) and `custom:optional` (all others). Designation is computed from the key, not stored.
+- Tag policies use a two-tier designation system: `platform:required` (keys starting with `loom:`) and `custom:optional` (all others). Designation is computed from the key, not stored. Filter categorization uses the `required` flag, not key prefix.
 - Tag policies are fetched from `/api/settings/tags` and used to derive `showOnCardKeys` for tag badge display and filter dropdowns.
-- Tag profiles are named presets managed via the Tagging page. The `ResourceTagFields` shared component renders a profile dropdown (persisted in `sessionStorage` as `loom:selectedTagProfileId`), resolves tags from the selected profile + policy defaults, and calls `onChange(tags)`. Used by both agent deploy and memory create forms.
-- Tag resolution is unified: for each policy, use user-supplied value → fall back to `default_value` → error if required and missing. The previous `source` (build-time/deploy-time) distinction has been removed.
-- `showOnCardKeys` (derived from tag policies with `show_on_card=true`) is passed as a prop to `AgentCard` and `MemoryCard` components from all listing pages.
+- Tag profiles are named presets managed via the Tagging page. The `ResourceTagFields` shared component renders a profile dropdown (persisted in `sessionStorage` as `loom:selectedTagProfileId`), resolves tags from the selected profile + policy defaults, displays all profile tags as badges, and calls `onChange(tags)`. Used by both agent deploy and memory create forms.
+- Tag resolution: for each policy, use user-supplied value → fall back to `default_value` (only for required policies) → error if required and missing. Custom/optional tags only appear when the profile explicitly sets them. The previous `source` (build-time/deploy-time) distinction has been removed.
+- `showOnCardKeys` (derived from tag policies with `show_on_card=true`) is filtered by the eyeball toggle to produce `effectiveShowOnCardKeys`, which is passed as a prop to `AgentCard` and `MemoryCard` components from all listing pages.
 - Tag badges use `variant="secondary"` to visually distinguish them from status and protocol badges.
-- **Progressive disclosure filtering:** All listing pages (CatalogPage, AgentListPage, MemoryManagementPanel) split show-on-card policies into required (`loom:*`) and custom. Required tag filters are always shown; custom tag filters are hidden until added via an "Add filter" dropdown (Select with Plus icon). Custom filters can be individually removed with an "x" button next to the label. "Clear filters" resets all filters and removes all custom filter selections.
-- **Custom tag show/hide toggle:** An Eye/EyeOff button in the filter bar toggles visibility of custom (non-`loom:`) tags on agent and memory cards. The preference is persisted to `localStorage` as `loom:showCustomTags`. When hidden, only `loom:*` tags appear on cards; filtering still works independently.
+- **Progressive disclosure filtering:** All listing pages (CatalogPage, AgentListPage, MemoryManagementPanel) split show-on-card policies into required and custom using the `required` flag. The filter bar renders in order: required filters → eyeball toggle → activated custom filters → "custom filters" Add dropdown → Clear filters → item count. All label rows use fixed `h-4 flex items-center` wrappers for consistent visual alignment. Custom `AddFilterDropdown` component (not Radix Select) provides the "Add filter" dropdown with click-outside-to-close behavior.
+- **Custom tag show/hide toggle:** An Eye/EyeOff button in the filter bar (positioned left of custom filter dropdowns) toggles visibility of custom tags on agent and memory cards. The preference is persisted to `localStorage` as `loom:showCustomTags`. When hidden, only required tags appear on cards; filtering still works independently.
+- **Filter persistence:** Both `tagFilters` and `activeCustomFilterKeys` are persisted to `localStorage` per page (e.g., `loom:tagFilters:agents`, `loom:customFilterKeys:catalog`) so filter state survives page navigation.
 - Filter state uses `Record<string, string[]>` to support multiple selected values per tag key with AND logic.
 
 ### MultiSelect Component
 Custom dropdown with checkboxes for multi-value selection. Uses `min-w-[140px]` with auto-expanding width to fit content (no truncation). Closes on outside click via `mousedown` event listener. Shows "All" when no values selected, the value when one is selected, or "N selected" for multiple. Uses `bg-input-bg` to match the existing `Select` component styling.
+
+### AddFilterDropdown Component
+Custom dropdown for adding custom tag filters to the filter bar. Uses a plain `<button>` with an absolute-positioned option list (not Radix Select, which has issues with empty controlled values). Shows a Plus icon and "Add filter" label, with a ChevronDown indicator. Closes on outside click via `mousedown` event listener. Each option triggers `onSelect` and closes the dropdown. Matches `MultiSelect` styling (`h-7`, `min-w-[140px]`, `bg-input-bg`).
+
+### Pydantic Error Handling
+`apiFetch` in `client.ts` handles Pydantic validation errors where `detail` is an array of objects (not a string). Array entries are mapped to their `msg` fields and joined with `"; "` for display. This prevents `[object Object]` from appearing in error toasts.
 
 ### API Layer Design
 - `apiFetch<T>()` is a thin wrapper around `fetch` with JSON parsing, `ApiError` class, and automatic auth token injection

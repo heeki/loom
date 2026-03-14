@@ -294,12 +294,17 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Documentation: `frontend/.env.example` template, README title updated.
 
 ### Phase 9 — Tagging Page and Custom Tags *(Complete)*
-- Dedicated Tagging page: tag profile management extracted from Settings into a new `TaggingPage` component with its own sidebar entry (Tags icon, visible to all scopes).
-- Custom tag policy management: `platform:required` tags shown as read-only rows with lock icon and designation badge; `custom:optional` tags are editable and deletable with designation badge. "Add Custom Tag" form with key, default value, and show-on-card toggle. Custom tags are always `required=false`.
+- Dedicated Tagging page: tag profile management extracted from Settings into a new `TaggingPage` component with its own sidebar entry (Tags icon, visible to all scopes). Drag-to-reorder via `SortableCardGrid` for both tag policies and tag profiles.
+- Custom tag policy management: `platform:required` tags shown as read-only cards with lock icon (top-right) and designation badge; `custom:optional` tags are editable (pencil icon) and deletable (Trash2 icon, top-right) with designation badge. "Add Custom Tag" form with key, default value, and show-on-card toggle. Custom tags are always `required=false`.
 - Tag profile form with two sections: **Platform (Required)** with mandatory input fields for all `platform:required` tags, and **Custom (Optional)** with checkbox-to-enable pattern per custom tag (checking reveals a value input, unchecking removes from profile).
-- Simplified tag model: removed `source` (build-time/deploy-time) distinction. Tag resolution is now unified — user-supplied value → default_value → error if required.
-- Progressive disclosure tag filtering: on Catalog, Agents, and Memory pages, required (`loom:*`) tag filters are always shown; custom tag filters are hidden until added via an "Add filter" dropdown. Custom filters can be individually removed with an "x" button. "Clear filters" resets all filters including custom filter selections.
-- Custom tag show/hide toggle: Eye/EyeOff button on filter bars toggles visibility of custom tags on agent and memory cards. Preference persisted to `localStorage` (`loom:showCustomTags`).
+- Simplified tag model: removed `source` (build-time/deploy-time) distinction. Tag resolution: for each policy, use user-supplied value → fall back to `default_value` (only for required policies) → error if required and missing. Custom/optional tags only appear when the profile explicitly sets them.
+- Progressive disclosure tag filtering: on Catalog, Agents, and Memory pages, required tag filters are always shown; custom tag filters are hidden until added via a custom `AddFilterDropdown` component. Filter bar layout: required filters → eyeball toggle → activated custom filters → "custom filters" Add dropdown → Clear filters → count. All label rows use fixed `h-4` height for visual alignment. Filter state (`tagFilters` and `activeCustomFilterKeys`) persisted to `localStorage` per page and survives navigation.
+- Custom tag show/hide toggle: Eye/EyeOff button on filter bars (positioned left of custom filter dropdown) toggles visibility of custom tags on agent and memory cards. Preference persisted to `localStorage` (`loom:showCustomTags`).
+- Card layout consistency: Trash2 icon for delete across all cards (agents, memory, roles, authorizers, tags). Edit/delete icons positioned top-right as lightweight `<button>` elements. Delete confirmation right-aligned at card bottom.
+- Table consistency: all tables use `table-fixed` with matching percentage-based column widths (30%/12%/14%/14%/14%/16%). Action columns removed from all tables — delete/refresh operations are card-view only.
+- Security card consistency: RoleManagementPanel and AuthorizerManagementPanel cards use the same top-right icon pattern (pencil + trash for authorizers, trash for roles). Tags aligned with content via `ml-6` offset.
+- Backend: `tags` column added to `managed_roles` and `authorizer_configs` tables. IAM role import fetches tags via `list_role_tags`. `environment.sh.example` files added for backend and security directories.
+- Pydantic error handling: `apiFetch` handles array-style `detail` responses (Pydantic validation errors) by joining `msg` fields.
 - Settings page simplified to display preferences only (theme + timezone).
 
 ### Phase 10 — Advanced Operations

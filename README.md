@@ -9,8 +9,8 @@ A platform for building, testing, and operating AI agents on Amazon Bedrock Agen
 - **Agent Management** — Deploy new agents or import existing AgentCore Runtime agents
 - **Memory Management** — Create and manage AgentCore Memory resources with configurable strategies (semantic, summary, user preference, episodic, custom)
 - **Security Administration** — Manage IAM roles, authorizer configs, credentials, and permission requests
-- **Resource Tagging** — Configurable tag policies (platform + custom) and named tag profiles applied to all deployed resources (agents, memory, IAM roles), tag badges on cards, progressive disclosure filtering with custom tag add/remove
-- **Tagging** — Dedicated page for managing tag policies (platform read-only, custom editable) and tag profiles (create, edit, delete named tag presets)
+- **Resource Tagging** — Configurable tag policies (platform + custom) and named tag profiles applied to all deployed resources (agents, memory, IAM roles). Tag badges on cards with show/hide toggle for custom tags. Progressive disclosure filtering with persistent filter state across navigation
+- **Tagging** — Dedicated page for managing tag policies (platform read-only with lock icon, custom editable/deletable) and tag profiles (create, edit, delete named tag presets with drag-to-reorder)
 - **Settings** — Display preferences (theme and timezone)
 - SSE streaming invocation with real-time response display and friendly error messages
 - Authenticated agent invocations using user tokens, M2M credentials, or manual bearer tokens
@@ -32,8 +32,10 @@ A platform for building, testing, and operating AI agents on Amazon Bedrock Agen
 loom/
 ├── agents/            # Agent blueprint source code (Strands Agent)
 ├── backend/           # FastAPI backend (Python, SQLAlchemy, boto3)
+│   └── etc/           # Backend environment config (environment.sh.example)
 ├── frontend/          # React/TypeScript frontend (Vite, shadcn, Tailwind CSS)
-├── security/          # Security IaC templates (IAM roles, Cognito) + makefile + etc/
+├── security/          # Security IaC templates (IAM roles, Cognito) + makefile
+│   └── etc/           # Security environment config (environment.sh.example)
 ├── etc/               # Configuration (environment.sh)
 ├── iac/               # Infrastructure as Code (CloudFormation, SAM)
 ├── makefile           # Root orchestration
@@ -113,7 +115,10 @@ make cognito.set-passwords  # Set permanent passwords for all users
 
 ### Configuration
 
-Runtime configuration is sourced from `etc/environment.sh`. See the backend and frontend READMEs for available variables.
+Runtime configuration is sourced from `etc/environment.sh`. Example templates are provided:
+- `backend/etc/environment.sh.example` — Backend environment variables (ports, database, AWS region, S3 bucket, Cognito)
+- `security/etc/environment.sh.example` — Security stack variables (Cognito pool, passwords)
+- `frontend/.env.example` — Frontend environment variables (Cognito user client ID)
 
 ### Make Targets
 

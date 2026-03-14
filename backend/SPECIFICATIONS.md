@@ -85,13 +85,17 @@ backend/
 ├── tests/
 │   ├── test_agentcore.py    # AgentCore service tests
 │   ├── test_agents.py       # Agent router tests
+│   ├── test_agents_deploy.py # Deployment-specific tests
 │   ├── test_cloudwatch.py   # CloudWatch service tests
+│   ├── test_iam.py          # IAM service tests
 │   ├── test_invocations.py  # Invocation router tests
 │   ├── test_latency.py      # Latency computation tests
 │   ├── test_logs.py         # Logs router tests
-│   ├── test_agents_deploy.py # Deployment-specific tests
 │   ├── test_memories.py     # Memory resource tests
-│   └── test_tags.py         # Tag policy and tag enforcement tests
+│   ├── test_security.py     # Security router tests (roles, authorizers)
+│   └── test_tags.py         # Tag policy, tag profile, and tag enforcement tests
+├── etc/
+│   └── environment.sh.example  # Example environment configuration template
 ├── makefile
 ├── pyproject.toml
 └── requirements.txt
@@ -154,6 +158,7 @@ backend/
 | `role_arn` | TEXT UNIQUE NOT NULL | IAM role ARN |
 | `description` | TEXT | Role description |
 | `policy_document` | TEXT | JSON policy document |
+| `tags` | TEXT | JSON dict of tags fetched from AWS IAM on import |
 | `created_at` | DATETIME | Creation timestamp |
 | `updated_at` | DATETIME | Last update timestamp |
 
@@ -170,6 +175,7 @@ backend/
 | `allowed_scopes` | TEXT | JSON array of allowed OAuth scopes |
 | `client_id` | TEXT | Default client ID |
 | `client_secret_arn` | TEXT | Secrets Manager ARN for default client secret |
+| `tags` | TEXT | JSON dict of tags |
 | `created_at` | DATETIME | Creation timestamp |
 | `updated_at` | DATETIME | Last update timestamp |
 
@@ -447,6 +453,8 @@ Tag profiles are named presets of tag key-value pairs. When creating or updating
 | `POST` | `/api/security/permission-requests` | Create a permission request. |
 | `GET` | `/api/security/permission-requests` | List permission requests. |
 | `PUT` | `/api/security/permission-requests/{req_id}/review` | Approve or deny a permission request. |
+
+**Role import behavior:** When importing a role by ARN, the backend fetches the IAM policy document via `get_role_policy` and IAM tags via `list_role_tags`, storing both on the managed role record. Tags are included in the role response as a JSON dict.
 
 ### Memory Resources
 
