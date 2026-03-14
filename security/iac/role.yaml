@@ -25,6 +25,15 @@ Parameters:
     Type: String
     Description: ARN of an AgentCore Memory resource to grant access to (leave empty to skip memory policy)
     Default: ""
+  pTagApplication:
+    Type: String
+    Description: Value for the loom:application tag
+  pTagGroup:
+    Type: String
+    Description: Value for the loom:group tag
+  pTagOwner:
+    Type: String
+    Description: Value for the loom:owner tag
 
 Conditions:
   IncludeMemoryPolicy: !Not [!Equals [!Ref pMemoryArn, ""]]
@@ -34,6 +43,13 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub "loom-role-${pRoleSuffix}"
+      Tags:
+        - Key: "loom:application"
+          Value: !Ref pTagApplication
+        - Key: "loom:group"
+          Value: !Ref pTagGroup
+        - Key: "loom:owner"
+          Value: !Ref pTagOwner
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:

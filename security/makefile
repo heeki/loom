@@ -25,6 +25,9 @@ role.deploy:
 			pBedrockModelArns=$(P_BEDROCK_MODEL_ARNS) \
 			pAgentCoreRegions=$(P_AGENTCORE_REGIONS) \
 			pLogsRegion=$(P_LOGS_REGION) \
+			pTagApplication=$(P_TAG_APPLICATION) \
+			pTagGroup=$(P_TAG_GROUP) \
+			pTagOwner=$(P_TAG_OWNER) \
 		--capabilities CAPABILITY_NAMED_IAM \
 		--no-confirm-changeset
 
@@ -60,6 +63,9 @@ cognito.deploy:
 			pResourceServerIdentifier=$(P_COGNITO_RESOURCE_SERVER) \
 			pScopes=$(P_COGNITO_SCOPES) \
 			pCallbackUrls=$(P_COGNITO_CALLBACK_URLS) \
+			pTagApplication=$(P_TAG_APPLICATION) \
+			pTagGroup=$(P_TAG_GROUP) \
+			pTagOwner=$(P_TAG_OWNER) \
 		--capabilities CAPABILITY_NAMED_IAM \
 		--no-confirm-changeset
 
