@@ -399,7 +399,6 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
   const [activeCustomFilterKeys, setActiveCustomFilterKeys] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem("loom:customFilterKeys:memories") || "[]") as string[]; } catch { return []; }
   });
-  const activePolicies = [...requiredPolicies, ...customFilterPolicies.filter(p => activeCustomFilterKeys.includes(p.key))];
 
   // Persist filter state to localStorage
   useEffect(() => { localStorage.setItem("loom:tagFilters:memories", JSON.stringify(tagFilters)); }, [tagFilters]);
@@ -672,33 +671,15 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
       {/* Tag Filters */}
       {showOnCardPolicies.length > 0 && memories.length > 0 && (
         <div className="flex flex-wrap items-end gap-3">
-          {activePolicies.map(tp => {
-            const isCustom = !tp.required;
+          {requiredPolicies.map(tp => {
             const distinctValues = [...new Set(
               memories.map(m => m.tags?.[tp.key]).filter(Boolean)
             )] as string[];
-            if (distinctValues.length === 0 && !isCustom) return null;
+            if (distinctValues.length === 0) return null;
             return (
               <div key={tp.key} className="space-y-1">
-                <div className="flex items-center gap-1">
+                <div className="h-4 flex items-center">
                   <label className="text-[10px] text-muted-foreground">{tp.key.replace(/^loom:/, "")}</label>
-                  {isCustom && (
-                    <button
-                      type="button"
-                      className="text-muted-foreground hover:text-foreground"
-                      onClick={() => {
-                        setActiveCustomFilterKeys(prev => prev.filter(k => k !== tp.key));
-                        setTagFilters(prev => {
-                          const next = { ...prev };
-                          delete next[tp.key];
-                          return next;
-                        });
-                      }}
-                      title="Remove filter"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  )}
                 </div>
                 <MultiSelect
                   values={tagFilters[tp.key] ?? []}
@@ -709,7 +690,9 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
             );
           })}
           <div className="space-y-1">
-            <label className="block text-[10px] text-muted-foreground">custom</label>
+            <div className="h-4 flex items-center">
+              <label className="text-[10px] text-muted-foreground">custom</label>
+            </div>
             <Button
               variant="outline"
               size="sm"
@@ -724,9 +707,43 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
               {showCustomTags ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
             </Button>
           </div>
+          {customFilterPolicies.filter(p => activeCustomFilterKeys.includes(p.key)).map(tp => {
+            const distinctValues = [...new Set(
+              memories.map(m => m.tags?.[tp.key]).filter(Boolean)
+            )] as string[];
+            return (
+              <div key={tp.key} className="space-y-1">
+                <div className="h-4 flex items-center gap-1">
+                  <label className="text-[10px] text-muted-foreground">{tp.key}</label>
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      setActiveCustomFilterKeys(prev => prev.filter(k => k !== tp.key));
+                      setTagFilters(prev => {
+                        const next = { ...prev };
+                        delete next[tp.key];
+                        return next;
+                      });
+                    }}
+                    title="Remove filter"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+                <MultiSelect
+                  values={tagFilters[tp.key] ?? []}
+                  options={distinctValues.sort()}
+                  onChange={(v) => setTagFilters(prev => ({ ...prev, [tp.key]: v }))}
+                />
+              </div>
+            );
+          })}
           {customFilterPolicies.filter(p => !activeCustomFilterKeys.includes(p.key)).length > 0 && (
             <div className="space-y-1">
-              <label className="text-[10px] text-muted-foreground">custom filters</label>
+              <div className="h-4 flex items-center">
+                <label className="text-[10px] text-muted-foreground">custom filters</label>
+              </div>
               <AddFilterDropdown
                 options={customFilterPolicies
                   .filter(p => !activeCustomFilterKeys.includes(p.key))
