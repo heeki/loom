@@ -260,6 +260,7 @@ export interface AuthorizerConfigResponse {
   allowed_scopes: string[];
   client_id: string | null;
   has_client_secret: boolean;
+  tags: Record<string, string>;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -395,6 +396,7 @@ export interface TagPolicyCreateRequest {
 }
 
 export interface TagPolicyUpdateRequest {
+  key: string;
   default_value?: string;
   required?: boolean;
   show_on_card?: boolean;

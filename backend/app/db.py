@@ -72,6 +72,7 @@ def _migrate_add_columns(eng) -> None:
         ("agents", "tags", "TEXT"),
         ("memories", "tags", "TEXT"),
         ("managed_roles", "tags", "TEXT"),
+        ("authorizer_configs", "tags", "TEXT"),
     ]
 
     for table, column, col_type in migrations:

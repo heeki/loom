@@ -66,7 +66,7 @@ class TestTagPolicyModel(unittest.TestCase):
         policy = TagPolicy(
             key="test-key",
             default_value="test-val",
-            required=True,
+            required=False,
             show_on_card=False,
         )
         self.session.add(policy)
@@ -77,19 +77,24 @@ class TestTagPolicyModel(unittest.TestCase):
         self.assertEqual(d["key"], "test-key")
         self.assertEqual(d["default_value"], "test-val")
         self.assertEqual(d["designation"], "custom:optional")
-        self.assertTrue(d["required"])
+        self.assertFalse(d["required"])
         self.assertFalse(d["show_on_card"])
         self.assertIn("id", d)
         self.assertNotIn("source", d)
 
     def test_designation_platform(self):
-        """Test that loom: prefixed keys get platform:required designation."""
+        """Test that required tags get platform:required designation."""
         policy = TagPolicy(key="loom:app", required=True)
         self.assertEqual(policy.designation, "platform:required")
 
     def test_designation_custom(self):
-        """Test that non-loom: keys get custom:optional designation."""
+        """Test that non-required tags get custom:optional designation."""
         policy = TagPolicy(key="cost-center", required=False)
+        self.assertEqual(policy.designation, "custom:optional")
+
+    def test_designation_loom_prefix_not_required(self):
+        """Test that loom: prefixed keys with required=False get custom:optional."""
+        policy = TagPolicy(key="loom:custom-thing", required=False)
         self.assertEqual(policy.designation, "custom:optional")
 
 
@@ -131,11 +136,11 @@ class TestTagPolicyCRUD(unittest.TestCase):
         self.assertEqual(response.json(), [])
 
     def test_create_tag_policy(self):
-        """Test creating a new tag policy."""
+        """Test creating a new custom tag policy."""
         response = self.client.post("/api/settings/tags", json={
             "key": "environment",
             "default_value": "dev",
-            "required": True,
+            "required": False,
             "show_on_card": False,
         })
         self.assertEqual(response.status_code, 201)

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, Eraser, RefreshCw } from "lucide-react";
+import { Loader2, Trash2, RefreshCw } from "lucide-react";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { statusVariant } from "@/lib/status";
@@ -120,7 +120,7 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
                 className="text-muted-foreground/50 hover:text-destructive transition-colors"
                 title="Remove agent"
               >
-                <Eraser className="h-3.5 w-3.5" />
+                <Trash2 className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
@@ -171,7 +171,7 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
             {showOnCardKeys
               .filter(key => agent.tags[key])
               .map(key => (
-                <Badge key={key} variant="secondary" className="text-[10px] px-1.5 py-0 font-normal">
+                <Badge key={key} variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
                   {key.replace(/^loom:/, "")}: {agent.tags[key]}
                 </Badge>
               ))}

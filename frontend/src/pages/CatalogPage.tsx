@@ -289,26 +289,29 @@ export function CatalogPage({
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 text-xs"
+              className="h-7 text-xs self-end"
               onClick={() => { setTagFilters({}); setActiveCustomFilterKeys([]); }}
             >
               Clear filters
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0"
-            onClick={() => {
-              const next = !showCustomTags;
-              setShowCustomTags(next);
-              localStorage.setItem("loom:showCustomTags", String(next));
-            }}
-            title={showCustomTags ? "Hide custom tags" : "Show custom tags"}
-          >
-            {showCustomTags ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-          </Button>
-          <span className="text-xs text-muted-foreground ml-auto">
+          <div className="space-y-1">
+            <label className="block text-[10px] text-muted-foreground">custom</label>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 w-[2.25rem] p-0 bg-input-bg"
+              onClick={() => {
+                const next = !showCustomTags;
+                setShowCustomTags(next);
+                localStorage.setItem("loom:showCustomTags", String(next));
+              }}
+              title={showCustomTags ? "Hide custom tags" : "Show custom tags"}
+            >
+              {showCustomTags ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+          <span className="text-xs text-muted-foreground ml-auto self-end">
             Showing {filteredAgents.length} of {agents.length} agents
           </span>
         </div>

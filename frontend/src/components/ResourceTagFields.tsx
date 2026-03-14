@@ -14,14 +14,27 @@ const SESSION_KEY = "loom:selectedTagProfileId";
 
 interface ResourceTagFieldsProps {
   onChange: (tags: Record<string, string>) => void;
+  profileId?: string;
 }
 
-export function ResourceTagFields({ onChange }: ResourceTagFieldsProps) {
+export function ResourceTagFields({ onChange, profileId: controlledProfileId }: ResourceTagFieldsProps) {
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
   const [profiles, setProfiles] = useState<TagProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string>(() => {
     return sessionStorage.getItem(SESSION_KEY) || "";
   });
+
+  // Sync with controlled profileId from parent
+  useEffect(() => {
+    if (controlledProfileId !== undefined) {
+      setSelectedProfileId(controlledProfileId);
+      if (controlledProfileId) {
+        sessionStorage.setItem(SESSION_KEY, controlledProfileId);
+      } else {
+        sessionStorage.removeItem(SESSION_KEY);
+      }
+    }
+  }, [controlledProfileId]);
 
   useEffect(() => {
     void settingsApi.listTagPolicies().then(setTagPolicies).catch(() => {});
@@ -82,13 +95,13 @@ export function ResourceTagFields({ onChange }: ResourceTagFieldsProps) {
             </SelectContent>
           </Select>
         </div>
-        {selectedProfile && requiredPolicies.length > 0 && (
+        {selectedProfile && tagPolicies.length > 0 && (
           <div className="flex flex-wrap gap-1.5 pb-1">
-            {requiredPolicies.map((tp) => {
+            {tagPolicies.map((tp) => {
               const val = selectedProfile.tags[tp.key];
               if (!val) return null;
               return (
-                <Badge key={tp.key} variant="secondary" className="text-[10px] px-1.5 py-0.5 font-normal">
+                <Badge key={tp.key} variant="outline" className="text-[10px] px-1.5 py-0.5 font-normal">
                   {tp.key.replace(/^loom:/, "")}: {val}
                 </Badge>
               );

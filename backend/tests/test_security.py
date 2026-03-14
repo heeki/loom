@@ -318,6 +318,40 @@ class TestSecurityAuthorizers(unittest.TestCase):
         self.assertEqual(data["allowed_clients"], ["client1"])
         self.assertFalse(data["has_client_secret"])
 
+    @patch("app.routers.security.boto3")
+    def test_create_cognito_authorizer_fetches_tags(self, mock_boto3):
+        """Test that creating a Cognito authorizer fetches pool tags."""
+        mock_cognito = MagicMock()
+        mock_boto3.client.return_value = mock_cognito
+        mock_cognito.describe_user_pool.return_value = {
+            "UserPool": {
+                "UserPoolTags": {
+                    "loom:application": "myapp",
+                    "loom:owner": "alice",
+                }
+            }
+        }
+
+        response = self.client.post("/api/security/authorizers", json={
+            "name": "tagged-cognito",
+            "authorizer_type": "cognito",
+            "pool_id": "us-east-1_tagged",
+        })
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+        self.assertEqual(data["tags"]["loom:application"], "myapp")
+        self.assertEqual(data["tags"]["loom:owner"], "alice")
+
+    def test_create_non_cognito_authorizer_no_tags(self):
+        """Test that non-Cognito authorizers get empty tags."""
+        response = self.client.post("/api/security/authorizers", json={
+            "name": "other-auth",
+            "authorizer_type": "other",
+            "discovery_url": "https://example.com/.well-known/openid-configuration",
+        })
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["tags"], {})
+
     @patch("app.routers.security.store_secret")
     def test_create_authorizer_with_secret(self, mock_store):
         """Test creating an authorizer with a client secret."""
@@ -408,6 +442,29 @@ class TestSecurityAuthorizers(unittest.TestCase):
         response = self.client.delete(f"/api/security/authorizers/{auth_id}")
         self.assertEqual(response.status_code, 204)
         mock_delete.assert_called_once()
+
+    @patch("app.routers.security.delete_secret")
+    @patch("app.routers.security.store_secret")
+    def test_delete_authorizer_with_credentials(self, mock_store, mock_delete):
+        """Test deleting an authorizer also deletes its credentials."""
+        mock_store.return_value = "arn:aws:secretsmanager:us-east-1:123:secret:cred"
+
+        create_resp = self.client.post("/api/security/authorizers", json={
+            "name": "auth-with-creds",
+            "authorizer_type": "cognito",
+        })
+        auth_id = create_resp.json()["id"]
+
+        # Add a credential with a secret
+        self.client.post(f"/api/security/authorizers/{auth_id}/credentials", json={
+            "label": "test-cred",
+            "client_id": "cid",
+            "client_secret": "csecret",
+        })
+
+        response = self.client.delete(f"/api/security/authorizers/{auth_id}")
+        self.assertEqual(response.status_code, 204)
+        mock_delete.assert_called()
 
     def test_delete_authorizer_not_found(self):
         """Test deleting a non-existent authorizer."""

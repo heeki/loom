@@ -11,7 +11,7 @@ class TagPolicy(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     key = Column(String, unique=True, nullable=False)
     default_value = Column(String, nullable=True)
-    source = Column(String, nullable=True)  # deprecated, kept for DB compat
+    source = Column(String, nullable=True, default="")  # deprecated, kept for DB compat
     required = Column(Boolean, nullable=False, default=True)
     show_on_card = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, nullable=True, default=datetime.utcnow)
@@ -19,8 +19,8 @@ class TagPolicy(Base):
 
     @property
     def designation(self) -> str:
-        """Computed designation based on key prefix and required flag."""
-        if self.key.startswith("loom:"):
+        """Computed designation based on required flag."""
+        if self.required:
             return "platform:required"
         return "custom:optional"
 

@@ -14,8 +14,9 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { PolicyViewer } from "@/components/PolicyViewer";
 import * as agentsApi from "@/api/agents";
 import * as securityApi from "@/api/security";
+import * as settingsApi from "@/api/settings";
 import { ResourceTagFields } from "@/components/ResourceTagFields";
-import type { AgentDeployRequest, ModelOption, ManagedRole, AuthorizerConfigResponse } from "@/api/types";
+import type { AgentDeployRequest, ModelOption, ManagedRole, AuthorizerConfigResponse, TagProfile } from "@/api/types";
 import { toast } from "sonner";
 
 function TagInput({
@@ -125,6 +126,8 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
 
   // Tag state (populated by ResourceTagFields via profile selection)
   const [tagValues, setTagValues] = useState<Record<string, string>>({});
+  const [tagProfiles, setTagProfiles] = useState<TagProfile[]>([]);
+  const [selectedTagProfileId, setSelectedTagProfileId] = useState<string | undefined>(undefined);
 
 
   // Discovery data
@@ -139,6 +142,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
     if (mode === "deploy") {
       void securityApi.listManagedRoles().then(setManagedRoles).catch(() => {});
       void securityApi.listAuthorizerConfigs().then(setAuthConfigs).catch(() => {});
+      void settingsApi.listTagProfiles().then(setTagProfiles).catch(() => {});
     }
   }, [mode]);
 
@@ -215,6 +219,10 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
       if (parsed.authorizer) {
         const match = authConfigs.find((c) => c.name === parsed.authorizer || c.id.toString() === parsed.authorizer);
         if (match) setSelectedAuthConfigId(match.id.toString());
+      }
+      if (parsed.tags) {
+        const match = tagProfiles.find((p) => p.name === parsed.tags);
+        if (match) setSelectedTagProfileId(match.id.toString());
       }
       setJsonInput("");
       setJsonError("");
@@ -623,7 +631,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
               </section>
 
               {/* Resource Tags */}
-              <ResourceTagFields onChange={setTagValues} />
+              <ResourceTagFields onChange={setTagValues} profileId={selectedTagProfileId} />
 
               {/* Integrations */}
               <section className="space-y-3">

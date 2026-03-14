@@ -1,13 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, Pencil, Trash2, Lock } from "lucide-react";
 import { toast } from "sonner";
-import { useTimezone } from "@/contexts/TimezoneContext";
-import { formatTimestamp } from "@/lib/format";
+import { SortableCardGrid } from "@/components/SortableCardGrid";
 import {
   listTagPolicies,
   listTagProfiles,
@@ -25,7 +24,6 @@ interface TaggingPageProps {
 }
 
 export function TaggingPage({ readOnly }: TaggingPageProps) {
-  const { timezone } = useTimezone();
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
   const [profiles, setProfiles] = useState<TagProfile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -88,8 +86,11 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
     setSubmitting(true);
     try {
       if (editingPolicyId) {
+        const existing = tagPolicies.find((tp) => tp.id === editingPolicyId);
         await updateTagPolicy(editingPolicyId, {
+          key: policyFormKey,
           default_value: policyFormDefault || undefined,
+          required: existing?.required ?? false,
           show_on_card: policyFormShowOnCard,
         });
         toast.success("Tag policy updated");
@@ -112,6 +113,16 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
   };
 
   const handlePolicyDelete = async (id: number) => {
+    const policy = tagPolicies.find((tp) => tp.id === id);
+    if (policy) {
+      const usingProfiles = profiles.filter((p) => p.tags[policy.key]);
+      if (usingProfiles.length > 0) {
+        const names = usingProfiles.map((p) => p.name).join(", ");
+        toast.error(`Cannot delete: tag is used by profile(s): ${names}. Remove the tag from those profiles first.`);
+        setConfirmDeletePolicyId(null);
+        return;
+      }
+    }
     setSubmitting(true);
     try {
       await deleteTagPolicy(id);
@@ -329,96 +340,108 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
                 <Button size="sm" variant="ghost" onClick={resetPolicyForm}>
                   Cancel
                 </Button>
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal ml-2">
+                  custom:optional
+                </Badge>
               </div>
             </CardContent>
           </Card>
         )}
 
-        <div className="space-y-2">
-          {platformPolicies.map((policy) => (
-            <Card key={policy.id} className="py-3">
-              <CardContent className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3 min-w-0">
-                  <Lock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <div className="space-y-0.5 min-w-0">
-                    <span className="text-sm font-medium">{policy.key}</span>
-                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                      {policy.show_on_card && <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-normal">visible</Badge>}
+        {tagPolicies.length === 0 && !showPolicyForm ? (
+          <p className="text-sm text-muted-foreground py-4">No tag policies defined.</p>
+        ) : (
+          <SortableCardGrid
+            items={tagPolicies}
+            getId={(p) => p.id.toString()}
+            storageKey="tag-policies"
+            className="grid gap-2 md:grid-cols-2 lg:grid-cols-3"
+            renderItem={(policy) =>
+              policy.designation === "platform:required" ? (
+                <Card className="relative py-3 gap-1">
+                  <CardHeader className="gap-1 pb-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium truncate min-w-0">{policy.key}</span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Lock className="h-3.5 w-3.5 text-muted-foreground/50" />
+                      </div>
                     </div>
-                  </div>
-                </div>
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal shrink-0">
-                  platform:required
-                </Badge>
-              </CardContent>
-            </Card>
-          ))}
-          {customPolicies.map((policy) => (
-            <Card key={policy.id} className="py-3">
-              <CardContent className="flex items-center justify-between gap-4">
-                <div className="space-y-0.5 min-w-0">
-                  <span className="text-sm font-medium">{policy.key}</span>
-                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                    {policy.default_value && <span>default: {policy.default_value}</span>}
-                    {policy.show_on_card && <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-normal">visible</Badge>}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
-                    custom:optional
-                  </Badge>
-                  {!readOnly && (
-                    <div className="flex items-center gap-1">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 w-7 p-0"
-                        onClick={() => startEditPolicy(policy)}
-                        title="Edit"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      {confirmDeletePolicyId === policy.id ? (
-                        <div className="flex items-center gap-1">
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            className="h-7 text-xs"
-                            onClick={() => handlePolicyDelete(policy.id)}
-                            disabled={submitting}
+                  </CardHeader>
+                  <CardContent className="flex flex-wrap gap-1">
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
+                      platform:required
+                    </Badge>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
+                      {policy.show_on_card ? "displayed on cards" : "not displayed on cards"}
+                    </Badge>
+                  </CardContent>
+                </Card>
+              ) : (
+                <Card className="relative py-3 gap-1">
+                  <CardHeader className="gap-1 pb-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium truncate min-w-0">{policy.key}</span>
+                      {!readOnly && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => startEditPolicy(policy)}
+                            className="text-muted-foreground/50 hover:text-foreground transition-colors"
+                            title="Edit"
                           >
-                            Confirm
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 text-xs"
-                            onClick={() => setConfirmDeletePolicyId(null)}
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeletePolicyId(policy.id)}
+                            className="text-muted-foreground/50 hover:text-destructive transition-colors"
+                            title="Delete"
                           >
-                            Cancel
-                          </Button>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
                         </div>
-                      ) : (
+                      )}
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-1.5">
+                    {policy.default_value && (
+                      <div className="text-[10px] text-muted-foreground truncate">default: {policy.default_value}</div>
+                    )}
+                    <div className="flex flex-wrap gap-1">
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
+                        custom:optional
+                      </Badge>
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
+                        {policy.show_on_card ? "displayed on cards" : "not displayed on cards"}
+                      </Badge>
+                    </div>
+                    {confirmDeletePolicyId === policy.id && (
+                      <div className="flex items-center justify-end gap-2 pt-1">
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="h-7 w-7 p-0"
-                          onClick={() => setConfirmDeletePolicyId(policy.id)}
-                          title="Delete"
+                          className="h-6 text-xs"
+                          onClick={() => setConfirmDeletePolicyId(null)}
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
+                          Cancel
                         </Button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-          {tagPolicies.length === 0 && !showPolicyForm && (
-            <p className="text-sm text-muted-foreground py-4">No tag policies defined.</p>
-          )}
-        </div>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          className="h-6 text-xs"
+                          onClick={() => handlePolicyDelete(policy.id)}
+                          disabled={submitting}
+                        >
+                          Confirm
+                        </Button>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )
+            }
+          />
+        )}
       </div>
 
       {/* Tag Profiles Section */}
@@ -555,77 +578,75 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
             No tag profiles yet. Create one to apply consistent tags across agents and memory resources.
           </p>
         ) : (
-          <div className="space-y-2">
-            {profiles.map((profile) => (
-              <Card key={profile.id} className="py-3">
-                <CardContent className="flex items-center justify-between gap-4">
-                  <div className="space-y-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium">{profile.name}</span>
-                      <span className="text-[10px] text-muted-foreground">
-                        {formatTimestamp(profile.updated_at || profile.created_at, timezone)}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-1">
-                      {Object.entries(profile.tags).map(([key, value]) => (
-                        <Badge
-                          key={key}
-                          variant="secondary"
-                          className="text-[10px] px-1.5 py-0 font-normal"
+          <SortableCardGrid
+            items={profiles}
+            getId={(p) => p.id.toString()}
+            storageKey="tag-profiles"
+            className="grid gap-2 md:grid-cols-2 lg:grid-cols-3"
+            renderItem={(profile) => (
+              <Card className="relative py-3 gap-1">
+                <CardHeader className="gap-1 pb-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium truncate min-w-0">{profile.name}</span>
+                    {!readOnly && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => startEditProfile(profile)}
+                          className="text-muted-foreground/50 hover:text-foreground transition-colors"
+                          title="Edit"
                         >
-                          {key.replace(/^loom:/, "")}: {value}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                  {!readOnly && (
-                    <div className="flex items-center gap-1 shrink-0">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 w-7 p-0"
-                        onClick={() => startEditProfile(profile)}
-                        title="Edit"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      {confirmDeleteProfileId === profile.id ? (
-                        <div className="flex items-center gap-1">
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            className="h-7 text-xs"
-                            onClick={() => handleProfileDelete(profile.id)}
-                            disabled={submitting}
-                          >
-                            Confirm
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 text-xs"
-                            onClick={() => setConfirmDeleteProfileId(null)}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 w-7 p-0"
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => setConfirmDeleteProfileId(profile.id)}
+                          className="text-muted-foreground/50 hover:text-destructive transition-colors"
                           title="Delete"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-1.5">
+                  <div className="flex flex-wrap gap-1">
+                    {Object.entries(profile.tags).map(([key, value]) => (
+                      <Badge
+                        key={key}
+                        variant="outline"
+                        className="text-[10px] px-1.5 py-0 font-normal"
+                      >
+                        {key.replace(/^loom:/, "")}: {value}
+                      </Badge>
+                    ))}
+                  </div>
+                  {confirmDeleteProfileId === profile.id && (
+                    <div className="flex items-center justify-end gap-2 pt-1">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 text-xs"
+                        onClick={() => setConfirmDeleteProfileId(null)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        className="h-6 text-xs"
+                        onClick={() => handleProfileDelete(profile.id)}
+                        disabled={submitting}
+                      >
+                        Confirm
+                      </Button>
                     </div>
                   )}
                 </CardContent>
               </Card>
-            ))}
-          </div>
+            )}
+          />
         )}
       </div>
     </div>
