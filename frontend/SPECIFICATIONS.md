@@ -66,7 +66,8 @@ frontend/
 │   ├── lib/
 │   │   ├── utils.ts            # shadcn cn() utility
 │   │   ├── format.ts           # Timezone-aware timestamp + metric formatters
-│   │   └── status.ts           # Status badge variant mapping
+│   │   ├── status.ts           # Status badge variant mapping
+│   │   └── errors.ts           # Friendly invoke error message mapping
 │   ├── App.tsx                 # Auth gate + persona-based navigation + sidebar
 │   ├── main.tsx                # Entry point
 │   └── index.css               # Tailwind v4 imports + Catppuccin CSS variables
@@ -131,7 +132,8 @@ Catalog  >  [Agent Name]  >  [Session ID]
 - Tag-based filter bar above the agents grid, with multi-select dropdowns (checkbox-based) for each tag policy with `show_on_card=true`. Client-side AND filtering with "Clear filters" button and agent count display (e.g., "Showing 3 of 12 agents")
 - Card/table view toggle applies to all sections on the page
 - Agents section: responsive grid of `AgentCard` components (3 columns on large screens) or table view
-- Memory Resources section: responsive grid of `MemoryCard` components (read-only, no create/delete) or table view
+- Memory Resources section: responsive grid of `MemoryCard` components with delete and refresh wired to API, manual RefreshCw button next to section header; or table view
+- Transitional-state polling: if any memory is in CREATING or DELETING state, polls at 3-second intervals; stops when all resources are stable. Memories returning 404 on refresh are automatically purged.
 - Loading skeleton placeholders during data fetch
 - Empty state with instructions when no agents/memories exist
 
@@ -143,7 +145,7 @@ Each card displays:
 - Status badge (color-coded: READY=default, CREATING=secondary, FAILED=destructive) — inline with name
 - Spinner animation when agent is in a creating/deploying state
 - Active session count badge (when > 0)
-- Region, Account ID, Network mode, Available qualifiers, Registered timestamp
+- Region, Account ID, Network mode, Available qualifiers, Authorizer (name, "Cognito", "external", or "None"), Registered timestamp
 - Tag badges (secondary variant) for tags marked `show_on_card` in tag policies, formatted as `key: value`
 - Refresh button (RefreshCw icon) and Eraser icon (top-right) for refresh/deletion
 
@@ -165,6 +167,7 @@ Clicking the eraser icon triggers an overlay confirmation panel:
 - Page header: "Agent Administration" with card/table view toggle (top-right)
 - Sub-header: "Agents" with description and "Add Agent" button (right-aligned)
 - "Add Agent" toggles a Card containing Deploy/Import tab switcher and `AgentRegistrationForm`
+- When deploy succeeds, the form collapses and an ephemeral `AgentCard` appears at the top of the grid with CREATING status and spinner/timer. Once the real agent appears in the agents list, the ephemeral card is removed.
 - Below the form: responsive grid of `AgentCard` components (cards default) or table view
 - Bottom section: "Additional Configuration" with MCP Servers and A2A Agents placeholders (coming soon)
 
@@ -178,6 +181,7 @@ Clicking the eraser icon triggers an overlay confirmation panel:
 ### Deploy Tab
 
 Full deployment form with sections:
+- **JSON Paste**: Collapsible section (ChevronDown/ChevronRight toggle) with monospace textarea for pasting JSON agent configuration. Maps `name`, `description`, `persona` (→ agent description), `instructions` (→ behavioral guidelines), `behavior` (→ output expectations). Apply/Cancel buttons. Invalid JSON shows inline error without clearing existing fields.
 - **Agent Identity**: name (1/3 width) and description (2/3 width)
 - **System Prompt**: agent description, behavioral guidelines, output expectations — each with placeholder examples
 - **Model / Protocol / Network / IAM Role**: single flex row with explicit widths (20% / 10% / 10% / flex-1). Model uses `SearchableSelect` with grouped options, no default selection. Protocol offers HTTP as selectable; MCP and A2A shown as disabled. Network offers PUBLIC; VPC shown as disabled. IAM Role uses a `SearchableSelect` with searchable dropdown. Both model and IAM role are required — deploy button is disabled until both are selected.
@@ -206,12 +210,19 @@ Full deployment form with sections:
 ### Invoke Form
 - `InvokePanel` component: qualifier selector, credential selector (optional), multi-line prompt textarea, invoke/cancel buttons
 - Model ID displayed as a badge in the panel header
-- Credential selector populates from all authorizer configs and their credentials
+- Credential selector populates from all authorizer configs and their credentials, plus a "Manual token" option
 - When a credential is selected, the `credential_id` is passed with the invoke request
+- When "Manual token" is selected, a password input field appears for entering a raw bearer token; the `bearer_token` is passed with the invoke request
 - Token indicator (Key icon + badge) shown when `session_start` includes `has_token: true`
 
 ### Latency Summary
 - 4-metric placeholder (shows "—" before invocation), fills in after `session_end` SSE event
+
+### Error Display
+- Invocation errors show user-friendly messages mapped from raw error patterns via `friendlyInvokeError()` in `lib/errors.ts`
+- Pattern matching: 401/unauthorized → auth required, 403/forbidden → access denied, token errors → expired/invalid, credential errors → credential required
+- Collapsible "Show details" toggle reveals the raw error for debugging
+- Error card styled with `border-destructive`
 
 ### Response Pane
 - Raw text display with `whitespace-pre-wrap` and monospace font
@@ -283,11 +294,17 @@ Status badges use `statusVariant()` mapping:
 - **FAILED** — destructive variant
 - **DELETING** — secondary variant + spinning `Loader2` icon
 
+### Timer Accuracy
+
+Elapsed timers for transitional states use per-resource timestamps:
+- **CREATING**: Timer uses the creation initiation timestamp (tracked in component state) rather than `created_at` from the server.
+- **DELETING**: Timer uses the delete initiation timestamp (tracked in component state) rather than `created_at`.
+- A 10-minute creation timeout shows an error toast rather than spinning indefinitely.
+
 ### Delete Confirmation
 
 Inline overlay on the card or table row (absolute positioned at bottom):
 - "Also delete in AgentCore" checkbox (shown when memory has a memory_id)
-- Prompt text: "Delete this memory resource?"
 - Cancel button (ghost) and Confirm button (destructive)
 - Clicks within overlay are stopped from propagating
 
@@ -409,6 +426,18 @@ Card/table view mode state is lifted to `App.tsx` with separate state variables 
 
 ### SSE Stream Consumer
 `invokeAgentStream()` uses `ReadableStream` to consume POST-based SSE responses with buffer-based line parsing, typed callback dispatch, and `AbortSignal` for cancellation.
+
+### Ephemeral Deploy Card
+When a deploy succeeds, `AgentListPage` creates a temporary `AgentResponse` object with CREATING status and displays it as an `AgentCard` at the top of the grid. A `useEffect` monitors the real agents list and removes the ephemeral card once an agent with the same name appears. This provides immediate visual feedback without waiting for the agents list to refresh.
+
+### Friendly Error Messages
+`lib/errors.ts` provides `friendlyInvokeError(raw: string): string` that maps raw error strings to user-friendly messages using regex pattern matching. The `useInvoke` hook stores both the friendly error (for display) and the raw error (for the "Show details" toggle). This keeps error UX readable while preserving debugging information.
+
+### Authorizer Display on Agent Cards
+Agent cards show the configured authorizer in the metadata section. The backend extracts `customJWTAuthorizer` configuration from the AgentCore `describe_runtime` response on import and refresh, stores it as JSON in the `authorizer_config` column, and returns it in the agent response. The frontend renders: "Cognito" for cognito type, the authorizer name if available, "external" for unknown types, or muted "None" when absent.
+
+### Manual Bearer Token Input
+The invoke panel's credential dropdown includes a "Manual token" sentinel value. Selecting it reveals a password input for pasting a raw bearer token. The token is passed in the invoke request body as `bearer_token` and takes highest priority (Priority 0) in the backend's token selection chain — above user tokens, credential-based tokens, and agent config tokens.
 
 ---
 

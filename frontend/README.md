@@ -109,7 +109,7 @@ src/
 │   ├── MemoryManagementPage.tsx # Memory resource management
 │   ├── SettingsPage.tsx        # Tag profile management
 │   └── SessionDetailPage.tsx   # Session metadata, invocations, logs
-├── lib/          # Shared utilities (cn(), format helpers, status mapping)
+├── lib/          # Shared utilities (cn(), format helpers, status mapping, error mapping)
 ├── App.tsx       # Root: auth gate + persona sidebar + navigation
 └── main.tsx      # Entry point
 ```
@@ -140,18 +140,18 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 
 - `useAgents()` — Agent list with auto-fetch, CRUD actions, register (with optional modelId)
 - `useSessions(agentId)` — Session list that re-fetches on agent change
-- `useInvoke()` — Streaming state management with `AbortController`, supports credential_id
+- `useInvoke()` — Streaming state management with `AbortController`, supports credential_id and bearer_token, provides friendly error messages with raw error detail
 - `useLogs()` — On-demand session log fetching
 - `useDeployment()` — Agent config, credential providers, and integrations
 
 ### Key Components
 
 - **SearchableSelect** — Combobox with search, filter, optional group headers (Anthropic/Amazon), and click-outside detection. Searches both label and value fields.
-- **AgentCard** — Compact card with inline badges, refresh button, eraser icon for deletion, overlay confirmation with "Also delete in AgentCore" checkbox. Displays tag badges for tags marked `show_on_card` in the tag policy.
-- **MemoryCard** — Memory resource card with name, status badge, spinner+timer for transitional states, region/account/expiry metadata, tag badges, refresh and delete buttons with overlay confirmation.
+- **AgentCard** — Compact card with inline badges (including authorizer display), refresh button, eraser icon for deletion, overlay confirmation with "Also delete in AgentCore" checkbox. Displays tag badges for tags marked `show_on_card` in the tag policy.
+- **MemoryCard** — Memory resource card with name, status badge, spinner+timer for transitional states (using per-resource timestamps for accurate elapsed time), region/account/expiry metadata, tag badges, refresh and delete buttons with overlay confirmation.
 - **ResourceTagFields** — Shared component for tag profile selection and tag resolution. Fetches tag policies and profiles, renders a profile dropdown (persisted in `sessionStorage`), resolves tags from the selected profile + policy defaults. Used by both agent deploy and memory create forms.
 - **MultiSelect** — Checkbox-based multi-select dropdown with auto-expanding width. Used for tag filtering on all listing pages.
-- **InvokePanel** — Qualifier selector, credential dropdown, model ID badge, prompt textarea, invoke/cancel buttons. Token indicator shown when invocation uses OAuth.
+- **InvokePanel** — Qualifier selector, credential dropdown (with "Manual token" option for bearer tokens), model ID badge, prompt textarea, invoke/cancel buttons. Token indicator shown when invocation uses OAuth.
 - **AuthorizerManagementPanel** — Lists authorizer configs with expandable credential management (add/list/delete credentials per config).
 - **MemoryManagementPanel** — Create/import form with strategy configuration (type, name, description, namespaces), memory card/table list with status badges (CREATING/ACTIVE/FAILED/DELETING), refresh and delete actions with inline confirmation overlay.
 

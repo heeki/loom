@@ -21,6 +21,7 @@ export interface AgentResponse {
   endpoint_status: string | null;
   protocol: string | null;
   network_mode: string | null;
+  authorizer_config: { type?: string; name?: string; pool_id?: string; discovery_url?: string } | null;
   model_id: string | null;
   deployed_at: string | null;
   tags: Record<string, string>;
@@ -143,6 +144,7 @@ export interface InvokeRequest {
   qualifier?: string;
   session_id?: string;
   credential_id?: number;
+  bearer_token?: string;
 }
 
 export interface InvocationResponse {

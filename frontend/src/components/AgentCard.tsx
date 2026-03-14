@@ -144,6 +144,13 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
               ))}
             </div>
           )}
+          <div>Authorizer: {(() => {
+            const ac = agent.authorizer_config;
+            if (!ac) return <span className="text-muted-foreground/50">None</span>;
+            if (ac.type === "cognito") return "Cognito";
+            if (ac.name) return ac.name;
+            return "external";
+          })()}</div>
           {agent.registered_at && (
             <div>Registered: {formatTimestamp(agent.registered_at, timezone)}</div>
           )}

@@ -26,11 +26,11 @@ export function AgentDetailPage({
   onSessionsRefresh,
   onRedeploy,
 }: AgentDetailPageProps) {
-  const { streamedText, sessionStart, sessionEnd, isStreaming, error, invoke, cancel } =
+  const { streamedText, sessionStart, sessionEnd, isStreaming, error, rawError, invoke, cancel } =
     useInvoke();
 
-  const handleInvoke = async (prompt: string, qualifier: string, sessionId?: string, credentialId?: number) => {
-    await invoke(agent.id, prompt, qualifier, sessionId, credentialId);
+  const handleInvoke = async (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string) => {
+    await invoke(agent.id, prompt, qualifier, sessionId, credentialId, bearerToken);
     onSessionsRefresh();
   };
 
@@ -65,7 +65,19 @@ export function AgentDetailPage({
       {/* Error */}
       {error && (
         <Card className="border-destructive">
-          <CardContent className="pt-4 text-sm text-destructive">{error}</CardContent>
+          <CardContent className="pt-4 text-sm text-destructive space-y-2">
+            <p>{error}</p>
+            {rawError && rawError !== error && (
+              <details className="text-xs">
+                <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                  Show details
+                </summary>
+                <pre className="mt-1 p-2 rounded bg-muted text-muted-foreground whitespace-pre-wrap font-mono text-xs">
+                  {rawError}
+                </pre>
+              </details>
+            )}
+          </CardContent>
         </Card>
       )}
 

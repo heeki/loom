@@ -127,6 +127,7 @@ class Agent(Base):
             "protocol": self.protocol,
             "network_mode": self.network_mode,
             "tags": self.get_tags(),
+            "authorizer_config": self.get_authorizer_config(),
             "deployed_at": (self.deployed_at.isoformat() + "Z") if self.deployed_at else None,
             "registered_at": (self.registered_at.isoformat() + "Z") if self.registered_at else None,
             "last_refreshed_at": (self.last_refreshed_at.isoformat() + "Z") if self.last_refreshed_at else None,

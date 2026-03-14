@@ -278,7 +278,16 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Settings persona: new sidebar entry accessible to all scopes. `SettingsPage` provides tag profile CRUD. `*:write` scopes can create, edit, and delete profiles; `*:read` scopes can only view. Tag value inputs enforce a 128-character maximum length.
 - 27 new backend tests covering tag policy CRUD, tag resolution, validation, and agent tag storage.
 
-### Phase 8 — Advanced Operations
+### Phase 8 — Frontend Visual Polish *(Complete)*
+- Catalog page: memory delete wired to API, transitional-state polling (3-second interval), manual refresh button.
+- Builder page: deploy collapses form and shows ephemeral agent card with CREATING status and timer; card is replaced by real agent once the agents list updates. JSON paste auto-fill for agent configuration (name, description, persona, instructions, behavior).
+- Memory page: delete timer uses per-resource delete initiation timestamp instead of creation timestamp. Creation timer uses per-resource creation start timestamp. 10-minute creation timeout with error toast. Removed "Delete this memory resource?" confirmation text.
+- Agent cards: authorizer display (Cognito, authorizer name, "external" for unknown, "None" when absent). Authorizer config pulled from AgentCore on import/refresh.
+- Invoke panel: "Manual token" option in credential dropdown with password input for direct bearer token entry.
+- Invoke errors: friendly error mapping (`errors.ts`) for 401/403/token/credential patterns with "Show details" toggle for raw error.
+- Backend: `authorizer_config` field on agent response (extracted from AgentCore `customJWTAuthorizer`); `bearer_token` field on invoke request as Priority 0 (highest) in token selection.
+
+### Phase 9 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,13 +16,14 @@ import type { SessionResponse, AuthorizerCredential } from "@/api/types";
 
 const NEW_SESSION = "__new__";
 const NO_CREDENTIAL = "__none__";
+const MANUAL_TOKEN = "__manual__";
 
 interface InvokePanelProps {
   qualifiers: string[];
   sessions: SessionResponse[];
   isStreaming: boolean;
   modelId?: string | null;
-  onInvoke: (prompt: string, qualifier: string, sessionId?: string, credentialId?: number) => void;
+  onInvoke: (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string) => void;
   onCancel: () => void;
 }
 
@@ -30,6 +32,7 @@ export function InvokePanel({ qualifiers, sessions, isStreaming, modelId, onInvo
   const [qualifier, setQualifier] = useState(qualifiers[0] ?? "DEFAULT");
   const [selectedSession, setSelectedSession] = useState(NEW_SESSION);
   const [selectedCredential, setSelectedCredential] = useState(NO_CREDENTIAL);
+  const [bearerToken, setBearerToken] = useState("");
   const [allCredentials, setAllCredentials] = useState<(AuthorizerCredential & { authorizer_name: string })[]>([]);
 
   useEffect(() => {
@@ -63,8 +66,11 @@ export function InvokePanel({ qualifiers, sessions, isStreaming, modelId, onInvo
     e.preventDefault();
     if (!prompt.trim() || isStreaming) return;
     const sessionId = selectedSession === NEW_SESSION ? undefined : selectedSession;
-    const credentialId = selectedCredential === NO_CREDENTIAL ? undefined : Number(selectedCredential);
-    onInvoke(prompt.trim(), qualifier, sessionId, credentialId);
+    const credentialId = selectedCredential === NO_CREDENTIAL || selectedCredential === MANUAL_TOKEN
+      ? undefined : Number(selectedCredential);
+    const token = selectedCredential === MANUAL_TOKEN && bearerToken.trim()
+      ? bearerToken.trim() : undefined;
+    onInvoke(prompt.trim(), qualifier, sessionId, credentialId, token);
   };
 
   const handleQualifierChange = (value: string) => {
@@ -121,20 +127,28 @@ export function InvokePanel({ qualifiers, sessions, isStreaming, modelId, onInvo
                 ))}
               </SelectContent>
             </Select>
-            {allCredentials.length > 0 && (
-              <Select value={selectedCredential} onValueChange={setSelectedCredential}>
-                <SelectTrigger className="w-64">
-                  <SelectValue placeholder="No credential" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NO_CREDENTIAL}>No credential</SelectItem>
-                  {allCredentials.map((c) => (
-                    <SelectItem key={c.id} value={String(c.id)}>
-                      {c.authorizer_name} / {c.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <Select value={selectedCredential} onValueChange={(v) => { setSelectedCredential(v); if (v !== MANUAL_TOKEN) setBearerToken(""); }}>
+              <SelectTrigger className="w-64">
+                <SelectValue placeholder="No credential" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_CREDENTIAL}>No credential</SelectItem>
+                <SelectItem value={MANUAL_TOKEN}>Manual token</SelectItem>
+                {allCredentials.map((c) => (
+                  <SelectItem key={c.id} value={String(c.id)}>
+                    {c.authorizer_name} / {c.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedCredential === MANUAL_TOKEN && (
+              <Input
+                type="password"
+                placeholder="Paste bearer token..."
+                value={bearerToken}
+                onChange={(e) => setBearerToken(e.target.value)}
+                className="w-80"
+              />
             )}
           </div>
           <div className="flex gap-2">

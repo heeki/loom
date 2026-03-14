@@ -11,8 +11,8 @@ A platform for building, testing, and operating AI agents on Amazon Bedrock Agen
 - **Security Administration** — Manage IAM roles, authorizer configs, credentials, and permission requests
 - **Resource Tagging** — Configurable tag policies and named tag profiles applied to all deployed resources (agents, memory, IAM roles), tag badges on cards, multi-select filtering on all listing pages
 - **Settings** — Tag profile management (create, edit, delete named tag presets) accessible to all users
-- SSE streaming invocation with real-time response display
-- Authenticated agent invocations using user tokens or M2M credentials
+- SSE streaming invocation with real-time response display and friendly error messages
+- Authenticated agent invocations using user tokens, M2M credentials, or manual bearer tokens
 - Cold-start latency measurement via automatic CloudWatch log parsing
 - Active session tracking with cold-start indicators per agent
 - Session liveness detection via idle timeout heuristic (no AWS API calls)

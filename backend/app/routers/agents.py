@@ -148,6 +148,7 @@ class AgentResponse(BaseModel):
     protocol: str | None = None
     network_mode: str | None = None
     tags: dict[str, str] = {}
+    authorizer_config: dict | None = None
     model_id: str | None = None
     deployed_at: str | None = None
     registered_at: str | None
@@ -382,6 +383,20 @@ def _register_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
     network_config = metadata.get("networkConfiguration", {})
     network_mode = network_config.get("networkMode", "PUBLIC")
 
+    # Extract authorizer configuration from runtime metadata
+    authorizer_metadata = metadata.get("authorizerConfiguration", {})
+    jwt_authorizer = authorizer_metadata.get("customJWTAuthorizer", {})
+    imported_authorizer = None
+    if jwt_authorizer:
+        discovery_url = jwt_authorizer.get("discoveryUrl", "")
+        auth_type = "cognito" if "cognito-idp" in discovery_url else "other"
+        imported_authorizer = {
+            "type": auth_type,
+            "discovery_url": discovery_url,
+            "allowed_clients": jwt_authorizer.get("allowedClients", []),
+            "allowed_scopes": jwt_authorizer.get("allowedScopes", []),
+        }
+
     agent = Agent(
         arn=request.arn,
         runtime_id=runtime_id,
@@ -398,6 +413,8 @@ def _register_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
     )
     agent.set_available_qualifiers(qualifiers)
     agent.set_raw_metadata(metadata)
+    if imported_authorizer:
+        agent.set_authorizer_config(imported_authorizer)
 
     db.add(agent)
     db.commit()
@@ -823,6 +840,20 @@ def refresh_agent(agent_id: int, db: Session = Depends(get_db)) -> AgentResponse
     agent.set_available_qualifiers(qualifiers)
     agent.set_raw_metadata(metadata)
     agent.last_refreshed_at = datetime.utcnow()
+
+    # Update authorizer config from runtime metadata (for imported agents)
+    if not agent.get_authorizer_config():
+        authorizer_metadata = metadata.get("authorizerConfiguration", {})
+        jwt_authorizer = authorizer_metadata.get("customJWTAuthorizer", {})
+        if jwt_authorizer:
+            discovery_url = jwt_authorizer.get("discoveryUrl", "")
+            auth_type = "cognito" if "cognito-idp" in discovery_url else "other"
+            agent.set_authorizer_config({
+                "type": auth_type,
+                "discovery_url": discovery_url,
+                "allowed_clients": jwt_authorizer.get("allowedClients", []),
+                "allowed_scopes": jwt_authorizer.get("allowedScopes", []),
+            })
 
     db.commit()
     db.refresh(agent)

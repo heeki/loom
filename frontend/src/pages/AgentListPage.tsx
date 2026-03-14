@@ -57,10 +57,18 @@ export function AgentListPage({
   const [cleanupAws, setCleanupAws] = useState(false);
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
   const [tagFilters, setTagFilters] = useState<Record<string, string[]>>({});
+  const [deployingAgent, setDeployingAgent] = useState<AgentResponse | null>(null);
 
   useEffect(() => {
     void listTagPolicies().then(setTagPolicies).catch(() => {});
   }, []);
+
+  // Clear deployingAgent once the real agents list contains it
+  useEffect(() => {
+    if (deployingAgent && agents.some((a) => a.name === deployingAgent.name)) {
+      setDeployingAgent(null);
+    }
+  }, [agents, deployingAgent]);
 
   const showOnCardPolicies = tagPolicies.filter(tp => tp.show_on_card);
   const showOnCardKeys = showOnCardPolicies.map(tp => tp.key);
@@ -90,6 +98,33 @@ export function AgentListPage({
     setSubmitting(true);
     try {
       await onDeploy(request);
+      setDeployingAgent({
+        id: -1,
+        arn: "",
+        runtime_id: "",
+        name: request.name,
+        status: "CREATING",
+        region: "",
+        account_id: "",
+        log_group: null,
+        available_qualifiers: [],
+        active_session_count: 0,
+        registered_at: null,
+        last_refreshed_at: null,
+        source: "deploy",
+        deployment_status: "deploying",
+        execution_role_arn: null,
+        config_hash: null,
+        endpoint_name: null,
+        endpoint_arn: null,
+        endpoint_status: null,
+        protocol: request.protocol,
+        network_mode: request.network_mode,
+        model_id: request.model_id,
+        deployed_at: new Date().toISOString(),
+        authorizer_config: null,
+        tags: {},
+      });
       setShowAddForm(false);
       toast.success("Agent deployment started");
     } catch (e) {
@@ -235,6 +270,16 @@ export function AgentListPage({
           <>
             {viewMode === "cards" ? (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {deployingAgent && (
+                  <AgentCard
+                    key="deploying"
+                    agent={deployingAgent}
+                    onSelect={() => {}}
+                    onRefresh={() => {}}
+                    onDelete={() => {}}
+                    readOnly
+                  />
+                )}
                 {filteredAgents.map((agent) => (
                   <AgentCard
                     key={agent.id}

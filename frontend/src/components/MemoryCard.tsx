@@ -17,6 +17,7 @@ interface MemoryCardProps {
   onDelete: (id: number, deleteInAws: boolean) => void;
   readOnly?: boolean;
   showOnCardKeys?: string[];
+  deleteStartTime?: number;
 }
 
 function isTransitional(status: string): boolean {
@@ -32,6 +33,7 @@ export function MemoryCard({
   onDelete,
   readOnly,
   showOnCardKeys,
+  deleteStartTime,
 }: MemoryCardProps) {
   const { timezone } = useTimezone();
   const [confirmingRemove, setConfirmingRemove] = useState(false);
@@ -40,7 +42,11 @@ export function MemoryCard({
   const transitional = isTransitional(memory.status);
 
   const elapsedSeconds = (() => {
-    if (!transitional || !memory.created_at) return 0;
+    if (!transitional) return 0;
+    if (memory.status === "DELETING" && deleteStartTime) {
+      return Math.max(0, Math.floor((now - deleteStartTime) / 1000));
+    }
+    if (!memory.created_at) return 0;
     return Math.max(0, Math.floor((now - new Date(memory.created_at).getTime()) / 1000));
   })();
 
@@ -135,9 +141,6 @@ export function MemoryCard({
               </label>
             )}
             <div className="flex items-center justify-end gap-2">
-              <span className="text-xs text-muted-foreground mr-auto">
-                Delete this memory resource?
-              </span>
               <Button
                 size="sm"
                 variant="ghost"

@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Loader2, ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -76,9 +76,6 @@ function TagInput({
   );
 }
 
-// Module-level deploy start timestamp — survives component unmount/remount
-let deployStartTime: number | null = null;
-
 type Mode = "register" | "deploy";
 
 interface AgentRegistrationFormProps {
@@ -129,33 +126,6 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
   // Tag state (populated by ResourceTagFields via profile selection)
   const [tagValues, setTagValues] = useState<Record<string, string>>({});
 
-  // Deploy elapsed timer — persists across navigation via module-level timestamp
-  const [elapsedSeconds, setElapsedSeconds] = useState(() => {
-    if (deployStartTime) return Math.floor((Date.now() - deployStartTime) / 1000);
-    return 0;
-  });
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    if (isLoading && mode === "deploy") {
-      if (!deployStartTime) deployStartTime = Date.now();
-      setElapsedSeconds(Math.floor((Date.now() - deployStartTime) / 1000));
-      timerRef.current = setInterval(() => {
-        setElapsedSeconds(
-          deployStartTime ? Math.floor((Date.now() - deployStartTime) / 1000) : 0,
-        );
-      }, 1000);
-    } else {
-      deployStartTime = null;
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-    }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [isLoading, mode]);
 
   // Discovery data
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -218,6 +188,27 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
     }
     setMaxLifetime(value);
     validateLifecycle("max", value);
+  };
+
+  // JSON paste state
+  const [showJsonPaste, setShowJsonPaste] = useState(false);
+  const [jsonInput, setJsonInput] = useState("");
+  const [jsonError, setJsonError] = useState("");
+
+  const handleJsonApply = () => {
+    try {
+      const parsed = JSON.parse(jsonInput);
+      if (parsed.name) setName(parsed.name);
+      if (parsed.description) setDescription(parsed.description);
+      if (parsed.persona) setAgentDescription(parsed.persona);
+      if (parsed.instructions) setBehavioralGuidelines(parsed.instructions);
+      if (parsed.behavior) setOutputExpectations(parsed.behavior);
+      setJsonInput("");
+      setJsonError("");
+      setShowJsonPaste(false);
+    } catch {
+      setJsonError("Invalid JSON. Please check the format and try again.");
+    }
   };
 
   const hasValidationErrors = nameError !== "" || idleTimeoutError !== "" || maxLifetimeError !== "";
@@ -308,6 +299,51 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
             </div>
       ) : (
           <div className="space-y-5">
+              {/* JSON Paste */}
+              <section className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowJsonPaste(!showJsonPaste); setJsonError(""); }}
+                  className="flex items-center gap-1 text-xs font-medium text-muted-foreground uppercase tracking-wide hover:text-foreground"
+                >
+                  {showJsonPaste ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                  Paste JSON
+                </button>
+                {showJsonPaste && (
+                  <div className="space-y-2">
+                    <Textarea
+                      placeholder='{"name": "my_agent", "description": "...", "persona": "...", "instructions": "...", "behavior": "..."}'
+                      value={jsonInput}
+                      onChange={(e) => { setJsonInput(e.target.value); setJsonError(""); }}
+                      rows={4}
+                      className="text-sm font-mono"
+                    />
+                    {jsonError && (
+                      <p className="text-xs text-red-500">{jsonError}</p>
+                    )}
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={handleJsonApply}
+                        disabled={!jsonInput.trim()}
+                      >
+                        Apply
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => { setShowJsonPaste(false); setJsonInput(""); setJsonError(""); }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </section>
+
               {/* Agent Identity */}
               <section className="space-y-3">
                 <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Agent Identity</h4>
@@ -609,14 +645,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
                   className="min-w-[120px]"
                   disabled={isLoading || !name.trim() || !modelId || !selectedRoleId || !onDeploy || hasValidationErrors}
                 >
-                  {isLoading ? (
-                    <span className="flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Deploying... ({elapsedSeconds}s)
-                    </span>
-                  ) : (
-                    "Deploy"
-                  )}
+                  {isLoading ? "Deploying..." : "Deploy"}
                 </Button>
                 <Button
                   type="button"
