@@ -63,7 +63,8 @@ frontend/
 │   │   ├── SecurityAdminPage.tsx  # Security persona: roles, authorizers, credentials, permissions
 │   │   ├── LoginPage.tsx        # Cognito login + NEW_PASSWORD_REQUIRED challenge
 │   │   ├── MemoryManagementPage.tsx # Memory persona: memory resource management
-│   │   ├── SettingsPage.tsx        # Settings persona: tag profile CRUD
+│   │   ├── TaggingPage.tsx         # Tagging persona: tag policy + tag profile CRUD
+│   │   ├── SettingsPage.tsx        # Settings persona: display preferences
 │   │   └── SessionDetailPage.tsx  # Session metadata, invocations, logs
 │   ├── lib/
 │   │   ├── utils.ts            # shadcn cn() utility
@@ -97,7 +98,8 @@ The app uses a persona-based single-page architecture with a sidebar for workflo
 | Agents | Bot | Deploy new agents or import existing ones | `agent:read` or `agent:write` | |
 | Memory | Brain | Create and manage AgentCore Memory resources | `data:read` or `data:write` | |
 | Security Admin | Shield | Manage roles, authorizers, credentials, permissions | `security:read` or `security:write` | |
-| Settings | Settings | Manage tag profiles and configuration | Always visible | |
+| Tagging | Tags | Manage tag policies and tag profiles | Always visible | |
+| Settings | Settings | Manage display preferences | Always visible | |
 | MCP Servers | Network | Future MCP server management (disabled) | `data:read` or `data:write` | |
 | A2A Agents | Users | Future A2A agent management (disabled) | `data:read` or `data:write` | |
 
@@ -325,14 +327,25 @@ When no memory resources exist: centered muted text "No memory resources yet. Ad
 
 ## 9. Settings View
 
-**Purpose:** Manage settings and tag profiles.
+**Purpose:** Manage display preferences.
 
 **Content:**
-- Page header: "Settings" with description
-- **Preferences** section (top): Theme selector (grouped by Light/Dark using SelectGroup/SelectLabel, always drops down via `position="popper"`) and Timezone selector (local/UTC)
-- **Tag Profiles** section: list, create, edit, delete named tag presets
+- Page header: "Settings" with description "Manage display preferences."
+- **Preferences** section: Theme selector (grouped by Light/Dark using SelectGroup/SelectLabel, always drops down via `position="popper"`) and Timezone selector (local/UTC)
+- Always visible in the sidebar (no scope guard for visibility)
+
+---
+
+## 9a. Tagging View
+
+**Purpose:** Manage tag policies (platform + custom) and tag profiles.
+
+**Content:**
+- Page header: "Tagging" with description "Manage tag policies and tag profiles."
+- **Tag Policies** section (top): displays platform-required tags (key starts with `loom:`) as read-only rows with a Lock icon, followed by custom tags (editable/deletable). "Add Custom Tag" button shows a form with: key (text, required), default value (optional text), source (select: build-time or deploy-time), show on card (checkbox, default true). Custom tags can be edited or deleted with inline confirmation.
+- **Tag Profiles** section (below policies): list, create, edit, delete named tag presets
   - Each profile card shows: name, timestamps, and tag value badges
-  - Create/edit form: profile name input (maxLength 128) + input fields for each build-time tag policy (maxLength 128)
+  - Create/edit form: profile name input (maxLength 128) + input fields for each build-time tag policy (including custom build-time policies)
   - Accessible to all scopes; `*:write` can create, edit, and delete; `*:read` can only view
   - Delete with inline confirmation (Confirm/Cancel)
 - Always visible in the sidebar (no scope guard for visibility)
@@ -415,10 +428,12 @@ Cognito client secrets are password-masked in forms. Secrets are sent to the bac
 
 ### Resource Tagging
 - Tag policies are fetched from `/api/settings/tags` and used to derive `showOnCardKeys` for tag badge display and filter dropdowns.
-- Tag profiles are named presets managed via the Settings page. The `ResourceTagFields` shared component renders a profile dropdown (persisted in `sessionStorage` as `loom:selectedTagProfileId`), resolves tags from the selected profile + policy defaults, and calls `onChange(tags)`. Used by both agent deploy and memory create forms.
+- Tag profiles are named presets managed via the Tagging page. The `ResourceTagFields` shared component renders a profile dropdown (persisted in `sessionStorage` as `loom:selectedTagProfileId`), resolves tags from the selected profile + policy defaults, and calls `onChange(tags)`. Used by both agent deploy and memory create forms.
 - `showOnCardKeys` (derived from tag policies with `show_on_card=true`) is passed as a prop to `AgentCard` and `MemoryCard` components from all listing pages.
 - Tag badges use `variant="secondary"` to visually distinguish them from status and protocol badges.
-- All listing pages (CatalogPage, AgentListPage, MemoryManagementPanel) use multi-select tag filter dropdowns (`MultiSelect` component with checkboxes) with AND logic. Filter state uses `Record<string, string[]>` to support multiple selected values per tag key.
+- **Progressive disclosure filtering:** All listing pages (CatalogPage, AgentListPage, MemoryManagementPanel) split show-on-card policies into required (`loom:*`) and custom. Required tag filters are always shown; custom tag filters are hidden until added via an "Add filter" dropdown (Select with Plus icon). Custom filters can be individually removed with an "x" button next to the label. "Clear filters" resets all filters and removes all custom filter selections.
+- **Custom tag show/hide toggle:** An Eye/EyeOff button in the filter bar toggles visibility of custom (non-`loom:`) tags on agent and memory cards. The preference is persisted to `localStorage` as `loom:showCustomTags`. When hidden, only `loom:*` tags appear on cards; filtering still works independently.
+- Filter state uses `Record<string, string[]>` to support multiple selected values per tag key with AND logic.
 
 ### MultiSelect Component
 Custom dropdown with checkboxes for multi-value selection. Uses `min-w-[140px]` with auto-expanding width to fit content (no truncation). Closes on outside click via `mousedown` event listener. Shows "All" when no values selected, the value when one is selected, or "N selected" for multiple. Uses `bg-input-bg` to match the existing `Select` component styling.

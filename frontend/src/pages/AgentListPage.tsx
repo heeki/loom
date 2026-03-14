@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, LayoutGrid, TableIcon, Eraser, Network, Users } from "lucide-react";
+import { Plus, LayoutGrid, TableIcon, Eraser, Network, Users, X, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,6 +13,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { MultiSelect } from "@/components/ui/multi-select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from "@/components/ui/select";
 import { AgentRegistrationForm } from "@/components/AgentRegistrationForm";
 import { AgentCard } from "@/components/AgentCard";
 import { SortableCardGrid } from "@/components/SortableCardGrid";
@@ -85,6 +91,16 @@ export function AgentListPage({
 
   const showOnCardPolicies = tagPolicies.filter(tp => tp.show_on_card);
   const showOnCardKeys = showOnCardPolicies.map(tp => tp.key);
+
+  // R3: Progressive disclosure filtering
+  const requiredPolicies = showOnCardPolicies.filter(tp => tp.key.startsWith("loom:"));
+  const customPolicies = showOnCardPolicies.filter(tp => !tp.key.startsWith("loom:"));
+  const [activeCustomFilterKeys, setActiveCustomFilterKeys] = useState<string[]>([]);
+  const activePolicies = [...requiredPolicies, ...customPolicies.filter(p => activeCustomFilterKeys.includes(p.key))];
+
+  // R4: Custom tag show/hide toggle
+  const [showCustomTags, setShowCustomTags] = useState(() => localStorage.getItem("loom:showCustomTags") !== "false");
+  const effectiveShowOnCardKeys = showCustomTags ? showOnCardKeys : showOnCardKeys.filter(k => k.startsWith("loom:"));
 
   const filteredAgents = agents.filter(agent => {
     return Object.entries(tagFilters).every(([key, values]) => {
@@ -209,14 +225,34 @@ export function AgentListPage({
         {/* Tag Filters */}
         {showOnCardPolicies.length > 0 && agents.length > 0 && (
           <div className="flex flex-wrap items-center gap-3">
-            {showOnCardPolicies.map(tp => {
+            {activePolicies.map(tp => {
+              const isCustom = !tp.key.startsWith("loom:");
               const distinctValues = [...new Set(
                 agents.map(a => a.tags?.[tp.key]).filter(Boolean)
               )] as string[];
               if (distinctValues.length === 0) return null;
               return (
                 <div key={tp.key} className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground">{tp.key.replace(/^loom:/, "")}</label>
+                  <div className="flex items-center gap-1">
+                    <label className="text-[10px] text-muted-foreground">{tp.key.replace(/^loom:/, "")}</label>
+                    {isCustom && (
+                      <button
+                        type="button"
+                        className="text-muted-foreground hover:text-foreground"
+                        onClick={() => {
+                          setActiveCustomFilterKeys(prev => prev.filter(k => k !== tp.key));
+                          setTagFilters(prev => {
+                            const next = { ...prev };
+                            delete next[tp.key];
+                            return next;
+                          });
+                        }}
+                        title="Remove filter"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
                   <MultiSelect
                     values={tagFilters[tp.key] ?? []}
                     options={distinctValues.sort()}
@@ -225,16 +261,49 @@ export function AgentListPage({
                 </div>
               );
             })}
-            {Object.values(tagFilters).some(v => v.length > 0) && (
+            {customPolicies.filter(p => !activeCustomFilterKeys.includes(p.key)).length > 0 && (
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground">&nbsp;</label>
+                <Select value="" onValueChange={(v) => setActiveCustomFilterKeys(prev => [...prev, v])}>
+                  <SelectTrigger className="h-8 w-[120px] text-xs">
+                    <div className="flex items-center gap-1">
+                      <Plus className="h-3 w-3" />
+                      <span>Add filter</span>
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {customPolicies
+                      .filter(p => !activeCustomFilterKeys.includes(p.key))
+                      .map(p => (
+                        <SelectItem key={p.key} value={p.key}>{p.key}</SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {(Object.values(tagFilters).some(v => v.length > 0) || activeCustomFilterKeys.length > 0) && (
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-7 text-xs"
-                onClick={() => setTagFilters({})}
+                onClick={() => { setTagFilters({}); setActiveCustomFilterKeys([]); }}
               >
                 Clear filters
               </Button>
             )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0"
+              onClick={() => {
+                const next = !showCustomTags;
+                setShowCustomTags(next);
+                localStorage.setItem("loom:showCustomTags", String(next));
+              }}
+              title={showCustomTags ? "Hide custom tags" : "Show custom tags"}
+            >
+              {showCustomTags ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+            </Button>
             <span className="text-xs text-muted-foreground ml-auto">
               Showing {filteredAgents.length} of {agents.length} agents
             </span>
@@ -267,7 +336,7 @@ export function AgentListPage({
                     onRefresh={onRefreshAgent}
                     onDelete={onDelete}
                     readOnly={readOnly}
-                    showOnCardKeys={showOnCardKeys}
+                    showOnCardKeys={effectiveShowOnCardKeys}
                   />
                 )}
               />

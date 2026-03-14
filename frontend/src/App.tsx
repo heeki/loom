@@ -25,12 +25,13 @@ import { InvocationDetailPage } from "@/pages/InvocationDetailPage";
 import { SecurityAdminPage } from "@/pages/SecurityAdminPage";
 import { MemoryManagementPage } from "@/pages/MemoryManagementPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { TaggingPage } from "@/pages/TaggingPage";
 import type { SessionResponse, InvocationResponse } from "@/api/types";
 import { AuthProvider, useAuth, type Scope } from "@/contexts/AuthContext";
 import { LoginPage } from "@/pages/LoginPage";
-import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings, Eye } from "lucide-react";
+import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings, Eye, Tags } from "lucide-react";
 
-type Persona = "catalog" | "security" | "builder" | "memory" | "settings";
+type Persona = "catalog" | "security" | "builder" | "memory" | "tagging" | "settings";
 
 const GROUP_SCOPES: Record<string, Scope[]> = {
   admins: ["agent:read", "agent:write", "security:read", "security:write", "data:read", "data:write"],
@@ -280,6 +281,12 @@ function AppContent() {
             />
           )}
           <SidebarItem
+            icon={Tags}
+            label="Tagging"
+            active={activePersona === "tagging"}
+            onClick={() => setActivePersona("tagging")}
+          />
+          <SidebarItem
             icon={Settings}
             label="Settings"
             active={activePersona === "settings"}
@@ -453,7 +460,8 @@ function AppContent() {
 
           {activePersona === "security" && <SecurityAdminPage readOnly={!effectiveHasScope("security:write")} />}
           {activePersona === "memory" && <MemoryManagementPage viewMode={memoryViewMode} onViewModeChange={setMemoryViewMode} readOnly={!effectiveHasScope("data:write")} />}
-          {activePersona === "settings" && <SettingsPage readOnly={!(effectiveHasScope("agent:write") || effectiveHasScope("security:write") || effectiveHasScope("data:write"))} />}
+          {activePersona === "tagging" && <TaggingPage readOnly={!(effectiveHasScope("agent:write") || effectiveHasScope("security:write") || effectiveHasScope("data:write"))} />}
+          {activePersona === "settings" && <SettingsPage />}
         </main>
       </div>
 

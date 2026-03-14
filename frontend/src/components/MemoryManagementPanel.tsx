@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { MultiSelect } from "@/components/ui/multi-select";
-import { Plus, Loader2, RefreshCw, Eraser, Trash2, Lock } from "lucide-react";
+import { Plus, Loader2, RefreshCw, Eraser, Trash2, Lock, X, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
@@ -395,6 +395,16 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
   const showOnCardPolicies = tagPolicies.filter(tp => tp.show_on_card);
   const showOnCardKeys = showOnCardPolicies.map(tp => tp.key);
 
+  // R3: Progressive disclosure filtering
+  const requiredPolicies = showOnCardPolicies.filter(tp => tp.key.startsWith("loom:"));
+  const customFilterPolicies = showOnCardPolicies.filter(tp => !tp.key.startsWith("loom:"));
+  const [activeCustomFilterKeys, setActiveCustomFilterKeys] = useState<string[]>([]);
+  const activePolicies = [...requiredPolicies, ...customFilterPolicies.filter(p => activeCustomFilterKeys.includes(p.key))];
+
+  // R4: Custom tag show/hide toggle
+  const [showCustomTags, setShowCustomTags] = useState(() => localStorage.getItem("loom:showCustomTags") !== "false");
+  const effectiveShowOnCardKeys = showCustomTags ? showOnCardKeys : showOnCardKeys.filter(k => k.startsWith("loom:"));
+
   const filteredMemories = memories.filter(mem => {
     return Object.entries(tagFilters).every(([key, values]) => {
       if (values.length === 0) return true;
@@ -657,14 +667,34 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
       {/* Tag Filters */}
       {showOnCardPolicies.length > 0 && memories.length > 0 && (
         <div className="flex flex-wrap items-center gap-3">
-          {showOnCardPolicies.map(tp => {
+          {activePolicies.map(tp => {
+            const isCustom = !tp.key.startsWith("loom:");
             const distinctValues = [...new Set(
               memories.map(m => m.tags?.[tp.key]).filter(Boolean)
             )] as string[];
             if (distinctValues.length === 0) return null;
             return (
               <div key={tp.key} className="space-y-1">
-                <label className="text-[10px] text-muted-foreground">{tp.key.replace(/^loom:/, "")}</label>
+                <div className="flex items-center gap-1">
+                  <label className="text-[10px] text-muted-foreground">{tp.key.replace(/^loom:/, "")}</label>
+                  {isCustom && (
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        setActiveCustomFilterKeys(prev => prev.filter(k => k !== tp.key));
+                        setTagFilters(prev => {
+                          const next = { ...prev };
+                          delete next[tp.key];
+                          return next;
+                        });
+                      }}
+                      title="Remove filter"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
                 <MultiSelect
                   values={tagFilters[tp.key] ?? []}
                   options={distinctValues.sort()}
@@ -673,16 +703,49 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
               </div>
             );
           })}
-          {Object.values(tagFilters).some(v => v.length > 0) && (
+          {customFilterPolicies.filter(p => !activeCustomFilterKeys.includes(p.key)).length > 0 && (
+            <div className="space-y-1">
+              <label className="text-[10px] text-muted-foreground">&nbsp;</label>
+              <Select value="" onValueChange={(v) => setActiveCustomFilterKeys(prev => [...prev, v])}>
+                <SelectTrigger className="h-8 w-[120px] text-xs">
+                  <div className="flex items-center gap-1">
+                    <Plus className="h-3 w-3" />
+                    <span>Add filter</span>
+                  </div>
+                </SelectTrigger>
+                <SelectContent>
+                  {customFilterPolicies
+                    .filter(p => !activeCustomFilterKeys.includes(p.key))
+                    .map(p => (
+                      <SelectItem key={p.key} value={p.key}>{p.key}</SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {(Object.values(tagFilters).some(v => v.length > 0) || activeCustomFilterKeys.length > 0) && (
             <Button
               variant="ghost"
               size="sm"
               className="h-7 text-xs"
-              onClick={() => setTagFilters({})}
+              onClick={() => { setTagFilters({}); setActiveCustomFilterKeys([]); }}
             >
               Clear filters
             </Button>
           )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={() => {
+              const next = !showCustomTags;
+              setShowCustomTags(next);
+              localStorage.setItem("loom:showCustomTags", String(next));
+            }}
+            title={showCustomTags ? "Hide custom tags" : "Show custom tags"}
+          >
+            {showCustomTags ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+          </Button>
           <span className="text-xs text-muted-foreground ml-auto">
             Showing {filteredMemories.length} of {memories.length} memories
           </span>
@@ -711,7 +774,7 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
                   onRefresh={handleRefresh}
                   onDelete={handleDelete}
                   readOnly={readOnly}
-                  showOnCardKeys={showOnCardKeys}
+                  showOnCardKeys={effectiveShowOnCardKeys}
                   deleteStartTime={deleteStartTimes[mem.id]}
                 />
               )}

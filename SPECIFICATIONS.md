@@ -18,7 +18,8 @@ The frontend is organized around persona-based workflows, accessible via a sideb
 - **Agents** — Deploy new agents or import existing ones. Includes agent listing with card/table view toggle.
 - **Security Admin** — Manage IAM roles, authorizer configurations, credentials, and permission requests.
 - **Memory** — Create new AgentCore Memory resources with configurable strategies or import existing ones.
-- **Settings** — Manage tag profiles and other configuration. Accessible to all scopes; write operations require `*:write`.
+- **Tagging** — Manage tag policies (platform + custom) and tag profiles. Accessible to all scopes; write operations require `*:write`.
+- **Settings** — Manage display preferences (theme, timezone). Accessible to all scopes.
 - **MCP Servers** (coming soon) — Disabled sidebar entry for future MCP server management.
 - **A2A Agents** (coming soon) — Disabled sidebar entry for future A2A agent management.
 
@@ -293,7 +294,14 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Catalog page: removed unnecessary refresh button from Memory Resources section.
 - Documentation: `frontend/.env.example` template, README title updated.
 
-### Phase 9 — Advanced Operations
+### Phase 9 — Tagging Page and Custom Tags *(Complete)*
+- Dedicated Tagging page: tag profile management extracted from Settings into a new `TaggingPage` component with its own sidebar entry (Tags icon, visible to all scopes).
+- Custom tag policy management: platform-required tags (key starts with `loom:`) shown as read-only rows with lock icon; custom tags are editable and deletable. "Add Custom Tag" form with key, default value, source (build-time/deploy-time), and show-on-card toggle.
+- Progressive disclosure tag filtering: on Catalog, Agents, and Memory pages, required (`loom:*`) tag filters are always shown; custom tag filters are hidden until added via an "Add filter" dropdown. Custom filters can be individually removed with an "x" button. "Clear filters" resets all filters including custom filter selections.
+- Custom tag show/hide toggle: Eye/EyeOff button on filter bars toggles visibility of custom tags on agent and memory cards. Preference persisted to `localStorage` (`loom:showCustomTags`).
+- Settings page simplified to display preferences only (theme + timezone).
+
+### Phase 10 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.
