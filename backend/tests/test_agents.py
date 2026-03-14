@@ -362,7 +362,7 @@ class TestAgentsRouter(unittest.TestCase):
             session_id="recent-complete-session",
             invocation_id="recent-inv",
             status="complete",
-            client_done_time=time.time() - 60,  # 1 minute ago (within 15 min timeout)
+            client_done_time=time.time() - 5,  # 5 seconds ago (within 15-second timeout)
             created_at=datetime.utcnow(),
         )
         self.session.add(inv)

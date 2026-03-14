@@ -157,4 +157,5 @@ def invoke_agent(
             elif isinstance(parsed, str) and parsed:
                 yield {"type": "text", "content": parsed}
         except json.JSONDecodeError:
-            pass
+            if payload:
+                yield {"type": "text", "content": payload}
