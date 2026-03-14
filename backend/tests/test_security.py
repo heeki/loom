@@ -63,6 +63,51 @@ class TestSecurityRoles(unittest.TestCase):
         self.assertEqual(data["description"], "Test role")
         self.assertIsInstance(data["policy_document"], dict)
 
+    @patch("app.routers.security.boto3")
+    @patch("app.routers.security.get_role_policy_details")
+    def test_import_role_fetches_tags(self, mock_policy, mock_boto3):
+        """Test that importing a role fetches and stores IAM tags."""
+        mock_policy.return_value = {"statements": []}
+        mock_iam = MagicMock()
+        mock_boto3.client.return_value = mock_iam
+        mock_iam.list_role_tags.return_value = {
+            "Tags": [
+                {"Key": "loom:application", "Value": "myapp"},
+                {"Key": "loom:owner", "Value": "alice"},
+                {"Key": "Environment", "Value": "prod"},
+            ]
+        }
+
+        response = self.client.post("/api/security/roles", json={
+            "mode": "import",
+            "role_arn": "arn:aws:iam::123456789012:role/tagged-role",
+        })
+
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+        self.assertEqual(data["tags"]["loom:application"], "myapp")
+        self.assertEqual(data["tags"]["loom:owner"], "alice")
+        self.assertEqual(data["tags"]["Environment"], "prod")
+        mock_iam.list_role_tags.assert_called_once_with(RoleName="tagged-role")
+
+    @patch("app.routers.security.boto3")
+    @patch("app.routers.security.get_role_policy_details")
+    def test_import_role_tag_fetch_failure_non_fatal(self, mock_policy, mock_boto3):
+        """Test that tag fetch failure does not block role import."""
+        mock_policy.return_value = {"statements": []}
+        mock_iam = MagicMock()
+        mock_boto3.client.return_value = mock_iam
+        mock_iam.list_role_tags.side_effect = Exception("Access denied")
+
+        response = self.client.post("/api/security/roles", json={
+            "mode": "import",
+            "role_arn": "arn:aws:iam::123456789012:role/no-tag-role",
+        })
+
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+        self.assertEqual(data["tags"], {})
+
     def test_import_role_missing_arn(self):
         """Test import mode without role_arn."""
         response = self.client.post("/api/security/roles", json={"mode": "import"})

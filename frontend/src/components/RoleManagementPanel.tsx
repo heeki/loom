@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PolicyViewer } from "@/components/PolicyViewer";
 import { useManagedRoles } from "@/hooks/useSecurity";
@@ -105,6 +106,15 @@ export function RoleManagementPanel({ readOnly }: { readOnly?: boolean }) {
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium truncate">{role.role_name}</div>
                     <div className="text-xs text-muted-foreground truncate">{role.role_arn}</div>
+                    {role.tags && Object.keys(role.tags).length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {Object.entries(role.tags).map(([key, value]) => (
+                          <Badge key={key} variant="secondary" className="text-[10px] px-1.5 py-0 font-normal">
+                            {key.replace(/^loom:/, "")}: {value}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="text-xs text-muted-foreground hidden sm:block max-w-[30%] truncate">
                     {role.description}

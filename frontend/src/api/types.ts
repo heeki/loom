@@ -205,6 +205,7 @@ export interface ManagedRole {
   role_arn: string;
   description: string;
   policy_document: PolicyDocument;
+  tags: Record<string, string>;
   created_at: string | null;
   updated_at: string | null;
 }

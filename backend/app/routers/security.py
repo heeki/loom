@@ -4,6 +4,8 @@ import logging
 import os
 from typing import Any
 
+import boto3
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -117,12 +119,23 @@ def create_role(request: CreateRoleRequest, db: Session = Depends(get_db)) -> di
             logger.warning("Could not fetch policy for %s: %s", role_name, e)
             policy_doc = {}
 
+        # Fetch tags from AWS IAM
+        tags: dict[str, str] = {}
+        try:
+            iam_client = boto3.client("iam", region_name=region)
+            response = iam_client.list_role_tags(RoleName=role_name)
+            for tag in response.get("Tags", []):
+                tags[tag["Key"]] = tag["Value"]
+        except Exception as e:
+            logger.warning("Could not fetch tags for role %s: %s", role_name, e)
+
         role = ManagedRole(
             role_name=role_name,
             role_arn=request.role_arn,
             description=request.description,
             policy_document=json.dumps(policy_doc),
         )
+        role.set_tags(tags)
         db.add(role)
         db.commit()
         db.refresh(role)
