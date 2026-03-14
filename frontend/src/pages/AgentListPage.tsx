@@ -15,6 +15,7 @@ import {
 import { MultiSelect } from "@/components/ui/multi-select";
 import { AgentRegistrationForm } from "@/components/AgentRegistrationForm";
 import { AgentCard } from "@/components/AgentCard";
+import { SortableCardGrid } from "@/components/SortableCardGrid";
 import { toast } from "sonner";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
@@ -33,6 +34,7 @@ interface AgentListPageProps {
   onDeploy?: (request: AgentDeployRequest) => Promise<unknown>;
   onSelectAgent: (id: number) => void;
   onRefreshAgent: (id: number) => void;
+  onFetchAgents?: () => void;
   onDelete: (id: number, cleanupAws: boolean) => void;
   readOnly?: boolean;
 }
@@ -46,6 +48,7 @@ export function AgentListPage({
   onDeploy,
   onSelectAgent,
   onRefreshAgent,
+  onFetchAgents,
   onDelete,
   readOnly,
 }: AgentListPageProps) {
@@ -57,18 +60,28 @@ export function AgentListPage({
   const [cleanupAws, setCleanupAws] = useState(false);
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
   const [tagFilters, setTagFilters] = useState<Record<string, string[]>>({});
-  const [deployingAgent, setDeployingAgent] = useState<AgentResponse | null>(null);
+  const [deployingName, setDeployingName] = useState<string | null>(null);
 
   useEffect(() => {
     void listTagPolicies().then(setTagPolicies).catch(() => {});
   }, []);
 
-  // Clear deployingAgent once the real agents list contains it
+  // Clear deployingName once the real agents list contains it and it's no longer transitional
   useEffect(() => {
-    if (deployingAgent && agents.some((a) => a.name === deployingAgent.name)) {
-      setDeployingAgent(null);
+    if (deployingName) {
+      const real = agents.find((a) => a.name === deployingName);
+      if (real && real.status !== "CREATING" && real.endpoint_status !== "CREATING" && real.deployment_status !== "deploying") {
+        setDeployingName(null);
+      }
     }
-  }, [agents, deployingAgent]);
+  }, [agents, deployingName]);
+
+  // Immediate fetch to pick up the new DB record; useAgents handles ongoing polling
+  useEffect(() => {
+    if (deployingName && onFetchAgents) {
+      onFetchAgents();
+    }
+  }, [deployingName, onFetchAgents]);
 
   const showOnCardPolicies = tagPolicies.filter(tp => tp.show_on_card);
   const showOnCardKeys = showOnCardPolicies.map(tp => tp.key);
@@ -95,43 +108,17 @@ export function AgentListPage({
 
   const handleDeploy = async (request: AgentDeployRequest) => {
     if (!onDeploy) return;
-    setSubmitting(true);
-    try {
-      await onDeploy(request);
-      setDeployingAgent({
-        id: -1,
-        arn: "",
-        runtime_id: "",
-        name: request.name,
-        status: "CREATING",
-        region: "",
-        account_id: "",
-        log_group: null,
-        available_qualifiers: [],
-        active_session_count: 0,
-        registered_at: null,
-        last_refreshed_at: null,
-        source: "deploy",
-        deployment_status: "deploying",
-        execution_role_arn: null,
-        config_hash: null,
-        endpoint_name: null,
-        endpoint_arn: null,
-        endpoint_status: null,
-        protocol: request.protocol,
-        network_mode: request.network_mode,
-        model_id: request.model_id,
-        deployed_at: new Date().toISOString(),
-        authorizer_config: null,
-        tags: {},
-      });
-      setShowAddForm(false);
-      toast.success("Agent deployment started");
-    } catch (e) {
+
+    // Immediately collapse form and start polling
+    setDeployingName(request.name);
+    setShowAddForm(false);
+    toast.success("Agent deployment started");
+
+    // Fire deploy in the background
+    void onDeploy(request).catch((e) => {
       toast.error(e instanceof Error ? e.message : "Deployment failed");
-    } finally {
-      setSubmitting(false);
-    }
+      setDeployingName(null);
+    });
   };
 
   return (
@@ -260,7 +247,7 @@ export function AgentListPage({
               <Skeleton key={i} className="h-48" />
             ))}
           </div>
-        ) : filteredAgents.length === 0 ? (
+        ) : filteredAgents.length === 0 && !deployingName ? (
           <p className="text-sm text-muted-foreground py-8">
             {agents.length === 0
               ? "No agents yet. Add one above."
@@ -269,20 +256,12 @@ export function AgentListPage({
         ) : (
           <>
             {viewMode === "cards" ? (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {deployingAgent && (
+              <SortableCardGrid
+                items={filteredAgents}
+                getId={(a) => String(a.id)}
+                storageKey="builder-agents"
+                renderItem={(agent) => (
                   <AgentCard
-                    key="deploying"
-                    agent={deployingAgent}
-                    onSelect={() => {}}
-                    onRefresh={() => {}}
-                    onDelete={() => {}}
-                    readOnly
-                  />
-                )}
-                {filteredAgents.map((agent) => (
-                  <AgentCard
-                    key={agent.id}
                     agent={agent}
                     onSelect={onSelectAgent}
                     onRefresh={onRefreshAgent}
@@ -290,8 +269,8 @@ export function AgentListPage({
                     readOnly={readOnly}
                     showOnCardKeys={showOnCardKeys}
                   />
-                ))}
-              </div>
+                )}
+              />
             ) : (
               <div className="rounded-md border overflow-hidden">
                 <Table>

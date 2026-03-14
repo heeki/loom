@@ -11,6 +11,7 @@ tmp
 # files
 .env
 .env.*
+!.env.example
 environment.sh
 loom.db
 notes.md

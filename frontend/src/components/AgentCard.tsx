@@ -17,13 +17,19 @@ interface AgentCardProps {
   showOnCardKeys?: string[];
 }
 
-function isCreating(agent: AgentResponse): boolean {
+function isTransitional(agent: AgentResponse): boolean {
   return (
     agent.status === "CREATING" ||
     agent.deployment_status === "deploying" ||
-    agent.deployment_status === "ENDPOINT_CREATING" ||
     agent.endpoint_status === "CREATING"
   );
+}
+
+function creationPhaseLabel(agent: AgentResponse): string | null {
+  if (agent.deployment_status === "deploying") return "Deploying";
+  if (agent.status === "CREATING") return "Completing deployment";
+  if (agent.status === "READY" && agent.endpoint_status === "CREATING") return "Finalizing endpoint";
+  return null;
 }
 
 function existsInAgentCore(agent: AgentResponse): boolean {
@@ -38,7 +44,8 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
   const [now, setNow] = useState(Date.now());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const creating = isCreating(agent);
+  const creating = isTransitional(agent);
+  const phaseLabel = creationPhaseLabel(agent);
 
   useEffect(() => {
     if (creating) {
@@ -53,7 +60,7 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
 
   const elapsedSeconds = (() => {
     if (!creating) return 0;
-    const ts = agent.deployed_at ?? agent.registered_at;
+    const ts = agent.registered_at ?? agent.deployed_at;
     if (!ts) return 0;
     return Math.max(0, Math.floor((now - new Date(ts).getTime()) / 1000));
   })();
@@ -66,34 +73,26 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
       onClick={() => onSelect(agent.id)}
     >
       <CardHeader className="gap-1 pb-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <CardTitle className="text-sm font-medium">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <CardTitle className="text-sm font-medium truncate">
               {agent.name ?? agent.runtime_id}
             </CardTitle>
             {agent.protocol && (
-              <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
                 {agent.protocol}
               </Badge>
             )}
-            <Badge variant={statusVariant(agent.status)} className="text-[10px] px-1.5 py-0">
+            <Badge variant={statusVariant(agent.status)} className="text-[10px] px-1.5 py-0 shrink-0">
               {agent.status ?? "unknown"}
             </Badge>
-            {creating && (
-              <>
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                <span className="text-[10px] text-muted-foreground">
-                  ({elapsedSeconds}s)
-                </span>
-              </>
-            )}
             {agent.active_session_count > 0 && (
-              <span className="inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-primary text-primary-foreground text-[10px] font-medium">
+              <span className="inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-primary text-primary-foreground text-[10px] font-medium shrink-0">
                 {agent.active_session_count}
               </span>
             )}
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 shrink-0">
             <button
               type="button"
               onClick={async (e) => {
@@ -126,6 +125,18 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
             )}
           </div>
         </div>
+        {creating && (
+          <div className="flex items-center gap-1.5 text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            <span className="text-[10px] tabular-nums">({elapsedSeconds}s)</span>
+            <span className="text-[10px]">{phaseLabel ?? "Creating"}</span>
+            {agent.endpoint_status && agent.endpoint_status !== agent.status && (
+              <Badge variant={statusVariant(agent.endpoint_status)} className="text-[10px] px-1.5 py-0">
+                Endpoint: {agent.endpoint_status}
+              </Badge>
+            )}
+          </div>
+        )}
       </CardHeader>
       <CardContent className="space-y-3 text-xs text-muted-foreground">
         <div className="rounded border bg-input-bg p-3 space-y-0.5">

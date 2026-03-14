@@ -3,7 +3,7 @@ import type { SSESessionStart, SSESessionEnd } from "@/api/types";
 import { invokeAgentStream } from "@/api/invocations";
 import { friendlyInvokeError } from "@/lib/errors";
 
-export function useInvoke() {
+export function useInvoke(authorizerName?: string) {
   const [streamedText, setStreamedText] = useState("");
   const [sessionStart, setSessionStart] = useState<SSESessionStart | null>(null);
   const [sessionEnd, setSessionEnd] = useState<SSESessionEnd | null>(null);
@@ -51,7 +51,7 @@ export function useInvoke() {
               setIsStreaming(false);
             },
             onError: (data) => {
-              setError(friendlyInvokeError(data.message));
+              setError(friendlyInvokeError(data.message, authorizerName));
               setRawError(data.message);
               setIsStreaming(false);
             },
@@ -64,13 +64,13 @@ export function useInvoke() {
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") return;
         const msg = e instanceof Error ? e.message : "Invocation failed";
-        setError(friendlyInvokeError(msg));
+        setError(friendlyInvokeError(msg, authorizerName));
         setRawError(msg);
       } finally {
         setIsStreaming(false);
       }
     },
-    [],
+    [authorizerName],
   );
 
   const cancel = useCallback(() => {

@@ -59,24 +59,16 @@ export function MemoryCard({
   return (
     <Card className="relative py-3 gap-1">
       <CardHeader className="gap-1 pb-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <CardTitle className="text-sm font-medium truncate" title={memory.name}>
               {memory.name}
             </CardTitle>
-            <Badge variant={statusVariant(memory.status)} className="text-[10px] px-1.5 py-0">
+            <Badge variant={statusVariant(memory.status)} className="text-[10px] px-1.5 py-0 shrink-0">
               {memory.status}
             </Badge>
-            {transitional && (
-              <>
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                <span className="text-[10px] text-muted-foreground">
-                  ({elapsedSeconds}s)
-                </span>
-              </>
-            )}
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 shrink-0">
             <button
               type="button"
               onClick={() => onRefresh(memory.id)}
@@ -102,6 +94,13 @@ export function MemoryCard({
             )}
           </div>
         </div>
+        {transitional && (
+          <div className="flex items-center gap-1.5 text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            <span className="text-[10px] tabular-nums">({elapsedSeconds}s)</span>
+            <span className="text-[10px]">{memory.status === "CREATING" ? "Creating" : "Deleting"}</span>
+          </div>
+        )}
       </CardHeader>
       <CardContent className="space-y-3 text-xs text-muted-foreground">
         <div className="rounded border bg-input-bg p-3 space-y-0.5">

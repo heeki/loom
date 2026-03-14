@@ -203,6 +203,19 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
       if (parsed.persona) setAgentDescription(parsed.persona);
       if (parsed.instructions) setBehavioralGuidelines(parsed.instructions);
       if (parsed.behavior) setOutputExpectations(parsed.behavior);
+      if (parsed.model) {
+        const match = models.find((m) => m.model_id === parsed.model || m.display_name === parsed.model);
+        if (match) setModelId(match.model_id);
+      }
+      if (parsed.role) {
+        const match = managedRoles.find((r) => r.role_name === parsed.role || r.role_arn === parsed.role);
+        if (match) setSelectedRoleId(match.id.toString());
+      }
+      if (parsed.network_mode) setNetworkMode(parsed.network_mode);
+      if (parsed.authorizer) {
+        const match = authConfigs.find((c) => c.name === parsed.authorizer || c.id.toString() === parsed.authorizer);
+        if (match) setSelectedAuthConfigId(match.id.toString());
+      }
       setJsonInput("");
       setJsonError("");
       setShowJsonPaste(false);
@@ -312,7 +325,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
                 {showJsonPaste && (
                   <div className="space-y-2">
                     <Textarea
-                      placeholder='{"name": "my_agent", "description": "...", "persona": "...", "instructions": "...", "behavior": "..."}'
+                      placeholder='{"name": "...", "description": "...", "persona": "...", "instructions": "...", "behavior": "...", "model": "...", "role": "...", "authorizer": "..."}'
                       value={jsonInput}
                       onChange={(e) => { setJsonInput(e.target.value); setJsonError(""); }}
                       rows={4}

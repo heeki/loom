@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { AgentCard } from "@/components/AgentCard";
 import { MemoryCard } from "@/components/MemoryCard";
+import { SortableCardGrid } from "@/components/SortableCardGrid";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -13,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { LayoutGrid, TableIcon, Eraser, Loader2, RefreshCw, Network, Users } from "lucide-react";
+import { LayoutGrid, TableIcon, Eraser, Network, Users } from "lucide-react";
 import { toast } from "sonner";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
@@ -71,6 +72,7 @@ export function CatalogPage({
   const [memoriesLoading, setMemoriesLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [refreshingId, setRefreshingId] = useState<number | null>(null);
+  const [deleteStartTimes, setDeleteStartTimes] = useState<Record<number, number>>({});
 
   // Elapsed timer for transitional states
   const [now, setNow] = useState(Date.now());
@@ -161,6 +163,7 @@ export function CatalogPage({
     try {
       const updated = await deleteMemory(id, deleteInAws);
       if (updated.status === "DELETING") {
+        setDeleteStartTimes((prev) => ({ ...prev, [id]: Date.now() }));
         setMemories((prev) => prev.map((m) => (m.id === id ? updated : m)));
         toast.success("Memory deletion initiated");
       } else {
@@ -174,17 +177,7 @@ export function CatalogPage({
     }
   };
 
-  const handleRefreshAll = async () => {
-    setRefreshingId(-1);
-    try {
-      const data = await listMemories();
-      setMemories(data);
-    } catch {
-      // ignore
-    } finally {
-      setRefreshingId(null);
-    }
-  };
+
 
   return (
     <div className="space-y-6">
@@ -271,10 +264,12 @@ export function CatalogPage({
         ) : (
           <>
             {viewMode === "cards" ? (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {filteredAgents.map((agent) => (
+              <SortableCardGrid
+                items={filteredAgents}
+                getId={(a) => String(a.id)}
+                storageKey="catalog-agents"
+                renderItem={(agent) => (
                   <AgentCard
-                    key={agent.id}
                     agent={agent}
                     onSelect={onSelectAgent}
                     onRefresh={onRefreshAgent}
@@ -282,8 +277,8 @@ export function CatalogPage({
                     readOnly={readOnly}
                     showOnCardKeys={showOnCardKeys}
                   />
-                ))}
-              </div>
+                )}
+              />
             ) : (
               <div className="rounded-md border overflow-hidden">
                 <Table>
@@ -394,23 +389,7 @@ export function CatalogPage({
 
       {/* Memory Resources Section */}
       <section className="space-y-3">
-        <div className="flex items-center gap-2">
-          <h3 className="text-sm font-medium">Memory Resources</h3>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-6 w-6 p-0"
-            onClick={handleRefreshAll}
-            disabled={refreshingId === -1}
-            title="Refresh all"
-          >
-            {refreshingId === -1 ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <RefreshCw className="h-3 w-3" />
-            )}
-          </Button>
-        </div>
+        <h3 className="text-sm font-medium">Memory Resources</h3>
 
         {memoriesLoading ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -423,10 +402,12 @@ export function CatalogPage({
             No memory resources. Use the Memory page to create or import one.
           </p>
         ) : viewMode === "cards" ? (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {memories.map((mem) => (
+          <SortableCardGrid
+            items={memories}
+            getId={(m) => String(m.id)}
+            storageKey="catalog-memories"
+            renderItem={(mem) => (
               <MemoryCard
-                key={mem.id}
                 memory={mem}
                 now={now}
                 refreshingId={refreshingId}
@@ -435,9 +416,10 @@ export function CatalogPage({
                 onDelete={handleMemoryDelete}
                 readOnly={readOnly}
                 showOnCardKeys={showOnCardKeys}
+                deleteStartTime={deleteStartTimes[mem.id]}
               />
-            ))}
-          </div>
+            )}
+          />
         ) : (
           <div className="rounded-md border overflow-hidden">
             <Table>

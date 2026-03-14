@@ -8,7 +8,7 @@
 | Build tool | Vite 6 |
 | UI components | shadcn/ui (Radix primitives) |
 | Styling | Tailwind CSS v4 (Vite plugin, no PostCSS) |
-| Theme | Catppuccin (Mocha dark / Latte light) |
+| Theme | 10 themes: 5 light + 5 dark (Catppuccin, Rosé Pine Dawn, Ayu, Everforest, Solarized, Dracula, Gruvbox, Nord, Tokyo Night) |
 | HTTP client | Native `fetch` (typed wrappers in `src/api/client.ts`) |
 | SSE streaming | `fetch` + `ReadableStream` (POST-based SSE) |
 | Notifications | Sonner (toast) |
@@ -33,7 +33,8 @@ frontend/
 │   │   └── settings.ts        # Settings API: tag policy + tag profile CRUD
 │   ├── contexts/
 │   │   ├── AuthContext.tsx      # Cognito auth provider (login, logout, token refresh)
-│   │   └── TimezoneContext.tsx  # Timezone preference provider + hook
+│   │   ├── TimezoneContext.tsx  # Timezone preference provider + hook
+│   │   └── ThemeContext.tsx     # Theme provider with 10 themes, localStorage persistence
 │   ├── hooks/
 │   │   ├── useAgents.ts        # Agent list state + CRUD actions
 │   │   ├── useSessions.ts      # Session list state per agent
@@ -42,6 +43,7 @@ frontend/
 │   │   └── useDeployment.ts    # Agent config, credential providers, integrations hooks
 │   ├── components/
 │   │   ├── ui/                 # shadcn primitives + searchable-select.tsx + multi-select.tsx
+│   │   ├── SortableCardGrid.tsx — Drag-to-reorder card grid using @dnd-kit, localStorage persistence
 │   │   ├── AgentCard.tsx       # Agent summary card with refresh + eraser icon deletion
 │   │   ├── AgentRegistrationForm.tsx  # Tabbed form: ARN registration + agent deployment
 │   │   ├── AuthorizerManagementPanel.tsx # Authorizer config + credential management
@@ -103,10 +105,11 @@ Sidebar items are conditionally rendered based on the user's scopes derived from
 
 The sidebar also contains:
 - User indicator with username display and logout button (when authenticated)
-- Theme toggle (Mocha dark / Latte light)
-- Timezone selector (local / UTC)
 - Live clock display
 - Version badge
+
+### Admin View Switching
+Admin users see an Eye icon dropdown in the sidebar header that lets them simulate other roles (security-admins, data-stewards, builders, operators). This overrides scope checks via `effectiveHasScope` so the admin can see what each role's experience looks like, without losing admin access. The dropdown resets when the page is refreshed.
 
 ### Drill-Down Navigation (Catalog)
 
@@ -322,10 +325,11 @@ When no memory resources exist: centered muted text "No memory resources yet. Ad
 
 ## 9. Settings View
 
-**Purpose:** Manage tag profiles and other platform configuration.
+**Purpose:** Manage settings and tag profiles.
 
 **Content:**
 - Page header: "Settings" with description
+- **Preferences** section (top): Theme selector (grouped by Light/Dark using SelectGroup/SelectLabel, always drops down via `position="popper"`) and Timezone selector (local/UTC)
 - **Tag Profiles** section: list, create, edit, delete named tag presets
   - Each profile card shows: name, timestamps, and tag value badges
   - Create/edit form: profile name input (maxLength 128) + input fields for each build-time tag policy (maxLength 128)
@@ -366,10 +370,15 @@ The delete confirmation uses absolute positioning (`absolute inset-x-0 bottom-0`
 ### Grouped Searchable Model Selector
 Model selection uses `SearchableSelect` with group headers (Anthropic / Amazon). Search matches both display name and model ID value, allowing power users to search by inference profile ID. No default is pre-selected — the user must explicitly choose a model on both register and deploy forms.
 
-### Catppuccin Theme
-- **Mocha** (dark mode, default): Base #1e1e2e, primary Blue #89b4fa, destructive Red #f38ba8
-- **Latte** (light mode): Base #eff1f5, primary Blue #1e66f5, destructive Red #d20f39
-- `bg-input-bg` CSS variable maps to `#ffffff` (light) / `#313244` (dark) — used for bordered content sections
+### Theme System
+10 themes organized into Light and Dark groups:
+- **Light:** Ayu Light (warm sandy/orange), Catppuccin Latte (cool blue-gray, default), Everforest Light (warm green), Rosé Pine Dawn (warm rose), Solarized Light (warm yellow-blue)
+- **Dark:** Catppuccin Mocha (deep purple-blue), Dracula (vibrant purple), Gruvbox (warm earthy), Nord (arctic blue), Tokyo Night (indigo blue)
+
+ThemeContext manages theme state with localStorage persistence. Latte uses `:root` variables (no class); all other themes use CSS class selectors on `<html>`. The `@custom-variant dark` includes all dark theme classes. Light themes have darkened foreground/muted-foreground/border for readability; dark themes have brightened values. Badge `default` and `secondary` variants include `border-border` for visibility across all themes.
+
+### Drag-to-Reorder Card Grid
+`SortableCardGrid` uses @dnd-kit/core + @dnd-kit/sortable for drag-and-drop reordering of cards within grid sections. Order is persisted to localStorage keyed by `storageKey`. Uses `PointerSensor` with 8px activation distance, `rectSortingStrategy`, and `closestCenter` collision detection.
 
 ### Tailwind CSS v4 (Vite Plugin)
 Using the `@tailwindcss/vite` plugin instead of PostCSS. Configuration is handled via CSS `@theme` blocks in `index.css`.
@@ -424,14 +433,20 @@ Computed server-side using `LOOM_SESSION_IDLE_TIMEOUT_SECONDS`. The frontend dis
 ### View Mode Persistence
 Card/table view mode state is lifted to `App.tsx` with separate state variables per page (`catalogViewMode`, `agentsViewMode`, `memoryViewMode`). Each page receives its mode and setter as props. This ensures the selection persists when switching between personas — the page components unmount but the state lives in the parent.
 
+### Deploy Flow
+Agent deployment uses a fire-and-forget pattern. The form collapses immediately on deploy, the backend creates a DB record before starting the AWS call, and `fetchAgents()` picks up the new record. The `useAgents` hook polls transitional agents (deploying/CREATING/endpoint CREATING) at 5-second intervals using a `watchIds` effect dependency. An `initialLoadDone` ref prevents skeleton flash on subsequent fetches. Agent cards show two-phase creation status: deploying → completing deployment → finalizing endpoint, with a timer using `registered_at` to avoid resets on phase transitions.
+
 ### SSE Stream Consumer
 `invokeAgentStream()` uses `ReadableStream` to consume POST-based SSE responses with buffer-based line parsing, typed callback dispatch, and `AbortSignal` for cancellation.
 
-### Ephemeral Deploy Card
-When a deploy succeeds, `AgentListPage` creates a temporary `AgentResponse` object with CREATING status and displays it as an `AgentCard` at the top of the grid. A `useEffect` monitors the real agents list and removes the ephemeral card once an agent with the same name appears. This provides immediate visual feedback without waiting for the agents list to refresh.
+### Deploy Card
+When a deploy starts, `AgentListPage` records the deploying agent name and triggers an immediate `fetchAgents()` to pick up the DB record (created before the AWS API call). The `useAgents` hook handles ongoing polling for transitional agents. This replaced the earlier ephemeral card approach which caused position glitches when the real agent appeared.
 
 ### Friendly Error Messages
-`lib/errors.ts` provides `friendlyInvokeError(raw: string): string` that maps raw error strings to user-friendly messages using regex pattern matching. The `useInvoke` hook stores both the friendly error (for display) and the raw error (for the "Show details" toggle). This keeps error UX readable while preserving debugging information.
+`lib/errors.ts` provides `friendlyInvokeError(raw: string, authorizerName?: string): string` that maps raw error strings to user-friendly messages using pattern matching. When an `authorizerName` is provided (from the agent's `authorizer_config`), 401/403 errors include a hint about which authorizer to use. The `useInvoke` hook stores both the friendly error (for display) and the raw error (for the 'Show details' toggle). This keeps error UX readable while preserving debugging information.
+
+### Credential Suggestion on Errors
+`friendlyInvokeError()` accepts an optional `authorizerName` parameter (from the agent's `authorizer_config`). On 401/403 errors, if the agent has a configured authorizer, the error message includes a hint like: 'This agent uses the "authorizer-name" authorizer — make sure you select a credential from that authorizer.' This helps users identify the correct credential without trial and error.
 
 ### Authorizer Display on Agent Cards
 Agent cards show the configured authorizer in the metadata section. The backend extracts `customJWTAuthorizer` configuration from the AgentCore `describe_runtime` response on import and refresh, stores it as JSON in the `authorizer_config` column, and returns it in the agent response. The frontend renders: "Cognito" for cognito type, the authorizer name if available, "external" for unknown types, or muted "None" when absent.

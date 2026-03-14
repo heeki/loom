@@ -27,7 +27,7 @@ export function AgentDetailPage({
   onRedeploy,
 }: AgentDetailPageProps) {
   const { streamedText, sessionStart, sessionEnd, isStreaming, error, rawError, invoke, cancel } =
-    useInvoke();
+    useInvoke(agent.authorizer_config?.name ?? undefined);
 
   const handleInvoke = async (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string) => {
     await invoke(agent.id, prompt, qualifier, sessionId, credentialId, bearerToken);

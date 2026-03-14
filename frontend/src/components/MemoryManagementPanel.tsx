@@ -30,6 +30,7 @@ import { listTagPolicies } from "@/api/settings";
 import { ApiError } from "@/api/client";
 import type { MemoryResponse, MemoryStrategyRequest, TagPolicy } from "@/api/types";
 import { MemoryCard } from "./MemoryCard";
+import { SortableCardGrid } from "./SortableCardGrid";
 import { ResourceTagFields } from "./ResourceTagFields";
 
 const STRATEGY_TYPES = [
@@ -697,10 +698,12 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
       ) : (
         <>
           {viewMode === "cards" ? (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {filteredMemories.map((mem) => (
+            <SortableCardGrid
+              items={filteredMemories}
+              getId={(m) => String(m.id)}
+              storageKey="memory-resources"
+              renderItem={(mem) => (
                 <MemoryCard
-                  key={mem.id}
                   memory={mem}
                   now={now}
                   refreshingId={refreshingId}
@@ -711,8 +714,8 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
                   showOnCardKeys={showOnCardKeys}
                   deleteStartTime={deleteStartTimes[mem.id]}
                 />
-              ))}
-            </div>
+              )}
+            />
           ) : (
             <div className="rounded-md border overflow-hidden">
               <Table>

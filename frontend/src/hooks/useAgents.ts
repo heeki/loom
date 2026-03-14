@@ -20,8 +20,12 @@ export function useAgents() {
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const initialLoadDone = useRef(false);
+
   const fetchAgents = useCallback(async () => {
-    setLoading(true);
+    if (!initialLoadDone.current) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const data = await agentsApi.listAgents();
@@ -30,6 +34,7 @@ export function useAgents() {
       setError(e instanceof Error ? e.message : "Failed to fetch agents");
     } finally {
       setLoading(false);
+      initialLoadDone.current = true;
     }
   }, []);
 
@@ -38,9 +43,17 @@ export function useAgents() {
   }, [fetchAgents]);
 
   // Status polling for agents that are still creating
+  const agentsRef = useRef(agents);
+  agentsRef.current = agents;
+
+  const watchIds = agents
+    .filter(needsPolling)
+    .map((a) => a.id)
+    .sort()
+    .join(",");
+
   useEffect(() => {
-    const agentsToWatch = agents.filter(needsPolling);
-    if (agentsToWatch.length === 0) {
+    if (!watchIds) {
       if (pollRef.current) {
         clearInterval(pollRef.current);
         pollRef.current = null;
@@ -53,8 +66,8 @@ export function useAgents() {
     }
 
     pollRef.current = setInterval(async () => {
-      const currentAgents = agents.filter(needsPolling);
-      if (currentAgents.length === 0) {
+      const toWatch = agentsRef.current.filter(needsPolling);
+      if (toWatch.length === 0) {
         if (pollRef.current) {
           clearInterval(pollRef.current);
           pollRef.current = null;
@@ -62,7 +75,7 @@ export function useAgents() {
         return;
       }
 
-      for (const agent of currentAgents) {
+      for (const agent of toWatch) {
         try {
           const updated = await agentsApi.fetchAgentStatus(agent.id);
           setAgents((prev) =>
@@ -80,7 +93,7 @@ export function useAgents() {
         pollRef.current = null;
       }
     };
-  }, [agents]);
+  }, [watchIds]);
 
   const registerAgent = useCallback(
     async (arn: string, modelId?: string) => {
