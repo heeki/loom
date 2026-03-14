@@ -1,0 +1,38 @@
+# Copy this file to environment.sh and update all values marked with <...>
+# cp etc/environment.sh.example etc/environment.sh
+
+# AWS configuration
+AWS_PROFILE=<your-aws-profile>
+AWS_REGION=us-east-1
+
+# General configurations
+LOG_LEVEL=info
+
+# Loom configurations
+LOOM_ARTIFACT_BUCKET=<your-s3-bucket-for-deployments>
+LOOM_DATABASE_URL=sqlite:///./loom.db
+LOOM_BACKEND_PORT=8000
+LOOM_FRONTEND_PORT=5173
+
+# Cognito user authentication (from cognito stack outputs)
+LOOM_COGNITO_USER_POOL_ID=<your-cognito-user-pool-id>
+LOOM_COGNITO_REGION=${AWS_REGION}
+
+# Exports
+export LOOM_ARTIFACT_BUCKET
+export LOOM_DATABASE_URL
+export LOOM_BACKEND_PORT
+export LOOM_FRONTEND_PORT
+export LOOM_COGNITO_USER_POOL_ID
+export LOOM_COGNITO_REGION
+
+# Local testing
+ARN=<your-agent-runtime-arn>
+AGENT_ID=1
+SESSION_ID=1
+PROMPT=Tell me about the benefits of using Amazon Bedrock AgentCore.
+
+# Memory resources
+MEMORY_ID=1
+MEMORY_NAME=<your-memory-name>
+MEMORY_EVENT_EXPIRY_DURATION_DAYS=7

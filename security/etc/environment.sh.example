@@ -1,0 +1,43 @@
+# Copy this file to environment.sh and update all values marked with <...>
+# cp etc/environment.sh.example etc/environment.sh
+
+# AWS configuration
+PROFILE=<your-aws-profile>
+REGION=us-east-1
+ACCOUNTID=<your-aws-account-id>
+BUCKET=<your-s3-bucket-for-sam-deployments>
+
+# Role configuration
+P_AGENT_NAME=<your-agent-name>
+P_BEDROCK_MODEL_ARNS="arn:aws:bedrock:*:$(ACCOUNTID):inference-profile/*,arn:aws:bedrock:*::foundation-model/*"
+P_AGENTCORE_REGIONS=*
+P_LOGS_REGION=$(REGION)
+
+# Derived configuration
+P_AGENT_NAME_SANITIZED=$(subst _,-,$(P_AGENT_NAME))
+
+# Role stack configuration
+P_ROLE_STACK=loom-role-$(P_AGENT_NAME_SANITIZED)
+ROLE_TEMPLATE=iac/role.yaml
+ROLE_OUTPUT=iac/role_output.yaml
+
+# Resource tagging (platform:required tags applied to all IaC resources)
+P_TAG_APPLICATION=<your-application-name>
+P_TAG_GROUP=<your-group-or-team>
+P_TAG_OWNER=<your-owner-alias-or-email>
+
+# Cognito configuration
+P_COGNITO_POOL_NAME=loom
+P_COGNITO_DOMAIN=<your-globally-unique-cognito-domain>
+P_COGNITO_RESOURCE_SERVER=https://loom.agentcore.local
+P_COGNITO_SCOPES=invoke
+P_COGNITO_CALLBACK_URLS=https://localhost
+
+# Cognito stack configuration
+P_COGNITO_STACK=loom-cognito
+COGNITO_TEMPLATE=iac/cognito.yaml
+COGNITO_OUTPUT=iac/cognito_output.yaml
+
+# Cognito user management (update after cognito stack deployment)
+P_COGNITO_USER_POOL_ID=<your-cognito-user-pool-id>
+P_COGNITO_PERMANENT_PASSWORD=<your-secure-password>
