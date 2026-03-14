@@ -4,13 +4,6 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Plus, Pencil, Trash2, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { useTimezone } from "@/contexts/TimezoneContext";
@@ -42,6 +35,7 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
   const [editingProfileId, setEditingProfileId] = useState<number | null>(null);
   const [profileFormName, setProfileFormName] = useState("");
   const [profileFormTags, setProfileFormTags] = useState<Record<string, string>>({});
+  const [profileEnabledCustomKeys, setProfileEnabledCustomKeys] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [confirmDeleteProfileId, setConfirmDeleteProfileId] = useState<number | null>(null);
 
@@ -50,7 +44,6 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
   const [editingPolicyId, setEditingPolicyId] = useState<number | null>(null);
   const [policyFormKey, setPolicyFormKey] = useState("");
   const [policyFormDefault, setPolicyFormDefault] = useState("");
-  const [policyFormSource, setPolicyFormSource] = useState<"build-time" | "deploy-time">("build-time");
   const [policyFormShowOnCard, setPolicyFormShowOnCard] = useState(true);
   const [confirmDeletePolicyId, setConfirmDeletePolicyId] = useState<number | null>(null);
 
@@ -70,15 +63,13 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
     void fetchData();
   }, [fetchData]);
 
-  const platformPolicies = tagPolicies.filter((tp) => tp.key.startsWith("loom:"));
-  const customPolicies = tagPolicies.filter((tp) => !tp.key.startsWith("loom:"));
-  const buildTimePolicies = tagPolicies.filter((tp) => tp.source === "build-time");
+  const platformPolicies = tagPolicies.filter((tp) => tp.designation === "platform:required");
+  const customPolicies = tagPolicies.filter((tp) => tp.designation === "custom:optional");
 
   // --- Policy CRUD ---
   const resetPolicyForm = () => {
     setPolicyFormKey("");
     setPolicyFormDefault("");
-    setPolicyFormSource("build-time");
     setPolicyFormShowOnCard(true);
     setEditingPolicyId(null);
     setShowPolicyForm(false);
@@ -88,7 +79,6 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
     setEditingPolicyId(policy.id);
     setPolicyFormKey(policy.key);
     setPolicyFormDefault(policy.default_value || "");
-    setPolicyFormSource(policy.source);
     setPolicyFormShowOnCard(policy.show_on_card);
     setShowPolicyForm(true);
   };
@@ -100,7 +90,6 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
       if (editingPolicyId) {
         await updateTagPolicy(editingPolicyId, {
           default_value: policyFormDefault || undefined,
-          source: policyFormSource,
           show_on_card: policyFormShowOnCard,
         });
         toast.success("Tag policy updated");
@@ -108,7 +97,7 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
         await createTagPolicy({
           key: policyFormKey.trim(),
           default_value: policyFormDefault || undefined,
-          source: policyFormSource,
+          required: false,
           show_on_card: policyFormShowOnCard,
         });
         toast.success("Tag policy created");
@@ -140,6 +129,7 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
   const resetProfileForm = () => {
     setProfileFormName("");
     setProfileFormTags({});
+    setProfileEnabledCustomKeys(new Set());
     setEditingProfileId(null);
     setShowProfileForm(false);
   };
@@ -148,13 +138,21 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
     setEditingProfileId(profile.id);
     setProfileFormName(profile.name);
     setProfileFormTags({ ...profile.tags });
+    // Enable custom keys that already have values in the profile
+    const enabledKeys = new Set<string>();
+    for (const cp of customPolicies) {
+      if (profile.tags[cp.key]) {
+        enabledKeys.add(cp.key);
+      }
+    }
+    setProfileEnabledCustomKeys(enabledKeys);
     setShowProfileForm(true);
   };
 
   const startCreateProfile = () => {
     resetProfileForm();
     const initial: Record<string, string> = {};
-    for (const tp of buildTimePolicies) {
+    for (const tp of platformPolicies) {
       initial[tp.key] = tp.default_value || "";
     }
     setProfileFormTags(initial);
@@ -163,13 +161,23 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
 
   const handleProfileSubmit = async () => {
     if (!profileFormName.trim()) return;
+    // Build final tags: platform tags + enabled custom tags only
+    const finalTags: Record<string, string> = {};
+    for (const tp of platformPolicies) {
+      const val = profileFormTags[tp.key];
+      if (val) finalTags[tp.key] = val;
+    }
+    for (const key of profileEnabledCustomKeys) {
+      const val = profileFormTags[key];
+      if (val) finalTags[key] = val;
+    }
     setSubmitting(true);
     try {
       if (editingProfileId) {
-        await updateTagProfile(editingProfileId, { name: profileFormName.trim(), tags: profileFormTags });
+        await updateTagProfile(editingProfileId, { name: profileFormName.trim(), tags: finalTags });
         toast.success("Tag profile updated");
       } else {
-        await createTagProfile({ name: profileFormName.trim(), tags: profileFormTags });
+        await createTagProfile({ name: profileFormName.trim(), tags: finalTags });
         toast.success("Tag profile created");
       }
       resetProfileForm();
@@ -193,6 +201,29 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const toggleCustomKey = (key: string) => {
+    setProfileEnabledCustomKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+        // Clear the value when unchecking
+        setProfileFormTags((tags) => {
+          const updated = { ...tags };
+          delete updated[key];
+          return updated;
+        });
+      } else {
+        next.add(key);
+        // Initialize with default value if available
+        const policy = customPolicies.find((p) => p.key === key);
+        if (policy?.default_value) {
+          setProfileFormTags((tags) => ({ ...tags, [key]: policy.default_value! }));
+        }
+      }
+      return next;
+    });
   };
 
   if (loading) {
@@ -224,7 +255,7 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
           <div>
             <h3 className="text-sm font-medium">Tag Policies</h3>
             <p className="text-xs text-muted-foreground mt-1">
-              Tag policies define which tags are tracked across resources. Platform tags are required and read-only.
+              Platform tags are required for all resources. Custom tags are optional and can be included in profiles.
             </p>
           </div>
           {!readOnly && (
@@ -248,12 +279,12 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
             <CardContent className="pt-4 space-y-3">
               <div className="flex gap-3">
                 {editingPolicyId ? (
-                  <div className="w-1/4 min-w-0 space-y-1">
+                  <div className="w-1/3 min-w-0 space-y-1">
                     <label className="text-xs text-muted-foreground">Key</label>
                     <Input value={policyFormKey} disabled className="text-sm" />
                   </div>
                 ) : (
-                  <div className="w-1/4 min-w-0 space-y-1">
+                  <div className="w-1/3 min-w-0 space-y-1">
                     <label className="text-xs text-muted-foreground">Key *</label>
                     <Input
                       value={policyFormKey}
@@ -264,7 +295,7 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
                     />
                   </div>
                 )}
-                <div className="w-1/4 min-w-0 space-y-1">
+                <div className="w-1/3 min-w-0 space-y-1">
                   <label className="text-xs text-muted-foreground">Default Value</label>
                   <Input
                     value={policyFormDefault}
@@ -273,18 +304,6 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
                     maxLength={128}
                     className="text-sm"
                   />
-                </div>
-                <div className="w-[140px] space-y-1">
-                  <label className="text-xs text-muted-foreground">Source</label>
-                  <Select value={policyFormSource} onValueChange={(v) => setPolicyFormSource(v as "build-time" | "deploy-time")}>
-                    <SelectTrigger className="h-9 text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="build-time">build-time</SelectItem>
-                      <SelectItem value="deploy-time">deploy-time</SelectItem>
-                    </SelectContent>
-                  </Select>
                 </div>
                 <div className="flex items-end pb-1">
                   <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-muted-foreground">
@@ -324,12 +343,13 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
                   <div className="space-y-0.5 min-w-0">
                     <span className="text-sm font-medium">{policy.key}</span>
                     <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                      <span>{policy.source}</span>
                       {policy.show_on_card && <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-normal">visible</Badge>}
                     </div>
                   </div>
                 </div>
-                <span className="text-[10px] text-muted-foreground shrink-0">platform</span>
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal shrink-0">
+                  platform:required
+                </Badge>
               </CardContent>
             </Card>
           ))}
@@ -339,55 +359,59 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
                 <div className="space-y-0.5 min-w-0">
                   <span className="text-sm font-medium">{policy.key}</span>
                   <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                    <span>{policy.source}</span>
                     {policy.default_value && <span>default: {policy.default_value}</span>}
                     {policy.show_on_card && <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-normal">visible</Badge>}
                   </div>
                 </div>
-                {!readOnly && (
-                  <div className="flex items-center gap-1 shrink-0">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 w-7 p-0"
-                      onClick={() => startEditPolicy(policy)}
-                      title="Edit"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                    {confirmDeletePolicyId === policy.id ? (
-                      <div className="flex items-center gap-1">
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          className="h-7 text-xs"
-                          onClick={() => handlePolicyDelete(policy.id)}
-                          disabled={submitting}
-                        >
-                          Confirm
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 text-xs"
-                          onClick={() => setConfirmDeletePolicyId(null)}
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    ) : (
+                <div className="flex items-center gap-2 shrink-0">
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
+                    custom:optional
+                  </Badge>
+                  {!readOnly && (
+                    <div className="flex items-center gap-1">
                       <Button
                         size="sm"
                         variant="ghost"
                         className="h-7 w-7 p-0"
-                        onClick={() => setConfirmDeletePolicyId(policy.id)}
-                        title="Delete"
+                        onClick={() => startEditPolicy(policy)}
+                        title="Edit"
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <Pencil className="h-3.5 w-3.5" />
                       </Button>
-                    )}
-                  </div>
-                )}
+                      {confirmDeletePolicyId === policy.id ? (
+                        <div className="flex items-center gap-1">
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="h-7 text-xs"
+                            onClick={() => handlePolicyDelete(policy.id)}
+                            disabled={submitting}
+                          >
+                            Confirm
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-xs"
+                            onClick={() => setConfirmDeletePolicyId(null)}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 p-0"
+                          onClick={() => setConfirmDeletePolicyId(policy.id)}
+                          title="Delete"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
           ))}
@@ -403,7 +427,7 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
           <div>
             <h3 className="text-sm font-medium">Tag Profiles</h3>
             <p className="text-xs text-muted-foreground mt-1">
-              Tag profiles are named sets of tag values applied to all resources deployed by Loom.
+              Tag profiles are named sets of tag values applied to resources deployed by Loom.
             </p>
           </div>
           {!readOnly && (
@@ -421,7 +445,7 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
 
         {showProfileForm && (
           <Card>
-            <CardContent className="pt-4 space-y-3">
+            <CardContent className="pt-4 space-y-4">
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">Profile Name *</label>
                 <Input
@@ -433,15 +457,19 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
                 />
               </div>
 
-              {buildTimePolicies.length > 0 && (
+              {/* Platform: Required section */}
+              {platformPolicies.length > 0 && (
                 <div className="space-y-2">
-                  <label className="text-xs text-muted-foreground font-medium">Tag Values</label>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-medium text-muted-foreground">Platform (Required)</label>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">platform:required</Badge>
+                  </div>
                   <div className="flex gap-3">
-                    {buildTimePolicies.map((tp) => (
+                    {platformPolicies.map((tp) => (
                       <div key={tp.key} className="flex-1 min-w-0 space-y-1">
                         <label className="text-xs text-muted-foreground">
                           {tp.key}
-                          {tp.required && <span className="text-destructive"> *</span>}
+                          <span className="text-destructive"> *</span>
                         </label>
                         <Input
                           placeholder={
@@ -462,6 +490,45 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
                         />
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Custom: Optional section */}
+              {customPolicies.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-medium text-muted-foreground">Custom (Optional)</label>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">custom:optional</Badge>
+                  </div>
+                  <div className="space-y-2">
+                    {customPolicies.map((tp) => {
+                      const enabled = profileEnabledCustomKeys.has(tp.key);
+                      return (
+                        <div key={tp.key} className="flex items-center gap-3">
+                          <label className="flex items-center gap-2 cursor-pointer select-none min-w-[160px]">
+                            <input
+                              type="checkbox"
+                              checked={enabled}
+                              onChange={() => toggleCustomKey(tp.key)}
+                              className="h-3.5 w-3.5"
+                            />
+                            <span className="text-xs text-muted-foreground">{tp.key}</span>
+                          </label>
+                          {enabled && (
+                            <Input
+                              placeholder={tp.default_value || `Enter ${tp.key}`}
+                              value={profileFormTags[tp.key] || ""}
+                              onChange={(e) =>
+                                setProfileFormTags((prev) => ({ ...prev, [tp.key]: e.target.value }))
+                              }
+                              maxLength={128}
+                              className="text-sm flex-1"
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}

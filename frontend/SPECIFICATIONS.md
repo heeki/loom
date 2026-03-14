@@ -340,12 +340,19 @@ When no memory resources exist: centered muted text "No memory resources yet. Ad
 
 **Purpose:** Manage tag policies (platform + custom) and tag profiles.
 
+**Tag Designations:**
+- `platform:required` — tags with `loom:` prefix. Required for all resources. Read-only in the policy list (Lock icon). Always shown as input fields in the profile form.
+- `custom:optional` — user-defined tags without `loom:` prefix. Optional, editable, deletable. In the profile form, each appears as a checkbox; checking it reveals a value input.
+- Designation is computed from the key (not stored). The legacy `source` column is retained in the DB for backward compatibility but is not exposed in the API or UI.
+
 **Content:**
 - Page header: "Tagging" with description "Manage tag policies and tag profiles."
-- **Tag Policies** section (top): displays platform-required tags (key starts with `loom:`) as read-only rows with a Lock icon, followed by custom tags (editable/deletable). "Add Custom Tag" button shows a form with: key (text, required), default value (optional text), source (select: build-time or deploy-time), show on card (checkbox, default true). Custom tags can be edited or deleted with inline confirmation.
+- **Tag Policies** section (top): displays `platform:required` tags as read-only rows with a Lock icon and designation badge, followed by `custom:optional` tags (editable/deletable with designation badge). "Add Custom Tag" button shows a form with: key (text, required), default value (optional text), show on card (checkbox, default true). Custom tags are always created as `required=false`.
 - **Tag Profiles** section (below policies): list, create, edit, delete named tag presets
   - Each profile card shows: name, timestamps, and tag value badges
-  - Create/edit form: profile name input (maxLength 128) + input fields for each build-time tag policy (including custom build-time policies)
+  - Create/edit form has two sections:
+    1. **Platform (Required)** — input fields for each `platform:required` tag (mandatory, marked with `*`)
+    2. **Custom (Optional)** — checkbox per custom tag; checking reveals a value input. Unchecking removes the tag from the profile.
   - Accessible to all scopes; `*:write` can create, edit, and delete; `*:read` can only view
   - Delete with inline confirmation (Confirm/Cancel)
 - Always visible in the sidebar (no scope guard for visibility)
@@ -427,8 +434,10 @@ Cognito client secrets are password-masked in forms. Secrets are sent to the bac
 - Components that respect `readOnly`: `AgentCard`, `AgentListPage`, `CatalogPage`, `SecurityAdminPage`, `RoleManagementPanel`, `AuthorizerManagementPanel`, `PermissionRequestsPanel`, `MemoryManagementPage`, `MemoryManagementPanel`, `MemoryCard`.
 
 ### Resource Tagging
+- Tag policies use a two-tier designation system: `platform:required` (keys starting with `loom:`) and `custom:optional` (all others). Designation is computed from the key, not stored.
 - Tag policies are fetched from `/api/settings/tags` and used to derive `showOnCardKeys` for tag badge display and filter dropdowns.
 - Tag profiles are named presets managed via the Tagging page. The `ResourceTagFields` shared component renders a profile dropdown (persisted in `sessionStorage` as `loom:selectedTagProfileId`), resolves tags from the selected profile + policy defaults, and calls `onChange(tags)`. Used by both agent deploy and memory create forms.
+- Tag resolution is unified: for each policy, use user-supplied value → fall back to `default_value` → error if required and missing. The previous `source` (build-time/deploy-time) distinction has been removed.
 - `showOnCardKeys` (derived from tag policies with `show_on_card=true`) is passed as a prop to `AgentCard` and `MemoryCard` components from all listing pages.
 - Tag badges use `variant="secondary"` to visually distinguish them from status and protocol badges.
 - **Progressive disclosure filtering:** All listing pages (CatalogPage, AgentListPage, MemoryManagementPanel) split show-on-card policies into required (`loom:*`) and custom. Required tag filters are always shown; custom tag filters are hidden until added via an "Add filter" dropdown (Select with Plus icon). Custom filters can be individually removed with an "x" button next to the label. "Clear filters" resets all filters and removes all custom filter selections.

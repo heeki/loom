@@ -16,7 +16,6 @@ class TagPolicyRequest(BaseModel):
     """Request body for creating/updating a tag policy."""
     key: str = Field(..., description="Tag key name")
     default_value: str | None = Field(None, description="Default value for the tag")
-    source: str = Field(..., description="'deploy-time' or 'build-time'")
     required: bool = Field(True, description="Whether this tag is required")
     show_on_card: bool = Field(False, description="Whether to display on agent cards")
 
@@ -26,7 +25,7 @@ class TagPolicyResponse(BaseModel):
     id: int
     key: str
     default_value: str | None
-    source: str
+    designation: str
     required: bool
     show_on_card: bool
     created_at: str | None
@@ -46,12 +45,6 @@ def create_tag_policy(
     db: Session = Depends(get_db),
 ) -> TagPolicyResponse:
     """Create a new tag policy."""
-    if request.source not in ("deploy-time", "build-time"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="source must be 'deploy-time' or 'build-time'",
-        )
-
     existing = db.query(TagPolicy).filter(TagPolicy.key == request.key).first()
     if existing:
         raise HTTPException(
@@ -62,7 +55,6 @@ def create_tag_policy(
     policy = TagPolicy(
         key=request.key,
         default_value=request.default_value,
-        source=request.source,
         required=request.required,
         show_on_card=request.show_on_card,
     )
@@ -83,12 +75,6 @@ def update_tag_policy(
     if not policy:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag policy not found")
 
-    if request.source not in ("deploy-time", "build-time"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="source must be 'deploy-time' or 'build-time'",
-        )
-
     # Check uniqueness if key changed
     if request.key != policy.key:
         conflict = db.query(TagPolicy).filter(TagPolicy.key == request.key).first()
@@ -100,7 +86,6 @@ def update_tag_policy(
 
     policy.key = request.key
     policy.default_value = request.default_value
-    policy.source = request.source
     policy.required = request.required
     policy.show_on_card = request.show_on_card
     policy.updated_at = datetime.utcnow()
@@ -160,8 +145,8 @@ def create_tag_profile(
             detail=f"Tag profile with name '{request.name}' already exists",
         )
 
-    # Validate that all required build-time tag policies have values
-    policies = db.query(TagPolicy).filter(TagPolicy.source == "build-time", TagPolicy.required == True).all()
+    # Validate that all required tag policies have values
+    policies = db.query(TagPolicy).filter(TagPolicy.required == True).all()
     missing = [p.key for p in policies if not request.tags.get(p.key, "").strip()]
     if missing:
         raise HTTPException(
@@ -197,8 +182,8 @@ def update_tag_profile(
                 detail=f"Tag profile with name '{request.name}' already exists",
             )
 
-    # Validate required build-time tags
-    policies = db.query(TagPolicy).filter(TagPolicy.source == "build-time", TagPolicy.required == True).all()
+    # Validate required tags
+    policies = db.query(TagPolicy).filter(TagPolicy.required == True).all()
     missing = [p.key for p in policies if not request.tags.get(p.key, "").strip()]
     if missing:
         raise HTTPException(

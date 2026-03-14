@@ -20,7 +20,7 @@ def _iam_tags(
     """Build IAM-format tags from tag policies and extra overrides.
 
     Args:
-        tag_policies: List of dicts with keys: key, default_value, source.
+        tag_policies: List of dicts with keys: key, default_value.
         extra: Additional tag key-value pairs that override policy defaults.
     """
     tags: dict[str, str] = {}

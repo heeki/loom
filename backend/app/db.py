@@ -90,9 +90,9 @@ def _seed_default_tags(eng) -> None:
     session = sessionmaker(bind=eng)()
     try:
         defaults = [
-            {"key": "loom:application", "default_value": None, "source": "build-time", "required": True, "show_on_card": True},
-            {"key": "loom:group", "default_value": None, "source": "build-time", "required": True, "show_on_card": True},
-            {"key": "loom:owner", "default_value": None, "source": "build-time", "required": True, "show_on_card": True},
+            {"key": "loom:application", "default_value": None, "required": True, "show_on_card": True},
+            {"key": "loom:group", "default_value": None, "required": True, "show_on_card": True},
+            {"key": "loom:owner", "default_value": None, "required": True, "show_on_card": True},
         ]
         # Remove legacy tags replaced by loom:* prefixed versions
         legacy_keys = ["application", "team", "owner", "deployed-by"]

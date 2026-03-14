@@ -30,8 +30,8 @@ class TestCreateExecutionRole(unittest.TestCase):
         }
 
         tag_policies = [
-            {"key": "deployed-by", "default_value": "loom", "source": "deploy-time"},
-            {"key": "owner", "default_value": "heeki", "source": "build-time"},
+            {"key": "deployed-by", "default_value": "loom"},
+            {"key": "owner", "default_value": "heeki"},
         ]
         result = create_execution_role(
             agent_name="test-agent",

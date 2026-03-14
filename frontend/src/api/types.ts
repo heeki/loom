@@ -379,7 +379,7 @@ export interface TagPolicy {
   id: number;
   key: string;
   default_value: string | null;
-  source: "deploy-time" | "build-time";
+  designation: "platform:required" | "custom:optional";
   required: boolean;
   show_on_card: boolean;
   created_at: string | null;
@@ -389,14 +389,12 @@ export interface TagPolicy {
 export interface TagPolicyCreateRequest {
   key: string;
   default_value?: string;
-  source: "deploy-time" | "build-time";
   required?: boolean;
   show_on_card?: boolean;
 }
 
 export interface TagPolicyUpdateRequest {
   default_value?: string;
-  source?: "deploy-time" | "build-time";
   required?: boolean;
   show_on_card?: boolean;
 }

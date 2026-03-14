@@ -159,15 +159,12 @@ def create_memory(
     user_tags = request.tags or {}
     policies = db.query(TagPolicy).all()
     for p in policies:
-        if p.source == "deploy-time" and p.default_value:
+        if p.key in user_tags:
+            resolved_tags[p.key] = user_tags[p.key]
+        elif p.default_value:
             resolved_tags[p.key] = p.default_value
-        elif p.source == "build-time":
-            if p.key in user_tags:
-                resolved_tags[p.key] = user_tags[p.key]
-            elif p.default_value:
-                resolved_tags[p.key] = p.default_value
-            elif p.required:
-                resolved_tags[p.key] = "missing"
+        elif p.required:
+            resolved_tags[p.key] = "missing"
 
     # Transform strategies
     aws_strategies = None

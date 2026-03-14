@@ -44,15 +44,14 @@ class TestTagPolicyModel(unittest.TestCase):
         keys = {p.key for p in policies}
         self.assertEqual(keys, {"loom:application", "loom:group", "loom:owner"})
 
-        # Verify build-time tags
         app_tag = self.session.query(TagPolicy).filter(TagPolicy.key == "loom:application").first()
         self.assertIsNone(app_tag.default_value)
-        self.assertEqual(app_tag.source, "build-time")
+        self.assertEqual(app_tag.designation, "platform:required")
         self.assertTrue(app_tag.show_on_card)
 
         group_tag = self.session.query(TagPolicy).filter(TagPolicy.key == "loom:group").first()
         self.assertIsNone(group_tag.default_value)
-        self.assertEqual(group_tag.source, "build-time")
+        self.assertEqual(group_tag.designation, "platform:required")
         self.assertTrue(group_tag.show_on_card)
 
     def test_seed_default_tags_idempotent(self):
@@ -67,7 +66,6 @@ class TestTagPolicyModel(unittest.TestCase):
         policy = TagPolicy(
             key="test-key",
             default_value="test-val",
-            source="deploy-time",
             required=True,
             show_on_card=False,
         )
@@ -78,10 +76,21 @@ class TestTagPolicyModel(unittest.TestCase):
         d = policy.to_dict()
         self.assertEqual(d["key"], "test-key")
         self.assertEqual(d["default_value"], "test-val")
-        self.assertEqual(d["source"], "deploy-time")
+        self.assertEqual(d["designation"], "custom:optional")
         self.assertTrue(d["required"])
         self.assertFalse(d["show_on_card"])
         self.assertIn("id", d)
+        self.assertNotIn("source", d)
+
+    def test_designation_platform(self):
+        """Test that loom: prefixed keys get platform:required designation."""
+        policy = TagPolicy(key="loom:app", required=True)
+        self.assertEqual(policy.designation, "platform:required")
+
+    def test_designation_custom(self):
+        """Test that non-loom: keys get custom:optional designation."""
+        policy = TagPolicy(key="cost-center", required=False)
+        self.assertEqual(policy.designation, "custom:optional")
 
 
 class TestTagPolicyCRUD(unittest.TestCase):
@@ -126,7 +135,6 @@ class TestTagPolicyCRUD(unittest.TestCase):
         response = self.client.post("/api/settings/tags", json={
             "key": "environment",
             "default_value": "dev",
-            "source": "deploy-time",
             "required": True,
             "show_on_card": False,
         })
@@ -134,25 +142,15 @@ class TestTagPolicyCRUD(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["key"], "environment")
         self.assertEqual(data["default_value"], "dev")
-        self.assertEqual(data["source"], "deploy-time")
-
-    def test_create_tag_policy_invalid_source(self):
-        """Test creating a tag policy with invalid source."""
-        response = self.client.post("/api/settings/tags", json={
-            "key": "bad",
-            "source": "invalid",
-        })
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(data["designation"], "custom:optional")
 
     def test_create_tag_policy_duplicate_key(self):
         """Test creating a tag policy with duplicate key."""
         self.client.post("/api/settings/tags", json={
             "key": "dup",
-            "source": "deploy-time",
         })
         response = self.client.post("/api/settings/tags", json={
             "key": "dup",
-            "source": "build-time",
         })
         self.assertEqual(response.status_code, 409)
 
@@ -160,7 +158,6 @@ class TestTagPolicyCRUD(unittest.TestCase):
         """Test updating an existing tag policy."""
         create_resp = self.client.post("/api/settings/tags", json={
             "key": "team",
-            "source": "build-time",
             "required": True,
             "show_on_card": True,
         })
@@ -169,7 +166,6 @@ class TestTagPolicyCRUD(unittest.TestCase):
         update_resp = self.client.put(f"/api/settings/tags/{tag_id}", json={
             "key": "team",
             "default_value": "platform",
-            "source": "build-time",
             "required": False,
             "show_on_card": True,
         })
@@ -181,7 +177,6 @@ class TestTagPolicyCRUD(unittest.TestCase):
         """Test updating a non-existent tag policy."""
         response = self.client.put("/api/settings/tags/999", json={
             "key": "x",
-            "source": "deploy-time",
         })
         self.assertEqual(response.status_code, 404)
 
@@ -189,7 +184,6 @@ class TestTagPolicyCRUD(unittest.TestCase):
         """Test deleting a tag policy."""
         create_resp = self.client.post("/api/settings/tags", json={
             "key": "temp",
-            "source": "deploy-time",
         })
         tag_id = create_resp.json()["id"]
 
@@ -210,7 +204,6 @@ class TestTagPolicyCRUD(unittest.TestCase):
         for key in ["a", "b", "c"]:
             self.client.post("/api/settings/tags", json={
                 "key": key,
-                "source": "deploy-time",
             })
         response = self.client.get("/api/settings/tags")
         self.assertEqual(len(response.json()), 3)
@@ -227,8 +220,8 @@ class TestMergeTags(unittest.TestCase):
     def test_merge_tags_with_policies(self):
         """Test _merge_tags uses default values from policies."""
         policies = [
-            {"key": "loom:application", "default_value": "myapp", "source": "build-time"},
-            {"key": "loom:group", "default_value": "platform", "source": "build-time"},
+            {"key": "loom:application", "default_value": "myapp"},
+            {"key": "loom:group", "default_value": "platform"},
         ]
         result = _merge_tags(tag_policies=policies)
         self.assertEqual(result, {"loom:application": "myapp", "loom:group": "platform"})
@@ -236,7 +229,7 @@ class TestMergeTags(unittest.TestCase):
     def test_merge_tags_extra_overrides(self):
         """Test _merge_tags extra overrides policy defaults."""
         policies = [
-            {"key": "loom:group", "default_value": "old", "source": "build-time"},
+            {"key": "loom:group", "default_value": "old"},
         ]
         result = _merge_tags(tag_policies=policies, extra={"loom:group": "new", "custom": "val"})
         self.assertEqual(result["loom:group"], "new")
@@ -245,7 +238,7 @@ class TestMergeTags(unittest.TestCase):
     def test_merge_tags_skips_none_defaults(self):
         """Test _merge_tags skips policies without default values."""
         policies = [
-            {"key": "app", "default_value": None, "source": "build-time"},
+            {"key": "app", "default_value": None},
         ]
         result = _merge_tags(tag_policies=policies)
         self.assertNotIn("app", result)
@@ -257,7 +250,7 @@ class TestIamTags(unittest.TestCase):
     def test_iam_tags_with_policies(self):
         """Test _iam_tags returns IAM-format tags from policies."""
         policies = [
-            {"key": "loom:application", "default_value": "myapp", "source": "build-time"},
+            {"key": "loom:application", "default_value": "myapp"},
         ]
         result = _iam_tags(tag_policies=policies)
         self.assertEqual(result, [{"Key": "loom:application", "Value": "myapp"}])
@@ -366,9 +359,8 @@ class TestDeployWithTags(unittest.TestCase):
         self, mock_create_role, mock_build_artifact, mock_create_runtime
     ):
         """Test that tags are resolved and stored on the agent after deployment."""
-        # Seed tag policies
-        self.session.add(TagPolicy(key="loom:application", default_value=None, source="build-time", required=True, show_on_card=True))
-        self.session.add(TagPolicy(key="loom:group", default_value=None, source="build-time", required=True, show_on_card=True))
+        self.session.add(TagPolicy(key="loom:application", default_value=None, required=True, show_on_card=True))
+        self.session.add(TagPolicy(key="loom:group", default_value=None, required=True, show_on_card=True))
         self.session.commit()
 
         mock_create_role.return_value = "arn:aws:iam::123456789012:role/test"
@@ -391,10 +383,9 @@ class TestDeployWithTags(unittest.TestCase):
         self.assertEqual(data["tags"]["loom:application"], "myapp")
         self.assertEqual(data["tags"]["loom:group"], "platform")
 
-    def test_deploy_missing_required_build_time_tag(self):
-        """Test that deployment fails when required build-time tags are missing."""
-        # Seed tag policies with required build-time tag
-        self.session.add(TagPolicy(key="loom:group", default_value=None, source="build-time", required=True))
+    def test_deploy_missing_required_tag(self):
+        """Test that deployment fails when required tags are missing."""
+        self.session.add(TagPolicy(key="loom:group", default_value=None, required=True))
         self.session.commit()
 
         response = self.client.post("/api/agents", json={
@@ -404,7 +395,7 @@ class TestDeployWithTags(unittest.TestCase):
         })
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("Missing required build-time tags", response.json()["detail"])
+        self.assertIn("Missing required tags", response.json()["detail"])
         self.assertIn("loom:group", response.json()["detail"])
 
     @patch("app.routers.agents.create_runtime")
@@ -438,7 +429,7 @@ class TestDeployWithTags(unittest.TestCase):
         self, mock_create_role, mock_build_artifact, mock_create_runtime
     ):
         """Test that resolved tags are passed to create_runtime."""
-        self.session.add(TagPolicy(key="loom:application", default_value="testapp", source="deploy-time", required=True))
+        self.session.add(TagPolicy(key="loom:application", default_value="testapp", required=True))
         self.session.commit()
 
         mock_create_role.return_value = "arn:aws:iam::123456789012:role/test"
@@ -466,7 +457,7 @@ class TestDeployWithTags(unittest.TestCase):
         self, mock_create_role, mock_build_artifact, mock_create_runtime
     ):
         """Test that agent list/detail endpoints include tags."""
-        self.session.add(TagPolicy(key="loom:application", default_value="testapp", source="deploy-time", required=True))
+        self.session.add(TagPolicy(key="loom:application", default_value="testapp", required=True))
         self.session.commit()
 
         mock_create_role.return_value = "arn:aws:iam::123456789012:role/test"
@@ -495,6 +486,62 @@ class TestDeployWithTags(unittest.TestCase):
         self.assertEqual(list_resp.status_code, 200)
         agent_data = [a for a in list_resp.json() if a["id"] == agent_id][0]
         self.assertIn("tags", agent_data)
+
+    @patch("app.routers.agents.create_runtime")
+    @patch("app.routers.agents.build_agent_artifact")
+    @patch("app.routers.agents.create_execution_role")
+    def test_deploy_with_optional_custom_tag(
+        self, mock_create_role, mock_build_artifact, mock_create_runtime
+    ):
+        """Test that optional custom tags are included when provided."""
+        self.session.add(TagPolicy(key="cost-center", default_value="default-cc", required=False, show_on_card=True))
+        self.session.commit()
+
+        mock_create_role.return_value = "arn:aws:iam::123456789012:role/test"
+        mock_build_artifact.return_value = ("bucket", "key")
+        mock_create_runtime.return_value = {
+            "agentRuntimeArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/rt-custom",
+            "agentRuntimeId": "rt-custom",
+            "status": "CREATING",
+        }
+
+        # Deploy without providing the custom tag — should use default
+        response = self.client.post("/api/agents", json={
+            "source": "deploy",
+            "name": "custom_tag_agent",
+            "model_id": "us.anthropic.claude-sonnet-4-6",
+        })
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["tags"]["cost-center"], "default-cc")
+
+    @patch("app.routers.agents.create_runtime")
+    @patch("app.routers.agents.build_agent_artifact")
+    @patch("app.routers.agents.create_execution_role")
+    def test_deploy_custom_tag_override(
+        self, mock_create_role, mock_build_artifact, mock_create_runtime
+    ):
+        """Test that user-supplied values override custom tag defaults."""
+        self.session.add(TagPolicy(key="cost-center", default_value="default-cc", required=False, show_on_card=True))
+        self.session.commit()
+
+        mock_create_role.return_value = "arn:aws:iam::123456789012:role/test"
+        mock_build_artifact.return_value = ("bucket", "key")
+        mock_create_runtime.return_value = {
+            "agentRuntimeArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/rt-override",
+            "agentRuntimeId": "rt-override",
+            "status": "CREATING",
+        }
+
+        response = self.client.post("/api/agents", json={
+            "source": "deploy",
+            "name": "override_agent",
+            "model_id": "us.anthropic.claude-sonnet-4-6",
+            "tags": {"cost-center": "eng-42"},
+        })
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["tags"]["cost-center"], "eng-42")
 
 
 class TestRegisterWithTags(unittest.TestCase):

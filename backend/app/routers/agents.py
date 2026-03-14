@@ -246,36 +246,32 @@ def _resolve_tags(
     db: Session,
     user_tags: dict[str, str] | None = None,
 ) -> tuple[dict[str, str], list[dict[str, Any]]]:
-    """Resolve final tag values from tag policies and user-supplied build-time tags.
+    """Resolve final tag values from tag policies and user-supplied tags.
 
     Returns:
         Tuple of (resolved_tags dict, tag_policies as list of dicts).
     Raises:
-        HTTPException if required build-time tags are missing.
+        HTTPException if required tags are missing.
     """
     policies = db.query(TagPolicy).all()
-    policy_dicts = [{"key": p.key, "default_value": p.default_value, "source": p.source, "required": p.required} for p in policies]
+    policy_dicts = [{"key": p.key, "default_value": p.default_value, "required": p.required} for p in policies]
 
     resolved: dict[str, str] = {}
     missing: list[str] = []
     user_tags = user_tags or {}
 
     for p in policies:
-        if p.source == "deploy-time":
-            if p.default_value:
-                resolved[p.key] = p.default_value
-        elif p.source == "build-time":
-            if p.key in user_tags:
-                resolved[p.key] = user_tags[p.key]
-            elif p.default_value:
-                resolved[p.key] = p.default_value
-            elif p.required:
-                missing.append(p.key)
+        if p.key in user_tags:
+            resolved[p.key] = user_tags[p.key]
+        elif p.default_value:
+            resolved[p.key] = p.default_value
+        elif p.required:
+            missing.append(p.key)
 
     if missing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Missing required build-time tags: {', '.join(missing)}",
+            detail=f"Missing required tags: {', '.join(missing)}",
         )
 
     return resolved, policy_dicts
@@ -489,7 +485,7 @@ def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
     region = os.getenv("AWS_REGION", DEFAULT_REGION)
     account_id = os.getenv("AWS_ACCOUNT_ID", "")
 
-    # Resolve tags from tag policies + user-supplied build-time values
+    # Resolve tags from tag policies + user-supplied profile values
     resolved_tags, tag_policy_dicts = _resolve_tags(db, request.tags)
 
     # Build config JSON (includes system prompt, model, and integrations)
