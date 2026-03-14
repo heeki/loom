@@ -35,7 +35,7 @@ make preview
 | Build | Vite 6 |
 | UI | shadcn/ui (Radix primitives) |
 | Styling | Tailwind CSS v4 |
-| Theme | Catppuccin (Mocha dark / Latte light) |
+| Theme | 10 themes (5 light + 5 dark) — see Settings |
 | Streaming | `fetch` + `ReadableStream` (POST-based SSE) |
 | Notifications | Sonner |
 
@@ -43,11 +43,12 @@ make preview
 
 ### Theme
 
-The app uses the [Catppuccin](https://catppuccin.com/) color palette:
+The app supports 10 color themes, managed by `ThemeContext` with localStorage persistence:
 
-- **Mocha** (dark) is the default theme
-- **Latte** (light) is available via the theme toggle in the sidebar
-- Colors are mapped to shadcn CSS variables in `src/index.css`
+- **Light:** Ayu Light, Catppuccin Latte (default), Everforest Light, Rosé Pine Dawn, Solarized Light
+- **Dark:** Catppuccin Mocha, Dracula, Gruvbox, Nord, Tokyo Night
+
+Theme and timezone preferences are configured on the Settings page. Colors are mapped to shadcn CSS variables in `src/index.css` using CSS class selectors per theme.
 
 ### Persona-Based Navigation
 
@@ -63,7 +64,7 @@ The sidebar provides access to persona-based workflows:
 | **MCP Servers** | Network | Coming soon (disabled) |
 | **A2A Agents** | Users | Coming soon (disabled) |
 
-The sidebar also includes a user indicator (when authenticated), theme toggle, timezone selector, live clock, and version badge. Each listing page has a card/table view toggle; the selection persists per-page across persona switches.
+The sidebar also includes a user indicator (when authenticated), admin view-as dropdown (for testing other roles), live clock, and version badge. Theme and timezone are configured on the Settings page. Each listing page has a card/table view toggle; the selection persists per-page across persona switches.
 
 ### Drill-Down Navigation
 
@@ -88,9 +89,11 @@ src/
 │   ├── settings.ts    # Tag policy CRUD operations
 │   └── types.ts       # TypeScript interfaces mirroring backend models
 ├── contexts/     # React contexts (auth, timezone preference)
+│   ├── ThemeContext.tsx   # Theme provider with 10 themes and localStorage persistence
 ├── hooks/        # Custom React hooks for data fetching
 ├── components/   # Application components + shadcn ui/ primitives
 │   ├── AgentCard.tsx              # Agent card with refresh + eraser icon deletion + overlay confirmation
+│   ├── SortableCardGrid.tsx       # Drag-to-reorder card grid with @dnd-kit
 │   ├── AgentRegistrationForm.tsx  # Import (ARN + model) and Deploy (full form) tabs
 │   ├── AuthorizerManagementPanel.tsx # Authorizer config and credential management
 │   ├── MemoryCard.tsx             # Memory resource card with status, tags, refresh, delete
@@ -109,7 +112,7 @@ src/
 │   ├── MemoryManagementPage.tsx # Memory resource management
 │   ├── SettingsPage.tsx        # Tag profile management
 │   └── SessionDetailPage.tsx   # Session metadata, invocations, logs
-├── lib/          # Shared utilities (cn(), format helpers, status mapping)
+├── lib/          # Shared utilities (cn(), format helpers, status mapping, error mapping)
 ├── App.tsx       # Root: auth gate + persona sidebar + navigation
 └── main.tsx      # Entry point
 ```
@@ -140,18 +143,18 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 
 - `useAgents()` — Agent list with auto-fetch, CRUD actions, register (with optional modelId)
 - `useSessions(agentId)` — Session list that re-fetches on agent change
-- `useInvoke()` — Streaming state management with `AbortController`, supports credential_id
+- `useInvoke(authorizerName?)` — Streaming state management with `AbortController`, supports credential_id and bearer_token, provides friendly error messages with authorizer-specific hints
 - `useLogs()` — On-demand session log fetching
 - `useDeployment()` — Agent config, credential providers, and integrations
 
 ### Key Components
 
 - **SearchableSelect** — Combobox with search, filter, optional group headers (Anthropic/Amazon), and click-outside detection. Searches both label and value fields.
-- **AgentCard** — Compact card with inline badges, refresh button, eraser icon for deletion, overlay confirmation with "Also delete in AgentCore" checkbox. Displays tag badges for tags marked `show_on_card` in the tag policy.
-- **MemoryCard** — Memory resource card with name, status badge, spinner+timer for transitional states, region/account/expiry metadata, tag badges, refresh and delete buttons with overlay confirmation.
+- **AgentCard** — Compact card with two-row header layout, inline badges (including authorizer display), refresh button, eraser icon for deletion, overlay confirmation with "Also delete in AgentCore" checkbox. Supports two-phase creation status (deploying → completing deployment → finalizing endpoint) with timer format (spinner + elapsed + message). Displays tag badges for tags marked `show_on_card` in the tag policy.
+- **MemoryCard** — Memory resource card with name, status badge, spinner+timer for transitional states (using per-resource timestamps for accurate elapsed time), region/account/expiry metadata, tag badges, refresh and delete buttons with overlay confirmation.
 - **ResourceTagFields** — Shared component for tag profile selection and tag resolution. Fetches tag policies and profiles, renders a profile dropdown (persisted in `sessionStorage`), resolves tags from the selected profile + policy defaults. Used by both agent deploy and memory create forms.
 - **MultiSelect** — Checkbox-based multi-select dropdown with auto-expanding width. Used for tag filtering on all listing pages.
-- **InvokePanel** — Qualifier selector, credential dropdown, model ID badge, prompt textarea, invoke/cancel buttons. Token indicator shown when invocation uses OAuth.
+- **InvokePanel** — Qualifier selector, credential dropdown (with "Manual token" option for bearer tokens), model ID badge, prompt textarea, invoke/cancel buttons. Token indicator shown when invocation uses OAuth.
 - **AuthorizerManagementPanel** — Lists authorizer configs with expandable credential management (add/list/delete credentials per config).
 - **MemoryManagementPanel** — Create/import form with strategy configuration (type, name, description, namespaces), memory card/table list with status badges (CREATING/ACTIVE/FAILED/DELETING), refresh and delete actions with inline confirmation overlay.
 

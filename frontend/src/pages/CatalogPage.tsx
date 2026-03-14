@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { AgentCard } from "@/components/AgentCard";
 import { MemoryCard } from "@/components/MemoryCard";
+import { SortableCardGrid } from "@/components/SortableCardGrid";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,11 +15,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { LayoutGrid, TableIcon, Eraser, Network, Users } from "lucide-react";
+import { toast } from "sonner";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { statusVariant } from "@/lib/status";
-import { listMemories } from "@/api/memories";
+import { listMemories, refreshMemory, deleteMemory, purgeMemory } from "@/api/memories";
 import { listTagPolicies } from "@/api/settings";
+import { ApiError } from "@/api/client";
 import type { AgentResponse, MemoryResponse, TagPolicy } from "@/api/types";
 
 interface CatalogPageProps {
@@ -67,13 +70,23 @@ export function CatalogPage({
   // Memory data
   const [memories, setMemories] = useState<MemoryResponse[]>([]);
   const [memoriesLoading, setMemoriesLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [refreshingId, setRefreshingId] = useState<number | null>(null);
+  const [deleteStartTimes, setDeleteStartTimes] = useState<Record<number, number>>({});
+
+  // Elapsed timer for transitional states
+  const [now, setNow] = useState(Date.now());
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const memoriesRef = useRef(memories);
+  memoriesRef.current = memories;
 
   const fetchMemoryData = useCallback(async () => {
     try {
       const data = await listMemories();
       setMemories(data);
     } catch {
-      // silently ignore — catalog is read-only for memories
+      // silently ignore
     } finally {
       setMemoriesLoading(false);
     }
@@ -82,6 +95,89 @@ export function CatalogPage({
   useEffect(() => {
     void fetchMemoryData();
   }, [fetchMemoryData]);
+
+  // 1-second tick for elapsed display, 3-second poll for AWS status
+  useEffect(() => {
+    const hasTransitional = memories.some(
+      (m) => m.status === "CREATING" || m.status === "DELETING",
+    );
+
+    if (!hasTransitional) {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      return;
+    }
+
+    if (!timerRef.current) {
+      timerRef.current = setInterval(() => {
+        setNow(Date.now());
+      }, 1000);
+    }
+
+    if (!pollRef.current) {
+      pollRef.current = setInterval(async () => {
+        const current = memoriesRef.current;
+        const transitional = current.filter(
+          (m) => m.status === "CREATING" || m.status === "DELETING",
+        );
+        for (const mem of transitional) {
+          try {
+            const updated = await refreshMemory(mem.id);
+            setMemories((prev) => prev.map((m) => (m.id === mem.id ? updated : m)));
+          } catch (e) {
+            if (mem.status === "DELETING" && e instanceof ApiError && e.status === 404) {
+              try {
+                await purgeMemory(mem.id);
+              } catch {
+                // ignore cleanup errors
+              }
+              setMemories((prev) => prev.filter((m) => m.id !== mem.id));
+              toast.success("Memory resource deleted");
+            }
+          }
+        }
+      }, 3000);
+    }
+
+    return () => {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    };
+  }, [memories.map((m) => `${m.id}:${m.status}`).join(",")]);
+
+  const handleMemoryRefresh = async (id: number) => {
+    setRefreshingId(id);
+    try {
+      const updated = await refreshMemory(id);
+      setMemories((prev) => prev.map((m) => (m.id === id ? updated : m)));
+      toast.success("Memory status refreshed");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.detail : "Failed to refresh memory");
+    } finally {
+      setRefreshingId(null);
+    }
+  };
+
+  const handleMemoryDelete = async (id: number, deleteInAws: boolean) => {
+    setSubmitting(true);
+    try {
+      const updated = await deleteMemory(id, deleteInAws);
+      if (updated.status === "DELETING") {
+        setDeleteStartTimes((prev) => ({ ...prev, [id]: Date.now() }));
+        setMemories((prev) => prev.map((m) => (m.id === id ? updated : m)));
+        toast.success("Memory deletion initiated");
+      } else {
+        setMemories((prev) => prev.filter((m) => m.id !== id));
+        toast.success(deleteInAws ? "Memory resource deleted" : "Memory removed from Loom");
+      }
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.detail : "Failed to delete memory");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+
 
   return (
     <div className="space-y-6">
@@ -168,10 +264,12 @@ export function CatalogPage({
         ) : (
           <>
             {viewMode === "cards" ? (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {filteredAgents.map((agent) => (
+              <SortableCardGrid
+                items={filteredAgents}
+                getId={(a) => String(a.id)}
+                storageKey="catalog-agents"
+                renderItem={(agent) => (
                   <AgentCard
-                    key={agent.id}
                     agent={agent}
                     onSelect={onSelectAgent}
                     onRefresh={onRefreshAgent}
@@ -179,8 +277,8 @@ export function CatalogPage({
                     readOnly={readOnly}
                     showOnCardKeys={showOnCardKeys}
                   />
-                ))}
-              </div>
+                )}
+              />
             ) : (
               <div className="rounded-md border overflow-hidden">
                 <Table>
@@ -304,21 +402,24 @@ export function CatalogPage({
             No memory resources. Use the Memory page to create or import one.
           </p>
         ) : viewMode === "cards" ? (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {memories.map((mem) => (
+          <SortableCardGrid
+            items={memories}
+            getId={(m) => String(m.id)}
+            storageKey="catalog-memories"
+            renderItem={(mem) => (
               <MemoryCard
-                key={mem.id}
                 memory={mem}
-                now={Date.now()}
-                refreshingId={null}
-                submitting={false}
-                onRefresh={() => {}}
-                onDelete={() => {}}
-                readOnly
+                now={now}
+                refreshingId={refreshingId}
+                submitting={submitting}
+                onRefresh={handleMemoryRefresh}
+                onDelete={handleMemoryDelete}
+                readOnly={readOnly}
                 showOnCardKeys={showOnCardKeys}
+                deleteStartTime={deleteStartTimes[mem.id]}
               />
-            ))}
-          </div>
+            )}
+          />
         ) : (
           <div className="rounded-md border overflow-hidden">
             <Table>

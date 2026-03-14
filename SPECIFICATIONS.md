@@ -278,7 +278,22 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Settings persona: new sidebar entry accessible to all scopes. `SettingsPage` provides tag profile CRUD. `*:write` scopes can create, edit, and delete profiles; `*:read` scopes can only view. Tag value inputs enforce a 128-character maximum length.
 - 27 new backend tests covering tag policy CRUD, tag resolution, validation, and agent tag storage.
 
-### Phase 8 — Advanced Operations
+### Phase 8 — Frontend Visual Polish *(Complete)*
+- Theme system: `ThemeContext` with 10 themes — 5 light (Ayu Light, Catppuccin Latte, Everforest Light, Rosé Pine Dawn, Solarized Light) and 5 dark (Catppuccin Mocha, Dracula, Gruvbox, Nord, Tokyo Night). Theme selector on Settings page with Light/Dark grouping. CSS variables per theme in `index.css`. Latte is the default (no class); other themes use class selectors. `localStorage` persistence.
+- Theme accessibility: darkened `foreground`/`muted-foreground`/`border` for all light themes for better readability. Brightened `foreground`/`muted-foreground`/`border` for all dark themes. Badge `border-border` added to default and secondary badge variants for visibility.
+- Settings page: moved theme and timezone selectors from sidebar to Settings preferences section. Description updated to "Manage settings and tag profiles."
+- Drag-to-reorder cards: `@dnd-kit` for card reordering in grid sections (`SortableCardGrid` component), order persisted to `localStorage`.
+- Admin role view switching: sidebar dropdown (Eye icon) to test other role experiences while retaining admin access. `effectiveHasScope` overrides `hasScope` for UI rendering.
+- Deploy flow: fire-and-forget pattern — form collapses immediately, shows agent card with creating status. Background API call with error toast on failure. No 45-second blocking.
+- Agent card two-phase creation: shows deploying → completing deployment → finalizing endpoint status with spinner and timer. Timer format: spinner (Ns) message. Timer uses `registered_at` to avoid reset on phase transition. Two-row header layout.
+- Memory card: matching two-row header layout with spinner/timer for creating/deleting states.
+- Polling stability: `initialLoadDone` ref prevents skeleton flash on refetches. `watchIds`-based polling effect dependency to prevent interval teardown on state updates. Removed redundant polling from `AgentListPage`.
+- JSON paste: handles `model`, `role`, `authorizer`, and `network_mode` fields in addition to `name`/`description`/`persona`/`instructions`/`behavior`.
+- Credential suggestion on errors: `friendlyInvokeError` accepts optional `authorizerName`, suggests correct authorizer on 401/403 errors.
+- Catalog page: removed unnecessary refresh button from Memory Resources section.
+- Documentation: `frontend/.env.example` template, README title updated.
+
+### Phase 9 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

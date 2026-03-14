@@ -1,13 +1,15 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import type { SSESessionStart, SSESessionEnd } from "@/api/types";
 import { invokeAgentStream } from "@/api/invocations";
+import { friendlyInvokeError } from "@/lib/errors";
 
-export function useInvoke() {
+export function useInvoke(authorizerName?: string) {
   const [streamedText, setStreamedText] = useState("");
   const [sessionStart, setSessionStart] = useState<SSESessionStart | null>(null);
   const [sessionEnd, setSessionEnd] = useState<SSESessionEnd | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rawError, setRawError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -17,7 +19,7 @@ export function useInvoke() {
   }, []);
 
   const invoke = useCallback(
-    async (agentId: number, prompt: string, qualifier = "DEFAULT", sessionId?: string, credentialId?: number) => {
+    async (agentId: number, prompt: string, qualifier = "DEFAULT", sessionId?: string, credentialId?: number, bearerToken?: string) => {
       // Abort any in-flight request
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -28,6 +30,7 @@ export function useInvoke() {
       setSessionStart(null);
       setSessionEnd(null);
       setError(null);
+      setRawError(null);
       setIsStreaming(true);
 
       try {
@@ -38,6 +41,7 @@ export function useInvoke() {
             qualifier,
             ...(sessionId ? { session_id: sessionId } : {}),
             ...(credentialId ? { credential_id: credentialId } : {}),
+            ...(bearerToken ? { bearer_token: bearerToken } : {}),
           },
           {
             onSessionStart: (data) => setSessionStart(data),
@@ -47,7 +51,8 @@ export function useInvoke() {
               setIsStreaming(false);
             },
             onError: (data) => {
-              setError(data.message);
+              setError(friendlyInvokeError(data.message, authorizerName));
+              setRawError(data.message);
               setIsStreaming(false);
             },
           },
@@ -58,12 +63,14 @@ export function useInvoke() {
         setIsStreaming(false);
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") return;
-        setError(e instanceof Error ? e.message : "Invocation failed");
+        const msg = e instanceof Error ? e.message : "Invocation failed";
+        setError(friendlyInvokeError(msg, authorizerName));
+        setRawError(msg);
       } finally {
         setIsStreaming(false);
       }
     },
-    [],
+    [authorizerName],
   );
 
   const cancel = useCallback(() => {
@@ -71,5 +78,5 @@ export function useInvoke() {
     setIsStreaming(false);
   }, []);
 
-  return { streamedText, sessionStart, sessionEnd, isStreaming, error, invoke, cancel };
+  return { streamedText, sessionStart, sessionEnd, isStreaming, error, rawError, invoke, cancel };
 }

@@ -8,7 +8,7 @@
 | Build tool | Vite 6 |
 | UI components | shadcn/ui (Radix primitives) |
 | Styling | Tailwind CSS v4 (Vite plugin, no PostCSS) |
-| Theme | Catppuccin (Mocha dark / Latte light) |
+| Theme | 10 themes: 5 light + 5 dark (Catppuccin, Rosé Pine Dawn, Ayu, Everforest, Solarized, Dracula, Gruvbox, Nord, Tokyo Night) |
 | HTTP client | Native `fetch` (typed wrappers in `src/api/client.ts`) |
 | SSE streaming | `fetch` + `ReadableStream` (POST-based SSE) |
 | Notifications | Sonner (toast) |
@@ -33,7 +33,8 @@ frontend/
 │   │   └── settings.ts        # Settings API: tag policy + tag profile CRUD
 │   ├── contexts/
 │   │   ├── AuthContext.tsx      # Cognito auth provider (login, logout, token refresh)
-│   │   └── TimezoneContext.tsx  # Timezone preference provider + hook
+│   │   ├── TimezoneContext.tsx  # Timezone preference provider + hook
+│   │   └── ThemeContext.tsx     # Theme provider with 10 themes, localStorage persistence
 │   ├── hooks/
 │   │   ├── useAgents.ts        # Agent list state + CRUD actions
 │   │   ├── useSessions.ts      # Session list state per agent
@@ -42,6 +43,7 @@ frontend/
 │   │   └── useDeployment.ts    # Agent config, credential providers, integrations hooks
 │   ├── components/
 │   │   ├── ui/                 # shadcn primitives + searchable-select.tsx + multi-select.tsx
+│   │   ├── SortableCardGrid.tsx — Drag-to-reorder card grid using @dnd-kit, localStorage persistence
 │   │   ├── AgentCard.tsx       # Agent summary card with refresh + eraser icon deletion
 │   │   ├── AgentRegistrationForm.tsx  # Tabbed form: ARN registration + agent deployment
 │   │   ├── AuthorizerManagementPanel.tsx # Authorizer config + credential management
@@ -66,7 +68,8 @@ frontend/
 │   ├── lib/
 │   │   ├── utils.ts            # shadcn cn() utility
 │   │   ├── format.ts           # Timezone-aware timestamp + metric formatters
-│   │   └── status.ts           # Status badge variant mapping
+│   │   ├── status.ts           # Status badge variant mapping
+│   │   └── errors.ts           # Friendly invoke error message mapping
 │   ├── App.tsx                 # Auth gate + persona-based navigation + sidebar
 │   ├── main.tsx                # Entry point
 │   └── index.css               # Tailwind v4 imports + Catppuccin CSS variables
@@ -102,10 +105,11 @@ Sidebar items are conditionally rendered based on the user's scopes derived from
 
 The sidebar also contains:
 - User indicator with username display and logout button (when authenticated)
-- Theme toggle (Mocha dark / Latte light)
-- Timezone selector (local / UTC)
 - Live clock display
 - Version badge
+
+### Admin View Switching
+Admin users see an Eye icon dropdown in the sidebar header that lets them simulate other roles (security-admins, data-stewards, builders, operators). This overrides scope checks via `effectiveHasScope` so the admin can see what each role's experience looks like, without losing admin access. The dropdown resets when the page is refreshed.
 
 ### Drill-Down Navigation (Catalog)
 
@@ -131,7 +135,8 @@ Catalog  >  [Agent Name]  >  [Session ID]
 - Tag-based filter bar above the agents grid, with multi-select dropdowns (checkbox-based) for each tag policy with `show_on_card=true`. Client-side AND filtering with "Clear filters" button and agent count display (e.g., "Showing 3 of 12 agents")
 - Card/table view toggle applies to all sections on the page
 - Agents section: responsive grid of `AgentCard` components (3 columns on large screens) or table view
-- Memory Resources section: responsive grid of `MemoryCard` components (read-only, no create/delete) or table view
+- Memory Resources section: responsive grid of `MemoryCard` components with delete and refresh wired to API, manual RefreshCw button next to section header; or table view
+- Transitional-state polling: if any memory is in CREATING or DELETING state, polls at 3-second intervals; stops when all resources are stable. Memories returning 404 on refresh are automatically purged.
 - Loading skeleton placeholders during data fetch
 - Empty state with instructions when no agents/memories exist
 
@@ -143,7 +148,7 @@ Each card displays:
 - Status badge (color-coded: READY=default, CREATING=secondary, FAILED=destructive) — inline with name
 - Spinner animation when agent is in a creating/deploying state
 - Active session count badge (when > 0)
-- Region, Account ID, Network mode, Available qualifiers, Registered timestamp
+- Region, Account ID, Network mode, Available qualifiers, Authorizer (name, "Cognito", "external", or "None"), Registered timestamp
 - Tag badges (secondary variant) for tags marked `show_on_card` in tag policies, formatted as `key: value`
 - Refresh button (RefreshCw icon) and Eraser icon (top-right) for refresh/deletion
 
@@ -165,6 +170,7 @@ Clicking the eraser icon triggers an overlay confirmation panel:
 - Page header: "Agent Administration" with card/table view toggle (top-right)
 - Sub-header: "Agents" with description and "Add Agent" button (right-aligned)
 - "Add Agent" toggles a Card containing Deploy/Import tab switcher and `AgentRegistrationForm`
+- When deploy succeeds, the form collapses and an ephemeral `AgentCard` appears at the top of the grid with CREATING status and spinner/timer. Once the real agent appears in the agents list, the ephemeral card is removed.
 - Below the form: responsive grid of `AgentCard` components (cards default) or table view
 - Bottom section: "Additional Configuration" with MCP Servers and A2A Agents placeholders (coming soon)
 
@@ -178,6 +184,7 @@ Clicking the eraser icon triggers an overlay confirmation panel:
 ### Deploy Tab
 
 Full deployment form with sections:
+- **JSON Paste**: Collapsible section (ChevronDown/ChevronRight toggle) with monospace textarea for pasting JSON agent configuration. Maps `name`, `description`, `persona` (→ agent description), `instructions` (→ behavioral guidelines), `behavior` (→ output expectations). Apply/Cancel buttons. Invalid JSON shows inline error without clearing existing fields.
 - **Agent Identity**: name (1/3 width) and description (2/3 width)
 - **System Prompt**: agent description, behavioral guidelines, output expectations — each with placeholder examples
 - **Model / Protocol / Network / IAM Role**: single flex row with explicit widths (20% / 10% / 10% / flex-1). Model uses `SearchableSelect` with grouped options, no default selection. Protocol offers HTTP as selectable; MCP and A2A shown as disabled. Network offers PUBLIC; VPC shown as disabled. IAM Role uses a `SearchableSelect` with searchable dropdown. Both model and IAM role are required — deploy button is disabled until both are selected.
@@ -206,12 +213,19 @@ Full deployment form with sections:
 ### Invoke Form
 - `InvokePanel` component: qualifier selector, credential selector (optional), multi-line prompt textarea, invoke/cancel buttons
 - Model ID displayed as a badge in the panel header
-- Credential selector populates from all authorizer configs and their credentials
+- Credential selector populates from all authorizer configs and their credentials, plus a "Manual token" option
 - When a credential is selected, the `credential_id` is passed with the invoke request
+- When "Manual token" is selected, a password input field appears for entering a raw bearer token; the `bearer_token` is passed with the invoke request
 - Token indicator (Key icon + badge) shown when `session_start` includes `has_token: true`
 
 ### Latency Summary
 - 4-metric placeholder (shows "—" before invocation), fills in after `session_end` SSE event
+
+### Error Display
+- Invocation errors show user-friendly messages mapped from raw error patterns via `friendlyInvokeError()` in `lib/errors.ts`
+- Pattern matching: 401/unauthorized → auth required, 403/forbidden → access denied, token errors → expired/invalid, credential errors → credential required
+- Collapsible "Show details" toggle reveals the raw error for debugging
+- Error card styled with `border-destructive`
 
 ### Response Pane
 - Raw text display with `whitespace-pre-wrap` and monospace font
@@ -283,11 +297,17 @@ Status badges use `statusVariant()` mapping:
 - **FAILED** — destructive variant
 - **DELETING** — secondary variant + spinning `Loader2` icon
 
+### Timer Accuracy
+
+Elapsed timers for transitional states use per-resource timestamps:
+- **CREATING**: Timer uses the creation initiation timestamp (tracked in component state) rather than `created_at` from the server.
+- **DELETING**: Timer uses the delete initiation timestamp (tracked in component state) rather than `created_at`.
+- A 10-minute creation timeout shows an error toast rather than spinning indefinitely.
+
 ### Delete Confirmation
 
 Inline overlay on the card or table row (absolute positioned at bottom):
 - "Also delete in AgentCore" checkbox (shown when memory has a memory_id)
-- Prompt text: "Delete this memory resource?"
 - Cancel button (ghost) and Confirm button (destructive)
 - Clicks within overlay are stopped from propagating
 
@@ -305,10 +325,11 @@ When no memory resources exist: centered muted text "No memory resources yet. Ad
 
 ## 9. Settings View
 
-**Purpose:** Manage tag profiles and other platform configuration.
+**Purpose:** Manage settings and tag profiles.
 
 **Content:**
 - Page header: "Settings" with description
+- **Preferences** section (top): Theme selector (grouped by Light/Dark using SelectGroup/SelectLabel, always drops down via `position="popper"`) and Timezone selector (local/UTC)
 - **Tag Profiles** section: list, create, edit, delete named tag presets
   - Each profile card shows: name, timestamps, and tag value badges
   - Create/edit form: profile name input (maxLength 128) + input fields for each build-time tag policy (maxLength 128)
@@ -349,10 +370,15 @@ The delete confirmation uses absolute positioning (`absolute inset-x-0 bottom-0`
 ### Grouped Searchable Model Selector
 Model selection uses `SearchableSelect` with group headers (Anthropic / Amazon). Search matches both display name and model ID value, allowing power users to search by inference profile ID. No default is pre-selected — the user must explicitly choose a model on both register and deploy forms.
 
-### Catppuccin Theme
-- **Mocha** (dark mode, default): Base #1e1e2e, primary Blue #89b4fa, destructive Red #f38ba8
-- **Latte** (light mode): Base #eff1f5, primary Blue #1e66f5, destructive Red #d20f39
-- `bg-input-bg` CSS variable maps to `#ffffff` (light) / `#313244` (dark) — used for bordered content sections
+### Theme System
+10 themes organized into Light and Dark groups:
+- **Light:** Ayu Light (warm sandy/orange), Catppuccin Latte (cool blue-gray, default), Everforest Light (warm green), Rosé Pine Dawn (warm rose), Solarized Light (warm yellow-blue)
+- **Dark:** Catppuccin Mocha (deep purple-blue), Dracula (vibrant purple), Gruvbox (warm earthy), Nord (arctic blue), Tokyo Night (indigo blue)
+
+ThemeContext manages theme state with localStorage persistence. Latte uses `:root` variables (no class); all other themes use CSS class selectors on `<html>`. The `@custom-variant dark` includes all dark theme classes. Light themes have darkened foreground/muted-foreground/border for readability; dark themes have brightened values. Badge `default` and `secondary` variants include `border-border` for visibility across all themes.
+
+### Drag-to-Reorder Card Grid
+`SortableCardGrid` uses @dnd-kit/core + @dnd-kit/sortable for drag-and-drop reordering of cards within grid sections. Order is persisted to localStorage keyed by `storageKey`. Uses `PointerSensor` with 8px activation distance, `rectSortingStrategy`, and `closestCenter` collision detection.
 
 ### Tailwind CSS v4 (Vite Plugin)
 Using the `@tailwindcss/vite` plugin instead of PostCSS. Configuration is handled via CSS `@theme` blocks in `index.css`.
@@ -407,8 +433,26 @@ Computed server-side using `LOOM_SESSION_IDLE_TIMEOUT_SECONDS`. The frontend dis
 ### View Mode Persistence
 Card/table view mode state is lifted to `App.tsx` with separate state variables per page (`catalogViewMode`, `agentsViewMode`, `memoryViewMode`). Each page receives its mode and setter as props. This ensures the selection persists when switching between personas — the page components unmount but the state lives in the parent.
 
+### Deploy Flow
+Agent deployment uses a fire-and-forget pattern. The form collapses immediately on deploy, the backend creates a DB record before starting the AWS call, and `fetchAgents()` picks up the new record. The `useAgents` hook polls transitional agents (deploying/CREATING/endpoint CREATING) at 5-second intervals using a `watchIds` effect dependency. An `initialLoadDone` ref prevents skeleton flash on subsequent fetches. Agent cards show two-phase creation status: deploying → completing deployment → finalizing endpoint, with a timer using `registered_at` to avoid resets on phase transitions.
+
 ### SSE Stream Consumer
 `invokeAgentStream()` uses `ReadableStream` to consume POST-based SSE responses with buffer-based line parsing, typed callback dispatch, and `AbortSignal` for cancellation.
+
+### Deploy Card
+When a deploy starts, `AgentListPage` records the deploying agent name and triggers an immediate `fetchAgents()` to pick up the DB record (created before the AWS API call). The `useAgents` hook handles ongoing polling for transitional agents. This replaced the earlier ephemeral card approach which caused position glitches when the real agent appeared.
+
+### Friendly Error Messages
+`lib/errors.ts` provides `friendlyInvokeError(raw: string, authorizerName?: string): string` that maps raw error strings to user-friendly messages using pattern matching. When an `authorizerName` is provided (from the agent's `authorizer_config`), 401/403 errors include a hint about which authorizer to use. The `useInvoke` hook stores both the friendly error (for display) and the raw error (for the 'Show details' toggle). This keeps error UX readable while preserving debugging information.
+
+### Credential Suggestion on Errors
+`friendlyInvokeError()` accepts an optional `authorizerName` parameter (from the agent's `authorizer_config`). On 401/403 errors, if the agent has a configured authorizer, the error message includes a hint like: 'This agent uses the "authorizer-name" authorizer — make sure you select a credential from that authorizer.' This helps users identify the correct credential without trial and error.
+
+### Authorizer Display on Agent Cards
+Agent cards show the configured authorizer in the metadata section. The backend extracts `customJWTAuthorizer` configuration from the AgentCore `describe_runtime` response on import and refresh, stores it as JSON in the `authorizer_config` column, and returns it in the agent response. The frontend renders: "Cognito" for cognito type, the authorizer name if available, "external" for unknown types, or muted "None" when absent.
+
+### Manual Bearer Token Input
+The invoke panel's credential dropdown includes a "Manual token" sentinel value. Selecting it reveals a password input for pasting a raw bearer token. The token is passed in the invoke request body as `bearer_token` and takes highest priority (Priority 0) in the backend's token selection chain — above user tokens, credential-based tokens, and agent config tokens.
 
 ---
 

@@ -233,9 +233,9 @@ Supports five memory strategy types: semantic, summary, user_preference, episodi
 | `GET` | `/api/agents/{agent_id}/sessions` | List sessions with invocations |
 | `GET` | `/api/agents/{agent_id}/sessions/{session_id}` | Get a specific session |
 
-The invoke endpoint uses a priority-based token selection: (1) user access token from Authorization header, (2) `credential_id` for M2M token, (3) agent config M2M flow. The `session_start` SSE event includes `has_token` and `token_source` fields when a token is used.
+The invoke endpoint uses a priority-based token selection: (0) `bearer_token` from request body, (1) user access token from Authorization header, (2) `credential_id` for M2M token, (3) agent config M2M flow. The `session_start` SSE event includes `has_token` and `token_source` fields when a token is used.
 
-Agent list responses include a computed `active_session_count` field based on `LOOM_SESSION_IDLE_TIMEOUT_SECONDS`. Session responses include computed `live_status` (`"pending"`, `"streaming"`, `"active"`, or `"expired"`).
+Agent list responses include a computed `active_session_count` field based on `LOOM_SESSION_IDLE_TIMEOUT_SECONDS`, and an `authorizer_config` field extracted from the AgentCore runtime's `customJWTAuthorizer` configuration. Session responses include computed `live_status` (`"pending"`, `"streaming"`, `"active"`, or `"expired"`).
 
 ### CloudWatch Logs
 

@@ -1,4 +1,4 @@
-# Loom: Agent Builder Playground
+# Loom: A simple, opinionated, enterprise-grade agent platform
 
 A platform for building, testing, and operating AI agents on Amazon Bedrock AgentCore Runtime and AWS Strands Agents. Loom provides a streamlined UI and opinionated backend for agent lifecycle management.
 
@@ -11,15 +11,19 @@ A platform for building, testing, and operating AI agents on Amazon Bedrock Agen
 - **Security Administration** — Manage IAM roles, authorizer configs, credentials, and permission requests
 - **Resource Tagging** — Configurable tag policies and named tag profiles applied to all deployed resources (agents, memory, IAM roles), tag badges on cards, multi-select filtering on all listing pages
 - **Settings** — Tag profile management (create, edit, delete named tag presets) accessible to all users
-- SSE streaming invocation with real-time response display
-- Authenticated agent invocations using user tokens or M2M credentials
+- SSE streaming invocation with real-time response display and friendly error messages
+- Authenticated agent invocations using user tokens, M2M credentials, or manual bearer tokens
 - Cold-start latency measurement via automatic CloudWatch log parsing
 - Active session tracking with cold-start indicators per agent
 - Session liveness detection via idle timeout heuristic (no AWS API calls)
 - Card/table view toggle on all listing pages with per-page persistence
 - OpenTelemetry observability with ADOT auto-instrumentation (traces for invocations, tool calls, model calls)
 - Timezone-aware timestamp display (local / UTC toggle)
-- Catppuccin-themed UI (Mocha dark / Latte light)
+- 10 color themes: 5 light (Ayu, Catppuccin Latte, Everforest, Rosé Pine Dawn, Solarized) and 5 dark (Catppuccin Mocha, Dracula, Gruvbox, Nord, Tokyo Night)
+- Instant deploy feedback with two-phase creation status tracking (deploying, completing deployment, finalizing endpoint)
+- Credential suggestions on access denied errors — identifies the correct authorizer for the agent
+- Drag-to-reorder cards within grid sections with persistent ordering
+- Admin role view switching — test the experience of other roles while retaining admin access
 
 ## Project Structure
 
@@ -59,9 +63,12 @@ make run
 
 # Frontend
 cd frontend
+cp .env.example .env   # Required — set VITE_COGNITO_USER_CLIENT_ID for Cognito login
 npm install
 npm run dev
 ```
+
+> **Note:** The `frontend/.env` file is required when using Cognito authentication. Without it, the Cognito login flow will not work. See the Authentication section below for details.
 
 ### Authentication (Optional)
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -12,8 +12,8 @@ import {
 import {
   TimezoneProvider,
   useTimezone,
-  type TimezonePreference,
 } from "@/contexts/TimezoneContext";
+import { ThemeProvider, useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { useAgents } from "@/hooks/useAgents";
 import { useSessions } from "@/hooks/useSessions";
 import { getSession, getInvocation } from "@/api/invocations";
@@ -26,46 +26,21 @@ import { SecurityAdminPage } from "@/pages/SecurityAdminPage";
 import { MemoryManagementPage } from "@/pages/MemoryManagementPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import type { SessionResponse, InvocationResponse } from "@/api/types";
-import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { AuthProvider, useAuth, type Scope } from "@/contexts/AuthContext";
 import { LoginPage } from "@/pages/LoginPage";
-import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings } from "lucide-react";
+import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings, Eye } from "lucide-react";
 
-type Theme = "light" | "dark";
 type Persona = "catalog" | "security" | "builder" | "memory" | "settings";
 
-function ThemeSelector({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) => void }) {
-  return (
-    <Select value={theme} onValueChange={(v) => setTheme(v as Theme)}>
-      <SelectTrigger className="h-7 w-full gap-1 text-xs text-muted-foreground">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent position="popper">
-        <SelectItem value="light">Latte</SelectItem>
-        <SelectItem value="dark">Mocha</SelectItem>
-      </SelectContent>
-    </Select>
-  );
-}
+const GROUP_SCOPES: Record<string, Scope[]> = {
+  admins: ["agent:read", "agent:write", "security:read", "security:write", "data:read", "data:write"],
+  "security-admins": ["security:read", "security:write"],
+  "data-stewards": ["data:read", "data:write"],
+  builders: ["agent:read", "agent:write"],
+  operators: ["agent:read", "security:read", "data:read"],
+};
 
-function TimezoneSelector() {
-  const { timezone, setTimezone } = useTimezone();
-  const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-
-  return (
-    <Select
-      value={timezone}
-      onValueChange={(v) => setTimezone(v as TimezonePreference)}
-    >
-      <SelectTrigger className="h-7 w-full gap-1 text-xs text-muted-foreground">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="local">{localTz}</SelectItem>
-        <SelectItem value="UTC">UTC</SelectItem>
-      </SelectContent>
-    </Select>
-  );
-}
+const VIEW_AS_GROUPS = Object.keys(GROUP_SCOPES);
 
 function SidebarClock() {
   const { timezone } = useTimezone();
@@ -131,14 +106,20 @@ function SidebarItem({
 
 function AppContent() {
   const { isAuthenticated, isLoading, user, logout, hasScope } = useAuth();
-  const [theme, setTheme] = useState<Theme>(() =>
-    document.documentElement.classList.contains("dark") ? "dark" : "light",
-  );
+  const { theme } = useTheme();
   const [activePersona, setActivePersona] = useState<Persona>("catalog");
+  const [viewAsGroup, setViewAsGroup] = useState<string | null>(null);
 
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
-  }, [theme]);
+  const isAdmin = user?.groups?.includes("admins") ?? false;
+
+  const effectiveHasScope = useCallback(
+    (scope: Scope) => {
+      if (!viewAsGroup) return hasScope(scope);
+      const groupScopes = GROUP_SCOPES[viewAsGroup] ?? [];
+      return groupScopes.includes(scope);
+    },
+    [viewAsGroup, hasScope],
+  );
 
   const { agents, loading, fetchAgents, registerAgent, deployAgent, redeployAgent, refreshAgent, deleteAgent } = useAgents();
   type ViewMode = "cards" | "table";
@@ -262,7 +243,7 @@ function AppContent() {
       <aside className="w-56 border-r bg-card flex flex-col shrink-0">
         <div className="p-4 border-b">
           <img
-            src={theme === "light" ? "/assets/loom_light_alt.png" : "/assets/loom_dark_alt.png"}
+            src={isLightTheme(theme) ? "/assets/loom_light_alt.png" : "/assets/loom_dark_alt.png"}
             alt="Loom"
             className="h-15"
           />
@@ -274,7 +255,7 @@ function AppContent() {
             active={activePersona === "catalog"}
             onClick={() => setActivePersona("catalog")}
           />
-          {(hasScope("agent:read") || hasScope("agent:write")) && (
+          {(effectiveHasScope("agent:read") || effectiveHasScope("agent:write")) && (
             <SidebarItem
               icon={Bot}
               label="Agents"
@@ -282,7 +263,7 @@ function AppContent() {
               onClick={() => setActivePersona("builder")}
             />
           )}
-          {(hasScope("data:read") || hasScope("data:write")) && (
+          {(effectiveHasScope("data:read") || effectiveHasScope("data:write")) && (
             <SidebarItem
               icon={Brain}
               label="Memory"
@@ -290,7 +271,7 @@ function AppContent() {
               onClick={() => setActivePersona("memory")}
             />
           )}
-          {(hasScope("security:read") || hasScope("security:write")) && (
+          {(effectiveHasScope("security:read") || effectiveHasScope("security:write")) && (
             <SidebarItem
               icon={Shield}
               label="Security"
@@ -304,7 +285,7 @@ function AppContent() {
             active={activePersona === "settings"}
             onClick={() => setActivePersona("settings")}
           />
-          {(hasScope("data:read") || hasScope("data:write")) && (
+          {(effectiveHasScope("data:read") || effectiveHasScope("data:write")) && (
             <>
               <SidebarItem
                 icon={Network}
@@ -342,12 +323,21 @@ function AppContent() {
               </button>
             </div>
           )}
-          <div className="px-3 py-1">
-            <ThemeSelector theme={theme} setTheme={setTheme} />
-          </div>
-          <div className="px-3 py-1">
-            <TimezoneSelector />
-          </div>
+          {isAdmin && (
+            <div className="px-3 py-1">
+              <Select value={viewAsGroup ?? "admins"} onValueChange={(v) => setViewAsGroup(v === "admins" ? null : v)}>
+                <SelectTrigger className="h-7 w-full gap-1 text-xs text-muted-foreground">
+                  <Eye className="h-3 w-3 shrink-0" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {VIEW_AS_GROUPS.map((g) => (
+                    <SelectItem key={g} value={g}>{g}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="px-3 py-1 flex items-center justify-between">
             <span className="inline-flex items-center rounded-full border border-border bg-input-bg px-2 py-0.5">
               <SidebarClock />
@@ -403,7 +393,7 @@ function AppContent() {
                   onSelectAgent={setSelectedAgentId}
                   onRefreshAgent={refreshAgent}
                   onDelete={handleDelete}
-                  readOnly={!hasScope("agent:write")}
+                  readOnly={!effectiveHasScope("agent:write")}
                 />
               )}
 
@@ -455,14 +445,15 @@ function AppContent() {
                 setActivePersona("catalog");
               }}
               onRefreshAgent={refreshAgent}
+              onFetchAgents={() => void fetchAgents()}
               onDelete={handleDelete}
-              readOnly={!hasScope("agent:write")}
+              readOnly={!effectiveHasScope("agent:write")}
             />
           )}
 
-          {activePersona === "security" && <SecurityAdminPage readOnly={!hasScope("security:write")} />}
-          {activePersona === "memory" && <MemoryManagementPage viewMode={memoryViewMode} onViewModeChange={setMemoryViewMode} readOnly={!hasScope("data:write")} />}
-          {activePersona === "settings" && <SettingsPage readOnly={!(hasScope("agent:write") || hasScope("security:write") || hasScope("data:write"))} />}
+          {activePersona === "security" && <SecurityAdminPage readOnly={!effectiveHasScope("security:write")} />}
+          {activePersona === "memory" && <MemoryManagementPage viewMode={memoryViewMode} onViewModeChange={setMemoryViewMode} readOnly={!effectiveHasScope("data:write")} />}
+          {activePersona === "settings" && <SettingsPage readOnly={!(effectiveHasScope("agent:write") || effectiveHasScope("security:write") || effectiveHasScope("data:write"))} />}
         </main>
       </div>
 
@@ -474,9 +465,11 @@ function AppContent() {
 export default function App() {
   return (
     <AuthProvider>
-      <TimezoneProvider>
-        <AppContent />
-      </TimezoneProvider>
+      <ThemeProvider>
+        <TimezoneProvider>
+          <AppContent />
+        </TimezoneProvider>
+      </ThemeProvider>
     </AuthProvider>
   );
 }

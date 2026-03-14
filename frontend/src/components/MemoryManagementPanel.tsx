@@ -30,6 +30,7 @@ import { listTagPolicies } from "@/api/settings";
 import { ApiError } from "@/api/client";
 import type { MemoryResponse, MemoryStrategyRequest, TagPolicy } from "@/api/types";
 import { MemoryCard } from "./MemoryCard";
+import { SortableCardGrid } from "./SortableCardGrid";
 import { ResourceTagFields } from "./ResourceTagFields";
 
 const STRATEGY_TYPES = [
@@ -158,6 +159,10 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
   const [now, setNow] = useState(Date.now());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Track when deletes and creates were initiated for accurate elapsed timers
+  const [deleteStartTimes, setDeleteStartTimes] = useState<Record<number, number>>({});
+  const [creationStartTimes, setCreationStartTimes] = useState<Record<number, number>>({});
+
   // Create form state
   const [formName, setFormName] = useState("");
   const [formDescription, setFormDescription] = useState("");
@@ -195,6 +200,14 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const elapsedFor = (mem: MemoryResponse): number => {
+    const delStart = deleteStartTimes[mem.id];
+    if (mem.status === "DELETING" && delStart) {
+      return Math.max(0, Math.floor((now - delStart) / 1000));
+    }
+    const createStart = creationStartTimes[mem.id];
+    if (mem.status === "CREATING" && createStart) {
+      return Math.max(0, Math.floor((now - createStart) / 1000));
+    }
     if (!mem.created_at) return 0;
     return Math.max(0, Math.floor((now - new Date(mem.created_at).getTime()) / 1000));
   };
@@ -225,6 +238,19 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
           (m) => m.status === "CREATING" || m.status === "DELETING",
         );
         for (const mem of transitional) {
+          // Check for 10-minute creation timeout
+          if (mem.status === "CREATING") {
+            const startTime = creationStartTimes[mem.id];
+            if (startTime && (Date.now() - startTime) > 600_000) {
+              toast.error(`Memory "${mem.name}" creation timed out after 10 minutes`);
+              setCreationStartTimes((prev) => {
+                const next = { ...prev };
+                delete next[mem.id];
+                return next;
+              });
+              continue;
+            }
+          }
           try {
             const updated = await refreshMemory(mem.id);
             setMemories((prev) => prev.map((m) => (m.id === mem.id ? updated : m)));
@@ -281,13 +307,16 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
             }))
           : undefined;
 
-      await createMemory({
+      const created = await createMemory({
         name: formName.trim(),
         description: formDescription.trim() || undefined,
         event_expiry_duration: formExpiryDays,
         memory_strategies: strategies,
         tags: Object.keys(tagValues).length > 0 ? tagValues : undefined,
       });
+      if (created && created.id) {
+        setCreationStartTimes((prev) => ({ ...prev, [created.id]: Date.now() }));
+      }
       resetForm();
       setShowAddForm(false);
       toast.success("Memory resource created");
@@ -336,6 +365,7 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
       setCleanupAws(false);
       if (updated.status === "DELETING") {
         // Async deletion — update local state so polling picks it up
+        setDeleteStartTimes((prev) => ({ ...prev, [id]: Date.now() }));
         setMemories((prev) => prev.map((m) => (m.id === id ? updated : m)));
         toast.success("Memory deletion initiated");
       } else {
@@ -396,7 +426,7 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
         <div>
           <h3 className="text-sm font-medium">Memory Resources</h3>
           <p className="text-xs text-muted-foreground mt-1 whitespace-pre-line">
-            {"This is a memory resource is attached to an agent.\nBy default, it includes only short-term memory.\nIf long-term memory is desired, add the appropriate strategy."}
+            {"A memory resource is attached to an agent.\nBy default, it includes only short-term memory. If long-term memory is desired, add the appropriate strategy."}
           </p>
         </div>
         <Button
@@ -668,10 +698,12 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
       ) : (
         <>
           {viewMode === "cards" ? (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {filteredMemories.map((mem) => (
+            <SortableCardGrid
+              items={filteredMemories}
+              getId={(m) => String(m.id)}
+              storageKey="memory-resources"
+              renderItem={(mem) => (
                 <MemoryCard
-                  key={mem.id}
                   memory={mem}
                   now={now}
                   refreshingId={refreshingId}
@@ -680,9 +712,10 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
                   onDelete={handleDelete}
                   readOnly={readOnly}
                   showOnCardKeys={showOnCardKeys}
+                  deleteStartTime={deleteStartTimes[mem.id]}
                 />
-              ))}
-            </div>
+              )}
+            />
           ) : (
             <div className="rounded-md border overflow-hidden">
               <Table>
@@ -774,9 +807,6 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
                               </label>
                             )}
                             <div className="flex items-center justify-end gap-2">
-                              <span className="text-xs text-muted-foreground mr-auto">
-                                Delete this memory resource?
-                              </span>
                               <Button
                                 size="sm"
                                 variant="ghost"

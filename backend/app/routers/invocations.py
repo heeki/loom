@@ -40,6 +40,7 @@ class InvokeRequest(BaseModel):
     qualifier: str = Field(default="DEFAULT", description="Endpoint qualifier to use")
     session_id: str | None = Field(default=None, description="Existing session ID to reuse (runtimeSessionId)")
     credential_id: int | None = Field(default=None, description="Authorizer credential ID for token generation")
+    bearer_token: str | None = Field(default=None, description="Manual bearer token for agent invocation")
 
 
 class InvocationResponse(BaseModel):
@@ -367,9 +368,15 @@ async def invoke_agent_endpoint(
     db.commit()
     db.refresh(invocation)
 
-    # Fetch access token with priority: user token > credential_id > agent config
+    # Fetch access token with priority: manual token > user token > credential_id > agent config
     access_token = None
     token_source = None
+
+    # Priority 0: Use manually provided bearer token
+    if request_body.bearer_token:
+        access_token = request_body.bearer_token
+        token_source = "manual"
+        logger.info("Using manually provided bearer token for agent invocation")
 
     # Priority 1: Use user's access token from Authorization header
     auth_header = request.headers.get("Authorization", "")

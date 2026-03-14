@@ -378,6 +378,7 @@ The `model_id` field is optional on registration and stored as an `AGENT_CONFIG_
 - `tags` — resolved tags (deploy-time + build-time) stored on the agent record
 - `model_id` — extracted from the agent's `AGENT_CONFIG_JSON` config entry
 - `active_session_count` — computed at query time based on `LOOM_SESSION_IDLE_TIMEOUT_SECONDS`
+- `authorizer_config` — JSON object with `type`, `name`, `pool_id`, `discovery_url` fields (extracted from AgentCore `customJWTAuthorizer` on register/refresh); `null` when no authorizer is configured
 
 **`GET /api/agents/models` response:**
 ```json
@@ -530,11 +531,12 @@ Removes the memory record from the local database without any AWS API call. Used
 {
   "prompt": "Hello, agent!",
   "qualifier": "DEFAULT",
-  "credential_id": 1
+  "credential_id": 1,
+  "bearer_token": "eyJraWQ..."
 }
 ```
 
-The optional `credential_id` references an authorizer credential. When provided, the backend fetches the client secret from Secrets Manager and generates an OAuth token for authenticated invocation.
+The optional `credential_id` references an authorizer credential. When provided, the backend fetches the client secret from Secrets Manager and generates an OAuth token for authenticated invocation. The optional `bearer_token` allows passing a raw bearer token directly — it takes highest priority (Priority 0) in the token selection chain, above user tokens and credential-based tokens.
 
 **SSE event stream format:**
 
@@ -652,7 +654,8 @@ Wraps `boto3.client('bedrock-agentcore-control')` for memory operations:
 
 Invocations are authenticated with a priority-based token selection:
 
-1. **User token (highest priority):** If the incoming request has a valid `Authorization: Bearer` header containing a Cognito user access token, it is validated against the JWKS endpoint and forwarded to AgentCore. The `token_source` is set to `"user"`.
+0. **Bearer token (highest priority):** If the invoke request includes a `bearer_token` field, it is used directly as the Authorization header. The `token_source` is set to `"bearer"`. This supports agents with external authorizers where credentials are not managed within Loom.
+1. **User token:** If the incoming request has a valid `Authorization: Bearer` header containing a Cognito user access token, it is validated against the JWKS endpoint and forwarded to AgentCore. The `token_source` is set to `"user"`.
 2. **Credential-based token:** If the invoke request includes an optional `credential_id`, the backend looks up the `AuthorizerCredential`, fetches the client secret from Secrets Manager (5-minute cache), and exchanges credentials for an M2M access token.
 3. **Agent config token (lowest priority):** Falls back to the agent's stored authorizer config to fetch an M2M token.
 
