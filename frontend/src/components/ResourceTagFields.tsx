@@ -50,7 +50,9 @@ export function ResourceTagFields({ onChange, profileId: controlledProfileId }: 
       const profileVal = profile?.tags[tp.key];
       if (profileVal) {
         resolved[tp.key] = profileVal;
-      } else if (tp.default_value) {
+      } else if (tp.required && tp.default_value) {
+        // Only fall back to default for required policies;
+        // custom/optional tags should only appear when the profile explicitly sets them
         resolved[tp.key] = tp.default_value;
       }
     }

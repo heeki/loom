@@ -171,7 +171,9 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
   // Tag state
   const [tagValues, setTagValues] = useState<Record<string, string>>({});
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
-  const [tagFilters, setTagFilters] = useState<Record<string, string[]>>({});
+  const [tagFilters, setTagFilters] = useState<Record<string, string[]>>(() => {
+    try { return JSON.parse(localStorage.getItem("loom:tagFilters:memories") || "{}") as Record<string, string[]>; } catch { return {}; }
+  });
 
   // Import form state
   const [importMemoryId, setImportMemoryId] = useState("");
@@ -394,8 +396,14 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
   // R3: Progressive disclosure filtering
   const requiredPolicies = showOnCardPolicies.filter(tp => tp.required);
   const customFilterPolicies = showOnCardPolicies.filter(tp => !tp.required);
-  const [activeCustomFilterKeys, setActiveCustomFilterKeys] = useState<string[]>([]);
+  const [activeCustomFilterKeys, setActiveCustomFilterKeys] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("loom:customFilterKeys:memories") || "[]") as string[]; } catch { return []; }
+  });
   const activePolicies = [...requiredPolicies, ...customFilterPolicies.filter(p => activeCustomFilterKeys.includes(p.key))];
+
+  // Persist filter state to localStorage
+  useEffect(() => { localStorage.setItem("loom:tagFilters:memories", JSON.stringify(tagFilters)); }, [tagFilters]);
+  useEffect(() => { localStorage.setItem("loom:customFilterKeys:memories", JSON.stringify(activeCustomFilterKeys)); }, [activeCustomFilterKeys]);
 
   // R4: Custom tag show/hide toggle
   const [showCustomTags, setShowCustomTags] = useState(() => localStorage.getItem("loom:showCustomTags") !== "false");
@@ -700,6 +708,22 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
               </div>
             );
           })}
+          <div className="space-y-1">
+            <label className="block text-[10px] text-muted-foreground">custom</label>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 w-[2.25rem] p-0 bg-input-bg"
+              onClick={() => {
+                const next = !showCustomTags;
+                setShowCustomTags(next);
+                localStorage.setItem("loom:showCustomTags", String(next));
+              }}
+              title={showCustomTags ? "Hide custom tags" : "Show custom tags"}
+            >
+              {showCustomTags ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
           {customFilterPolicies.filter(p => !activeCustomFilterKeys.includes(p.key)).length > 0 && (
             <div className="space-y-1">
               <label className="text-[10px] text-muted-foreground">custom filters</label>
@@ -721,22 +745,6 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
               Clear filters
             </Button>
           )}
-          <div className="space-y-1">
-            <label className="block text-[10px] text-muted-foreground">custom</label>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 w-[2.25rem] p-0 bg-input-bg"
-              onClick={() => {
-                const next = !showCustomTags;
-                setShowCustomTags(next);
-                localStorage.setItem("loom:showCustomTags", String(next));
-              }}
-              title={showCustomTags ? "Hide custom tags" : "Show custom tags"}
-            >
-              {showCustomTags ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-            </Button>
-          </div>
           <span className="text-xs text-muted-foreground ml-auto self-end">
             Showing {filteredMemories.length} of {memories.length} memories
           </span>
