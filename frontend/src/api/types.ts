@@ -205,6 +205,7 @@ export interface ManagedRole {
   role_arn: string;
   description: string;
   policy_document: PolicyDocument;
+  tags: Record<string, string>;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -259,6 +260,7 @@ export interface AuthorizerConfigResponse {
   allowed_scopes: string[];
   client_id: string | null;
   has_client_secret: boolean;
+  tags: Record<string, string>;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -379,7 +381,7 @@ export interface TagPolicy {
   id: number;
   key: string;
   default_value: string | null;
-  source: "deploy-time" | "build-time";
+  designation: "platform:required" | "custom:optional";
   required: boolean;
   show_on_card: boolean;
   created_at: string | null;
@@ -389,14 +391,13 @@ export interface TagPolicy {
 export interface TagPolicyCreateRequest {
   key: string;
   default_value?: string;
-  source: "deploy-time" | "build-time";
   required?: boolean;
   show_on_card?: boolean;
 }
 
 export interface TagPolicyUpdateRequest {
+  key: string;
   default_value?: string;
-  source?: "deploy-time" | "build-time";
   required?: boolean;
   show_on_card?: boolean;
 }

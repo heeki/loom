@@ -14,14 +14,27 @@ const SESSION_KEY = "loom:selectedTagProfileId";
 
 interface ResourceTagFieldsProps {
   onChange: (tags: Record<string, string>) => void;
+  profileId?: string;
 }
 
-export function ResourceTagFields({ onChange }: ResourceTagFieldsProps) {
+export function ResourceTagFields({ onChange, profileId: controlledProfileId }: ResourceTagFieldsProps) {
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
   const [profiles, setProfiles] = useState<TagProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string>(() => {
     return sessionStorage.getItem(SESSION_KEY) || "";
   });
+
+  // Sync with controlled profileId from parent
+  useEffect(() => {
+    if (controlledProfileId !== undefined) {
+      setSelectedProfileId(controlledProfileId);
+      if (controlledProfileId) {
+        sessionStorage.setItem(SESSION_KEY, controlledProfileId);
+      } else {
+        sessionStorage.removeItem(SESSION_KEY);
+      }
+    }
+  }, [controlledProfileId]);
 
   useEffect(() => {
     void settingsApi.listTagPolicies().then(setTagPolicies).catch(() => {});
@@ -34,15 +47,13 @@ export function ResourceTagFields({ onChange }: ResourceTagFieldsProps) {
     const resolved: Record<string, string> = {};
 
     for (const tp of tagPolicies) {
-      if (tp.source === "deploy-time" && tp.default_value) {
+      const profileVal = profile?.tags[tp.key];
+      if (profileVal) {
+        resolved[tp.key] = profileVal;
+      } else if (tp.required && tp.default_value) {
+        // Only fall back to default for required policies;
+        // custom/optional tags should only appear when the profile explicitly sets them
         resolved[tp.key] = tp.default_value;
-      } else if (tp.source === "build-time") {
-        const profileVal = profile?.tags[tp.key];
-        if (profileVal) {
-          resolved[tp.key] = profileVal;
-        } else if (tp.default_value) {
-          resolved[tp.key] = tp.default_value;
-        }
       }
     }
 
@@ -59,8 +70,8 @@ export function ResourceTagFields({ onChange }: ResourceTagFieldsProps) {
     }
   };
 
-  const buildTimePolicies = tagPolicies.filter((tp) => tp.source === "build-time");
-  if (buildTimePolicies.length === 0 && profiles.length === 0) return null;
+  const requiredPolicies = tagPolicies.filter((tp) => tp.required);
+  if (requiredPolicies.length === 0 && profiles.length === 0) return null;
 
   const selectedProfile = profiles.find((p) => p.id.toString() === selectedProfileId);
 
@@ -86,13 +97,13 @@ export function ResourceTagFields({ onChange }: ResourceTagFieldsProps) {
             </SelectContent>
           </Select>
         </div>
-        {selectedProfile && buildTimePolicies.length > 0 && (
+        {selectedProfile && tagPolicies.length > 0 && (
           <div className="flex flex-wrap gap-1.5 pb-1">
-            {buildTimePolicies.map((tp) => {
+            {tagPolicies.map((tp) => {
               const val = selectedProfile.tags[tp.key];
               if (!val) return null;
               return (
-                <Badge key={tp.key} variant="secondary" className="text-[10px] px-1.5 py-0.5 font-normal">
+                <Badge key={tp.key} variant="outline" className="text-[10px] px-1.5 py-0.5 font-normal">
                   {tp.key.replace(/^loom:/, "")}: {val}
                 </Badge>
               );
@@ -100,14 +111,9 @@ export function ResourceTagFields({ onChange }: ResourceTagFieldsProps) {
           </div>
         )}
       </div>
-      {!selectedProfileId && buildTimePolicies.some((tp) => tp.required) && (
+      {!selectedProfileId && requiredPolicies.some((tp) => tp.required) && (
         <p className="text-[10px] text-amber-600 dark:text-amber-400">
           No tag profile selected. Required tags will use default values or &quot;missing&quot;.
-        </p>
-      )}
-      {tagPolicies.filter((tp) => tp.source === "deploy-time").length > 0 && (
-        <p className="text-[10px] text-muted-foreground italic">
-          Deploy-time tags ({tagPolicies.filter((tp) => tp.source === "deploy-time").map((tp) => `${tp.key}=${tp.default_value}`).join(", ")}) are applied automatically.
         </p>
       )}
     </section>

@@ -20,7 +20,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { MultiSelect } from "@/components/ui/multi-select";
-import { Plus, Loader2, RefreshCw, Eraser, Trash2, Lock } from "lucide-react";
+import { AddFilterDropdown } from "@/components/ui/add-filter-dropdown";
+import { Plus, Loader2, Trash2, Lock, X, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
@@ -152,9 +153,6 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
   const [addMode, setAddMode] = useState<"create" | "import">("create");
   const [submitting, setSubmitting] = useState(false);
   const [refreshingId, setRefreshingId] = useState<number | null>(null);
-  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
-  const [cleanupAws, setCleanupAws] = useState(false);
-
   // Elapsed timer: tick a `now` timestamp every second so elapsed = now - created_at
   const [now, setNow] = useState(Date.now());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -173,7 +171,9 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
   // Tag state
   const [tagValues, setTagValues] = useState<Record<string, string>>({});
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
-  const [tagFilters, setTagFilters] = useState<Record<string, string[]>>({});
+  const [tagFilters, setTagFilters] = useState<Record<string, string[]>>(() => {
+    try { return JSON.parse(localStorage.getItem("loom:tagFilters:memories") || "{}") as Record<string, string[]>; } catch { return {}; }
+  });
 
   // Import form state
   const [importMemoryId, setImportMemoryId] = useState("");
@@ -361,8 +361,6 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
     setSubmitting(true);
     try {
       const updated = await deleteMemory(id, deleteInAws);
-      setConfirmDeleteId(null);
-      setCleanupAws(false);
       if (updated.status === "DELETING") {
         // Async deletion — update local state so polling picks it up
         setDeleteStartTimes((prev) => ({ ...prev, [id]: Date.now() }));
@@ -394,6 +392,22 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
 
   const showOnCardPolicies = tagPolicies.filter(tp => tp.show_on_card);
   const showOnCardKeys = showOnCardPolicies.map(tp => tp.key);
+
+  // R3: Progressive disclosure filtering
+  const requiredPolicies = showOnCardPolicies.filter(tp => tp.required);
+  const customFilterPolicies = showOnCardPolicies.filter(tp => !tp.required);
+  const [activeCustomFilterKeys, setActiveCustomFilterKeys] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("loom:customFilterKeys:memories") || "[]") as string[]; } catch { return []; }
+  });
+
+  // Persist filter state to localStorage
+  useEffect(() => { localStorage.setItem("loom:tagFilters:memories", JSON.stringify(tagFilters)); }, [tagFilters]);
+  useEffect(() => { localStorage.setItem("loom:customFilterKeys:memories", JSON.stringify(activeCustomFilterKeys)); }, [activeCustomFilterKeys]);
+
+  // R4: Custom tag show/hide toggle
+  const [showCustomTags, setShowCustomTags] = useState(() => localStorage.getItem("loom:showCustomTags") !== "false");
+  const requiredKeySet = new Set(requiredPolicies.map(tp => tp.key));
+  const effectiveShowOnCardKeys = showCustomTags ? showOnCardKeys : showOnCardKeys.filter(k => requiredKeySet.has(k));
 
   const filteredMemories = memories.filter(mem => {
     return Object.entries(tagFilters).every(([key, values]) => {
@@ -656,15 +670,17 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
 
       {/* Tag Filters */}
       {showOnCardPolicies.length > 0 && memories.length > 0 && (
-        <div className="flex flex-wrap items-center gap-3">
-          {showOnCardPolicies.map(tp => {
+        <div className="flex flex-wrap items-end gap-3">
+          {requiredPolicies.map(tp => {
             const distinctValues = [...new Set(
               memories.map(m => m.tags?.[tp.key]).filter(Boolean)
             )] as string[];
             if (distinctValues.length === 0) return null;
             return (
               <div key={tp.key} className="space-y-1">
-                <label className="text-[10px] text-muted-foreground">{tp.key.replace(/^loom:/, "")}</label>
+                <div className="h-4 flex items-center">
+                  <label className="text-[10px] text-muted-foreground">{tp.key.replace(/^loom:/, "")}</label>
+                </div>
                 <MultiSelect
                   values={tagFilters[tp.key] ?? []}
                   options={distinctValues.sort()}
@@ -673,17 +689,80 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
               </div>
             );
           })}
-          {Object.values(tagFilters).some(v => v.length > 0) && (
+          <div className="space-y-1">
+            <div className="h-4 flex items-center">
+              <label className="text-[10px] text-muted-foreground">custom</label>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 w-[2.25rem] p-0 bg-input-bg"
+              onClick={() => {
+                const next = !showCustomTags;
+                setShowCustomTags(next);
+                localStorage.setItem("loom:showCustomTags", String(next));
+              }}
+              title={showCustomTags ? "Hide custom tags" : "Show custom tags"}
+            >
+              {showCustomTags ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+          {customFilterPolicies.filter(p => activeCustomFilterKeys.includes(p.key)).map(tp => {
+            const distinctValues = [...new Set(
+              memories.map(m => m.tags?.[tp.key]).filter(Boolean)
+            )] as string[];
+            return (
+              <div key={tp.key} className="space-y-1">
+                <div className="h-4 flex items-center gap-1">
+                  <label className="text-[10px] text-muted-foreground">{tp.key}</label>
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      setActiveCustomFilterKeys(prev => prev.filter(k => k !== tp.key));
+                      setTagFilters(prev => {
+                        const next = { ...prev };
+                        delete next[tp.key];
+                        return next;
+                      });
+                    }}
+                    title="Remove filter"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+                <MultiSelect
+                  values={tagFilters[tp.key] ?? []}
+                  options={distinctValues.sort()}
+                  onChange={(v) => setTagFilters(prev => ({ ...prev, [tp.key]: v }))}
+                />
+              </div>
+            );
+          })}
+          {customFilterPolicies.filter(p => !activeCustomFilterKeys.includes(p.key)).length > 0 && (
+            <div className="space-y-1">
+              <div className="h-4 flex items-center">
+                <label className="text-[10px] text-muted-foreground">custom filters</label>
+              </div>
+              <AddFilterDropdown
+                options={customFilterPolicies
+                  .filter(p => !activeCustomFilterKeys.includes(p.key))
+                  .map(p => ({ key: p.key, label: p.key }))}
+                onSelect={(v) => setActiveCustomFilterKeys(prev => [...prev, v])}
+              />
+            </div>
+          )}
+          {(Object.values(tagFilters).some(v => v.length > 0) || activeCustomFilterKeys.length > 0) && (
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 text-xs"
-              onClick={() => setTagFilters({})}
+              className="h-7 text-xs self-end"
+              onClick={() => { setTagFilters({}); setActiveCustomFilterKeys([]); }}
             >
               Clear filters
             </Button>
           )}
-          <span className="text-xs text-muted-foreground ml-auto">
+          <span className="text-xs text-muted-foreground ml-auto self-end">
             Showing {filteredMemories.length} of {memories.length} memories
           </span>
         </div>
@@ -711,28 +790,27 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
                   onRefresh={handleRefresh}
                   onDelete={handleDelete}
                   readOnly={readOnly}
-                  showOnCardKeys={showOnCardKeys}
+                  showOnCardKeys={effectiveShowOnCardKeys}
                   deleteStartTime={deleteStartTimes[mem.id]}
                 />
               )}
             />
           ) : (
             <div className="rounded-md border overflow-hidden">
-              <Table>
+              <Table className="table-fixed">
                 <TableHeader>
                   <TableRow className="bg-card hover:bg-card">
-                    <TableHead>Name</TableHead>
-                    <TableHead className="w-[200px]">Status</TableHead>
-                    <TableHead>Strategies</TableHead>
-                    <TableHead>Event Expiry</TableHead>
-                    <TableHead>Region</TableHead>
-                    <TableHead>Registered</TableHead>
-                    <TableHead className="w-[80px]" />
+                    <TableHead className="w-[30%]">Name</TableHead>
+                    <TableHead className="w-[12%]">Status</TableHead>
+                    <TableHead className="w-[14%]">Strategies</TableHead>
+                    <TableHead className="w-[14%]">Event Expiry</TableHead>
+                    <TableHead className="w-[14%]">Region</TableHead>
+                    <TableHead className="w-[16%]">Registered</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredMemories.map((mem) => (
-                    <TableRow key={mem.id} className="relative bg-input-bg hover:bg-input-bg/80">
+                    <TableRow key={mem.id} className="bg-input-bg hover:bg-input-bg/80">
                       <TableCell className="font-medium text-sm">{mem.name}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1.5">
@@ -758,75 +836,6 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
                       <TableCell className="text-xs text-muted-foreground">{mem.region}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {formatTimestamp(mem.created_at, timezone)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-6 w-6 p-0"
-                            onClick={() => handleRefresh(mem.id)}
-                            disabled={refreshingId === mem.id}
-                            title="Refresh"
-                          >
-                            {refreshingId === mem.id ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
-                              <RefreshCw className="h-3 w-3" />
-                            )}
-                          </Button>
-                          {!readOnly && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-6 w-6 p-0"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setConfirmDeleteId(mem.id);
-                              }}
-                              title="Delete"
-                            >
-                              <Eraser className="h-3 w-3" />
-                            </Button>
-                          )}
-                        </div>
-                        {confirmDeleteId === mem.id && (
-                          <div
-                            className="absolute inset-x-0 bottom-0 rounded-b-lg border-t bg-card px-4 py-2 space-y-1.5"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {mem.memory_id && (
-                              <label className="flex items-end justify-end gap-2 cursor-pointer select-none">
-                                <span className="text-[11px] whitespace-nowrap">Also delete in AgentCore</span>
-                                <input
-                                  type="checkbox"
-                                  checked={cleanupAws}
-                                  onChange={(e) => setCleanupAws(e.target.checked)}
-                                  className="h-3.5 w-3.5 shrink-0 mb-0.5"
-                                />
-                              </label>
-                            )}
-                            <div className="flex items-center justify-end gap-2">
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-6 text-xs"
-                                onClick={() => { setConfirmDeleteId(null); setCleanupAws(false); }}
-                              >
-                                Cancel
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                className="h-6 text-xs"
-                                onClick={() => handleDelete(mem.id, cleanupAws)}
-                                disabled={submitting}
-                              >
-                                Confirm
-                              </Button>
-                            </div>
-                          </div>
-                        )}
                       </TableCell>
                     </TableRow>
                   ))}

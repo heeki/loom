@@ -20,6 +20,15 @@ Parameters:
     Type: CommaDelimitedList
     Description: Comma-separated list of allowed callback URLs
     Default: "https://localhost"
+  pTagApplication:
+    Type: String
+    Description: Value for the loom:application tag
+  pTagGroup:
+    Type: String
+    Description: Value for the loom:group tag
+  pTagOwner:
+    Type: String
+    Description: Value for the loom:owner tag
 
 Resources:
   CognitoUserPool:
@@ -35,6 +44,10 @@ Resources:
           RequireLowercase: true
           RequireNumbers: true
           RequireSymbols: false
+      UserPoolTags:
+        "loom:application": !Ref pTagApplication
+        "loom:group": !Ref pTagGroup
+        "loom:owner": !Ref pTagOwner
 
   CognitoUserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain

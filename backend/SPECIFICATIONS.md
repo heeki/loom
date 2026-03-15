@@ -85,13 +85,17 @@ backend/
 ├── tests/
 │   ├── test_agentcore.py    # AgentCore service tests
 │   ├── test_agents.py       # Agent router tests
+│   ├── test_agents_deploy.py # Deployment-specific tests
 │   ├── test_cloudwatch.py   # CloudWatch service tests
+│   ├── test_iam.py          # IAM service tests
 │   ├── test_invocations.py  # Invocation router tests
 │   ├── test_latency.py      # Latency computation tests
 │   ├── test_logs.py         # Logs router tests
-│   ├── test_agents_deploy.py # Deployment-specific tests
 │   ├── test_memories.py     # Memory resource tests
-│   └── test_tags.py         # Tag policy and tag enforcement tests
+│   ├── test_security.py     # Security router tests (roles, authorizers)
+│   └── test_tags.py         # Tag policy, tag profile, and tag enforcement tests
+├── etc/
+│   └── environment.sh.example  # Example environment configuration template
 ├── makefile
 ├── pyproject.toml
 └── requirements.txt
@@ -154,6 +158,7 @@ backend/
 | `role_arn` | TEXT UNIQUE NOT NULL | IAM role ARN |
 | `description` | TEXT | Role description |
 | `policy_document` | TEXT | JSON policy document |
+| `tags` | TEXT | JSON dict of tags fetched from AWS IAM on import |
 | `created_at` | DATETIME | Creation timestamp |
 | `updated_at` | DATETIME | Last update timestamp |
 
@@ -170,6 +175,7 @@ backend/
 | `allowed_scopes` | TEXT | JSON array of allowed OAuth scopes |
 | `client_id` | TEXT | Default client ID |
 | `client_secret_arn` | TEXT | Secrets Manager ARN for default client secret |
+| `tags` | TEXT | JSON dict of tags |
 | `created_at` | DATETIME | Creation timestamp |
 | `updated_at` | DATETIME | Last update timestamp |
 
@@ -203,22 +209,25 @@ backend/
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | INTEGER PK AUTOINCREMENT | Internal ID |
-| `key` | TEXT UNIQUE NOT NULL | Tag key name (e.g., `deployed-by`, `team`) |
+| `key` | TEXT UNIQUE NOT NULL | Tag key name (e.g., `loom:application`, `cost-center`) |
 | `default_value` | TEXT | Optional default value |
-| `source` | TEXT NOT NULL | `deploy-time` (auto-applied) or `build-time` (user-supplied) |
+| `source` | TEXT (deprecated) | Legacy column, kept for DB compatibility. Not used in API or UI. |
 | `required` | BOOLEAN NOT NULL | Whether this tag must be present on all resources |
 | `show_on_card` | BOOLEAN NOT NULL | Whether to display on agent cards in the catalog |
 | `created_at` | DATETIME | Creation timestamp |
 | `updated_at` | DATETIME | Last update timestamp |
 
+**Computed designation** (not stored, derived from key):
+- `platform:required` — keys starting with `loom:`. Required, read-only in UI.
+- `custom:optional` — all other keys. Optional, editable/deletable in UI.
+
 **Default seed data** (created on first startup):
 
-| Key | Source | Default Value | Required | Show on Card |
-|-----|--------|---------------|----------|--------------|
-| `loom:deployed-by` | deploy-time | `loom` | Yes | No |
-| `loom:application` | build-time | — | Yes | Yes |
-| `loom:group` | build-time | — | Yes | Yes |
-| `loom:owner` | build-time | — | Yes | Yes |
+| Key | Designation | Default Value | Required | Show on Card |
+|-----|-------------|---------------|----------|--------------|
+| `loom:application` | platform:required | — | Yes | Yes |
+| `loom:group` | platform:required | — | Yes | Yes |
+| `loom:owner` | platform:required | — | Yes | Yes |
 
 ### `tag_profiles` table
 
@@ -230,7 +239,7 @@ backend/
 | `created_at` | DATETIME | Creation timestamp |
 | `updated_at` | DATETIME | Last update timestamp |
 
-Tag profiles are named presets of tag values that satisfy build-time tag policies. When a profile is selected during deployment, its tag values are merged with deploy-time policy defaults and applied to all created AWS resources. Tag values are limited to 128 characters.
+Tag profiles are named presets of tag values that satisfy required tag policies. When a profile is selected during deployment, its tag values are merged with policy defaults and applied to all created AWS resources. Tag values are limited to 128 characters.
 
 ### `memories` table
 
@@ -375,7 +384,7 @@ The `model_id` field is optional on registration and stored as an `AGENT_CONFIG_
 | `tags` | Build-time tag values (e.g., `{"team": "aws", "owner": "heeki"}`) |
 
 **`GET /api/agents` response includes:**
-- `tags` — resolved tags (deploy-time + build-time) stored on the agent record
+- `tags` — resolved tags (profile values + policy defaults) stored on the agent record
 - `model_id` — extracted from the agent's `AGENT_CONFIG_JSON` config entry
 - `active_session_count` — computed at query time based on `LOOM_SESSION_IDLE_TIMEOUT_SECONDS`
 - `authorizer_config` — JSON object with `type`, `name`, `pool_id`, `discovery_url` fields (extracted from AgentCore `customJWTAuthorizer` on register/refresh); `null` when no authorizer is configured
@@ -406,9 +415,8 @@ The `model_id` field is optional on registration and stored as an `AGENT_CONFIG_
 | `DELETE` | `/api/settings/tags/{tag_id}` | Delete a tag policy. |
 
 **Tag resolution during deployment:**
-- Deploy-time tags are applied automatically from their `default_value`.
-- Build-time tags are resolved from the selected tag profile; the deploy request includes a `tags: dict[str, str]` field.
-- All required build-time tags must have values or the deployment is rejected (400).
+- For each tag policy: use user-supplied value (from profile) → fall back to `default_value` → error if required and missing (HTTP 400).
+- The deploy request includes a `tags: dict[str, str]` field with values from the selected tag profile.
 - Resolved tags are stored on Agent and Memory records and included in API responses.
 - For registered agents and imported memories, tags are fetched from AWS via `list_tags_for_resource` and stored locally. Missing required tags are filled with `"missing"`.
 
@@ -421,7 +429,7 @@ The `model_id` field is optional on registration and stored as an `AGENT_CONFIG_
 | `PUT` | `/api/settings/tag-profiles/{profile_id}` | Update an existing tag profile. |
 | `DELETE` | `/api/settings/tag-profiles/{profile_id}` | Delete a tag profile. |
 
-Tag profiles are named presets of tag key-value pairs. When creating or updating a profile, all required build-time tag policies must have values in the profile's tags.
+Tag profiles are named presets of tag key-value pairs. When creating or updating a profile, all required tag policies must have values in the profile's tags.
 
 ### Security Administration
 
@@ -445,6 +453,8 @@ Tag profiles are named presets of tag key-value pairs. When creating or updating
 | `POST` | `/api/security/permission-requests` | Create a permission request. |
 | `GET` | `/api/security/permission-requests` | List permission requests. |
 | `PUT` | `/api/security/permission-requests/{req_id}/review` | Approve or deny a permission request. |
+
+**Role import behavior:** When importing a role by ARN, the backend fetches the IAM policy document via `get_role_policy` and IAM tags via `list_role_tags`, storing both on the managed role record. Tags are included in the role response as a JSON dict.
 
 ### Memory Resources
 

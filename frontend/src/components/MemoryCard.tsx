@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, Eraser, RefreshCw } from "lucide-react";
+import { Loader2, Trash2, RefreshCw } from "lucide-react";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { statusVariant } from "@/lib/status";
@@ -41,9 +41,12 @@ export function MemoryCard({
 
   const transitional = isTransitional(memory.status);
 
+  // For DELETING, use the recorded start time from when the user clicked delete.
+  // For CREATING, use created_at as a reasonable proxy.
   const elapsedSeconds = (() => {
     if (!transitional) return 0;
-    if (memory.status === "DELETING" && deleteStartTime) {
+    if (memory.status === "DELETING") {
+      if (!deleteStartTime) return 0;
       return Math.max(0, Math.floor((now - deleteStartTime) / 1000));
     }
     if (!memory.created_at) return 0;
@@ -89,7 +92,7 @@ export function MemoryCard({
                 className="text-muted-foreground/50 hover:text-destructive transition-colors"
                 title="Delete memory"
               >
-                <Eraser className="h-3.5 w-3.5" />
+                <Trash2 className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
@@ -117,7 +120,7 @@ export function MemoryCard({
             {showOnCardKeys
               .filter(key => memory.tags[key])
               .map(key => (
-                <Badge key={key} variant="secondary" className="text-[10px] px-1.5 py-0 font-normal">
+                <Badge key={key} variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
                   {key.replace(/^loom:/, "")}: {memory.tags[key]}
                 </Badge>
               ))}

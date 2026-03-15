@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/select";
 import { useAuthorizerConfigs } from "@/hooks/useSecurity";
 import { listCognitoPools, listAuthorizerCredentials, createAuthorizerCredential, deleteAuthorizerCredential } from "@/api/security";
+import { Badge } from "@/components/ui/badge";
 import { Pencil, Trash2, Plus, ChevronDown, ChevronRight, Key } from "lucide-react";
 import { toast } from "sonner";
 import type { CognitoPool, AuthorizerCredential } from "@/api/types";
@@ -55,19 +56,20 @@ function TagInput({
       {values.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {values.map((v) => (
-            <span
+            <Badge
               key={v}
-              className="inline-flex items-center gap-1 rounded bg-accent px-2 py-0.5 text-xs"
+              variant="outline"
+              className="gap-1 px-2 py-0.5 text-xs font-normal bg-primary/10"
             >
               {v}
               <button
                 type="button"
                 onClick={() => remove(v)}
-                className="text-muted-foreground hover:text-foreground"
+                className="text-muted-foreground hover:text-foreground ml-0.5"
               >
                 &times;
               </button>
-            </span>
+            </Badge>
           ))}
         </div>
       )}
@@ -243,6 +245,11 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
     try {
       await deleteConfig(id);
       setConfirmDeleteId(null);
+      setCredentials((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       toast.success("Authorizer config deleted");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to delete config");
@@ -358,48 +365,68 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
       ) : (
         <div className="space-y-2">
           {configs.map((config) => (
-            <Card key={config.id}>
-              <CardContent className="py-3 space-y-2">
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next = expandedId === config.id ? null : config.id;
-                      setExpandedId(next);
-                      if (next !== null && !credentials[config.id]) {
-                        fetchCredentials(config.id);
-                      }
-                    }}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    {expandedId === config.id ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                  </button>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium">{config.name}</div>
-                    <div className="text-xs text-muted-foreground">{config.authorizer_type === "cognito" ? "Amazon Cognito" : config.authorizer_type}</div>
+            <Card key={config.id} className="relative py-3 gap-1">
+              <CardHeader className="gap-1 pb-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = expandedId === config.id ? null : config.id;
+                        setExpandedId(next);
+                        if (next !== null && !credentials[config.id]) {
+                          fetchCredentials(config.id);
+                        }
+                      }}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      {expandedId === config.id ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    </button>
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium">{config.name}</div>
+                      <div className="text-xs text-muted-foreground">{config.authorizer_type === "cognito" ? "Amazon Cognito" : config.authorizer_type}</div>
+                    </div>
                   </div>
-                  <div className="flex gap-1 shrink-0">
-                    {!readOnly && (
-                      <>
-                        <Button size="sm" variant="ghost" onClick={() => startEdit(config.id)}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setConfirmDeleteId(config.id)}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </>
-                    )}
-                  </div>
+                  {!readOnly && (
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => startEdit(config.id)}
+                        className="text-muted-foreground/50 hover:text-foreground transition-colors"
+                        title="Edit"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteId(config.id)}
+                        className="text-muted-foreground/50 hover:text-destructive transition-colors"
+                        title="Delete"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
                 </div>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {config.tags && Object.keys(config.tags).length > 0 && (
+                  <div className="flex flex-wrap gap-1 ml-6">
+                    {Object.entries(config.tags).map(([key, value]) => (
+                      <Badge key={key} variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
+                        {key.replace(/^loom:/, "")}: {value}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
 
                 {confirmDeleteId === config.id && (
-                  <div className="flex items-center gap-2 rounded border border-destructive/50 bg-destructive/5 p-2 text-xs">
-                    <span>Delete this config?</span>
-                    <Button size="sm" variant="destructive" onClick={() => handleDelete(config.id)} disabled={submitting}>
-                      Confirm
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setConfirmDeleteId(null)}>
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setConfirmDeleteId(null)}>
                       Cancel
+                    </Button>
+                    <Button size="sm" variant="destructive" className="h-6 text-xs" onClick={() => handleDelete(config.id)} disabled={submitting}>
+                      Confirm
                     </Button>
                   </div>
                 )}

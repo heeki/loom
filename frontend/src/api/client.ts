@@ -41,8 +41,15 @@ export async function apiFetch<T>(
   if (!response.ok) {
     let detail = `HTTP ${response.status}`;
     try {
-      const body = (await response.json()) as { detail?: string };
-      if (body.detail) detail = body.detail;
+      const body = (await response.json()) as { detail?: string | unknown[] };
+      if (typeof body.detail === "string") {
+        detail = body.detail;
+      } else if (Array.isArray(body.detail)) {
+        detail = body.detail.map((e) => {
+          const err = e as { msg?: string; loc?: string[] };
+          return err.msg ?? String(e);
+        }).join("; ");
+      }
     } catch {
       // use default detail
     }

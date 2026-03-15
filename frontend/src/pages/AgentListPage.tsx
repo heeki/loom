@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, LayoutGrid, TableIcon, Eraser, Network, Users } from "lucide-react";
+import { Plus, LayoutGrid, TableIcon, Network, Users, X, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,6 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { MultiSelect } from "@/components/ui/multi-select";
+import { AddFilterDropdown } from "@/components/ui/add-filter-dropdown";
 import { AgentRegistrationForm } from "@/components/AgentRegistrationForm";
 import { AgentCard } from "@/components/AgentCard";
 import { SortableCardGrid } from "@/components/SortableCardGrid";
@@ -56,10 +57,10 @@ export function AgentListPage({
   const [submitting, setSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState<BuilderTab>("deploy");
   const [showAddForm, setShowAddForm] = useState(false);
-  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
-  const [cleanupAws, setCleanupAws] = useState(false);
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
-  const [tagFilters, setTagFilters] = useState<Record<string, string[]>>({});
+  const [tagFilters, setTagFilters] = useState<Record<string, string[]>>(() => {
+    try { return JSON.parse(localStorage.getItem("loom:tagFilters:agents") || "{}") as Record<string, string[]>; } catch { return {}; }
+  });
   const [deployingName, setDeployingName] = useState<string | null>(null);
 
   useEffect(() => {
@@ -85,6 +86,22 @@ export function AgentListPage({
 
   const showOnCardPolicies = tagPolicies.filter(tp => tp.show_on_card);
   const showOnCardKeys = showOnCardPolicies.map(tp => tp.key);
+
+  // R3: Progressive disclosure filtering
+  const requiredPolicies = showOnCardPolicies.filter(tp => tp.required);
+  const customPolicies = showOnCardPolicies.filter(tp => !tp.required);
+  const [activeCustomFilterKeys, setActiveCustomFilterKeys] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("loom:customFilterKeys:agents") || "[]") as string[]; } catch { return []; }
+  });
+
+  // Persist filter state to localStorage
+  useEffect(() => { localStorage.setItem("loom:tagFilters:agents", JSON.stringify(tagFilters)); }, [tagFilters]);
+  useEffect(() => { localStorage.setItem("loom:customFilterKeys:agents", JSON.stringify(activeCustomFilterKeys)); }, [activeCustomFilterKeys]);
+
+  // R4: Custom tag show/hide toggle
+  const [showCustomTags, setShowCustomTags] = useState(() => localStorage.getItem("loom:showCustomTags") !== "false");
+  const requiredKeySet = new Set(requiredPolicies.map(tp => tp.key));
+  const effectiveShowOnCardKeys = showCustomTags ? showOnCardKeys : showOnCardKeys.filter(k => requiredKeySet.has(k));
 
   const filteredAgents = agents.filter(agent => {
     return Object.entries(tagFilters).every(([key, values]) => {
@@ -208,15 +225,17 @@ export function AgentListPage({
 
         {/* Tag Filters */}
         {showOnCardPolicies.length > 0 && agents.length > 0 && (
-          <div className="flex flex-wrap items-center gap-3">
-            {showOnCardPolicies.map(tp => {
+          <div className="flex flex-wrap items-end gap-3">
+            {requiredPolicies.map(tp => {
               const distinctValues = [...new Set(
                 agents.map(a => a.tags?.[tp.key]).filter(Boolean)
               )] as string[];
               if (distinctValues.length === 0) return null;
               return (
                 <div key={tp.key} className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground">{tp.key.replace(/^loom:/, "")}</label>
+                  <div className="h-4 flex items-center">
+                    <label className="text-[10px] text-muted-foreground">{tp.key.replace(/^loom:/, "")}</label>
+                  </div>
                   <MultiSelect
                     values={tagFilters[tp.key] ?? []}
                     options={distinctValues.sort()}
@@ -225,17 +244,80 @@ export function AgentListPage({
                 </div>
               );
             })}
-            {Object.values(tagFilters).some(v => v.length > 0) && (
+            <div className="space-y-1">
+              <div className="h-4 flex items-center">
+                <label className="text-[10px] text-muted-foreground">custom</label>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 w-[2.25rem] p-0 bg-input-bg"
+                onClick={() => {
+                  const next = !showCustomTags;
+                  setShowCustomTags(next);
+                  localStorage.setItem("loom:showCustomTags", String(next));
+                }}
+                title={showCustomTags ? "Hide custom tags" : "Show custom tags"}
+              >
+                {showCustomTags ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+              </Button>
+            </div>
+            {customPolicies.filter(p => activeCustomFilterKeys.includes(p.key)).map(tp => {
+              const distinctValues = [...new Set(
+                agents.map(a => a.tags?.[tp.key]).filter(Boolean)
+              )] as string[];
+              return (
+                <div key={tp.key} className="space-y-1">
+                  <div className="h-4 flex items-center gap-1">
+                    <label className="text-[10px] text-muted-foreground">{tp.key}</label>
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        setActiveCustomFilterKeys(prev => prev.filter(k => k !== tp.key));
+                        setTagFilters(prev => {
+                          const next = { ...prev };
+                          delete next[tp.key];
+                          return next;
+                        });
+                      }}
+                      title="Remove filter"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                  <MultiSelect
+                    values={tagFilters[tp.key] ?? []}
+                    options={distinctValues.sort()}
+                    onChange={(v) => setTagFilters(prev => ({ ...prev, [tp.key]: v }))}
+                  />
+                </div>
+              );
+            })}
+            {customPolicies.filter(p => !activeCustomFilterKeys.includes(p.key)).length > 0 && (
+              <div className="space-y-1">
+                <div className="h-4 flex items-center">
+                  <label className="text-[10px] text-muted-foreground">custom filters</label>
+                </div>
+                <AddFilterDropdown
+                  options={customPolicies
+                    .filter(p => !activeCustomFilterKeys.includes(p.key))
+                    .map(p => ({ key: p.key, label: p.key }))}
+                  onSelect={(v) => setActiveCustomFilterKeys(prev => [...prev, v])}
+                />
+              </div>
+            )}
+            {(Object.values(tagFilters).some(v => v.length > 0) || activeCustomFilterKeys.length > 0) && (
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 text-xs"
-                onClick={() => setTagFilters({})}
+                className="h-7 text-xs self-end"
+                onClick={() => { setTagFilters({}); setActiveCustomFilterKeys([]); }}
               >
                 Clear filters
               </Button>
             )}
-            <span className="text-xs text-muted-foreground ml-auto">
+            <span className="text-xs text-muted-foreground ml-auto self-end">
               Showing {filteredAgents.length} of {agents.length} agents
             </span>
           </div>
@@ -267,29 +349,28 @@ export function AgentListPage({
                     onRefresh={onRefreshAgent}
                     onDelete={onDelete}
                     readOnly={readOnly}
-                    showOnCardKeys={showOnCardKeys}
+                    showOnCardKeys={effectiveShowOnCardKeys}
                   />
                 )}
               />
             ) : (
               <div className="rounded-md border overflow-hidden">
-                <Table>
+                <Table className="table-fixed">
                   <TableHeader>
                     <TableRow className="bg-card hover:bg-card">
-                      <TableHead>Name</TableHead>
-                      <TableHead className="w-[160px]">Status</TableHead>
-                      <TableHead>Protocol</TableHead>
-                      <TableHead>Network</TableHead>
-                      <TableHead>Region</TableHead>
-                      <TableHead>Registered</TableHead>
-                      <TableHead className="w-[60px]" />
+                      <TableHead className="w-[30%]">Name</TableHead>
+                      <TableHead className="w-[12%]">Status</TableHead>
+                      <TableHead className="w-[14%]">Protocol</TableHead>
+                      <TableHead className="w-[14%]">Network</TableHead>
+                      <TableHead className="w-[14%]">Region</TableHead>
+                      <TableHead className="w-[16%]">Registered</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredAgents.map((agent) => (
                       <TableRow
                         key={agent.id}
-                        className="relative bg-input-bg hover:bg-input-bg/80 cursor-pointer"
+                        className="bg-input-bg hover:bg-input-bg/80 cursor-pointer"
                         onClick={() => onSelectAgent(agent.id)}
                       >
                         <TableCell className="font-medium text-sm">
@@ -309,65 +390,6 @@ export function AgentListPage({
                         <TableCell className="text-xs text-muted-foreground">{agent.region}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {formatTimestamp(agent.registered_at, timezone)}
-                        </TableCell>
-                        <TableCell>
-                          {!readOnly && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-6 w-6 p-0"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setConfirmDeleteId(agent.id);
-                              }}
-                              title="Delete"
-                            >
-                              <Eraser className="h-3 w-3" />
-                            </Button>
-                          )}
-                          {confirmDeleteId === agent.id && (
-                            <div
-                              className="absolute inset-x-0 bottom-0 rounded-b-lg border-t bg-card px-4 py-2 space-y-1.5"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {agent.runtime_id && (
-                                <label className="flex items-end justify-end gap-2 cursor-pointer select-none">
-                                  <span className="text-[11px] whitespace-nowrap">Also delete in AgentCore</span>
-                                  <input
-                                    type="checkbox"
-                                    checked={cleanupAws}
-                                    onChange={(e) => setCleanupAws(e.target.checked)}
-                                    className="h-3.5 w-3.5 shrink-0 mb-0.5"
-                                  />
-                                </label>
-                              )}
-                              <div className="flex items-center justify-end gap-2">
-                                <span className="text-xs text-muted-foreground mr-auto">
-                                  Delete this agent?
-                                </span>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-6 text-xs"
-                                  onClick={() => { setConfirmDeleteId(null); setCleanupAws(false); }}
-                                >
-                                  Cancel
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="destructive"
-                                  className="h-6 text-xs"
-                                  onClick={() => {
-                                    onDelete(agent.id, cleanupAws);
-                                    setConfirmDeleteId(null);
-                                    setCleanupAws(false);
-                                  }}
-                                >
-                                  Confirm
-                                </Button>
-                              </div>
-                            </div>
-                          )}
                         </TableCell>
                       </TableRow>
                     ))}

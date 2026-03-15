@@ -9,8 +9,9 @@ A platform for building, testing, and operating AI agents on Amazon Bedrock Agen
 - **Agent Management** — Deploy new agents or import existing AgentCore Runtime agents
 - **Memory Management** — Create and manage AgentCore Memory resources with configurable strategies (semantic, summary, user preference, episodic, custom)
 - **Security Administration** — Manage IAM roles, authorizer configs, credentials, and permission requests
-- **Resource Tagging** — Configurable tag policies and named tag profiles applied to all deployed resources (agents, memory, IAM roles), tag badges on cards, multi-select filtering on all listing pages
-- **Settings** — Tag profile management (create, edit, delete named tag presets) accessible to all users
+- **Resource Tagging** — Configurable tag policies (platform + custom) and named tag profiles applied to all deployed resources (agents, memory, IAM roles). Tag badges on cards with show/hide toggle for custom tags. Progressive disclosure filtering with persistent filter state across navigation
+- **Tagging** — Dedicated page for managing tag policies (platform read-only with lock icon, custom editable/deletable) and tag profiles (create, edit, delete named tag presets with drag-to-reorder)
+- **Settings** — Display preferences (theme and timezone)
 - SSE streaming invocation with real-time response display and friendly error messages
 - Authenticated agent invocations using user tokens, M2M credentials, or manual bearer tokens
 - Cold-start latency measurement via automatic CloudWatch log parsing
@@ -31,8 +32,10 @@ A platform for building, testing, and operating AI agents on Amazon Bedrock Agen
 loom/
 ├── agents/            # Agent blueprint source code (Strands Agent)
 ├── backend/           # FastAPI backend (Python, SQLAlchemy, boto3)
+│   └── etc/           # Backend environment config (environment.sh.example)
 ├── frontend/          # React/TypeScript frontend (Vite, shadcn, Tailwind CSS)
-├── security/          # Security IaC templates (IAM roles, Cognito) + makefile + etc/
+├── security/          # Security IaC templates (IAM roles, Cognito) + makefile
+│   └── etc/           # Security environment config (environment.sh.example)
 ├── etc/               # Configuration (environment.sh)
 ├── iac/               # Infrastructure as Code (CloudFormation, SAM)
 ├── makefile           # Root orchestration
@@ -112,7 +115,10 @@ make cognito.set-passwords  # Set permanent passwords for all users
 
 ### Configuration
 
-Runtime configuration is sourced from `etc/environment.sh`. See the backend and frontend READMEs for available variables.
+Runtime configuration is sourced from `etc/environment.sh`. Example templates are provided:
+- `backend/etc/environment.sh.example` — Backend environment variables (ports, database, AWS region, S3 bucket, Cognito)
+- `security/etc/environment.sh.example` — Security stack variables (Cognito pool, passwords)
+- `frontend/.env.example` — Frontend environment variables (Cognito user client ID)
 
 ### Make Targets
 
@@ -128,5 +134,5 @@ make -C frontend dev    # Start frontend dev server
 
 - **Backend:** FastAPI with SQLAlchemy (SQLite), boto3 for AWS interactions, SSE streaming via `StreamingResponse`
 - **Frontend:** React 18, TypeScript, Vite, shadcn/ui, Tailwind CSS v4
-- **Persona Navigation:** Sidebar with Platform Catalog, Agents, Memory, Security Admin, Settings, plus MCP Servers and A2A Agents (coming soon)
+- **Persona Navigation:** Sidebar with Platform Catalog, Agents, Memory, Security Admin, Tagging, Settings, plus MCP Servers and A2A Agents (coming soon)
 - **Session Liveness:** Computed locally using an idle timeout heuristic (`LOOM_SESSION_IDLE_TIMEOUT_SECONDS`). No AWS control plane APIs are called — the Bedrock AgentCore SDK does not expose session listing/querying APIs.

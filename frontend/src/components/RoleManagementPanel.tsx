@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PolicyViewer } from "@/components/PolicyViewer";
 import { useManagedRoles } from "@/hooks/useSecurity";
@@ -92,44 +93,59 @@ export function RoleManagementPanel({ readOnly }: { readOnly?: boolean }) {
       ) : (
         <div className="space-y-2">
           {roles.map((role) => (
-            <Card key={role.id}>
-              <CardContent className="py-3 space-y-2">
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setExpandedRoleId(expandedRoleId === role.id ? null : role.id)}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    {expandedRoleId === role.id ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                  </button>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium truncate">{role.role_name}</div>
-                    <div className="text-xs text-muted-foreground truncate">{role.role_arn}</div>
-                  </div>
-                  <div className="text-xs text-muted-foreground hidden sm:block max-w-[30%] truncate">
-                    {role.description}
+            <Card key={role.id} className="relative py-3 gap-1">
+              <CardHeader className="gap-1 pb-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => setExpandedRoleId(expandedRoleId === role.id ? null : role.id)}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      {expandedRoleId === role.id ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    </button>
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium truncate">{role.role_name}</div>
+                      <div className="text-xs text-muted-foreground truncate">{role.role_arn}</div>
+                    </div>
                   </div>
                   {!readOnly && (
-                    <div className="flex gap-1 shrink-0">
-                      <Button
-                        size="sm"
-                        variant="ghost"
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
                         onClick={() => setConfirmDeleteId(role.id)}
+                        className="text-muted-foreground/50 hover:text-destructive transition-colors"
+                        title="Delete"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      </button>
                     </div>
                   )}
                 </div>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {role.tags && Object.keys(role.tags).length > 0 && (
+                  <div className="flex flex-wrap gap-1 ml-6">
+                    {Object.entries(role.tags).map(([key, value]) => (
+                      <Badge key={key} variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
+                        {key.replace(/^loom:/, "")}: {value}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                {role.description && (
+                  <div className="text-xs text-muted-foreground truncate">
+                    {role.description}
+                  </div>
+                )}
 
                 {confirmDeleteId === role.id && (
-                  <div className="flex items-center gap-2 rounded border border-destructive/50 bg-destructive/5 p-2 text-xs">
-                    <span>Delete this role?</span>
-                    <Button size="sm" variant="destructive" onClick={() => handleDelete(role.id)} disabled={submitting}>
-                      Confirm
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setConfirmDeleteId(null)}>
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setConfirmDeleteId(null)}>
                       Cancel
+                    </Button>
+                    <Button size="sm" variant="destructive" className="h-6 text-xs" onClick={() => handleDelete(role.id)} disabled={submitting}>
+                      Confirm
                     </Button>
                   </div>
                 )}

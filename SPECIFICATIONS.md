@@ -18,7 +18,8 @@ The frontend is organized around persona-based workflows, accessible via a sideb
 - **Agents** — Deploy new agents or import existing ones. Includes agent listing with card/table view toggle.
 - **Security Admin** — Manage IAM roles, authorizer configurations, credentials, and permission requests.
 - **Memory** — Create new AgentCore Memory resources with configurable strategies or import existing ones.
-- **Settings** — Manage tag profiles and other configuration. Accessible to all scopes; write operations require `*:write`.
+- **Tagging** — Manage tag policies (platform + custom) and tag profiles. Accessible to all scopes; write operations require `*:write`.
+- **Settings** — Manage display preferences (theme, timezone). Accessible to all scopes.
 - **MCP Servers** (coming soon) — Disabled sidebar entry for future MCP server management.
 - **A2A Agents** (coming soon) — Disabled sidebar entry for future A2A agent management.
 
@@ -263,12 +264,11 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Scope-based frontend authorization: `AuthContext` extracts `cognito:groups` from the ID token, maps groups to scopes, and exposes `hasScope()`. Sidebar items are conditionally rendered based on user scopes. Write operations (add, edit, delete buttons) are disabled or hidden via a `readOnly` prop when the user lacks `*:write` scopes. When auth is not configured, all scopes are granted.
 
 ### Phase 7 — Resource Tagging *(Complete)*
-- Configurable tag policy system: `TagPolicy` model with key, default_value, source (deploy-time/build-time), required, and show_on_card fields.
-- Tag policy CRUD API under `/api/settings/tags` with default seed data (loom:deployed-by, loom:application, loom:group, loom:owner).
-- Tag profile system: `TagProfile` model for named sets of tag values. CRUD API under `/api/settings/tag-profiles`. Profiles satisfy build-time tag policies and are applied to all deployed resources.
+- Configurable tag policy system: `TagPolicy` model with key, default_value, required, and show_on_card fields. Two-tier designation: `platform:required` (keys starting with `loom:`) and `custom:optional` (all others). Designation is computed from the key, not stored.
+- Tag policy CRUD API under `/api/settings/tags` with default seed data (loom:application, loom:group, loom:owner).
+- Tag profile system: `TagProfile` model for named sets of tag values. CRUD API under `/api/settings/tag-profiles`. Profiles satisfy required tag policies and are applied to all deployed resources.
 - `ResourceTagFields` shared component: fetches tag policies and profiles, renders a profile dropdown with `sessionStorage` persistence (`loom:selectedTagProfileId`), resolves tags from the selected profile + policy defaults, and passes resolved tags to the parent form via `onChange`. Used by both the agent deploy form and memory create form.
-- Deploy-time tags are automatically applied from policy defaults; build-time tags are resolved from the selected tag profile.
-- Required build-time tag validation before deployment — missing tags return HTTP 400.
+- Unified tag resolution: for each policy, use user-supplied value → fall back to `default_value` → error if required and missing. Required tag validation before deployment — missing tags return HTTP 400.
 - All AWS resources that support tags (AgentCore runtimes, runtime endpoints, IAM execution roles, managed roles, memory resources) receive the resolved tags.
 - Memory resources: `tags` column added to the `memories` table. Tags are resolved from tag policies + selected profile on creation, passed to AWS `create_memory`, and stored locally. Imported memories fetch existing tags from AWS via `list_tags_for_resource` and enforce tag policies (missing required tags default to "missing").
 - Registered agents fetch existing tags from AWS via `list_tags_for_resource` and enforce tag policies (missing required tags default to "missing").
@@ -276,7 +276,7 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Agent and memory cards display tag badges (`variant="secondary"`) for tags with `show_on_card=true`.
 - All listing pages (Platform Catalog, Agents, Memory) provide tag-based filtering with multi-select dropdowns (checkbox-based), AND logic, clear button, and item count display.
 - Settings persona: new sidebar entry accessible to all scopes. `SettingsPage` provides tag profile CRUD. `*:write` scopes can create, edit, and delete profiles; `*:read` scopes can only view. Tag value inputs enforce a 128-character maximum length.
-- 27 new backend tests covering tag policy CRUD, tag resolution, validation, and agent tag storage.
+- 29 backend tests covering tag policy CRUD, tag designation, tag resolution, validation, and agent tag storage.
 
 ### Phase 8 — Frontend Visual Polish *(Complete)*
 - Theme system: `ThemeContext` with 10 themes — 5 light (Ayu Light, Catppuccin Latte, Everforest Light, Rosé Pine Dawn, Solarized Light) and 5 dark (Catppuccin Mocha, Dracula, Gruvbox, Nord, Tokyo Night). Theme selector on Settings page with Light/Dark grouping. CSS variables per theme in `index.css`. Latte is the default (no class); other themes use class selectors. `localStorage` persistence.
@@ -293,7 +293,21 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Catalog page: removed unnecessary refresh button from Memory Resources section.
 - Documentation: `frontend/.env.example` template, README title updated.
 
-### Phase 9 — Advanced Operations
+### Phase 9 — Tagging Page and Custom Tags *(Complete)*
+- Dedicated Tagging page: tag profile management extracted from Settings into a new `TaggingPage` component with its own sidebar entry (Tags icon, visible to all scopes). Drag-to-reorder via `SortableCardGrid` for both tag policies and tag profiles.
+- Custom tag policy management: `platform:required` tags shown as read-only cards with lock icon (top-right) and designation badge; `custom:optional` tags are editable (pencil icon) and deletable (Trash2 icon, top-right) with designation badge. "Add Custom Tag" form with key, default value, and show-on-card toggle. Custom tags are always `required=false`.
+- Tag profile form with two sections: **Platform (Required)** with mandatory input fields for all `platform:required` tags, and **Custom (Optional)** with checkbox-to-enable pattern per custom tag (checking reveals a value input, unchecking removes from profile).
+- Simplified tag model: removed `source` (build-time/deploy-time) distinction. Tag resolution: for each policy, use user-supplied value → fall back to `default_value` (only for required policies) → error if required and missing. Custom/optional tags only appear when the profile explicitly sets them.
+- Progressive disclosure tag filtering: on Catalog, Agents, and Memory pages, required tag filters are always shown; custom tag filters are hidden until added via a custom `AddFilterDropdown` component. Filter bar layout: required filters → eyeball toggle → activated custom filters → "custom filters" Add dropdown → Clear filters → count. All label rows use fixed `h-4` height for visual alignment. Filter state (`tagFilters` and `activeCustomFilterKeys`) persisted to `localStorage` per page and survives navigation.
+- Custom tag show/hide toggle: Eye/EyeOff button on filter bars (positioned left of custom filter dropdown) toggles visibility of custom tags on agent and memory cards. Preference persisted to `localStorage` (`loom:showCustomTags`).
+- Card layout consistency: Trash2 icon for delete across all cards (agents, memory, roles, authorizers, tags). Edit/delete icons positioned top-right as lightweight `<button>` elements. Delete confirmation right-aligned at card bottom.
+- Table consistency: all tables use `table-fixed` with matching percentage-based column widths (30%/12%/14%/14%/14%/16%). Action columns removed from all tables — delete/refresh operations are card-view only.
+- Security card consistency: RoleManagementPanel and AuthorizerManagementPanel cards use the same top-right icon pattern (pencil + trash for authorizers, trash for roles). Tags aligned with content via `ml-6` offset.
+- Backend: `tags` column added to `managed_roles` and `authorizer_configs` tables. IAM role import fetches tags via `list_role_tags`. `environment.sh.example` files added for backend and security directories.
+- Pydantic error handling: `apiFetch` handles array-style `detail` responses (Pydantic validation errors) by joining `msg` fields.
+- Settings page simplified to display preferences only (theme + timezone).
+
+### Phase 10 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

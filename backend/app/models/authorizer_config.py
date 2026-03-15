@@ -1,3 +1,5 @@
+import json
+
 from sqlalchemy import Column, Integer, String, Text, DateTime
 from sqlalchemy.sql import func
 from app.db import Base
@@ -14,11 +16,19 @@ class AuthorizerConfig(Base):
     allowed_scopes = Column(Text, default="[]")  # JSON array
     client_id = Column(String, nullable=True)
     client_secret_arn = Column(String, nullable=True)  # ARN in Secrets Manager
+    tags = Column(Text, nullable=True)  # JSON dict
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
+    def get_tags(self) -> dict[str, str]:
+        if not self.tags:
+            return {}
+        return json.loads(self.tags)
+
+    def set_tags(self, tags: dict[str, str]) -> None:
+        self.tags = json.dumps(tags)
+
     def to_dict(self) -> dict:
-        import json
         return {
             "id": self.id,
             "name": self.name,
@@ -29,6 +39,7 @@ class AuthorizerConfig(Base):
             "allowed_scopes": json.loads(self.allowed_scopes) if self.allowed_scopes else [],
             "client_id": self.client_id,
             "has_client_secret": bool(self.client_secret_arn),
+            "tags": self.get_tags(),
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
