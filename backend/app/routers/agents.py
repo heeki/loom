@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.dependencies.auth import UserInfo, require_scopes
 from app.models.agent import Agent
+from app.models.authorizer_config import AuthorizerConfig
 from app.models.config_entry import ConfigEntry
 from app.models.session import InvocationSession
 from app.models.invocation import Invocation
@@ -236,8 +237,18 @@ def _agent_response(agent: Agent, db: Session) -> AgentResponse:
             except (json.JSONDecodeError, TypeError):
                 pass
             break
+
+    agent_dict = agent.to_dict()
+
+    # Enrich authorizer_config with the matching AuthorizerConfig name
+    auth_cfg = agent_dict.get("authorizer_config")
+    if auth_cfg and auth_cfg.get("pool_id"):
+        ac = db.query(AuthorizerConfig).filter(AuthorizerConfig.pool_id == auth_cfg["pool_id"]).first()
+        if ac:
+            auth_cfg["name"] = ac.name
+
     return AgentResponse(
-        **agent.to_dict(),
+        **agent_dict,
         model_id=model_id,
         active_session_count=compute_active_session_count(agent.id, db)
     )
@@ -609,12 +620,17 @@ def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
             lifecycle_config["maxLifetime"] = request.max_lifetime
 
     authorizer_config = None
+    user_client_id = os.getenv("LOOM_COGNITO_USER_CLIENT_ID", "")
     if request.authorizer_type == "cognito" and request.authorizer_pool_id:
         jwt_config: dict[str, Any] = {
             "discoveryUrl": f"https://cognito-idp.{region}.amazonaws.com/{request.authorizer_pool_id}/.well-known/openid-configuration"
         }
-        if request.authorizer_allowed_clients:
-            jwt_config["allowedClients"] = request.authorizer_allowed_clients
+        allowed_clients = list(request.authorizer_allowed_clients) if request.authorizer_allowed_clients else []
+        # Auto-include the user app client so login tokens are accepted
+        if user_client_id and user_client_id not in allowed_clients:
+            allowed_clients.append(user_client_id)
+        if allowed_clients:
+            jwt_config["allowedClients"] = allowed_clients
         if request.authorizer_allowed_scopes:
             jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
         authorizer_config = {"customJWTAuthorizer": jwt_config}
@@ -665,11 +681,14 @@ def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
 
         # Persist authorizer config for token retrieval at invoke time
         if request.authorizer_type:
+            stored_clients = list(request.authorizer_allowed_clients) if request.authorizer_allowed_clients else []
+            if user_client_id and user_client_id not in stored_clients:
+                stored_clients.append(user_client_id)
             agent.set_authorizer_config({
                 "type": request.authorizer_type,
                 "pool_id": request.authorizer_pool_id,
                 "discovery_url": request.authorizer_discovery_url,
-                "allowed_clients": request.authorizer_allowed_clients,
+                "allowed_clients": stored_clients,
                 "allowed_scopes": request.authorizer_allowed_scopes,
             })
 

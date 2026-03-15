@@ -4,8 +4,8 @@ import logging
 import os
 from typing import Any
 
-from fastapi import Depends, HTTPException, Request
-from fastapi.security import OAuth2AuthorizationCodeBearer
+from fastapi import Depends, HTTPException, Request, Security
+from fastapi.security import OAuth2AuthorizationCodeBearer, SecurityScopes
 
 from app.services.jwt_validator import validate_cognito_token
 
@@ -25,7 +25,7 @@ GROUP_SCOPES: dict[str, list[str]] = {
         "catalog:read", "agent:read", "memory:read", "security:read",
         "settings:read", "mcp:read", "a2a:read",
         "catalog:write", "agent:write", "memory:write", "security:write",
-        "settings:write", "mcp:write", "a2a:write",
+        "settings:write", "mcp:write", "a2a:write", "invoke",
     ],
     "security-admins": ["security:read", "security:write"],
     "memory-admins": ["memory:read", "memory:write"],
@@ -132,8 +132,15 @@ def get_current_user(request: Request) -> UserInfo:
 
 
 def require_scopes(*required: str):
-    """Create a dependency that checks the user has ALL required scopes."""
-    def checker(user: UserInfo = Depends(get_current_user)) -> UserInfo:
+    """Create a dependency that checks the user has ALL required scopes.
+
+    Uses Security() with the oauth2_scheme so that required scopes appear
+    in the OpenAPI specification for each endpoint.
+    """
+    def checker(
+        security_scopes: SecurityScopes = Security(oauth2_scheme, scopes=list(required)),
+        user: UserInfo = Depends(get_current_user),
+    ) -> UserInfo:
         for scope in required:
             if scope not in user.scopes:
                 raise HTTPException(status_code=403, detail=f"Missing required scope: {scope}")

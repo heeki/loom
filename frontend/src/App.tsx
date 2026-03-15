@@ -44,7 +44,7 @@ const GROUP_SCOPES: Record<string, Scope[]> = {
     "catalog:read", "agent:read", "memory:read", "security:read",
     "settings:read", "mcp:read", "a2a:read",
     "catalog:write", "agent:write", "memory:write", "security:write",
-    "settings:write", "mcp:write", "a2a:write",
+    "settings:write", "mcp:write", "a2a:write", "invoke",
   ],
   "security-admins": ["security:read", "security:write"],
   "memory-admins": ["memory:read", "memory:write"],
@@ -53,7 +53,17 @@ const GROUP_SCOPES: Record<string, Scope[]> = {
   "users": ["invoke"],
 };
 
-const VIEW_AS_GROUPS = Object.keys(GROUP_SCOPES);
+const USER_GROUPS: Record<string, string[]> = {
+  "admin": ["super-admins"],
+  "demo-admin-1": ["demo-admins"],
+  "demo-admin-2": ["demo-admins"],
+  "security-admin": ["security-admins"],
+  "integration-admin": ["memory-admins", "mcp-admins", "a2a-admins"],
+  "demo-user-1": ["users"],
+  "demo-user-2": ["users"],
+};
+
+const VIEW_AS_USERS = Object.keys(USER_GROUPS);
 
 function SidebarClock() {
   const { timezone } = useTimezone();
@@ -121,20 +131,35 @@ function AppContent() {
   const { isAuthenticated, isLoading, user, logout, hasScope } = useAuth();
   const { theme } = useTheme();
   const [activePersona, setActivePersona] = useState<Persona>("catalog");
-  const [viewAsGroup, setViewAsGroup] = useState<string | null>(null);
+  const [viewAsUser, setViewAsUser] = useState<string | null>(null);
 
   const isAdmin = user?.groups?.includes("super-admins") ?? false;
 
   const effectiveHasScope = useCallback(
     (scope: Scope) => {
-      if (!viewAsGroup) return hasScope(scope);
-      const groupScopes = GROUP_SCOPES[viewAsGroup] ?? [];
-      return groupScopes.includes(scope);
+      if (!viewAsUser) return hasScope(scope);
+      const groups = USER_GROUPS[viewAsUser] ?? [];
+      return groups.some((g) => (GROUP_SCOPES[g] ?? []).includes(scope));
     },
-    [viewAsGroup, hasScope],
+    [viewAsUser, hasScope],
   );
 
+  // Compute group restriction for resource creation.
+  // super-admins: no restriction; demo-admins: locked to "demo-admins"; others: locked to first group name
+  const effectiveGroups = viewAsUser
+    ? (USER_GROUPS[viewAsUser] ?? [])
+    : (user?.groups ?? []);
+  const groupRestriction = effectiveGroups.includes("super-admins")
+    ? undefined
+    : effectiveGroups.find((g) => g !== "users");
+
   const { agents, loading, fetchAgents, registerAgent, deployAgent, redeployAgent, refreshAgent, deleteAgent } = useAgents();
+
+  // Re-fetch agents after authentication completes (initial fetch may race with login)
+  useEffect(() => {
+    if (isAuthenticated) void fetchAgents();
+  }, [isAuthenticated, fetchAgents]);
+
   type ViewMode = "cards" | "table";
   const [catalogViewMode, setCatalogViewMode] = useState<ViewMode>("cards");
   const [agentsViewMode, setAgentsViewMode] = useState<ViewMode>("cards");
@@ -251,9 +276,9 @@ function AppContent() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex">
+    <div className="h-screen bg-background flex overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-56 border-r bg-card flex flex-col shrink-0">
+      <aside className="w-56 border-r bg-card flex flex-col shrink-0 h-screen overflow-y-auto">
         <div className="p-4 border-b">
           <img
             src={isLightTheme(theme) ? "/assets/loom_light_alt.png" : "/assets/loom_dark_alt.png"}
@@ -344,14 +369,14 @@ function AppContent() {
           )}
           {isAdmin && (
             <div className="px-3 py-1">
-              <Select value={viewAsGroup ?? "super-admins"} onValueChange={(v) => setViewAsGroup(v === "super-admins" ? null : v)}>
+              <Select value={viewAsUser ?? "admin"} onValueChange={(v) => setViewAsUser(v === "admin" ? null : v)}>
                 <SelectTrigger className="h-7 w-full gap-1 text-xs text-muted-foreground">
                   <Eye className="h-3 w-3 shrink-0" />
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {VIEW_AS_GROUPS.map((g) => (
-                    <SelectItem key={g} value={g}>{g}</SelectItem>
+                  {VIEW_AS_USERS.map((u) => (
+                    <SelectItem key={u} value={u}>{u}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -369,7 +394,7 @@ function AppContent() {
       </aside>
 
       {/* Main content */}
-      <div className="flex-1 min-h-screen flex flex-col">
+      <div className="flex-1 flex flex-col overflow-y-auto">
         {activePersona === "catalog" && selectedAgentId !== null && (
           <header className="border-b">
             <div className="max-w-6xl px-8 py-3 flex items-center justify-between gap-4">
@@ -467,11 +492,12 @@ function AppContent() {
               onFetchAgents={() => void fetchAgents()}
               onDelete={handleDelete}
               readOnly={!effectiveHasScope("agent:write")}
+              groupRestriction={groupRestriction}
             />
           )}
 
           {activePersona === "security" && <SecurityAdminPage readOnly={!effectiveHasScope("security:write")} />}
-          {activePersona === "memory" && <MemoryManagementPage viewMode={memoryViewMode} onViewModeChange={setMemoryViewMode} readOnly={!effectiveHasScope("memory:write")} />}
+          {activePersona === "memory" && <MemoryManagementPage viewMode={memoryViewMode} onViewModeChange={setMemoryViewMode} readOnly={!effectiveHasScope("memory:write")} groupRestriction={groupRestriction} />}
           {activePersona === "tagging" && <TaggingPage readOnly={!(effectiveHasScope("agent:write") || effectiveHasScope("security:write") || effectiveHasScope("memory:write"))} />}
           {activePersona === "settings" && <SettingsPage />}
         </main>

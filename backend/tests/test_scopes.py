@@ -41,9 +41,9 @@ class TestDeriveScopes(unittest.TestCase):
         scopes = derive_scopes(["nonexistent-group"])
         self.assertEqual(scopes, set())
 
-    def test_demo_admins_have_all_read_write_except_invoke(self) -> None:
+    def test_demo_admins_have_all_scopes(self) -> None:
         scopes = derive_scopes(["demo-admins"])
-        self.assertNotIn("invoke", scopes)
+        self.assertIn("invoke", scopes)
         self.assertIn("catalog:read", scopes)
         self.assertIn("catalog:write", scopes)
         self.assertIn("agent:read", scopes)

@@ -15,9 +15,12 @@ const SESSION_KEY = "loom:selectedTagProfileId";
 interface ResourceTagFieldsProps {
   onChange: (tags: Record<string, string>) => void;
   profileId?: string;
+  /** When set, only profiles whose loom:group matches this value are shown,
+   *  and the resolved loom:group tag is forced to this value. */
+  groupRestriction?: string;
 }
 
-export function ResourceTagFields({ onChange, profileId: controlledProfileId }: ResourceTagFieldsProps) {
+export function ResourceTagFields({ onChange, profileId: controlledProfileId, groupRestriction }: ResourceTagFieldsProps) {
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
   const [profiles, setProfiles] = useState<TagProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string>(() => {
@@ -41,9 +44,14 @@ export function ResourceTagFields({ onChange, profileId: controlledProfileId }: 
     void settingsApi.listTagProfiles().then(setProfiles).catch(() => {});
   }, []);
 
+  // Filter profiles when group restriction is active
+  const availableProfiles = groupRestriction
+    ? profiles.filter((p) => p.tags["loom:group"] === groupRestriction)
+    : profiles;
+
   // Resolve tags when profile or policies change
   useEffect(() => {
-    const profile = profiles.find((p) => p.id.toString() === selectedProfileId);
+    const profile = availableProfiles.find((p) => p.id.toString() === selectedProfileId);
     const resolved: Record<string, string> = {};
 
     for (const tp of tagPolicies) {
@@ -57,8 +65,13 @@ export function ResourceTagFields({ onChange, profileId: controlledProfileId }: 
       }
     }
 
+    // Force loom:group when restriction is active
+    if (groupRestriction) {
+      resolved["loom:group"] = groupRestriction;
+    }
+
     onChange(resolved);
-  }, [selectedProfileId, profiles, tagPolicies]);
+  }, [selectedProfileId, availableProfiles, tagPolicies, groupRestriction]);
 
   const handleProfileChange = (value: string) => {
     const id = value === "__none__" ? "" : value;
@@ -71,9 +84,9 @@ export function ResourceTagFields({ onChange, profileId: controlledProfileId }: 
   };
 
   const requiredPolicies = tagPolicies.filter((tp) => tp.required);
-  if (requiredPolicies.length === 0 && profiles.length === 0) return null;
+  if (requiredPolicies.length === 0 && availableProfiles.length === 0) return null;
 
-  const selectedProfile = profiles.find((p) => p.id.toString() === selectedProfileId);
+  const selectedProfile = availableProfiles.find((p) => p.id.toString() === selectedProfileId);
 
   return (
     <section className="space-y-3">
@@ -89,7 +102,7 @@ export function ResourceTagFields({ onChange, profileId: controlledProfileId }: 
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__none__">None</SelectItem>
-              {profiles.map((p) => (
+              {availableProfiles.map((p) => (
                 <SelectItem key={p.id} value={p.id.toString()}>
                   {p.name}
                 </SelectItem>

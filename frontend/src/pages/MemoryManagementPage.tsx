@@ -5,9 +5,10 @@ interface MemoryManagementPageProps {
   viewMode: "cards" | "table";
   onViewModeChange: (mode: "cards" | "table") => void;
   readOnly?: boolean;
+  groupRestriction?: string;
 }
 
-export function MemoryManagementPage({ viewMode, onViewModeChange, readOnly }: MemoryManagementPageProps) {
+export function MemoryManagementPage({ viewMode, onViewModeChange, readOnly, groupRestriction }: MemoryManagementPageProps) {
 
   return (
     <div className="space-y-6">
@@ -39,7 +40,7 @@ export function MemoryManagementPage({ viewMode, onViewModeChange, readOnly }: M
           </button>
         </div>
       </div>
-      <MemoryManagementPanel viewMode={viewMode} readOnly={readOnly} />
+      <MemoryManagementPanel viewMode={viewMode} readOnly={readOnly} groupRestriction={groupRestriction} />
     </div>
   );
 }

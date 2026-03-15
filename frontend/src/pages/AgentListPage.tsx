@@ -38,6 +38,7 @@ interface AgentListPageProps {
   onFetchAgents?: () => void;
   onDelete: (id: number, cleanupAws: boolean) => void;
   readOnly?: boolean;
+  groupRestriction?: string;
 }
 
 export function AgentListPage({
@@ -52,6 +53,7 @@ export function AgentListPage({
   onFetchAgents,
   onDelete,
   readOnly,
+  groupRestriction,
 }: AgentListPageProps) {
   const { timezone } = useTimezone();
   const [submitting, setSubmitting] = useState(false);
@@ -218,6 +220,7 @@ export function AgentListPage({
                 onRegister={handleRegister}
                 onDeploy={onDeploy ? handleDeploy : undefined}
                 isLoading={submitting}
+                groupRestriction={groupRestriction}
               />
             </CardContent>
           </Card>

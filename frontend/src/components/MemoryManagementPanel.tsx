@@ -143,9 +143,10 @@ function parseApiError(e: unknown): string {
 interface MemoryManagementPanelProps {
   viewMode: "cards" | "table";
   readOnly?: boolean;
+  groupRestriction?: string;
 }
 
-export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPanelProps) {
+export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: MemoryManagementPanelProps) {
   const { timezone } = useTimezone();
   const [memories, setMemories] = useState<MemoryResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -521,7 +522,7 @@ export function MemoryManagementPanel({ viewMode, readOnly }: MemoryManagementPa
                 </div>
 
                 {/* Resource Tags */}
-                <ResourceTagFields onChange={setTagValues} />
+                <ResourceTagFields onChange={setTagValues} groupRestriction={groupRestriction} />
 
                 {/* Long-Term Strategies */}
                 <div className="space-y-2">

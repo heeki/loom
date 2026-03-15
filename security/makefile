@@ -79,8 +79,10 @@ cognito.delete:
 # cognito user management
 cognito.set-passwords:
 	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username admin --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
-	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username secadmin --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
-	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username datasteward --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
-	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username builder --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
-	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username operator --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-admin-1 --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-admin-2 --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username security-admin --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username integration-admin --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-user-1 --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-user-2 --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
 
