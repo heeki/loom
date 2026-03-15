@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 from app.db import get_db
+from app.dependencies.auth import UserInfo, require_scopes
 from app.models.agent import Agent
 from app.models.session import InvocationSession
 from app.models.invocation import Invocation
@@ -300,6 +301,7 @@ async def invoke_agent_endpoint(
     agent_id: int,
     request_body: InvokeRequest,
     request: Request,
+    user: UserInfo = Depends(require_scopes("invoke")),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
     """
@@ -451,6 +453,7 @@ async def invoke_agent_endpoint(
 @router.post("/{agent_id}/token")
 def get_agent_token(
     agent_id: int,
+    user: UserInfo = Depends(require_scopes("invoke")),
     db: Session = Depends(get_db),
 ) -> dict:
     """Get an access token for an agent with a Cognito authorizer.
@@ -501,7 +504,8 @@ def get_agent_token(
 @router.get("/{agent_id}/sessions", response_model=List[SessionResponse])
 def list_sessions(
     agent_id: int,
-    db: Session = Depends(get_db)
+    user: UserInfo = Depends(require_scopes("agent:read")),
+    db: Session = Depends(get_db),
 ) -> List[SessionResponse]:
     """List all invocation sessions for an agent with their invocations."""
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
@@ -525,7 +529,8 @@ def list_sessions(
 def get_session(
     agent_id: int,
     session_id: str,
-    db: Session = Depends(get_db)
+    user: UserInfo = Depends(require_scopes("agent:read")),
+    db: Session = Depends(get_db),
 ) -> SessionResponse:
     """Get a specific session with all its invocations."""
     session = db.query(InvocationSession).filter(
@@ -547,7 +552,8 @@ def get_invocation(
     agent_id: int,
     session_id: str,
     invocation_id: str,
-    db: Session = Depends(get_db)
+    user: UserInfo = Depends(require_scopes("agent:read")),
+    db: Session = Depends(get_db),
 ) -> InvocationResponse:
     """Get a specific invocation within a session."""
     # Look up session first to validate agent_id

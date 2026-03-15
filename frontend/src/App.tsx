@@ -34,11 +34,23 @@ import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings, E
 type Persona = "catalog" | "security" | "builder" | "memory" | "tagging" | "settings";
 
 const GROUP_SCOPES: Record<string, Scope[]> = {
-  admins: ["agent:read", "agent:write", "security:read", "security:write", "data:read", "data:write"],
+  "super-admins": [
+    "catalog:read", "catalog:write", "agent:read", "agent:write",
+    "memory:read", "memory:write", "security:read", "security:write",
+    "settings:read", "settings:write", "mcp:read", "mcp:write",
+    "a2a:read", "a2a:write", "invoke",
+  ],
+  "demo-admins": [
+    "catalog:read", "agent:read", "memory:read", "security:read",
+    "settings:read", "mcp:read", "a2a:read",
+    "catalog:write", "agent:write", "memory:write", "security:write",
+    "settings:write", "mcp:write", "a2a:write",
+  ],
   "security-admins": ["security:read", "security:write"],
-  "data-stewards": ["data:read", "data:write"],
-  builders: ["agent:read", "agent:write"],
-  operators: ["agent:read", "security:read", "data:read"],
+  "memory-admins": ["memory:read", "memory:write"],
+  "mcp-admins": ["mcp:read", "mcp:write"],
+  "a2a-admins": ["a2a:read", "a2a:write"],
+  "users": ["invoke"],
 };
 
 const VIEW_AS_GROUPS = Object.keys(GROUP_SCOPES);
@@ -111,7 +123,7 @@ function AppContent() {
   const [activePersona, setActivePersona] = useState<Persona>("catalog");
   const [viewAsGroup, setViewAsGroup] = useState<string | null>(null);
 
-  const isAdmin = user?.groups?.includes("admins") ?? false;
+  const isAdmin = user?.groups?.includes("super-admins") ?? false;
 
   const effectiveHasScope = useCallback(
     (scope: Scope) => {
@@ -264,7 +276,7 @@ function AppContent() {
               onClick={() => setActivePersona("builder")}
             />
           )}
-          {(effectiveHasScope("data:read") || effectiveHasScope("data:write")) && (
+          {(effectiveHasScope("memory:read") || effectiveHasScope("memory:write")) && (
             <SidebarItem
               icon={Brain}
               label="Memory"
@@ -292,23 +304,23 @@ function AppContent() {
             active={activePersona === "settings"}
             onClick={() => setActivePersona("settings")}
           />
-          {(effectiveHasScope("data:read") || effectiveHasScope("data:write")) && (
-            <>
-              <SidebarItem
-                icon={Network}
-                label="MCP Servers"
-                active={false}
-                onClick={() => {}}
-                disabled
-              />
-              <SidebarItem
-                icon={Users}
-                label="A2A Agents"
-                active={false}
-                onClick={() => {}}
-                disabled
-              />
-            </>
+          {(effectiveHasScope("mcp:read") || effectiveHasScope("mcp:write")) && (
+            <SidebarItem
+              icon={Network}
+              label="MCP Servers"
+              active={false}
+              onClick={() => {}}
+              disabled
+            />
+          )}
+          {(effectiveHasScope("a2a:read") || effectiveHasScope("a2a:write")) && (
+            <SidebarItem
+              icon={Users}
+              label="A2A Agents"
+              active={false}
+              onClick={() => {}}
+              disabled
+            />
           )}
         </nav>
         <div className="p-2 border-t space-y-1">
@@ -332,7 +344,7 @@ function AppContent() {
           )}
           {isAdmin && (
             <div className="px-3 py-1">
-              <Select value={viewAsGroup ?? "admins"} onValueChange={(v) => setViewAsGroup(v === "admins" ? null : v)}>
+              <Select value={viewAsGroup ?? "super-admins"} onValueChange={(v) => setViewAsGroup(v === "super-admins" ? null : v)}>
                 <SelectTrigger className="h-7 w-full gap-1 text-xs text-muted-foreground">
                   <Eye className="h-3 w-3 shrink-0" />
                   <SelectValue />
@@ -459,8 +471,8 @@ function AppContent() {
           )}
 
           {activePersona === "security" && <SecurityAdminPage readOnly={!effectiveHasScope("security:write")} />}
-          {activePersona === "memory" && <MemoryManagementPage viewMode={memoryViewMode} onViewModeChange={setMemoryViewMode} readOnly={!effectiveHasScope("data:write")} />}
-          {activePersona === "tagging" && <TaggingPage readOnly={!(effectiveHasScope("agent:write") || effectiveHasScope("security:write") || effectiveHasScope("data:write"))} />}
+          {activePersona === "memory" && <MemoryManagementPage viewMode={memoryViewMode} onViewModeChange={setMemoryViewMode} readOnly={!effectiveHasScope("memory:write")} />}
+          {activePersona === "tagging" && <TaggingPage readOnly={!(effectiveHasScope("agent:write") || effectiveHasScope("security:write") || effectiveHasScope("memory:write"))} />}
           {activePersona === "settings" && <SettingsPage />}
         </main>
       </div>

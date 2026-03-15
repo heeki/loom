@@ -64,24 +64,48 @@ Resources:
       Scopes:
         - ScopeName: invoke
           ScopeDescription: Invoke agent through AgentCore
+        - ScopeName: catalog:read
+          ScopeDescription: Read catalog resources
+        - ScopeName: catalog:write
+          ScopeDescription: Write catalog resources
         - ScopeName: agent:read
           ScopeDescription: Read agents
         - ScopeName: agent:write
           ScopeDescription: Write agents
+        - ScopeName: memory:read
+          ScopeDescription: Read memory resources
+        - ScopeName: memory:write
+          ScopeDescription: Write memory resources
         - ScopeName: security:read
           ScopeDescription: Read security configurations
         - ScopeName: security:write
           ScopeDescription: Write security configurations
-        - ScopeName: data:read
-          ScopeDescription: Read data resources
-        - ScopeName: data:write
-          ScopeDescription: Write data resources
+        - ScopeName: settings:read
+          ScopeDescription: Read settings
+        - ScopeName: settings:write
+          ScopeDescription: Write settings
+        - ScopeName: mcp:read
+          ScopeDescription: Read MCP servers
+        - ScopeName: mcp:write
+          ScopeDescription: Write MCP servers
+        - ScopeName: a2a:read
+          ScopeDescription: Read A2A agents
+        - ScopeName: a2a:write
+          ScopeDescription: Write A2A agents
 
-  AdminsGroup:
+  # Groups
+  SuperAdminsGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
-      GroupName: admins
+      GroupName: super-admins
       Description: Full access to all resources
+      UserPoolId: !Ref CognitoUserPool
+
+  DemoAdminsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: demo-admins
+      Description: Read-only access across all pages; write only to demo-admins tagged resources
       UserPoolId: !Ref CognitoUserPool
 
   SecurityAdminsGroup:
@@ -91,25 +115,32 @@ Resources:
       Description: Manage security configurations
       UserPoolId: !Ref CognitoUserPool
 
-  DataStewardsGroup:
+  MemoryAdminsGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
-      GroupName: data-stewards
-      Description: Manage data resources
+      GroupName: memory-admins
+      Description: Manage memory resources
       UserPoolId: !Ref CognitoUserPool
 
-  BuildersGroup:
+  McpAdminsGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
-      GroupName: builders
-      Description: Build and manage agents
+      GroupName: mcp-admins
+      Description: Manage MCP servers
       UserPoolId: !Ref CognitoUserPool
 
-  OperatorsGroup:
+  A2aAdminsGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
-      GroupName: operators
-      Description: Read-only operational access
+      GroupName: a2a-admins
+      Description: Manage A2A agents
+      UserPoolId: !Ref CognitoUserPool
+
+  UsersGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: users
+      Description: End-user invoke-only access
       UserPoolId: !Ref CognitoUserPool
 
   # Users
@@ -122,77 +153,123 @@ Resources:
         - Name: email
           Value: admin@heeki.cloud
 
-  SecadminUser:
+  DemoAdmin1User:
     Type: AWS::Cognito::UserPoolUser
     Properties:
       UserPoolId: !Ref CognitoUserPool
-      Username: secadmin
+      Username: demo-admin-1
       UserAttributes:
         - Name: email
-          Value: secadmin@heeki.cloud
+          Value: demo-admin-1@heeki.cloud
 
-  DatastewardUser:
+  DemoAdmin2User:
     Type: AWS::Cognito::UserPoolUser
     Properties:
       UserPoolId: !Ref CognitoUserPool
-      Username: datasteward
+      Username: demo-admin-2
       UserAttributes:
         - Name: email
-          Value: datasteward@heeki.cloud
+          Value: demo-admin-2@heeki.cloud
 
-  BuilderUser:
+  SecurityAdminUser:
     Type: AWS::Cognito::UserPoolUser
     Properties:
       UserPoolId: !Ref CognitoUserPool
-      Username: builder
+      Username: security-admin
       UserAttributes:
         - Name: email
-          Value: builder@heeki.cloud
+          Value: security-admin@heeki.cloud
 
-  OperatorUser:
+  IntegrationAdminUser:
     Type: AWS::Cognito::UserPoolUser
     Properties:
       UserPoolId: !Ref CognitoUserPool
-      Username: operator
+      Username: integration-admin
       UserAttributes:
         - Name: email
-          Value: operator@heeki.cloud
+          Value: integration-admin@heeki.cloud
+
+  DemoUser1User:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: demo-user-1
+      UserAttributes:
+        - Name: email
+          Value: demo-user-1@heeki.cloud
+
+  DemoUser2User:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: demo-user-2
+      UserAttributes:
+        - Name: email
+          Value: demo-user-2@heeki.cloud
 
   # User-to-group assignments
-  AdminToAdmins:
+  AdminToSuperAdmins:
     Type: AWS::Cognito::UserPoolUserToGroupAttachment
     Properties:
       UserPoolId: !Ref CognitoUserPool
       Username: !Ref AdminUser
-      GroupName: !Ref AdminsGroup
+      GroupName: !Ref SuperAdminsGroup
 
-  SecadminToSecurityAdmins:
+  DemoAdmin1ToDemoAdmins:
     Type: AWS::Cognito::UserPoolUserToGroupAttachment
     Properties:
       UserPoolId: !Ref CognitoUserPool
-      Username: !Ref SecadminUser
+      Username: !Ref DemoAdmin1User
+      GroupName: !Ref DemoAdminsGroup
+
+  DemoAdmin2ToDemoAdmins:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoAdmin2User
+      GroupName: !Ref DemoAdminsGroup
+
+  SecurityAdminToSecurityAdmins:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref SecurityAdminUser
       GroupName: !Ref SecurityAdminsGroup
 
-  DatastewardToDataStewards:
+  IntegrationAdminToMemoryAdmins:
     Type: AWS::Cognito::UserPoolUserToGroupAttachment
     Properties:
       UserPoolId: !Ref CognitoUserPool
-      Username: !Ref DatastewardUser
-      GroupName: !Ref DataStewardsGroup
+      Username: !Ref IntegrationAdminUser
+      GroupName: !Ref MemoryAdminsGroup
 
-  BuilderToBuilders:
+  IntegrationAdminToMcpAdmins:
     Type: AWS::Cognito::UserPoolUserToGroupAttachment
     Properties:
       UserPoolId: !Ref CognitoUserPool
-      Username: !Ref BuilderUser
-      GroupName: !Ref BuildersGroup
+      Username: !Ref IntegrationAdminUser
+      GroupName: !Ref McpAdminsGroup
 
-  OperatorToOperators:
+  IntegrationAdminToA2aAdmins:
     Type: AWS::Cognito::UserPoolUserToGroupAttachment
     Properties:
       UserPoolId: !Ref CognitoUserPool
-      Username: !Ref OperatorUser
-      GroupName: !Ref OperatorsGroup
+      Username: !Ref IntegrationAdminUser
+      GroupName: !Ref A2aAdminsGroup
+
+  DemoUser1ToUsers:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoUser1User
+      GroupName: !Ref UsersGroup
+
+  DemoUser2ToUsers:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoUser2User
+      GroupName: !Ref UsersGroup
 
   # Machine-to-machine client (client_credentials flow, access token only)
   M2MClient:
@@ -230,12 +307,20 @@ Resources:
         - email
         - profile
         - !Sub "${pResourceServerIdentifier}/invoke"
+        - !Sub "${pResourceServerIdentifier}/catalog:read"
+        - !Sub "${pResourceServerIdentifier}/catalog:write"
         - !Sub "${pResourceServerIdentifier}/agent:read"
         - !Sub "${pResourceServerIdentifier}/agent:write"
+        - !Sub "${pResourceServerIdentifier}/memory:read"
+        - !Sub "${pResourceServerIdentifier}/memory:write"
         - !Sub "${pResourceServerIdentifier}/security:read"
         - !Sub "${pResourceServerIdentifier}/security:write"
-        - !Sub "${pResourceServerIdentifier}/data:read"
-        - !Sub "${pResourceServerIdentifier}/data:write"
+        - !Sub "${pResourceServerIdentifier}/settings:read"
+        - !Sub "${pResourceServerIdentifier}/settings:write"
+        - !Sub "${pResourceServerIdentifier}/mcp:read"
+        - !Sub "${pResourceServerIdentifier}/mcp:write"
+        - !Sub "${pResourceServerIdentifier}/a2a:read"
+        - !Sub "${pResourceServerIdentifier}/a2a:write"
       CallbackURLs: !Ref pCallbackUrls
       SupportedIdentityProviders:
         - COGNITO

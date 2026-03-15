@@ -59,7 +59,7 @@ backend/
 │   │   └── tag_profile.py   # TagProfile ORM model (named tag presets)
 │   ├── dependencies/
 │   │   ├── __init__.py
-│   │   └── auth.py          # Auth dependencies (get_current_user_token, get_token_claims)
+│   │   └── auth.py          # Auth dependencies (get_current_user, require_scopes, UserInfo)
 │   ├── routers/
 │   │   ├── auth.py          # Authentication config endpoint (GET /api/auth/config)
 │   │   ├── agents.py        # Agent CRUD + ARN parsing + log group derivation + tag resolution
@@ -93,6 +93,7 @@ backend/
 │   ├── test_logs.py         # Logs router tests
 │   ├── test_memories.py     # Memory resource tests
 │   ├── test_security.py     # Security router tests (roles, authorizers)
+│   ├── test_scopes.py       # Scope enforcement and GROUP_SCOPES mapping tests
 │   └── test_tags.py         # Tag policy, tag profile, and tag enforcement tests
 ├── etc/
 │   └── environment.sh.example  # Example environment configuration template
@@ -613,8 +614,31 @@ Handles agent artifact build and runtime lifecycle:
 
 ### `dependencies/auth.py`
 
-- `get_current_user_token(request: Request) -> str | None` — extracts and validates the Bearer token from the Authorization header. Returns the raw token string if valid, None otherwise. Allows unauthenticated requests to pass through with a warning.
-- `get_token_claims(request: Request) -> dict | None` — extracts, validates, and decodes the Bearer token. Returns decoded claims if valid, None otherwise.
+Core authentication and authorization module. Provides:
+
+- `GROUP_SCOPES: dict[str, list[str]]` — maps Cognito group names to scope lists. Must match the frontend `GROUP_SCOPES` exactly. Groups: `super-admins` (all 15 scopes), `demo-admins` (all read/write, no invoke), `security-admins`, `memory-admins`, `mcp-admins`, `a2a-admins`, `users` (invoke only).
+- `UserInfo` dataclass — `sub`, `username`, `groups`, `scopes` (derived from groups).
+- `get_current_user(request: Request) -> UserInfo` — validates JWT, extracts `cognito:groups`, derives scopes. In bypass mode (no `LOOM_COGNITO_USER_POOL_ID`), returns a super-admin with all scopes. Raises 401 on missing/invalid token.
+- `require_scopes(*required: str)` — factory returning a FastAPI dependency that checks the user has ALL required scopes. Raises 403 on missing scope. Used as `Depends(require_scopes("scope:name"))` on all guarded endpoints.
+- `oauth2_scheme` — `OAuth2AuthorizationCodeBearer` for OpenAPI docs with all 15 scopes.
+- `get_current_user_token(request: Request) -> str | None` — legacy helper for token forwarding to AgentCore invocations.
+- `get_token_claims(request: Request) -> dict | None` — legacy helper for decoded claims extraction.
+
+**Scope enforcement per router:**
+
+| Router | GET scopes | POST/PUT/DELETE scopes |
+|--------|-----------|----------------------|
+| `agents.py` | `agent:read` | `agent:write` |
+| `invocations.py` | `agent:read` (sessions), `invoke` (invoke/token) | — |
+| `logs.py` | `agent:read` | — |
+| `credentials.py` | `agent:read` | `agent:write` |
+| `integrations.py` | `agent:read` | `agent:write` |
+| `memories.py` | `memory:read` | `memory:write` |
+| `security.py` | `security:read` | `security:write` |
+| `settings.py` | `settings:read` | `settings:write` |
+| `auth.py` | Public (no guard) | — |
+
+**Tag-based resource isolation (R5):** Users in the `users` group only see agents and memories tagged with `loom:group=users`. Demo-admins are restricted at the data layer: create/delete operations enforce that the resource's `loom:group` tag matches `demo-admins`.
 
 ### `services/secrets.py`
 

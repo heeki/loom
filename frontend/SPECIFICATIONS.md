@@ -96,12 +96,12 @@ The app uses a persona-based single-page architecture with a sidebar for workflo
 |---------|------|-------------|----------------|---------|
 | Platform Catalog | BookOpen | Browse agents, memory resources, MCP servers (coming soon), A2A agents (coming soon) | Always visible | Yes |
 | Agents | Bot | Deploy new agents or import existing ones | `agent:read` or `agent:write` | |
-| Memory | Brain | Create and manage AgentCore Memory resources | `data:read` or `data:write` | |
+| Memory | Brain | Create and manage AgentCore Memory resources | `memory:read` or `memory:write` | |
 | Security Admin | Shield | Manage roles, authorizers, credentials, permissions | `security:read` or `security:write` | |
 | Tagging | Tags | Manage tag policies and tag profiles | Always visible | |
 | Settings | Settings | Manage display preferences | Always visible | |
-| MCP Servers | Network | Future MCP server management (disabled) | `data:read` or `data:write` | |
-| A2A Agents | Users | Future A2A agent management (disabled) | `data:read` or `data:write` | |
+| MCP Servers | Network | Future MCP server management (disabled) | `mcp:read` or `mcp:write` | |
+| A2A Agents | Users | Future A2A agent management (disabled) | `a2a:read` or `a2a:write` | |
 
 Sidebar items are conditionally rendered based on the user's scopes derived from their Cognito group membership. When auth is not configured, all items are visible.
 
@@ -425,11 +425,12 @@ Cognito client secrets are password-masked in forms. Secrets are sent to the bac
 - `apiFetch` and `invokeAgentStream` automatically include the `Authorization: Bearer` header when a token is available, via a module-level token setter (`setAuthToken`/`getAuthToken`).
 
 ### Scope-Based Authorization
-- `AuthContext` extracts `cognito:groups` from the decoded ID token and maps them to scopes using a `GROUP_SCOPES` lookup table. The `hasScope(scope)` function is exposed to the entire app.
-- Scopes: `agent:read`, `agent:write`, `security:read`, `security:write`, `data:read`, `data:write`.
+- `AuthContext` extracts `cognito:groups` from the decoded ID token and maps them to scopes using a `GROUP_SCOPES` lookup table (must match the backend `GROUP_SCOPES` exactly). The `hasScope(scope)` function is exposed to the entire app.
+- Scopes (15 total): `invoke`, `catalog:read`, `catalog:write`, `agent:read`, `agent:write`, `memory:read`, `memory:write`, `security:read`, `security:write`, `settings:read`, `settings:write`, `mcp:read`, `mcp:write`, `a2a:read`, `a2a:write`.
+- Groups (7): `super-admins` (all scopes), `demo-admins` (all read/write, no invoke), `security-admins`, `memory-admins`, `mcp-admins`, `a2a-admins`, `users` (invoke only).
 - Sidebar visibility is controlled by scopes — each persona item is rendered only when the user has the corresponding `*:read` or `*:write` scope. The Platform Catalog is always visible.
 - Write operations are gated by a `readOnly` prop propagated from `App.tsx` through page components to individual UI elements. When `readOnly` is true, add/edit/delete buttons are disabled or hidden.
-- Pages and their `readOnly` mapping: `AgentListPage` and `CatalogPage` use `!hasScope("agent:write")`, `SecurityAdminPage` uses `!hasScope("security:write")`, `MemoryManagementPage` uses `!hasScope("data:write")`.
+- Pages and their `readOnly` mapping: `AgentListPage` and `CatalogPage` use `!hasScope("agent:write")`, `SecurityAdminPage` uses `!hasScope("security:write")`, `MemoryManagementPage` uses `!hasScope("memory:write")`, `TaggingPage` uses `!hasScope("memory:write")`.
 - Components that respect `readOnly`: `AgentCard`, `AgentListPage`, `CatalogPage`, `SecurityAdminPage`, `RoleManagementPanel`, `AuthorizerManagementPanel`, `PermissionRequestsPanel`, `MemoryManagementPage`, `MemoryManagementPanel`, `MemoryCard`.
 
 ### Resource Tagging

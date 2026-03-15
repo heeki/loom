@@ -148,9 +148,9 @@ Detailed specifications for each component are maintained in their respective di
 The Cognito User Pool is managed via CloudFormation (`security/iac/cognito.yaml`) and includes:
 
 - **Password policy:** Minimum 12 characters, uppercase, lowercase, numbers required; symbols not required.
-- **Resource server scopes:** `invoke`, `agent:read`, `agent:write`, `security:read`, `security:write`, `data:read`, `data:write`.
-- **Groups:** `admins`, `security-admins`, `data-stewards`, `builders`, `operators`.
-- **Users:** `admin`, `secadmin`, `datasteward`, `builder`, `operator` — each assigned to their respective group via `UserPoolUserToGroupAttachment`.
+- **Resource server scopes:** `invoke`, `catalog:read`, `catalog:write`, `agent:read`, `agent:write`, `memory:read`, `memory:write`, `security:read`, `security:write`, `settings:read`, `settings:write`, `mcp:read`, `mcp:write`, `a2a:read`, `a2a:write`.
+- **Groups:** `super-admins`, `demo-admins`, `security-admins`, `memory-admins`, `mcp-admins`, `a2a-admins`, `users`.
+- **Users:** `admin` (super-admins), `demo-admin-1`/`demo-admin-2` (demo-admins), `security-admin` (security-admins), `integration-admin` (memory-admins + mcp-admins + a2a-admins), `demo-user-1`/`demo-user-2` (users) — each assigned via `UserPoolUserToGroupAttachment`.
 - **Clients:**
   - **M2MClient** — `client_credentials` flow with secret, scoped to `invoke`.
   - **UserClient** — `USER_PASSWORD_AUTH` + `REFRESH_TOKEN_AUTH` flows without secret, scoped to all custom scopes plus `openid`, `email`, `profile`.
@@ -162,11 +162,13 @@ The frontend enforces scope-based access control derived from Cognito group memb
 
 | Group | Scopes | Sidebar Access | Write Access |
 |-------|--------|----------------|--------------|
-| `admins` | agent:read/write, security:read/write, data:read/write | All pages | All actions |
+| `super-admins` | All 15 scopes including `invoke` | All pages | All actions |
+| `demo-admins` | All read/write scopes (no `invoke`) | All admin pages | All admin actions (tag-scoped data) |
 | `security-admins` | security:read, security:write | Security | Security actions |
-| `data-stewards` | data:read, data:write | Memory, MCP Servers, A2A Agents | Memory actions |
-| `builders` | agent:read, agent:write | Agents | Agent actions |
-| `operators` | agent:read, security:read, data:read | Agents, Security | Read-only |
+| `memory-admins` | memory:read, memory:write | Memory | Memory actions |
+| `mcp-admins` | mcp:read, mcp:write | MCP Servers | MCP actions |
+| `a2a-admins` | a2a:read, a2a:write | A2A Agents | A2A actions |
+| `users` | invoke | Agent invocation only | Invoke only (tag-filtered resources) |
 
 - **Sidebar visibility:** Each sidebar item is shown only when the user has the corresponding `*:read` or `*:write` scope. The Platform Catalog is always visible.
 - **Write protection:** Components receive a `readOnly` prop that disables or hides add, edit, and delete buttons when the user lacks `*:write` scopes.
@@ -259,7 +261,7 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Graceful fallback to existing M2M client credentials flow when no user token is present.
 - `GET /api/auth/config` endpoint returns pool ID and region; user client ID is configured on the frontend via `VITE_COGNITO_USER_CLIENT_ID`.
 - Tokens stored in memory only (not localStorage); authentication does not persist across page reloads.
-- Cognito User Pool IaC: resource server with custom scopes (`agent:read/write`, `security:read/write`, `data:read/write`, `invoke`), user groups (`admins`, `security-admins`, `data-stewards`, `builders`, `operators`), users with group assignments, password policy (12+ chars, no symbols required).
+- Cognito User Pool IaC: resource server with custom scopes (15 scopes: `invoke`, `catalog:read/write`, `agent:read/write`, `memory:read/write`, `security:read/write`, `settings:read/write`, `mcp:read/write`, `a2a:read/write`), user groups (7 groups: `super-admins`, `demo-admins`, `security-admins`, `memory-admins`, `mcp-admins`, `a2a-admins`, `users`), users with group assignments, password policy (12+ chars, no symbols required).
 - Security makefile with `cognito.set-passwords` target for setting permanent user passwords.
 - Scope-based frontend authorization: `AuthContext` extracts `cognito:groups` from the ID token, maps groups to scopes, and exposes `hasScope()`. Sidebar items are conditionally rendered based on user scopes. Write operations (add, edit, delete buttons) are disabled or hidden via a `readOnly` prop when the user lacks `*:write` scopes. When auth is not configured, all scopes are granted.
 
@@ -307,11 +309,21 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Pydantic error handling: `apiFetch` handles array-style `detail` responses (Pydantic validation errors) by joining `msg` fields.
 - Settings page simplified to display preferences only (theme + timezone).
 
-### Phase 10 — Advanced Operations
+### Phase 10 — Fine-Grained Permissions Scoping *(Complete)*
+- Expanded scope model from 7 scopes to 15: `invoke`, `catalog:read/write`, `agent:read/write`, `memory:read/write`, `security:read/write`, `settings:read/write`, `mcp:read/write`, `a2a:read/write`.
+- Restructured Cognito groups from 5 to 7: `super-admins`, `demo-admins`, `security-admins`, `memory-admins`, `mcp-admins`, `a2a-admins`, `users`.
+- Updated user-to-group assignments: `admin` → super-admins, `demo-admin-1`/`demo-admin-2` → demo-admins, `security-admin` → security-admins, `integration-admin` → memory-admins + mcp-admins + a2a-admins, `demo-user-1`/`demo-user-2` → users.
+- Backend OAuth2 enforcement: every router endpoint guarded by `require_scopes()` dependency. `get_current_user` validates JWT, extracts `cognito:groups`, and derives scopes via `GROUP_SCOPES` mapping. Returns 401 for missing/invalid tokens, 403 for insufficient scopes.
+- `OAuth2AuthorizationCodeBearer` scheme added for OpenAPI documentation with all 15 scopes.
+- Tag-based resource isolation for end-users: `users` group only sees agents/memories tagged with `loom:group=users`. `demo-admins` enforced at data layer (create/delete restricted to resources tagged with their group).
+- Frontend `AuthContext` and `App.tsx` updated with matching `GROUP_SCOPES` mapping.
+- Bypass mode preserved: when `LOOM_COGNITO_USER_POOL_ID` is not set, all scopes are granted (local development).
+- 16 new scope enforcement tests + 2 pre-existing test fixes.
+
+### Phase 11 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.
-- Role-based access control within Loom.
 
 ---
 

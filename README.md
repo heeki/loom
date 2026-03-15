@@ -100,11 +100,13 @@ The `security/` directory contains CloudFormation templates for provisioning the
 
 | Group | Scopes |
 |-------|--------|
-| `admins` | agent:read, agent:write, security:read, security:write, data:read, data:write |
+| `super-admins` | All 15 scopes (invoke, catalog:r/w, agent:r/w, memory:r/w, security:r/w, settings:r/w, mcp:r/w, a2a:r/w) |
+| `demo-admins` | All read/write scopes (no invoke) |
 | `security-admins` | security:read, security:write |
-| `data-stewards` | data:read, data:write |
-| `builders` | agent:read, agent:write |
-| `operators` | agent:read, security:read, data:read |
+| `memory-admins` | memory:read, memory:write |
+| `mcp-admins` | mcp:read, mcp:write |
+| `a2a-admins` | a2a:read, a2a:write |
+| `users` | invoke |
 
 **Deploying and managing users:**
 ```bash

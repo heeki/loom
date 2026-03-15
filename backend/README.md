@@ -52,7 +52,7 @@ Runtime configuration is sourced from `etc/environment.sh`:
 
 AWS credentials use the standard boto3 credential chain (environment variables, AWS profile, instance metadata).
 
-When `LOOM_COGNITO_USER_POOL_ID` is set, the backend validates user JWTs and forwards user tokens to AgentCore for authenticated invocations. When not set, the app runs without user authentication. The user client ID is configured on the frontend side (via `VITE_COGNITO_USER_CLIENT_ID` in the frontend `.env` file), not the backend.
+When `LOOM_COGNITO_USER_POOL_ID` is set, the backend validates user JWTs, derives scopes from `cognito:groups` via the `GROUP_SCOPES` mapping, and enforces per-endpoint scope requirements using `require_scopes()`. Returns 401 for missing/invalid tokens, 403 for insufficient scopes. When not set (bypass mode), all scopes are granted for local development. The user client ID is configured on the frontend side (via `VITE_COGNITO_USER_CLIENT_ID` in the frontend `.env` file), not the backend.
 
 ## Project Structure
 
@@ -74,7 +74,7 @@ backend/
 │   │   ├── tag_policy.py    # TagPolicy ORM model (configurable tag policies)
 │   │   └── tag_profile.py   # TagProfile ORM model (named tag presets)
 │   ├── dependencies/
-│   │   └── auth.py          # Auth dependencies (token extraction, validation)
+│   │   └── auth.py          # Auth dependencies (get_current_user, require_scopes, UserInfo)
 │   ├── routers/
 │   │   ├── auth.py          # Auth config endpoint (GET /api/auth/config)
 │   │   ├── agents.py        # Agent CRUD + ARN parsing + log group derivation

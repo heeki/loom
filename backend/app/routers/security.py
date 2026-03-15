@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.dependencies.auth import UserInfo, require_scopes
 from app.models.managed_role import ManagedRole
 from app.models.authorizer_config import AuthorizerConfig
 from app.models.authorizer_credential import AuthorizerCredential
@@ -94,7 +95,7 @@ class ReviewPermissionRequestBody(BaseModel):
 # Managed Roles
 # ---------------------------------------------------------------------------
 @router.post("/roles", status_code=status.HTTP_201_CREATED)
-def create_role(request: CreateRoleRequest, db: Session = Depends(get_db)) -> dict:
+def create_role(request: CreateRoleRequest, user: UserInfo = Depends(require_scopes("security:write")), db: Session = Depends(get_db)) -> dict:
     """Create or import a managed role."""
     region = _get_region()
     account_id = _get_account_id()
@@ -171,14 +172,14 @@ def create_role(request: CreateRoleRequest, db: Session = Depends(get_db)) -> di
 
 
 @router.get("/roles")
-def list_roles(db: Session = Depends(get_db)) -> list[dict]:
+def list_roles(user: UserInfo = Depends(require_scopes("security:read")), db: Session = Depends(get_db)) -> list[dict]:
     """List all managed roles."""
     roles = db.query(ManagedRole).order_by(ManagedRole.id).all()
     return [r.to_dict() for r in roles]
 
 
 @router.get("/roles/{role_id}")
-def get_role(role_id: int, db: Session = Depends(get_db)) -> dict:
+def get_role(role_id: int, user: UserInfo = Depends(require_scopes("security:read")), db: Session = Depends(get_db)) -> dict:
     """Get a managed role with its policy details."""
     role = db.query(ManagedRole).filter(ManagedRole.id == role_id).first()
     if not role:
@@ -197,7 +198,7 @@ def get_role(role_id: int, db: Session = Depends(get_db)) -> dict:
 
 
 @router.put("/roles/{role_id}")
-def update_role(role_id: int, request: UpdateRoleRequest, db: Session = Depends(get_db)) -> dict:
+def update_role(role_id: int, request: UpdateRoleRequest, user: UserInfo = Depends(require_scopes("security:write")), db: Session = Depends(get_db)) -> dict:
     """Update a managed role's description and/or policy."""
     role = db.query(ManagedRole).filter(ManagedRole.id == role_id).first()
     if not role:
@@ -220,7 +221,7 @@ def update_role(role_id: int, request: UpdateRoleRequest, db: Session = Depends(
 
 
 @router.delete("/roles/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_role(role_id: int, db: Session = Depends(get_db)) -> None:
+def delete_role(role_id: int, user: UserInfo = Depends(require_scopes("security:write")), db: Session = Depends(get_db)) -> None:
     """Delete a managed role. Refuses if any agent uses it."""
     role = db.query(ManagedRole).filter(ManagedRole.id == role_id).first()
     if not role:
@@ -242,7 +243,7 @@ def delete_role(role_id: int, db: Session = Depends(get_db)) -> None:
 # Cognito Pools (discovery)
 # ---------------------------------------------------------------------------
 @router.get("/cognito-pools")
-def list_cognito_pools() -> list[dict]:
+def list_cognito_pools(user: UserInfo = Depends(require_scopes("security:read"))) -> list[dict]:
     """List available Cognito User Pools in the current region."""
     region = _get_region()
     client = boto3.client("cognito-idp", region_name=region)
@@ -270,7 +271,7 @@ def list_cognito_pools() -> list[dict]:
 # Authorizer Configs
 # ---------------------------------------------------------------------------
 @router.post("/authorizers", status_code=status.HTTP_201_CREATED)
-def create_authorizer(request: CreateAuthorizerRequest, db: Session = Depends(get_db)) -> dict:
+def create_authorizer(request: CreateAuthorizerRequest, user: UserInfo = Depends(require_scopes("security:write")), db: Session = Depends(get_db)) -> dict:
     """Create an authorizer configuration."""
     existing = db.query(AuthorizerConfig).filter(AuthorizerConfig.name == request.name).first()
     if existing:
@@ -320,14 +321,14 @@ def create_authorizer(request: CreateAuthorizerRequest, db: Session = Depends(ge
 
 
 @router.get("/authorizers")
-def list_authorizers(db: Session = Depends(get_db)) -> list[dict]:
+def list_authorizers(user: UserInfo = Depends(require_scopes("security:read")), db: Session = Depends(get_db)) -> list[dict]:
     """List all authorizer configurations."""
     auths = db.query(AuthorizerConfig).order_by(AuthorizerConfig.id).all()
     return [a.to_dict() for a in auths]
 
 
 @router.get("/authorizers/{auth_id}")
-def get_authorizer(auth_id: int, db: Session = Depends(get_db)) -> dict:
+def get_authorizer(auth_id: int, user: UserInfo = Depends(require_scopes("security:read")), db: Session = Depends(get_db)) -> dict:
     """Get an authorizer configuration."""
     auth = db.query(AuthorizerConfig).filter(AuthorizerConfig.id == auth_id).first()
     if not auth:
@@ -337,7 +338,7 @@ def get_authorizer(auth_id: int, db: Session = Depends(get_db)) -> dict:
 
 @router.put("/authorizers/{auth_id}")
 def update_authorizer(
-    auth_id: int, request: UpdateAuthorizerRequest, db: Session = Depends(get_db)
+    auth_id: int, request: UpdateAuthorizerRequest, user: UserInfo = Depends(require_scopes("security:write")), db: Session = Depends(get_db)
 ) -> dict:
     """Update an authorizer configuration."""
     auth = db.query(AuthorizerConfig).filter(AuthorizerConfig.id == auth_id).first()
@@ -378,7 +379,7 @@ def update_authorizer(
 
 
 @router.delete("/authorizers/{auth_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_authorizer(auth_id: int, db: Session = Depends(get_db)) -> None:
+def delete_authorizer(auth_id: int, user: UserInfo = Depends(require_scopes("security:write")), db: Session = Depends(get_db)) -> None:
     """Delete an authorizer configuration and its credentials."""
     auth = db.query(AuthorizerConfig).filter(AuthorizerConfig.id == auth_id).first()
     if not auth:
@@ -416,7 +417,7 @@ class CreateCredentialRequest(BaseModel):
 
 
 @router.post("/authorizers/{auth_id}/credentials", status_code=status.HTTP_201_CREATED)
-def create_credential(auth_id: int, request: CreateCredentialRequest, db: Session = Depends(get_db)) -> dict:
+def create_credential(auth_id: int, request: CreateCredentialRequest, user: UserInfo = Depends(require_scopes("security:write")), db: Session = Depends(get_db)) -> dict:
     """Add a client credential to an authorizer configuration."""
     auth = db.query(AuthorizerConfig).filter(AuthorizerConfig.id == auth_id).first()
     if not auth:
@@ -449,7 +450,7 @@ def create_credential(auth_id: int, request: CreateCredentialRequest, db: Sessio
 
 
 @router.get("/authorizers/{auth_id}/credentials")
-def list_credentials(auth_id: int, db: Session = Depends(get_db)) -> list[dict]:
+def list_credentials(auth_id: int, user: UserInfo = Depends(require_scopes("security:read")), db: Session = Depends(get_db)) -> list[dict]:
     """List credentials for an authorizer."""
     creds = db.query(AuthorizerCredential).filter(
         AuthorizerCredential.authorizer_config_id == auth_id
@@ -458,7 +459,7 @@ def list_credentials(auth_id: int, db: Session = Depends(get_db)) -> list[dict]:
 
 
 @router.delete("/authorizers/{auth_id}/credentials/{cred_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_credential(auth_id: int, cred_id: int, db: Session = Depends(get_db)) -> None:
+def delete_credential(auth_id: int, cred_id: int, user: UserInfo = Depends(require_scopes("security:write")), db: Session = Depends(get_db)) -> None:
     """Delete a credential from an authorizer."""
     cred = db.query(AuthorizerCredential).filter(
         AuthorizerCredential.id == cred_id,
@@ -474,7 +475,7 @@ def delete_credential(auth_id: int, cred_id: int, db: Session = Depends(get_db))
 
 
 @router.post("/authorizers/{auth_id}/credentials/{cred_id}/token")
-def get_credential_token(auth_id: int, cred_id: int, db: Session = Depends(get_db)) -> dict:
+def get_credential_token(auth_id: int, cred_id: int, user: UserInfo = Depends(require_scopes("security:read")), db: Session = Depends(get_db)) -> dict:
     """Generate an access token using a credential's client_id and client_secret."""
     from app.services.cognito import get_cognito_token
 
@@ -518,7 +519,7 @@ def get_credential_token(auth_id: int, cred_id: int, db: Session = Depends(get_d
 # ---------------------------------------------------------------------------
 @router.post("/permission-requests", status_code=status.HTTP_201_CREATED)
 def create_permission_request(
-    request: CreatePermissionRequestBody, db: Session = Depends(get_db)
+    request: CreatePermissionRequestBody, user: UserInfo = Depends(require_scopes("security:write")), db: Session = Depends(get_db)
 ) -> dict:
     """Create a new permission request."""
     role = db.query(ManagedRole).filter(ManagedRole.id == request.managed_role_id).first()
@@ -540,6 +541,7 @@ def create_permission_request(
 @router.get("/permission-requests")
 def list_permission_requests(
     request_status: str | None = Query(None, alias="status"),
+    user: UserInfo = Depends(require_scopes("security:read")),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     """List permission requests, optionally filtered by status."""
@@ -552,7 +554,7 @@ def list_permission_requests(
 
 @router.put("/permission-requests/{request_id}")
 def review_permission_request(
-    request_id: int, body: ReviewPermissionRequestBody, db: Session = Depends(get_db)
+    request_id: int, body: ReviewPermissionRequestBody, user: UserInfo = Depends(require_scopes("security:write")), db: Session = Depends(get_db)
 ) -> dict:
     """Approve or deny a permission request."""
     perm_req = db.query(PermissionRequest).filter(PermissionRequest.id == request_id).first()
