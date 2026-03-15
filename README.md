@@ -14,6 +14,8 @@ A platform for building, testing, and operating AI agents on Amazon Bedrock Agen
 - **Settings** — Display preferences (theme and timezone)
 - SSE streaming invocation with real-time response display and friendly error messages
 - Authenticated agent invocations using user tokens, M2M credentials, or manual bearer tokens
+- Automatic token refresh — 401 responses trigger transparent access token refresh and request retry
+- Group-based invoke restriction — super-admins invoke any agent; demo-admins and users restricted to agents within their `loom:group`
 - Cold-start latency measurement via automatic CloudWatch log parsing
 - Active session tracking with cold-start indicators per agent
 - Session liveness detection via idle timeout heuristic (no AWS API calls)
@@ -24,7 +26,7 @@ A platform for building, testing, and operating AI agents on Amazon Bedrock Agen
 - Instant deploy feedback with two-phase creation status tracking (deploying, completing deployment, finalizing endpoint)
 - Credential suggestions on access denied errors — identifies the correct authorizer for the agent
 - Drag-to-reorder cards within grid sections with persistent ordering
-- Admin role view switching — test the experience of other roles while retaining admin access
+- Admin user view switching — simulate specific users (admin, demo-admin-1, demo-user-1, etc.) to preview their scoped experience
 
 ## Project Structure
 
@@ -81,6 +83,7 @@ Cognito-based user authentication requires configuration on both the backend and
 ```bash
 export LOOM_COGNITO_USER_POOL_ID=<your-pool-id>
 export LOOM_COGNITO_REGION=<your-region>  # defaults to AWS_REGION
+export LOOM_COGNITO_USER_CLIENT_ID=<your-user-client-id>  # same as frontend VITE_COGNITO_USER_CLIENT_ID
 ```
 
 **Frontend** — Set the user client ID in `frontend/.env`:
@@ -101,7 +104,7 @@ The `security/` directory contains CloudFormation templates for provisioning the
 | Group | Scopes |
 |-------|--------|
 | `super-admins` | All 15 scopes (invoke, catalog:r/w, agent:r/w, memory:r/w, security:r/w, settings:r/w, mcp:r/w, a2a:r/w) |
-| `demo-admins` | All read/write scopes (no invoke) |
+| `demo-admins` | All read/write scopes plus invoke |
 | `security-admins` | security:read, security:write |
 | `memory-admins` | memory:read, memory:write |
 | `mcp-admins` | mcp:read, mcp:write |

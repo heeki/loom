@@ -137,10 +137,11 @@ Detailed specifications for each component are maintained in their respective di
 - The backend validates user JWTs against the Cognito JWKS endpoint (keys cached for 1 hour).
 - The `GET /api/auth/config` endpoint exposes only the pool ID and region — never client IDs or secrets.
 - The user client ID is configured on the frontend via the `VITE_COGNITO_USER_CLIENT_ID` environment variable (Vite `.env` file). The user client has `GenerateSecret: false` since browser-based apps cannot safely store client secrets.
-- When a user is authenticated, their access token is forwarded to AgentCore for agent invocations, replacing the M2M client credentials flow.
+- When a user is authenticated, their access token is forwarded to OAuth-protected AgentCore agents. The backend auto-includes the user app client ID in the agent's `allowedClients` on deploy. M2M credentials remain available for service-to-service integrations.
 - Unauthenticated requests are allowed to pass through with a warning (no breaking change to existing flows).
 - The `NEW_PASSWORD_REQUIRED` Cognito challenge is handled on first login for admin-created users.
 - Access tokens are automatically refreshed before expiry using the refresh token.
+- On 401 responses, the frontend automatically refreshes the access token and retries the failed request.
 - Token persistence across browser refreshes is out of scope — users must re-login after page reload.
 
 ### Cognito User Pool Configuration
@@ -149,7 +150,7 @@ The Cognito User Pool is managed via CloudFormation (`security/iac/cognito.yaml`
 
 - **Password policy:** Minimum 12 characters, uppercase, lowercase, numbers required; symbols not required.
 - **Resource server scopes:** `invoke`, `catalog:read`, `catalog:write`, `agent:read`, `agent:write`, `memory:read`, `memory:write`, `security:read`, `security:write`, `settings:read`, `settings:write`, `mcp:read`, `mcp:write`, `a2a:read`, `a2a:write`.
-- **Groups:** `super-admins`, `demo-admins`, `security-admins`, `memory-admins`, `mcp-admins`, `a2a-admins`, `users`.
+- **Groups:** `super-admins`, `demo-admins`, `security-admins`, `memory-admins`, `mcp-admins`, `a2a-admins`, `users`. Group scopes: super-admins (all 15 scopes including invoke), demo-admins (all read/write scopes plus invoke), security-admins (security:read/write), memory-admins (memory:read/write), mcp-admins (mcp:read/write), a2a-admins (a2a:read/write), users (invoke only).
 - **Users:** `admin` (super-admins), `demo-admin-1`/`demo-admin-2` (demo-admins), `security-admin` (security-admins), `integration-admin` (memory-admins + mcp-admins + a2a-admins), `demo-user-1`/`demo-user-2` (users) — each assigned via `UserPoolUserToGroupAttachment`.
 - **Clients:**
   - **M2MClient** — `client_credentials` flow with secret, scoped to `invoke`.
@@ -163,7 +164,7 @@ The frontend enforces scope-based access control derived from Cognito group memb
 | Group | Scopes | Sidebar Access | Write Access |
 |-------|--------|----------------|--------------|
 | `super-admins` | All 15 scopes including `invoke` | All pages | All actions |
-| `demo-admins` | All read/write scopes (no `invoke`) | All admin pages | All admin actions (tag-scoped data) |
+| `demo-admins` | All read/write scopes plus `invoke` | All admin pages | All admin actions (tag-scoped data) |
 | `security-admins` | security:read, security:write | Security | Security actions |
 | `memory-admins` | memory:read, memory:write | Memory | Memory actions |
 | `mcp-admins` | mcp:read, mcp:write | MCP Servers | MCP actions |
@@ -313,10 +314,17 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Expanded scope model from 7 scopes to 15: `invoke`, `catalog:read/write`, `agent:read/write`, `memory:read/write`, `security:read/write`, `settings:read/write`, `mcp:read/write`, `a2a:read/write`.
 - Restructured Cognito groups from 5 to 7: `super-admins`, `demo-admins`, `security-admins`, `memory-admins`, `mcp-admins`, `a2a-admins`, `users`.
 - Updated user-to-group assignments: `admin` → super-admins, `demo-admin-1`/`demo-admin-2` → demo-admins, `security-admin` → security-admins, `integration-admin` → memory-admins + mcp-admins + a2a-admins, `demo-user-1`/`demo-user-2` → users.
-- Backend OAuth2 enforcement: every router endpoint guarded by `require_scopes()` dependency. `get_current_user` validates JWT, extracts `cognito:groups`, and derives scopes via `GROUP_SCOPES` mapping. Returns 401 for missing/invalid tokens, 403 for insufficient scopes.
-- `OAuth2AuthorizationCodeBearer` scheme added for OpenAPI documentation with all 15 scopes.
-- Tag-based resource isolation for end-users: `users` group only sees agents/memories tagged with `loom:group=users`. `demo-admins` enforced at data layer (create/delete restricted to resources tagged with their group).
-- Frontend `AuthContext` and `App.tsx` updated with matching `GROUP_SCOPES` mapping.
+- Backend OAuth2 enforcement: every router endpoint guarded by `require_scopes()` dependency with OpenAPI scope annotations via `Security()`. `get_current_user` validates JWT, extracts `cognito:groups`, and derives scopes via `GROUP_SCOPES` mapping. Returns 401 for missing/invalid tokens, 403 for insufficient scopes.
+- Group-based invoke restriction: `super-admins` can invoke any agent; `demo-admins` and `users` can only invoke agents whose `loom:group` tag matches their own group.
+- Token forwarding for agent invocation: user's login token is forwarded to OAuth-protected agents (shared Cognito pool). Token priority: manual bearer token > M2M credential > user login token > agent config M2M > SigV4 (no token).
+- Auto-include user app client ID (`LOOM_COGNITO_USER_CLIENT_ID`) in agent authorizer `allowedClients` on deploy, so user login tokens are accepted by the agent runtime.
+- Credential dropdown shows context-aware options: OAuth agents show user's token (default), M2M credentials, and manual token; non-OAuth agents show "No credentials (SigV4)" only.
+- Auto-select newly created session in the session dropdown after an invocation.
+- Automatic 401 token refresh: `apiFetch` intercepts 401 responses, refreshes the Cognito access token, and retries the request transparently.
+- Re-fetch agent list after authentication to prevent empty state on hard refresh.
+- Frontend `AuthContext` and `App.tsx` updated with matching `GROUP_SCOPES` mapping. View As selector changed from group-based to user-based (admin, demo-admin-1, demo-admin-2, etc.) for more realistic role simulation.
+- Group restriction on `ResourceTagFields` and `MemoryManagementPanel`: demo-admins only see tag profiles matching their group, and `loom:group` tag is forced to their group value.
+- Sidebar overflow fix: sidebar and main content use proper scroll containment.
 - Bypass mode preserved: when `LOOM_COGNITO_USER_POOL_ID` is not set, all scopes are granted (local development).
 - 16 new scope enforcement tests + 2 pre-existing test fixes.
 
