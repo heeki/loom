@@ -328,7 +328,14 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Bypass mode preserved: when `LOOM_COGNITO_USER_POOL_ID` is not set, all scopes are granted (local development).
 - 16 new scope enforcement tests + 2 pre-existing test fixes.
 
-### Phase 11 — Advanced Operations
+### Phase 11 — JSON Import/Export for Form Configuration *(Complete)*
+- Shared `JsonConfigSection` component for collapsible JSON import/export on forms. Encapsulates toggle, textarea, and Apply/Export/Cancel buttons.
+- Agent deploy form (`AgentRegistrationForm`): refactored to use `JsonConfigSection`. Export serializes form state to JSON with human-readable names (model display name, role name, authorizer name, tag profile name). Import unchanged (maps `name`, `description`, `persona`, `instructions`, `behavior`, `model`, `role`, `network_mode`, `authorizer`, `tags`).
+- Memory create form (`MemoryManagementPanel`): added `JsonConfigSection` with import/export. Import maps `name`, `description`, `event_expiry_duration` (validated 3-364), `tags` (tag profile name lookup), `strategies` (array with strategy_type validation against semantic/summary/user_preference/episodic/custom). Export serializes current form state; empty/default fields omitted.
+- Round-trip capable: exported JSON is valid input for import, reproducing the same form state.
+- Consistent visual behavior across both forms: same collapse/expand toggle, textarea styling, and button layout.
+
+### Phase 12 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

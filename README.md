@@ -12,6 +12,7 @@ A platform for building, testing, and operating AI agents on Amazon Bedrock Agen
 - **Resource Tagging** — Configurable tag policies (platform + custom) and named tag profiles applied to all deployed resources (agents, memory, IAM roles). Tag badges on cards with show/hide toggle for custom tags. Progressive disclosure filtering with persistent filter state across navigation
 - **Tagging** — Dedicated page for managing tag policies (platform read-only with lock icon, custom editable/deletable) and tag profiles (create, edit, delete named tag presets with drag-to-reorder)
 - **Settings** — Display preferences (theme and timezone)
+- JSON import/export on agent deploy and memory create forms — paste a JSON document to auto-fill fields, or export the current form state as portable JSON
 - SSE streaming invocation with real-time response display and friendly error messages
 - Authenticated agent invocations using user tokens, M2M credentials, or manual bearer tokens
 - Automatic token refresh — 401 responses trigger transparent access token refresh and request retry

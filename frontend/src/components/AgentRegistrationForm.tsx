@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { PolicyViewer } from "@/components/PolicyViewer";
+import { JsonConfigSection } from "@/components/JsonConfigSection";
 import * as agentsApi from "@/api/agents";
 import * as securityApi from "@/api/security";
 import * as settingsApi from "@/api/settings";
@@ -195,44 +196,6 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
     validateLifecycle("max", value);
   };
 
-  // JSON paste state
-  const [showJsonPaste, setShowJsonPaste] = useState(false);
-  const [jsonInput, setJsonInput] = useState("");
-  const [jsonError, setJsonError] = useState("");
-
-  const handleJsonApply = () => {
-    try {
-      const parsed = JSON.parse(jsonInput);
-      if (parsed.name) setName(parsed.name);
-      if (parsed.description) setDescription(parsed.description);
-      if (parsed.persona) setAgentDescription(parsed.persona);
-      if (parsed.instructions) setBehavioralGuidelines(parsed.instructions);
-      if (parsed.behavior) setOutputExpectations(parsed.behavior);
-      if (parsed.model) {
-        const match = models.find((m) => m.model_id === parsed.model || m.display_name === parsed.model);
-        if (match) setModelId(match.model_id);
-      }
-      if (parsed.role) {
-        const match = managedRoles.find((r) => r.role_name === parsed.role || r.role_arn === parsed.role);
-        if (match) setSelectedRoleId(match.id.toString());
-      }
-      if (parsed.network_mode) setNetworkMode(parsed.network_mode);
-      if (parsed.authorizer) {
-        const match = authConfigs.find((c) => c.name === parsed.authorizer || c.id.toString() === parsed.authorizer);
-        if (match) setSelectedAuthConfigId(match.id.toString());
-      }
-      if (parsed.tags) {
-        const match = tagProfiles.find((p) => p.name === parsed.tags);
-        if (match) setSelectedTagProfileId(match.id.toString());
-      }
-      setJsonInput("");
-      setJsonError("");
-      setShowJsonPaste(false);
-    } catch {
-      setJsonError("Invalid JSON. Please check the format and try again.");
-    }
-  };
-
   const hasValidationErrors = nameError !== "" || idleTimeoutError !== "" || maxLifetimeError !== "";
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -321,50 +284,66 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
             </div>
       ) : (
           <div className="space-y-5">
-              {/* JSON Paste */}
-              <section className="space-y-2">
-                <button
-                  type="button"
-                  onClick={() => { setShowJsonPaste(!showJsonPaste); setJsonError(""); }}
-                  className="flex items-center gap-1 text-xs font-medium text-muted-foreground uppercase tracking-wide hover:text-foreground"
-                >
-                  {showJsonPaste ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                  Paste JSON
-                </button>
-                {showJsonPaste && (
-                  <div className="space-y-2">
-                    <Textarea
-                      placeholder='{"name": "...", "description": "...", "persona": "...", "instructions": "...", "behavior": "...", "model": "...", "role": "...", "authorizer": "..."}'
-                      value={jsonInput}
-                      onChange={(e) => { setJsonInput(e.target.value); setJsonError(""); }}
-                      rows={4}
-                      className="text-sm font-mono"
-                    />
-                    {jsonError && (
-                      <p className="text-xs text-red-500">{jsonError}</p>
-                    )}
-                    <div className="flex gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={handleJsonApply}
-                        disabled={!jsonInput.trim()}
-                      >
-                        Apply
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => { setShowJsonPaste(false); setJsonInput(""); setJsonError(""); }}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </section>
+              {/* JSON Import / Export */}
+              <JsonConfigSection
+                onApply={(json) => {
+                  try {
+                    const parsed = JSON.parse(json);
+                    if (parsed.name) setName(parsed.name);
+                    if (parsed.description) setDescription(parsed.description);
+                    if (parsed.persona) setAgentDescription(parsed.persona);
+                    if (parsed.instructions) setBehavioralGuidelines(parsed.instructions);
+                    if (parsed.behavior) setOutputExpectations(parsed.behavior);
+                    if (parsed.model) {
+                      const match = models.find((m) => m.model_id === parsed.model || m.display_name === parsed.model);
+                      if (match) setModelId(match.model_id);
+                    }
+                    if (parsed.role) {
+                      const match = managedRoles.find((r) => r.role_name === parsed.role || r.role_arn === parsed.role);
+                      if (match) setSelectedRoleId(match.id.toString());
+                    }
+                    if (parsed.network_mode) setNetworkMode(parsed.network_mode);
+                    if (parsed.authorizer) {
+                      const match = authConfigs.find((c) => c.name === parsed.authorizer || c.id.toString() === parsed.authorizer);
+                      if (match) setSelectedAuthConfigId(match.id.toString());
+                    }
+                    if (parsed.tags) {
+                      const match = tagProfiles.find((p) => p.name === parsed.tags);
+                      if (match) setSelectedTagProfileId(match.id.toString());
+                    }
+                    return null;
+                  } catch {
+                    return "Invalid JSON. Please check the format and try again.";
+                  }
+                }}
+                onExport={() => {
+                  const result: Record<string, unknown> = {};
+                  if (name) result.name = name;
+                  if (description) result.description = description;
+                  if (agentDescription) result.persona = agentDescription;
+                  if (behavioralGuidelines) result.instructions = behavioralGuidelines;
+                  if (outputExpectations) result.behavior = outputExpectations;
+                  if (modelId) {
+                    const model = models.find((m) => m.model_id === modelId);
+                    result.model = model?.display_name ?? modelId;
+                  }
+                  if (selectedRoleId) {
+                    const role = managedRoles.find((r) => r.id.toString() === selectedRoleId);
+                    if (role) result.role = role.role_name;
+                  }
+                  if (networkMode && networkMode !== "PUBLIC") result.network_mode = networkMode;
+                  if (selectedAuthConfigId) {
+                    const auth = authConfigs.find((c) => c.id.toString() === selectedAuthConfigId);
+                    if (auth) result.authorizer = auth.name;
+                  }
+                  if (selectedTagProfileId) {
+                    const profile = tagProfiles.find((p) => p.id.toString() === selectedTagProfileId);
+                    if (profile) result.tags = profile.name;
+                  }
+                  return JSON.stringify(result, null, 2);
+                }}
+                placeholder='{"name": "...", "description": "...", "persona": "...", "instructions": "...", "behavior": "...", "model": "...", "role": "...", "authorizer": "..."}'
+              />
 
               {/* Agent Identity */}
               <section className="space-y-3">

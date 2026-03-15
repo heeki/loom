@@ -46,6 +46,7 @@ frontend/
 │   │   ├── SortableCardGrid.tsx — Drag-to-reorder card grid using @dnd-kit, localStorage persistence
 │   │   ├── AgentCard.tsx       # Agent summary card with refresh + Trash2 icon deletion
 │   │   ├── AgentRegistrationForm.tsx  # Tabbed form: ARN registration + agent deployment
+│   │   ├── JsonConfigSection.tsx     # Shared collapsible JSON import/export section
 │   │   ├── AuthorizerManagementPanel.tsx # Authorizer config + credential management
 │   │   ├── MemoryCard.tsx              # Memory resource summary card
 │   │   ├── MemoryManagementPanel.tsx    # Memory resource create form + list table
@@ -186,7 +187,7 @@ Clicking the Trash2 icon triggers an overlay confirmation panel:
 ### Deploy Tab
 
 Full deployment form with sections:
-- **JSON Paste**: Collapsible section (ChevronDown/ChevronRight toggle) with monospace textarea for pasting JSON agent configuration. Maps `name`, `description`, `persona` (→ agent description), `instructions` (→ behavioral guidelines), `behavior` (→ output expectations). Apply/Cancel buttons. Invalid JSON shows inline error without clearing existing fields.
+- **JSON Import/Export**: Collapsible section (ChevronDown/ChevronRight toggle) via the shared `JsonConfigSection` component. Import maps `name`, `description`, `persona` (→ agent description), `instructions` (→ behavioral guidelines), `behavior` (→ output expectations), `model`, `role`, `network_mode`, `authorizer`, `tags` (tag profile name). Export serializes the current form state to JSON using human-readable names (model display name, role name, authorizer name, tag profile name); empty/default fields are omitted. Apply/Export/Cancel buttons. Invalid JSON shows inline error without clearing existing fields.
 - **Agent Identity**: name (1/3 width) and description (2/3 width)
 - **System Prompt**: agent description, behavioral guidelines, output expectations — each with placeholder examples
 - **Model / Protocol / Network / IAM Role**: single flex row with explicit widths (20% / 10% / 10% / flex-1). Model uses `SearchableSelect` with grouped options, no default selection. Protocol offers HTTP as selectable; MCP and A2A shown as disabled. Network offers PUBLIC; VPC shown as disabled. IAM Role uses a `SearchableSelect` with searchable dropdown. Both model and IAM role are required — deploy button is disabled until both are selected.
@@ -266,6 +267,7 @@ Full deployment form with sections:
 
 Toggled via the "Add Memory" button. Contained in a `Card` with the following fields:
 
+- **JSON Import/Export**: Collapsible section via the shared `JsonConfigSection` component. Import maps `name`, `description`, `event_expiry_duration` (validated 3-364), `tags` (tag profile name lookup), `strategies` (array with strategy_type validation). Export serializes the current form state; empty/default fields are omitted. Apply/Export/Cancel buttons.
 - **Name** (required, flex-1) and **Event Expiry** (days, fixed 140px width) — same row
 - **Description** — full width, optional
 - **Memory Execution Role ARN** and **Encryption Key ARN** — 2-column grid, optional
@@ -410,6 +412,9 @@ All timestamps use shared utilities in `src/lib/format.ts`. A `TimezoneContext` 
 
 ### SearchableSelect Component
 Custom combobox with click-outside detection, filtered option list, check mark for selected item, and optional group headers. Accepts a `className` prop for width control. Filter matches both `label` and `value` fields.
+
+### JsonConfigSection Component
+Shared collapsible component for JSON import/export on forms. Encapsulates the collapse/expand toggle (ChevronRight/ChevronDown), monospace textarea, and Apply/Export/Cancel button row. Props: `onApply(json) => string | null` (returns error or null on success), `onExport() => string`, optional `label` and `placeholder`. On successful apply, the input clears and the section auto-collapses. On export, the serialized JSON is written to the textarea and the section expands if collapsed. Used by both `AgentRegistrationForm` and `MemoryManagementPanel` to ensure consistent behavior. Export produces human-readable JSON (display names rather than internal IDs) that is valid input for import (round-trip capable).
 
 ### TagInput Pattern
 Inline component for adding/removing tag-style values (clients, scopes). Single textbox with Enter to add, badge with X to remove.

@@ -95,6 +95,7 @@ src/
 │   ├── AgentCard.tsx              # Agent card with refresh + eraser icon deletion + overlay confirmation
 │   ├── SortableCardGrid.tsx       # Drag-to-reorder card grid with @dnd-kit
 │   ├── AgentRegistrationForm.tsx  # Import (ARN + model) and Deploy (full form) tabs
+│   ├── JsonConfigSection.tsx     # Shared collapsible JSON import/export section
 │   ├── AuthorizerManagementPanel.tsx # Authorizer config and credential management
 │   ├── MemoryCard.tsx             # Memory resource card with status, tags, refresh, delete
 │   ├── MemoryManagementPanel.tsx  # Memory resource create form + card/table list + tag filters
@@ -152,11 +153,12 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 - **SearchableSelect** — Combobox with search, filter, optional group headers (Anthropic/Amazon), and click-outside detection. Searches both label and value fields.
 - **AgentCard** — Compact card with two-row header layout, inline badges (including authorizer display), refresh button, eraser icon for deletion, overlay confirmation with "Also delete in AgentCore" checkbox. Supports two-phase creation status (deploying → completing deployment → finalizing endpoint) with timer format (spinner + elapsed + message). Displays tag badges for tags marked `show_on_card` in the tag policy.
 - **MemoryCard** — Memory resource card with name, status badge, spinner+timer for transitional states (using per-resource timestamps for accurate elapsed time), region/account/expiry metadata, tag badges, refresh and delete buttons with overlay confirmation.
+- **JsonConfigSection** — Shared collapsible JSON import/export section used by both agent deploy and memory create forms. Encapsulates toggle, monospace textarea, and Apply/Export/Cancel buttons. Export produces human-readable JSON that is round-trip compatible with import.
 - **ResourceTagFields** — Shared component for tag profile selection and tag resolution. Fetches tag policies and profiles, renders a profile dropdown (persisted in `sessionStorage`), resolves tags from the selected profile + policy defaults. Used by both agent deploy and memory create forms.
 - **MultiSelect** — Checkbox-based multi-select dropdown with auto-expanding width. Used for tag filtering on all listing pages.
 - **InvokePanel** — Qualifier selector, context-aware credential dropdown (OAuth agents: user token / M2M / manual token; non-OAuth: SigV4 only), model ID badge, prompt textarea, invoke/cancel buttons. Auto-selects newly created session. Token indicator shown when invocation uses OAuth.
 - **AuthorizerManagementPanel** — Lists authorizer configs with expandable credential management (add/list/delete credentials per config).
-- **MemoryManagementPanel** — Create/import form with strategy configuration (type, name, description, namespaces), memory card/table list with status badges (CREATING/ACTIVE/FAILED/DELETING), refresh and delete actions with inline confirmation overlay.
+- **MemoryManagementPanel** — Create/import form with JSON import/export and strategy configuration (type, name, description, namespaces), memory card/table list with status badges (CREATING/ACTIVE/FAILED/DELETING), refresh and delete actions with inline confirmation overlay.
 
 ### Views
 
