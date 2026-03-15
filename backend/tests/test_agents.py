@@ -333,10 +333,10 @@ class TestAgentsRouter(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["active_session_count"], 1)
 
-    @patch("app.routers.agents.os.getenv", return_value="15")
+    @patch.dict("os.environ", {"LOOM_SESSION_IDLE_TIMEOUT_SECONDS": "15"})
     @patch("app.routers.agents.describe_runtime")
     @patch("app.routers.agents.list_runtime_endpoints")
-    def test_active_session_count_with_recent_complete_session(self, mock_list_endpoints, mock_describe, mock_getenv):
+    def test_active_session_count_with_recent_complete_session(self, mock_list_endpoints, mock_describe):
         """Test active_session_count includes recently completed sessions."""
         mock_describe.return_value = {"agentRuntimeName": "Test Agent", "status": "READY"}
         mock_list_endpoints.return_value = ["DEFAULT"]
@@ -372,10 +372,10 @@ class TestAgentsRouter(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["active_session_count"], 1)
 
-    @patch("app.routers.agents.os.getenv", return_value="15")
+    @patch.dict("os.environ", {"LOOM_SESSION_IDLE_TIMEOUT_SECONDS": "15"})
     @patch("app.routers.agents.describe_runtime")
     @patch("app.routers.agents.list_runtime_endpoints")
-    def test_active_session_count_with_expired_session(self, mock_list_endpoints, mock_describe, mock_getenv):
+    def test_active_session_count_with_expired_session(self, mock_list_endpoints, mock_describe):
         """Test active_session_count excludes expired sessions."""
         mock_describe.return_value = {"agentRuntimeName": "Test Agent", "status": "READY"}
         mock_list_endpoints.return_value = ["DEFAULT"]

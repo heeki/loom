@@ -14,7 +14,9 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.dependencies.auth import UserInfo, require_scopes
 from app.models.agent import Agent
+from app.models.authorizer_config import AuthorizerConfig
 from app.models.config_entry import ConfigEntry
 from app.models.session import InvocationSession
 from app.models.invocation import Invocation
@@ -235,8 +237,18 @@ def _agent_response(agent: Agent, db: Session) -> AgentResponse:
             except (json.JSONDecodeError, TypeError):
                 pass
             break
+
+    agent_dict = agent.to_dict()
+
+    # Enrich authorizer_config with the matching AuthorizerConfig name
+    auth_cfg = agent_dict.get("authorizer_config")
+    if auth_cfg and auth_cfg.get("pool_id"):
+        ac = db.query(AuthorizerConfig).filter(AuthorizerConfig.pool_id == auth_cfg["pool_id"]).first()
+        if ac:
+            auth_cfg["name"] = ac.name
+
     return AgentResponse(
-        **agent.to_dict(),
+        **agent_dict,
         model_id=model_id,
         active_session_count=compute_active_session_count(agent.id, db)
     )
@@ -293,27 +305,27 @@ def _build_system_prompt(request: AgentCreateRequest) -> str:
 # Discovery endpoints
 # ---------------------------------------------------------------------------
 @router.get("/roles")
-def list_roles() -> list[dict]:
+def list_roles(user: UserInfo = Depends(require_scopes("agent:read"))) -> list[dict]:
     """List available IAM roles with bedrock-agentcore trust policy."""
     region = os.getenv("AWS_REGION", DEFAULT_REGION)
     return list_agentcore_roles(region)
 
 
 @router.get("/cognito-pools")
-def get_cognito_pools() -> list[dict]:
+def get_cognito_pools(user: UserInfo = Depends(require_scopes("agent:read"))) -> list[dict]:
     """List available Cognito user pools."""
     region = os.getenv("AWS_REGION", DEFAULT_REGION)
     return list_cognito_pools(region)
 
 
 @router.get("/models")
-def get_models() -> list[dict]:
+def get_models(user: UserInfo = Depends(require_scopes("agent:read"))) -> list[dict]:
     """Return list of supported Bedrock model IDs."""
     return SUPPORTED_MODELS
 
 
 @router.get("/defaults")
-def get_defaults() -> dict:
+def get_defaults(user: UserInfo = Depends(require_scopes("agent:read"))) -> dict:
     """Return configurable default values for the frontend."""
     return {
         "idle_timeout_seconds": int(os.getenv("LOOM_SESSION_IDLE_TIMEOUT_SECONDS", "300")),
@@ -327,9 +339,19 @@ def get_defaults() -> dict:
 @router.post("", response_model=AgentResponse, status_code=status.HTTP_201_CREATED)
 def create_agent(
     request: AgentCreateRequest,
-    db: Session = Depends(get_db)
+    user: UserInfo = Depends(require_scopes("agent:write")),
+    db: Session = Depends(get_db),
 ) -> AgentResponse:
     """Create a new agent via registration (existing ARN) or deployment (new runtime)."""
+    # demo-admins can only create resources tagged with loom:group=demo-admins
+    if "demo-admins" in user.groups and "super-admins" not in user.groups:
+        tags = request.tags or {}
+        if tags.get("loom:group") and tags["loom:group"] != "demo-admins":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="demo-admins can only create resources tagged with loom:group=demo-admins",
+            )
+
     if request.source == "register":
         return _register_agent(request, db)
     elif request.source == "deploy":
@@ -598,12 +620,17 @@ def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
             lifecycle_config["maxLifetime"] = request.max_lifetime
 
     authorizer_config = None
+    user_client_id = os.getenv("LOOM_COGNITO_USER_CLIENT_ID", "")
     if request.authorizer_type == "cognito" and request.authorizer_pool_id:
         jwt_config: dict[str, Any] = {
             "discoveryUrl": f"https://cognito-idp.{region}.amazonaws.com/{request.authorizer_pool_id}/.well-known/openid-configuration"
         }
-        if request.authorizer_allowed_clients:
-            jwt_config["allowedClients"] = request.authorizer_allowed_clients
+        allowed_clients = list(request.authorizer_allowed_clients) if request.authorizer_allowed_clients else []
+        # Auto-include the user app client so login tokens are accepted
+        if user_client_id and user_client_id not in allowed_clients:
+            allowed_clients.append(user_client_id)
+        if allowed_clients:
+            jwt_config["allowedClients"] = allowed_clients
         if request.authorizer_allowed_scopes:
             jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
         authorizer_config = {"customJWTAuthorizer": jwt_config}
@@ -654,11 +681,14 @@ def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
 
         # Persist authorizer config for token retrieval at invoke time
         if request.authorizer_type:
+            stored_clients = list(request.authorizer_allowed_clients) if request.authorizer_allowed_clients else []
+            if user_client_id and user_client_id not in stored_clients:
+                stored_clients.append(user_client_id)
             agent.set_authorizer_config({
                 "type": request.authorizer_type,
                 "pool_id": request.authorizer_pool_id,
                 "discovery_url": request.authorizer_discovery_url,
-                "allowed_clients": request.authorizer_allowed_clients,
+                "allowed_clients": stored_clients,
                 "allowed_scopes": request.authorizer_allowed_scopes,
             })
 
@@ -714,21 +744,29 @@ def _cleanup_role(role_arn: str) -> None:
 
 
 @router.get("", response_model=list[AgentResponse])
-def list_agents(db: Session = Depends(get_db)) -> list[AgentResponse]:
+def list_agents(
+    user: UserInfo = Depends(require_scopes("agent:read")),
+    db: Session = Depends(get_db),
+) -> list[AgentResponse]:
     """List all registered agents."""
     agents = db.query(Agent).order_by(Agent.registered_at.desc()).all()
+
+    # Tag-based filtering: users group can only see agents tagged with loom:group=users
+    if "users" in user.groups and "super-admins" not in user.groups:
+        agents = [a for a in agents if a.get_tags().get("loom:group") == "users"]
+
     return [_agent_response(agent, db) for agent in agents]
 
 
 @router.get("/{agent_id}", response_model=AgentResponse)
-def get_agent(agent_id: int, db: Session = Depends(get_db)) -> AgentResponse:
+def get_agent(agent_id: int, user: UserInfo = Depends(require_scopes("agent:read")), db: Session = Depends(get_db)) -> AgentResponse:
     """Get metadata for a specific registered agent."""
     agent = get_agent_or_404(agent_id, db)
     return _agent_response(agent, db)
 
 
 @router.get("/{agent_id}/status", response_model=AgentResponse)
-def get_agent_status(agent_id: int, db: Session = Depends(get_db)) -> AgentResponse:
+def get_agent_status(agent_id: int, user: UserInfo = Depends(require_scopes("agent:read")), db: Session = Depends(get_db)) -> AgentResponse:
     """Poll AWS for current runtime and endpoint status, update local DB.
 
     If the runtime is READY and no endpoint exists yet, creates one automatically.
@@ -770,6 +808,7 @@ def get_agent_status(agent_id: int, db: Session = Depends(get_db)) -> AgentRespo
 def delete_agent(
     agent_id: int,
     cleanup_aws: bool = False,
+    user: UserInfo = Depends(require_scopes("agent:write")),
     db: Session = Depends(get_db),
 ) -> None:
     """Remove an agent from the local registry.
@@ -778,6 +817,14 @@ def delete_agent(
         cleanup_aws: If True, also delete the runtime, endpoint, and IAM role from AWS.
     """
     agent = get_agent_or_404(agent_id, db)
+
+    # demo-admins can only delete resources tagged with loom:group=demo-admins
+    if "demo-admins" in user.groups and "super-admins" not in user.groups:
+        if agent.get_tags().get("loom:group") != "demo-admins":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot modify resources outside your group",
+            )
 
     if cleanup_aws and agent.runtime_id:
         # Delete endpoint first
@@ -804,7 +851,7 @@ def delete_agent(
 
 
 @router.post("/{agent_id}/refresh", response_model=AgentResponse)
-def refresh_agent(agent_id: int, db: Session = Depends(get_db)) -> AgentResponse:
+def refresh_agent(agent_id: int, user: UserInfo = Depends(require_scopes("agent:write")), db: Session = Depends(get_db)) -> AgentResponse:
     """Re-fetch metadata from AgentCore and update the local record."""
     agent = get_agent_or_404(agent_id, db)
 
@@ -858,7 +905,7 @@ def refresh_agent(agent_id: int, db: Session = Depends(get_db)) -> AgentResponse
 
 
 @router.post("/{agent_id}/redeploy", response_model=AgentResponse)
-def redeploy_agent_endpoint(agent_id: int, db: Session = Depends(get_db)) -> AgentResponse:
+def redeploy_agent_endpoint(agent_id: int, user: UserInfo = Depends(require_scopes("agent:write")), db: Session = Depends(get_db)) -> AgentResponse:
     """Redeploy an agent with its current code and config."""
     agent = get_agent_or_404(agent_id, db)
 
@@ -905,7 +952,7 @@ def redeploy_agent_endpoint(agent_id: int, db: Session = Depends(get_db)) -> Age
 
 
 @router.get("/{agent_id}/config", response_model=list[ConfigEntryResponse])
-def get_agent_config(agent_id: int, db: Session = Depends(get_db)) -> list[ConfigEntryResponse]:
+def get_agent_config(agent_id: int, user: UserInfo = Depends(require_scopes("agent:read")), db: Session = Depends(get_db)) -> list[ConfigEntryResponse]:
     """Get all configuration entries for an agent. Secret values are masked."""
     get_agent_or_404(agent_id, db)
     entries = db.query(ConfigEntry).filter(ConfigEntry.agent_id == agent_id).all()
@@ -922,6 +969,7 @@ def get_agent_config(agent_id: int, db: Session = Depends(get_db)) -> list[Confi
 def update_agent_config(
     agent_id: int,
     request: ConfigUpdateRequest,
+    user: UserInfo = Depends(require_scopes("agent:write")),
     db: Session = Depends(get_db),
 ) -> list[ConfigEntryResponse]:
     """Update configuration entries for an agent. Adds new keys and updates existing ones."""

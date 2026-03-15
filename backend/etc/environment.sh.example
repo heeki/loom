@@ -16,6 +16,7 @@ LOOM_FRONTEND_PORT=5173
 
 # Cognito user authentication (from cognito stack outputs)
 LOOM_COGNITO_USER_POOL_ID=<your-cognito-user-pool-id>
+LOOM_COGNITO_USER_CLIENT_ID=<your-cognito-user-client-id>
 LOOM_COGNITO_REGION=${AWS_REGION}
 
 # Exports
@@ -24,6 +25,7 @@ export LOOM_DATABASE_URL
 export LOOM_BACKEND_PORT
 export LOOM_FRONTEND_PORT
 export LOOM_COGNITO_USER_POOL_ID
+export LOOM_COGNITO_USER_CLIENT_ID
 export LOOM_COGNITO_REGION
 
 # Local testing

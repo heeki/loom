@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.dependencies.auth import UserInfo, require_scopes
 from app.models.memory import Memory
 from app.models.tag_policy import TagPolicy
 from app.services.memory import (
@@ -146,9 +147,19 @@ def _transform_strategies(strategies: list[MemoryStrategyRequest]) -> list[dict]
 @router.post("", response_model=MemoryResponse, status_code=status.HTTP_201_CREATED)
 def create_memory(
     request: MemoryCreateRequest,
+    user: UserInfo = Depends(require_scopes("memory:write")),
     db: Session = Depends(get_db),
 ) -> MemoryResponse:
     """Create a new memory resource."""
+    # demo-admins can only create resources tagged with loom:group=demo-admins
+    if "demo-admins" in user.groups and "super-admins" not in user.groups:
+        tags = request.tags or {}
+        if tags.get("loom:group") and tags["loom:group"] != "demo-admins":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="demo-admins can only create resources tagged with loom:group=demo-admins",
+            )
+
     region = os.getenv("AWS_REGION", DEFAULT_REGION)
     account_id = os.getenv("AWS_ACCOUNT_ID", "")
 
@@ -237,6 +248,7 @@ def create_memory(
 @router.post("/import", response_model=MemoryResponse, status_code=status.HTTP_201_CREATED)
 def import_memory(
     request: MemoryImportRequest,
+    user: UserInfo = Depends(require_scopes("memory:write")),
     db: Session = Depends(get_db),
 ) -> MemoryResponse:
     """Import an existing memory resource from AWS by its memory ID."""
@@ -325,14 +337,22 @@ def import_memory(
 
 
 @router.get("", response_model=list[MemoryResponse])
-def list_memories(db: Session = Depends(get_db)) -> list[MemoryResponse]:
+def list_memories(
+    user: UserInfo = Depends(require_scopes("memory:read")),
+    db: Session = Depends(get_db),
+) -> list[MemoryResponse]:
     """List all memory resources."""
     memories = db.query(Memory).order_by(Memory.created_at.desc()).all()
+
+    # Tag-based filtering: users group can only see memories tagged with loom:group=users
+    if "users" in user.groups and "super-admins" not in user.groups:
+        memories = [m for m in memories if m.get_tags().get("loom:group") == "users"]
+
     return [MemoryResponse(**m.to_dict()) for m in memories]
 
 
 @router.get("/{memory_id}", response_model=MemoryResponse)
-def get_memory(memory_id: int, db: Session = Depends(get_db)) -> MemoryResponse:
+def get_memory(memory_id: int, user: UserInfo = Depends(require_scopes("memory:read")), db: Session = Depends(get_db)) -> MemoryResponse:
     """Get a specific memory resource by DB ID."""
     memory = db.query(Memory).filter(Memory.id == memory_id).first()
     if not memory:
@@ -344,7 +364,7 @@ def get_memory(memory_id: int, db: Session = Depends(get_db)) -> MemoryResponse:
 
 
 @router.post("/{memory_id}/refresh", response_model=MemoryResponse)
-def refresh_memory(memory_id: int, db: Session = Depends(get_db)) -> MemoryResponse:
+def refresh_memory(memory_id: int, user: UserInfo = Depends(require_scopes("memory:read")), db: Session = Depends(get_db)) -> MemoryResponse:
     """Refresh memory status from AWS."""
     memory = db.query(Memory).filter(Memory.id == memory_id).first()
     if not memory:
@@ -403,6 +423,7 @@ def refresh_memory(memory_id: int, db: Session = Depends(get_db)) -> MemoryRespo
 def delete_memory(
     memory_id: int,
     cleanup_aws: bool = True,
+    user: UserInfo = Depends(require_scopes("memory:write")),
     db: Session = Depends(get_db),
 ) -> MemoryResponse:
     """Delete a memory resource. When cleanup_aws=True, initiates async deletion in AWS."""
@@ -412,6 +433,14 @@ def delete_memory(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Memory with id {memory_id} not found"
         )
+
+    # demo-admins can only delete resources tagged with loom:group=demo-admins
+    if "demo-admins" in user.groups and "super-admins" not in user.groups:
+        if memory.get_tags().get("loom:group") != "demo-admins":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot modify resources outside your group",
+            )
 
     # If not cleaning up AWS, just remove from DB
     if not cleanup_aws or not memory.memory_id or memory.status in ("FAILED",):
@@ -442,7 +471,7 @@ def delete_memory(
 
 
 @router.delete("/{memory_id}/purge", status_code=status.HTTP_204_NO_CONTENT)
-def purge_memory(memory_id: int, db: Session = Depends(get_db)) -> None:
+def purge_memory(memory_id: int, user: UserInfo = Depends(require_scopes("memory:write")), db: Session = Depends(get_db)) -> None:
     """Remove a memory resource from the local database (no AWS call)."""
     memory = db.query(Memory).filter(Memory.id == memory_id).first()
     if not memory:

@@ -1,6 +1,7 @@
 const BASE_URL = "http://localhost:8000";
 
 let _authToken: string | null = null;
+let _onUnauthorized: (() => Promise<string | null>) | null = null;
 
 export function setAuthToken(token: string | null): void {
   _authToken = token;
@@ -8,6 +9,11 @@ export function setAuthToken(token: string | null): void {
 
 export function getAuthToken(): string | null {
   return _authToken;
+}
+
+/** Register a callback that attempts to refresh the token on 401. */
+export function setOnUnauthorized(cb: (() => Promise<string | null>) | null): void {
+  _onUnauthorized = cb;
 }
 
 export class ApiError extends Error {
@@ -33,10 +39,28 @@ export async function apiFetch<T>(
     headers["Authorization"] = `Bearer ${_authToken}`;
   }
 
-  const response = await fetch(`${BASE_URL}${path}`, {
+  let response = await fetch(`${BASE_URL}${path}`, {
     ...options,
     headers,
   });
+
+  // On 401, attempt a token refresh and retry once
+  if (response.status === 401 && _onUnauthorized) {
+    const newToken = await _onUnauthorized();
+    if (newToken) {
+      headers["Authorization"] = `Bearer ${newToken}`;
+      const retryResponse = await fetch(`${BASE_URL}${path}`, {
+        ...options,
+        headers,
+      });
+      if (retryResponse.ok) {
+        if (retryResponse.status === 204) return undefined as T;
+        return retryResponse.json() as Promise<T>;
+      }
+      // Retry also failed — fall through to error handling with retryResponse
+      response = retryResponse;
+    }
+  }
 
   if (!response.ok) {
     let detail = `HTTP ${response.status}`;

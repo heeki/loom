@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 
 from app.db import get_db
+from app.dependencies.auth import UserInfo, require_scopes
 from app.models.agent import Agent
 from app.routers.agents import derive_log_group
 
@@ -112,7 +113,8 @@ def _resolve_agent_and_log_group(
 def get_log_stream_list(
     agent_id: int,
     qualifier: str = Query(default="DEFAULT", description="Endpoint qualifier"),
-    db: Session = Depends(get_db)
+    user: UserInfo = Depends(require_scopes("agent:read")),
+    db: Session = Depends(get_db),
 ) -> LogStreamsResponse:
     """
     List available log streams for an agent, ordered by most recent first.
@@ -143,7 +145,8 @@ def get_agent_logs(
     limit: int = Query(default=100, ge=1, le=1000, description="Max number of log events"),
     start_time: Optional[str] = Query(default=None, description="Filter events after this ISO 8601 timestamp"),
     end_time: Optional[str] = Query(default=None, description="Filter events before this ISO 8601 timestamp"),
-    db: Session = Depends(get_db)
+    user: UserInfo = Depends(require_scopes("agent:read")),
+    db: Session = Depends(get_db),
 ) -> LogResponse:
     """
     Retrieve recent logs from CloudWatch for this agent.
@@ -203,7 +206,8 @@ def get_session_logs(
     session_id: str,
     qualifier: str = Query(default="DEFAULT", description="Endpoint qualifier"),
     limit: int = Query(default=100, ge=1, le=1000, description="Max number of log events"),
-    db: Session = Depends(get_db)
+    user: UserInfo = Depends(require_scopes("agent:read")),
+    db: Session = Depends(get_db),
 ) -> LogResponse:
     """
     Retrieve logs filtered to a specific session.

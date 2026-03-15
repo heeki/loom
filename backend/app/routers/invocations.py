@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 from app.db import get_db
+from app.dependencies.auth import UserInfo, require_scopes
 from app.models.agent import Agent
 from app.models.session import InvocationSession
 from app.models.invocation import Invocation
@@ -266,15 +267,23 @@ async def invoke_agent_stream(
         yield format_sse_event("session_end", session_end_data)
 
     except Exception as e:
-        # Handle errors
+        # Handle errors — include full exception details for debugging
+        error_detail = str(e)
+        if hasattr(e, "response"):
+            try:
+                error_detail = f"{error_detail} | Response: {e.response}"
+            except Exception:
+                pass
+        logger.error("Invocation failed for agent %s session %s (token_source=%s): %s",
+                      agent.id, session_id, token_source, error_detail)
         invocation.status = "error"
-        invocation.error_message = str(e)
+        invocation.error_message = error_detail
         session.status = "error"
         completed = True
         db.commit()
 
         yield format_sse_event("error", {
-            "message": f"Invocation failed: {str(e)}"
+            "message": f"Invocation failed: {error_detail}"
         })
 
     finally:
@@ -300,6 +309,7 @@ async def invoke_agent_endpoint(
     agent_id: int,
     request_body: InvokeRequest,
     request: Request,
+    user: UserInfo = Depends(require_scopes("invoke")),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
     """
@@ -368,7 +378,26 @@ async def invoke_agent_endpoint(
     db.commit()
     db.refresh(invocation)
 
-    # Fetch access token with priority: manual token > user token > credential_id > agent config
+    # ---- Group-based invoke restriction ----
+    # super-admins can invoke any agent.
+    # demo-admins and users can only invoke agents tagged with their own group.
+    if "super-admins" not in user.groups:
+        agent_group = agent.get_tags().get("loom:group", "")
+        allowed_groups = [g for g in user.groups if g != "users"]
+        # users group members match agents tagged "users"
+        if "users" in user.groups:
+            allowed_groups.append("users")
+        if agent_group not in allowed_groups:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"You can only invoke agents within your group (agent group: {agent_group})",
+            )
+
+    # ---- Resolve access token ----
+    # Priority: manual token > credential_id (M2M) > user login token > agent config M2M
+    # The frontend and agent share the same authorization server, so the user's
+    # login token is the primary path. M2M credentials are for future integrations
+    # (MCP, A2A) that need service-to-service tokens.
     access_token = None
     token_source = None
 
@@ -378,23 +407,7 @@ async def invoke_agent_endpoint(
         token_source = "manual"
         logger.info("Using manually provided bearer token for agent invocation")
 
-    # Priority 1: Use user's access token from Authorization header
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        user_token = auth_header[7:]
-        user_pool_id = os.getenv("LOOM_COGNITO_USER_POOL_ID", "")
-        if user_pool_id:
-            try:
-                from app.services.jwt_validator import validate_cognito_token
-                region_env = os.getenv("LOOM_COGNITO_REGION", os.getenv("AWS_REGION", "us-east-1"))
-                validate_cognito_token(user_token, user_pool_id, region_env)
-                access_token = user_token
-                token_source = "user"
-                logger.info("Using user access token for agent invocation")
-            except Exception as e:
-                logger.warning("User token validation failed, falling back to M2M: %s", e)
-
-    # Priority 2: Use credential_id if provided
+    # Priority 1: Use credential_id if provided (M2M for integrations)
     if not access_token and request_body.credential_id:
         cred = db.query(AuthorizerCredential).filter(AuthorizerCredential.id == request_body.credential_id).first()
         if cred and cred.client_secret_arn:
@@ -416,6 +429,17 @@ async def invoke_agent_endpoint(
                 except Exception as e:
                     logger.warning("Failed to get token via credential %s: %s", request_body.credential_id, e)
 
+    # Priority 2: Forward user's login token (same auth server as agent)
+    # Only applies when the agent has an authorizer; non-OAuth agents use SigV4.
+    if not access_token:
+        agent_auth_config = agent.get_authorizer_config()
+        if agent_auth_config and agent_auth_config.get("type"):
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                access_token = auth_header[7:]
+                token_source = "user"
+                logger.info("Using user login token for agent invocation")
+
     # Priority 3: Fall back to agent config M2M flow
     if not access_token:
         auth_config = agent.get_authorizer_config()
@@ -433,8 +457,12 @@ async def invoke_agent_endpoint(
                         scopes=auth_config.get("allowed_scopes") or None,
                     )
                     access_token = token_response.get("access_token")
+                    token_source = "agent-config"
                 except Exception as e:
                     logger.warning("Failed to get Cognito token for agent %s: %s", agent_id, e)
+
+    logger.info("Invoking agent %s with token_source=%s, has_token=%s",
+                agent_id, token_source, bool(access_token))
 
     # Return streaming response
     return StreamingResponse(
@@ -451,6 +479,7 @@ async def invoke_agent_endpoint(
 @router.post("/{agent_id}/token")
 def get_agent_token(
     agent_id: int,
+    user: UserInfo = Depends(require_scopes("invoke")),
     db: Session = Depends(get_db),
 ) -> dict:
     """Get an access token for an agent with a Cognito authorizer.
@@ -501,7 +530,8 @@ def get_agent_token(
 @router.get("/{agent_id}/sessions", response_model=List[SessionResponse])
 def list_sessions(
     agent_id: int,
-    db: Session = Depends(get_db)
+    user: UserInfo = Depends(require_scopes("agent:read")),
+    db: Session = Depends(get_db),
 ) -> List[SessionResponse]:
     """List all invocation sessions for an agent with their invocations."""
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
@@ -525,7 +555,8 @@ def list_sessions(
 def get_session(
     agent_id: int,
     session_id: str,
-    db: Session = Depends(get_db)
+    user: UserInfo = Depends(require_scopes("agent:read")),
+    db: Session = Depends(get_db),
 ) -> SessionResponse:
     """Get a specific session with all its invocations."""
     session = db.query(InvocationSession).filter(
@@ -547,7 +578,8 @@ def get_invocation(
     agent_id: int,
     session_id: str,
     invocation_id: str,
-    db: Session = Depends(get_db)
+    user: UserInfo = Depends(require_scopes("agent:read")),
+    db: Session = Depends(get_db),
 ) -> InvocationResponse:
     """Get a specific invocation within a session."""
     # Look up session first to validate agent_id

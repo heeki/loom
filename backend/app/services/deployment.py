@@ -348,6 +348,7 @@ def update_runtime(
     runtime_id: str,
     env_vars: dict[str, str] | None = None,
     role_arn: str | None = None,
+    authorizer_config: dict[str, Any] | None = None,
     region: str = "us-east-1",
 ) -> dict[str, Any]:
     """
@@ -357,6 +358,7 @@ def update_runtime(
         runtime_id: AgentCore Runtime ID to update
         env_vars: Optional updated environment variables
         role_arn: Optional updated role ARN
+        authorizer_config: Optional authorizer configuration (e.g., {"customJWTAuthorizer": {...}})
         region: AWS region name
 
     Returns:
@@ -371,6 +373,8 @@ def update_runtime(
         params["environmentVariables"] = env_vars
     if role_arn is not None:
         params["roleArn"] = role_arn
+    if authorizer_config is not None:
+        params["authorizerConfiguration"] = authorizer_config
 
     return client.update_agent_runtime(**params)
 

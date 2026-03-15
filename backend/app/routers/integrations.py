@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.dependencies.auth import UserInfo, require_scopes
 from app.models.agent import Agent
 from app.models.integration import Integration
 from app.routers.utils import get_agent_or_404
@@ -86,7 +87,8 @@ def _sync_role_policy(agent: Agent, db: Session) -> None:
 def create_integration(
     agent_id: int,
     request: IntegrationCreateRequest,
-    db: Session = Depends(get_db)
+    user: UserInfo = Depends(require_scopes("agent:write")),
+    db: Session = Depends(get_db),
 ) -> IntegrationResponse:
     """Add an integration to an agent."""
     agent = get_agent_or_404(agent_id, db)
@@ -110,7 +112,8 @@ def create_integration(
 @router.get("/{agent_id}/integrations", response_model=List[IntegrationResponse])
 def list_integrations(
     agent_id: int,
-    db: Session = Depends(get_db)
+    user: UserInfo = Depends(require_scopes("agent:read")),
+    db: Session = Depends(get_db),
 ) -> List[IntegrationResponse]:
     """List all integrations for an agent."""
     get_agent_or_404(agent_id, db)
@@ -125,7 +128,8 @@ def update_integration(
     agent_id: int,
     integration_id: int,
     request: IntegrationUpdateRequest,
-    db: Session = Depends(get_db)
+    user: UserInfo = Depends(require_scopes("agent:write")),
+    db: Session = Depends(get_db),
 ) -> IntegrationResponse:
     """Update an integration."""
     agent = get_agent_or_404(agent_id, db)
@@ -161,7 +165,8 @@ def update_integration(
 def delete_integration(
     agent_id: int,
     integration_id: int,
-    db: Session = Depends(get_db)
+    user: UserInfo = Depends(require_scopes("agent:write")),
+    db: Session = Depends(get_db),
 ) -> None:
     """Delete an integration from an agent."""
     agent = get_agent_or_404(agent_id, db)

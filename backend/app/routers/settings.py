@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.dependencies.auth import UserInfo, require_scopes
 from app.models.tag_policy import TagPolicy
 from app.models.tag_profile import TagProfile
 
@@ -33,7 +34,7 @@ class TagPolicyResponse(BaseModel):
 
 
 @router.get("/tags", response_model=list[TagPolicyResponse])
-def list_tag_policies(db: Session = Depends(get_db)) -> list[TagPolicyResponse]:
+def list_tag_policies(user: UserInfo = Depends(require_scopes("settings:read")), db: Session = Depends(get_db)) -> list[TagPolicyResponse]:
     """List all tag policies."""
     policies = db.query(TagPolicy).order_by(TagPolicy.id).all()
     return [TagPolicyResponse(**p.to_dict()) for p in policies]
@@ -42,6 +43,7 @@ def list_tag_policies(db: Session = Depends(get_db)) -> list[TagPolicyResponse]:
 @router.post("/tags", response_model=TagPolicyResponse, status_code=status.HTTP_201_CREATED)
 def create_tag_policy(
     request: TagPolicyRequest,
+    user: UserInfo = Depends(require_scopes("settings:write")),
     db: Session = Depends(get_db),
 ) -> TagPolicyResponse:
     """Create a new tag policy."""
@@ -68,6 +70,7 @@ def create_tag_policy(
 def update_tag_policy(
     tag_id: int,
     request: TagPolicyRequest,
+    user: UserInfo = Depends(require_scopes("settings:write")),
     db: Session = Depends(get_db),
 ) -> TagPolicyResponse:
     """Update an existing tag policy."""
@@ -97,6 +100,7 @@ def update_tag_policy(
 @router.delete("/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_tag_policy(
     tag_id: int,
+    user: UserInfo = Depends(require_scopes("settings:write")),
     db: Session = Depends(get_db),
 ) -> None:
     """Delete a tag policy."""
@@ -126,7 +130,7 @@ class TagProfileResponse(BaseModel):
 
 
 @router.get("/tag-profiles", response_model=list[TagProfileResponse])
-def list_tag_profiles(db: Session = Depends(get_db)) -> list[TagProfileResponse]:
+def list_tag_profiles(user: UserInfo = Depends(require_scopes("settings:read")), db: Session = Depends(get_db)) -> list[TagProfileResponse]:
     """List all tag profiles."""
     profiles = db.query(TagProfile).order_by(TagProfile.name).all()
     return [TagProfileResponse(**p.to_dict()) for p in profiles]
@@ -135,6 +139,7 @@ def list_tag_profiles(db: Session = Depends(get_db)) -> list[TagProfileResponse]
 @router.post("/tag-profiles", response_model=TagProfileResponse, status_code=status.HTTP_201_CREATED)
 def create_tag_profile(
     request: TagProfileRequest,
+    user: UserInfo = Depends(require_scopes("settings:write")),
     db: Session = Depends(get_db),
 ) -> TagProfileResponse:
     """Create a new tag profile."""
@@ -166,6 +171,7 @@ def create_tag_profile(
 def update_tag_profile(
     profile_id: int,
     request: TagProfileRequest,
+    user: UserInfo = Depends(require_scopes("settings:write")),
     db: Session = Depends(get_db),
 ) -> TagProfileResponse:
     """Update an existing tag profile."""
@@ -202,6 +208,7 @@ def update_tag_profile(
 @router.delete("/tag-profiles/{profile_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_tag_profile(
     profile_id: int,
+    user: UserInfo = Depends(require_scopes("settings:write")),
     db: Session = Depends(get_db),
 ) -> None:
     """Delete a tag profile."""

@@ -23,7 +23,7 @@ frontend/
 ├── src/
 │   ├── api/
 │   │   ├── types.ts            # TypeScript interfaces mirroring backend models
-│   │   ├── client.ts           # apiFetch<T>() wrapper + ApiError class + auth token injection
+│   │   ├── client.ts           # apiFetch<T>() wrapper + ApiError class, automatic auth token injection, and 401 auto-refresh via `setOnUnauthorized` callback
 │   │   ├── auth.ts             # Cognito auth API (initiateAuth, respondToChallenge, refreshTokens)
 │   │   ├── agents.ts           # Agent CRUD + fetchRoles(), fetchCognitoPools(), fetchModels(), fetchDefaults()
 │   │   ├── invocations.ts      # Session queries + SSE stream consumer (with auth header)
@@ -96,12 +96,12 @@ The app uses a persona-based single-page architecture with a sidebar for workflo
 |---------|------|-------------|----------------|---------|
 | Platform Catalog | BookOpen | Browse agents, memory resources, MCP servers (coming soon), A2A agents (coming soon) | Always visible | Yes |
 | Agents | Bot | Deploy new agents or import existing ones | `agent:read` or `agent:write` | |
-| Memory | Brain | Create and manage AgentCore Memory resources | `data:read` or `data:write` | |
+| Memory | Brain | Create and manage AgentCore Memory resources | `memory:read` or `memory:write` | |
 | Security Admin | Shield | Manage roles, authorizers, credentials, permissions | `security:read` or `security:write` | |
 | Tagging | Tags | Manage tag policies and tag profiles | Always visible | |
 | Settings | Settings | Manage display preferences | Always visible | |
-| MCP Servers | Network | Future MCP server management (disabled) | `data:read` or `data:write` | |
-| A2A Agents | Users | Future A2A agent management (disabled) | `data:read` or `data:write` | |
+| MCP Servers | Network | Future MCP server management (disabled) | `mcp:read` or `mcp:write` | |
+| A2A Agents | Users | Future A2A agent management (disabled) | `a2a:read` or `a2a:write` | |
 
 Sidebar items are conditionally rendered based on the user's scopes derived from their Cognito group membership. When auth is not configured, all items are visible.
 
@@ -111,7 +111,7 @@ The sidebar also contains:
 - Version badge
 
 ### Admin View Switching
-Admin users see an Eye icon dropdown in the sidebar header that lets them simulate other roles (security-admins, data-stewards, builders, operators). This overrides scope checks via `effectiveHasScope` so the admin can see what each role's experience looks like, without losing admin access. The dropdown resets when the page is refreshed.
+Admin users see an Eye icon dropdown in the sidebar that lets them simulate specific users (admin, demo-admin-1, demo-admin-2, security-admin, integration-admin, demo-user-1, demo-user-2). Each user maps to their Cognito groups, and `effectiveHasScope` resolves scopes from those groups. This lets admins see what each user's experience looks like — including group-restricted resource visibility — without losing admin access. The dropdown resets when the page is refreshed.
 
 ### Drill-Down Navigation (Catalog)
 
@@ -213,11 +213,14 @@ Full deployment form with sections:
 - Clicking a row navigates to Session Detail
 
 ### Invoke Form
-- `InvokePanel` component: qualifier selector, credential selector (optional), multi-line prompt textarea, invoke/cancel buttons
+- `InvokePanel` component: qualifier selector, credential selector, multi-line prompt textarea, invoke/cancel buttons
 - Model ID displayed as a badge in the panel header
-- Credential selector populates from all authorizer configs and their credentials, plus a "Manual token" option
+- Credential dropdown is context-aware:
+  - **OAuth agents** (agent has authorizer): shows user's token (default), M2M credentials from authorizer configs, and manual token (always last)
+  - **Non-OAuth agents** (no authorizer): shows "No credentials (SigV4)" only
 - When a credential is selected, the `credential_id` is passed with the invoke request
-- When "Manual token" is selected, a password input field appears for entering a raw bearer token; the `bearer_token` is passed with the invoke request
+- When "Manual token" is selected, a password input field appears for entering a raw bearer token
+- Session dropdown auto-selects the newly created session after an invocation
 - Token indicator (Key icon + badge) shown when `session_start` includes `has_token: true`
 
 ### Latency Summary
@@ -423,19 +426,22 @@ Cognito client secrets are password-masked in forms. Secrets are sent to the bac
 - Access tokens are automatically refreshed 60 seconds before expiry using the refresh token.
 - The user indicator (username + logout button) is shown in the sidebar footer, above the theme selector.
 - `apiFetch` and `invokeAgentStream` automatically include the `Authorization: Bearer` header when a token is available, via a module-level token setter (`setAuthToken`/`getAuthToken`).
+- On 401 responses, `apiFetch` calls a registered `onUnauthorized` callback that refreshes the Cognito access token via `REFRESH_TOKEN_AUTH` and retries the failed request. This prevents expired token errors during long sessions.
 
 ### Scope-Based Authorization
-- `AuthContext` extracts `cognito:groups` from the decoded ID token and maps them to scopes using a `GROUP_SCOPES` lookup table. The `hasScope(scope)` function is exposed to the entire app.
-- Scopes: `agent:read`, `agent:write`, `security:read`, `security:write`, `data:read`, `data:write`.
+- `AuthContext` extracts `cognito:groups` from the decoded ID token and maps them to scopes using a `GROUP_SCOPES` lookup table (must match the backend `GROUP_SCOPES` exactly). The `hasScope(scope)` function is exposed to the entire app.
+- Scopes (15 total): `invoke`, `catalog:read`, `catalog:write`, `agent:read`, `agent:write`, `memory:read`, `memory:write`, `security:read`, `security:write`, `settings:read`, `settings:write`, `mcp:read`, `mcp:write`, `a2a:read`, `a2a:write`.
+- Groups (7): `super-admins` (all scopes), `demo-admins` (all read/write plus invoke), `security-admins`, `memory-admins`, `mcp-admins`, `a2a-admins`, `users` (invoke only).
 - Sidebar visibility is controlled by scopes — each persona item is rendered only when the user has the corresponding `*:read` or `*:write` scope. The Platform Catalog is always visible.
 - Write operations are gated by a `readOnly` prop propagated from `App.tsx` through page components to individual UI elements. When `readOnly` is true, add/edit/delete buttons are disabled or hidden.
-- Pages and their `readOnly` mapping: `AgentListPage` and `CatalogPage` use `!hasScope("agent:write")`, `SecurityAdminPage` uses `!hasScope("security:write")`, `MemoryManagementPage` uses `!hasScope("data:write")`.
+- Pages and their `readOnly` mapping: `AgentListPage` and `CatalogPage` use `!hasScope("agent:write")`, `SecurityAdminPage` uses `!hasScope("security:write")`, `MemoryManagementPage` uses `!hasScope("memory:write")`, `TaggingPage` uses `!hasScope("memory:write")`.
 - Components that respect `readOnly`: `AgentCard`, `AgentListPage`, `CatalogPage`, `SecurityAdminPage`, `RoleManagementPanel`, `AuthorizerManagementPanel`, `PermissionRequestsPanel`, `MemoryManagementPage`, `MemoryManagementPanel`, `MemoryCard`.
 
 ### Resource Tagging
 - Tag policies use a two-tier designation system: `platform:required` (keys starting with `loom:`) and `custom:optional` (all others). Designation is computed from the key, not stored. Filter categorization uses the `required` flag, not key prefix.
 - Tag policies are fetched from `/api/settings/tags` and used to derive `showOnCardKeys` for tag badge display and filter dropdowns.
 - Tag profiles are named presets managed via the Tagging page. The `ResourceTagFields` shared component renders a profile dropdown (persisted in `sessionStorage` as `loom:selectedTagProfileId`), resolves tags from the selected profile + policy defaults, displays all profile tags as badges, and calls `onChange(tags)`. Used by both agent deploy and memory create forms.
+- `ResourceTagFields` accepts an optional `groupRestriction` prop. When set (for demo-admins), only profiles whose `loom:group` matches the restriction are shown, and the resolved `loom:group` tag is forced to the restriction value. `MemoryManagementPanel` also receives `groupRestriction` for the same purpose.
 - Tag resolution: for each policy, use user-supplied value → fall back to `default_value` (only for required policies) → error if required and missing. Custom/optional tags only appear when the profile explicitly sets them. The previous `source` (build-time/deploy-time) distinction has been removed.
 - `showOnCardKeys` (derived from tag policies with `show_on_card=true`) is filtered by the eyeball toggle to produce `effectiveShowOnCardKeys`, which is passed as a prop to `AgentCard` and `MemoryCard` components from all listing pages.
 - Tag badges use `variant="secondary"` to visually distinguish them from status and protocol badges.
@@ -454,7 +460,7 @@ Custom dropdown for adding custom tag filters to the filter bar. Uses a plain `<
 `apiFetch` in `client.ts` handles Pydantic validation errors where `detail` is an array of objects (not a string). Array entries are mapped to their `msg` fields and joined with `"; "` for display. This prevents `[object Object]` from appearing in error toasts.
 
 ### API Layer Design
-- `apiFetch<T>()` is a thin wrapper around `fetch` with JSON parsing, `ApiError` class, and automatic auth token injection
+- `apiFetch<T>()` is a thin wrapper around `fetch` with JSON parsing, `ApiError` class, automatic auth token injection, and 401 auto-refresh (intercepts unauthorized responses, refreshes the token, and retries once)
 - Each API domain (agents, auth, invocations, logs, security) is a separate module with typed functions
 
 ### Session Liveness Display

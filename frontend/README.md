@@ -64,7 +64,7 @@ The sidebar provides access to persona-based workflows:
 | **MCP Servers** | Network | Coming soon (disabled) |
 | **A2A Agents** | Users | Coming soon (disabled) |
 
-The sidebar also includes a user indicator (when authenticated), admin view-as dropdown (for testing other roles), live clock, and version badge. Theme and timezone are configured on the Settings page. Each listing page has a card/table view toggle; the selection persists per-page across persona switches.
+The sidebar also includes a user indicator (when authenticated), admin View As dropdown (simulates specific users like demo-admin-1, demo-user-1 with their group-based scopes), live clock, and version badge. Theme and timezone are configured on the Settings page. Each listing page has a card/table view toggle; the selection persists per-page across persona switches.
 
 ### Drill-Down Navigation
 
@@ -125,11 +125,11 @@ When Cognito is configured, users must sign in before accessing the app. Configu
 
 The login page handles the `USER_PASSWORD_AUTH` flow and `NEW_PASSWORD_REQUIRED` challenge. Tokens are stored in memory only (not persisted across page reloads). The access token is automatically attached to all API requests. The `.env` file is the standard Vite mechanism for environment variables — any variable prefixed with `VITE_` is exposed via `import.meta.env`.
 
-The `AuthContext` also provides scope-based authorization. User groups are extracted from the `cognito:groups` claim in the ID token and mapped to scopes (`agent:read/write`, `security:read/write`, `data:read/write`). Sidebar items are conditionally rendered based on scopes, and write operations are disabled via a `readOnly` prop for users without the corresponding `*:write` scope. When auth is not configured, all scopes are granted.
+The `AuthContext` also provides scope-based authorization. User groups are extracted from the `cognito:groups` claim in the ID token and mapped to 15 scopes via `GROUP_SCOPES` (matching the backend mapping). Groups: `super-admins` (all scopes), `demo-admins` (all read/write plus invoke), `security-admins`, `memory-admins`, `mcp-admins`, `a2a-admins`, `users` (invoke only). Sidebar items are conditionally rendered based on scopes, and write operations are disabled via a `readOnly` prop for users without the corresponding `*:write` scope. When auth is not configured, all scopes are granted.
 
 ### API Layer
 
-- `api/client.ts` — `apiFetch<T>()` wrapper with `ApiError` class and automatic auth token injection
+- `api/client.ts` — `apiFetch<T>()` wrapper with `ApiError` class, automatic auth token injection, and 401 auto-refresh (transparent token refresh and request retry)
 - `api/auth.ts` — Cognito auth API: `fetchAuthConfig`, `initiateAuth`, `respondToNewPasswordChallenge`, `refreshTokens`
 - `api/agents.ts` — Agent operations: list, get, register (with optional model_id), deploy, delete (with optional AWS cleanup), refresh, redeploy, fetchRoles, fetchCognitoPools, fetchModels, fetchDefaults
 - `api/invocations.ts` — Session queries + `invokeAgentStream()` SSE consumer (supports `credential_id`, includes auth header)
@@ -154,7 +154,7 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 - **MemoryCard** — Memory resource card with name, status badge, spinner+timer for transitional states (using per-resource timestamps for accurate elapsed time), region/account/expiry metadata, tag badges, refresh and delete buttons with overlay confirmation.
 - **ResourceTagFields** — Shared component for tag profile selection and tag resolution. Fetches tag policies and profiles, renders a profile dropdown (persisted in `sessionStorage`), resolves tags from the selected profile + policy defaults. Used by both agent deploy and memory create forms.
 - **MultiSelect** — Checkbox-based multi-select dropdown with auto-expanding width. Used for tag filtering on all listing pages.
-- **InvokePanel** — Qualifier selector, credential dropdown (with "Manual token" option for bearer tokens), model ID badge, prompt textarea, invoke/cancel buttons. Token indicator shown when invocation uses OAuth.
+- **InvokePanel** — Qualifier selector, context-aware credential dropdown (OAuth agents: user token / M2M / manual token; non-OAuth: SigV4 only), model ID badge, prompt textarea, invoke/cancel buttons. Auto-selects newly created session. Token indicator shown when invocation uses OAuth.
 - **AuthorizerManagementPanel** — Lists authorizer configs with expandable credential management (add/list/delete credentials per config).
 - **MemoryManagementPanel** — Create/import form with strategy configuration (type, name, description, namespaces), memory card/table list with status badges (CREATING/ACTIVE/FAILED/DELETING), refresh and delete actions with inline confirmation overlay.
 

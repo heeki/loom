@@ -49,10 +49,11 @@ Runtime configuration is sourced from `etc/environment.sh`:
 | `MEMORY_EVENT_EXPIRY_DURATION` | Default memory event expiry in days | `30` |
 | `LOOM_COGNITO_USER_POOL_ID` | Cognito User Pool ID for user authentication | — |
 | `LOOM_COGNITO_REGION` | Region of the Cognito pool | `AWS_REGION` |
+| `LOOM_COGNITO_USER_CLIENT_ID` | Cognito user app client ID (auto-included in agent `allowedClients` on deploy) | — |
 
 AWS credentials use the standard boto3 credential chain (environment variables, AWS profile, instance metadata).
 
-When `LOOM_COGNITO_USER_POOL_ID` is set, the backend validates user JWTs and forwards user tokens to AgentCore for authenticated invocations. When not set, the app runs without user authentication. The user client ID is configured on the frontend side (via `VITE_COGNITO_USER_CLIENT_ID` in the frontend `.env` file), not the backend.
+When `LOOM_COGNITO_USER_POOL_ID` is set, the backend validates user JWTs, derives scopes from `cognito:groups` via the `GROUP_SCOPES` mapping, and enforces per-endpoint scope requirements using `require_scopes()`. Returns 401 for missing/invalid tokens, 403 for insufficient scopes. When not set (bypass mode), all scopes are granted for local development. The user client ID is configured on the frontend side (via `VITE_COGNITO_USER_CLIENT_ID` in the frontend `.env` file), not the backend.
 
 ## Project Structure
 
@@ -74,7 +75,7 @@ backend/
 │   │   ├── tag_policy.py    # TagPolicy ORM model (configurable tag policies)
 │   │   └── tag_profile.py   # TagProfile ORM model (named tag presets)
 │   ├── dependencies/
-│   │   └── auth.py          # Auth dependencies (token extraction, validation)
+│   │   └── auth.py          # Auth dependencies (get_current_user, require_scopes, UserInfo)
 │   ├── routers/
 │   │   ├── auth.py          # Auth config endpoint (GET /api/auth/config)
 │   │   ├── agents.py        # Agent CRUD + ARN parsing + log group derivation
@@ -233,7 +234,7 @@ Supports five memory strategy types: semantic, summary, user_preference, episodi
 | `GET` | `/api/agents/{agent_id}/sessions` | List sessions with invocations |
 | `GET` | `/api/agents/{agent_id}/sessions/{session_id}` | Get a specific session |
 
-The invoke endpoint uses a priority-based token selection: (0) `bearer_token` from request body, (1) user access token from Authorization header, (2) `credential_id` for M2M token, (3) agent config M2M flow. The `session_start` SSE event includes `has_token` and `token_source` fields when a token is used.
+The invoke endpoint uses a priority-based token selection: (0) `bearer_token` from request body, (1) `credential_id` for M2M token, (2) user access token (forwarded when agent has authorizer), (3) agent config M2M flow, (4) SigV4. The `session_start` SSE event includes `has_token` and `token_source` fields when a token is used.
 
 Agent list responses include a computed `active_session_count` field based on `LOOM_SESSION_IDLE_TIMEOUT_SECONDS`, and an `authorizer_config` field extracted from the AgentCore runtime's `customJWTAuthorizer` configuration. Session responses include computed `live_status` (`"pending"`, `"streaming"`, `"active"`, or `"expired"`).
 
@@ -271,11 +272,15 @@ Tags are resolved from the tag policy system at deploy time. Deploy-time tags ar
 
 ## Authenticated Invocation
 
-Invocations support three token sources with priority ordering:
+Invocations support multiple token sources with priority ordering:
 
-1. **User token**: If the request includes an `Authorization: Bearer` header with a valid Cognito user access token (validated via JWKS), it is forwarded directly to AgentCore.
+1. **Manual bearer token**: If the invoke request includes a `bearer_token` field, it is used directly.
 2. **Credential-based token**: If the invoke request includes a `credential_id`, the backend resolves the credential, fetches the client secret from Secrets Manager (5-minute cache), and exchanges it for an M2M OAuth token.
-3. **Agent config token**: Falls back to the agent's stored authorizer config for M2M token retrieval.
+3. **User login token**: If the agent has an authorizer configured, the user's access token from the `Authorization` header is forwarded directly to AgentCore. This works because the frontend and agent share the same Cognito user pool.
+4. **Agent config token**: Falls back to the agent's stored authorizer config for M2M token retrieval.
+5. **SigV4 (no token)**: If no token is resolved, the request uses IAM SigV4 authentication.
+
+Group-based invoke restriction: `super-admins` can invoke any agent. `demo-admins` and `users` can only invoke agents within their `loom:group` tag. The backend automatically includes `LOOM_COGNITO_USER_CLIENT_ID` in agent authorizer `allowedClients` on deploy so user tokens are accepted.
 
 ## Makefile Targets
 

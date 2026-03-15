@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.dependencies.auth import UserInfo, require_scopes
 from app.models.credential_provider import CredentialProvider
 from app.routers.utils import get_agent_or_404
 from app.services.credential import create_oauth2_credential_provider, delete_credential_provider
@@ -49,7 +50,8 @@ class CredentialProviderResponse(BaseModel):
 def create_credential_provider(
     agent_id: int,
     request: CredentialProviderCreateRequest,
-    db: Session = Depends(get_db)
+    user: UserInfo = Depends(require_scopes("agent:write")),
+    db: Session = Depends(get_db),
 ) -> CredentialProviderResponse:
     """Create a credential provider for an agent."""
     agent = get_agent_or_404(agent_id, db)
@@ -92,7 +94,8 @@ def create_credential_provider(
 @router.get("/{agent_id}/credential-providers", response_model=List[CredentialProviderResponse])
 def list_credential_providers(
     agent_id: int,
-    db: Session = Depends(get_db)
+    user: UserInfo = Depends(require_scopes("agent:read")),
+    db: Session = Depends(get_db),
 ) -> List[CredentialProviderResponse]:
     """List all credential providers for an agent."""
     get_agent_or_404(agent_id, db)
@@ -109,7 +112,8 @@ def list_credential_providers(
 def delete_credential_provider_endpoint(
     agent_id: int,
     provider_id: int,
-    db: Session = Depends(get_db)
+    user: UserInfo = Depends(require_scopes("agent:write")),
+    db: Session = Depends(get_db),
 ) -> None:
     """Delete a credential provider."""
     agent = get_agent_or_404(agent_id, db)

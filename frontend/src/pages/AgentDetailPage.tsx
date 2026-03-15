@@ -55,6 +55,7 @@ export function AgentDetailPage({
         sessions={sessions}
         isStreaming={isStreaming}
         modelId={agent.model_id}
+        authorizerName={agent.authorizer_config?.name}
         onInvoke={handleInvoke}
         onCancel={cancel}
       />

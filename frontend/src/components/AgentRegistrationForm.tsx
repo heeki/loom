@@ -84,9 +84,10 @@ interface AgentRegistrationFormProps {
   onRegister: (arn: string, modelId?: string) => Promise<void>;
   onDeploy?: (request: AgentDeployRequest) => Promise<void>;
   isLoading: boolean;
+  groupRestriction?: string;
 }
 
-export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }: AgentRegistrationFormProps) {
+export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, groupRestriction }: AgentRegistrationFormProps) {
 
   // Register state
   const [arn, setArn] = useState("");
@@ -631,7 +632,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading }:
               </section>
 
               {/* Resource Tags */}
-              <ResourceTagFields onChange={setTagValues} profileId={selectedTagProfileId} />
+              <ResourceTagFields onChange={setTagValues} profileId={selectedTagProfileId} groupRestriction={groupRestriction} />
 
               {/* Integrations */}
               <section className="space-y-3">

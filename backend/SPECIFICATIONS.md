@@ -32,6 +32,7 @@ All runtime configuration is injected via environment variables sourced from `et
 | `MEMORY_EVENT_EXPIRY_DURATION` | Default memory event expiry in days | `30` |
 | `LOOM_COGNITO_USER_POOL_ID` | Cognito User Pool ID for user authentication | — |
 | `LOOM_COGNITO_REGION` | Region of the Cognito pool | `AWS_REGION` |
+| `LOOM_COGNITO_USER_CLIENT_ID` | Cognito user app client ID (auto-included in agent authorizer `allowedClients` on deploy) | — |
 
 AWS credentials use the standard boto3 credential chain (environment variables, AWS profile, instance metadata).
 
@@ -59,7 +60,7 @@ backend/
 │   │   └── tag_profile.py   # TagProfile ORM model (named tag presets)
 │   ├── dependencies/
 │   │   ├── __init__.py
-│   │   └── auth.py          # Auth dependencies (get_current_user_token, get_token_claims)
+│   │   └── auth.py          # Auth dependencies (get_current_user, require_scopes, UserInfo)
 │   ├── routers/
 │   │   ├── auth.py          # Authentication config endpoint (GET /api/auth/config)
 │   │   ├── agents.py        # Agent CRUD + ARN parsing + log group derivation + tag resolution
@@ -93,6 +94,7 @@ backend/
 │   ├── test_logs.py         # Logs router tests
 │   ├── test_memories.py     # Memory resource tests
 │   ├── test_security.py     # Security router tests (roles, authorizers)
+│   ├── test_scopes.py       # Scope enforcement and GROUP_SCOPES mapping tests
 │   └── test_tags.py         # Tag policy, tag profile, and tag enforcement tests
 ├── etc/
 │   └── environment.sh.example  # Example environment configuration template
@@ -548,6 +550,8 @@ Removes the memory record from the local database without any AWS API call. Used
 
 The optional `credential_id` references an authorizer credential. When provided, the backend fetches the client secret from Secrets Manager and generates an OAuth token for authenticated invocation. The optional `bearer_token` allows passing a raw bearer token directly — it takes highest priority (Priority 0) in the token selection chain, above user tokens and credential-based tokens.
 
+The invoke endpoint uses a priority-based token selection: (0) `bearer_token` from request body, (1) `credential_id` for M2M token, (2) user access token (forwarded when agent has authorizer), (3) agent config M2M flow, (4) SigV4 (no token).
+
 **SSE event stream format:**
 
 ```
@@ -601,6 +605,7 @@ Handles agent artifact build and runtime lifecycle:
 
 - Builds agent artifacts by cross-compiling pip dependencies for ARM64 (`manylinux2014_aarch64`).
 - Creates, updates, and deletes AgentCore runtimes and endpoints.
+- Updates agent runtime authorizer configuration (e.g., adding client IDs to `allowedClients`).
 - Validates configuration values for secrets, stores/updates/deletes secrets in AWS Secrets Manager.
 
 ### `services/cognito.py`
@@ -613,8 +618,31 @@ Handles agent artifact build and runtime lifecycle:
 
 ### `dependencies/auth.py`
 
-- `get_current_user_token(request: Request) -> str | None` — extracts and validates the Bearer token from the Authorization header. Returns the raw token string if valid, None otherwise. Allows unauthenticated requests to pass through with a warning.
-- `get_token_claims(request: Request) -> dict | None` — extracts, validates, and decodes the Bearer token. Returns decoded claims if valid, None otherwise.
+Core authentication and authorization module. Provides:
+
+- `GROUP_SCOPES: dict[str, list[str]]` — maps Cognito group names to scope lists. Must match the frontend `GROUP_SCOPES` exactly. Groups: `super-admins` (all 15 scopes), `demo-admins` (all read/write plus invoke), `security-admins`, `memory-admins`, `mcp-admins`, `a2a-admins`, `users` (invoke only).
+- `UserInfo` dataclass — `sub`, `username`, `groups`, `scopes` (derived from groups).
+- `get_current_user(request: Request) -> UserInfo` — validates JWT, extracts `cognito:groups`, derives scopes. In bypass mode (no `LOOM_COGNITO_USER_POOL_ID`), returns a super-admin with all scopes. Raises 401 on missing/invalid token.
+- `require_scopes(*required: str)` — factory returning a FastAPI dependency that checks the user has ALL required scopes. Raises 403 on missing scope. Used as `Depends(require_scopes("scope:name"))` on all guarded endpoints.
+- `oauth2_scheme` — `OAuth2AuthorizationCodeBearer` for OpenAPI docs with all 15 scopes.
+- `get_current_user_token(request: Request) -> str | None` — legacy helper for token forwarding to AgentCore invocations.
+- `get_token_claims(request: Request) -> dict | None` — legacy helper for decoded claims extraction.
+
+**Scope enforcement per router:**
+
+| Router | GET scopes | POST/PUT/DELETE scopes |
+|--------|-----------|----------------------|
+| `agents.py` | `agent:read` | `agent:write` |
+| `invocations.py` | `agent:read` (sessions), `invoke` (invoke/token) | — |
+| `logs.py` | `agent:read` | — |
+| `credentials.py` | `agent:read` | `agent:write` |
+| `integrations.py` | `agent:read` | `agent:write` |
+| `memories.py` | `memory:read` | `memory:write` |
+| `security.py` | `security:read` | `security:write` |
+| `settings.py` | `settings:read` | `settings:write` |
+| `auth.py` | Public (no guard) | — |
+
+**Tag-based resource isolation (R5):** Users in the `users` group only see agents and memories tagged with `loom:group=users`. Demo-admins are restricted at the data layer: create/delete operations enforce that the resource's `loom:group` tag matches `demo-admins`.
 
 ### `services/secrets.py`
 
@@ -664,12 +692,17 @@ Wraps `boto3.client('bedrock-agentcore-control')` for memory operations:
 
 Invocations are authenticated with a priority-based token selection:
 
-0. **Bearer token (highest priority):** If the invoke request includes a `bearer_token` field, it is used directly as the Authorization header. The `token_source` is set to `"bearer"`. This supports agents with external authorizers where credentials are not managed within Loom.
-1. **User token:** If the incoming request has a valid `Authorization: Bearer` header containing a Cognito user access token, it is validated against the JWKS endpoint and forwarded to AgentCore. The `token_source` is set to `"user"`.
-2. **Credential-based token:** If the invoke request includes an optional `credential_id`, the backend looks up the `AuthorizerCredential`, fetches the client secret from Secrets Manager (5-minute cache), and exchanges credentials for an M2M access token.
-3. **Agent config token (lowest priority):** Falls back to the agent's stored authorizer config to fetch an M2M token.
+0. **Bearer token (highest priority):** If the invoke request includes a `bearer_token` field, it is used directly as the Authorization header. The `token_source` is set to `"manual"`. This supports agents with external authorizers where credentials are not managed within Loom.
+1. **Credential-based token:** If the invoke request includes a `credential_id`, the backend looks up the `AuthorizerCredential`, fetches the client secret from Secrets Manager (5-minute cache), and exchanges credentials for an M2M access token. The `token_source` is set to the credential label.
+2. **User login token:** If the agent has an authorizer configured and the request includes an `Authorization: Bearer` header, the user's access token is forwarded directly to AgentCore. The `token_source` is set to `"user"`. This works because the frontend and agent share the same Cognito user pool.
+3. **Agent config token (lowest priority):** Falls back to the agent's stored authorizer config for M2M token retrieval. The `token_source` is set to `"agent-config"`.
+4. **No token (SigV4):** If no token is resolved, the request uses IAM SigV4 authentication (the default boto3 credential chain).
 
 The selected Bearer token is passed to `invoke_agent_runtime` (unsigned SigV4 + `Authorization` header). The `session_start` SSE event includes `has_token: true` and `token_source` indicating which token source was used.
+
+**Group-based invoke restriction:** `super-admins` can invoke any agent. `demo-admins` and `users` can only invoke agents whose `loom:group` tag matches their own group. Returns 403 if the user's group doesn't match the agent's tag.
+
+**User client auto-inclusion:** When deploying an agent with a Cognito authorizer, the backend automatically adds `LOOM_COGNITO_USER_CLIENT_ID` to the agent's `allowedClients` list. This ensures user login tokens are accepted by the agent runtime without manual configuration.
 
 ---
 

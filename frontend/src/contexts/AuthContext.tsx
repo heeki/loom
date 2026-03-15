@@ -16,7 +16,7 @@ import {
   type AuthTokens,
   type CognitoAuthResult,
 } from "@/api/auth";
-import { setAuthToken } from "@/api/client";
+import { setAuthToken, setOnUnauthorized } from "@/api/client";
 
 interface CognitoUser {
   sub: string;
@@ -26,14 +26,34 @@ interface CognitoUser {
   [key: string]: unknown;
 }
 
-export type Scope = "agent:read" | "agent:write" | "security:read" | "security:write" | "data:read" | "data:write";
+export type Scope =
+  | "catalog:read" | "catalog:write"
+  | "agent:read" | "agent:write"
+  | "memory:read" | "memory:write"
+  | "security:read" | "security:write"
+  | "settings:read" | "settings:write"
+  | "mcp:read" | "mcp:write"
+  | "a2a:read" | "a2a:write"
+  | "invoke";
 
 const GROUP_SCOPES: Record<string, Scope[]> = {
-  admins: ["agent:read", "agent:write", "security:read", "security:write", "data:read", "data:write"],
+  "super-admins": [
+    "catalog:read", "catalog:write", "agent:read", "agent:write",
+    "memory:read", "memory:write", "security:read", "security:write",
+    "settings:read", "settings:write", "mcp:read", "mcp:write",
+    "a2a:read", "a2a:write", "invoke",
+  ],
+  "demo-admins": [
+    "catalog:read", "agent:read", "memory:read", "security:read",
+    "settings:read", "mcp:read", "a2a:read",
+    "catalog:write", "agent:write", "memory:write", "security:write",
+    "settings:write", "mcp:write", "a2a:write", "invoke",
+  ],
   "security-admins": ["security:read", "security:write"],
-  "data-stewards": ["data:read", "data:write"],
-  builders: ["agent:read", "agent:write"],
-  operators: ["agent:read", "security:read", "data:read"],
+  "memory-admins": ["memory:read", "memory:write"],
+  "mcp-admins": ["mcp:read", "mcp:write"],
+  "a2a-admins": ["a2a:read", "a2a:write"],
+  "users": ["invoke"],
 };
 
 function deriveScopes(groups: string[]): Set<Scope> {
@@ -65,7 +85,12 @@ interface AuthContextValue {
   logout: () => void;
 }
 
-const ALL_SCOPES = new Set<Scope>(["agent:read", "agent:write", "security:read", "security:write", "data:read", "data:write"]);
+const ALL_SCOPES = new Set<Scope>([
+  "catalog:read", "catalog:write", "agent:read", "agent:write",
+  "memory:read", "memory:write", "security:read", "security:write",
+  "settings:read", "settings:write", "mcp:read", "mcp:write",
+  "a2a:read", "a2a:write", "invoke",
+]);
 const EMPTY_SCOPES = new Set<Scope>();
 
 const AuthContext = createContext<AuthContextValue>({
@@ -94,6 +119,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<AuthConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tokensRef = useRef<AuthTokens | null>(null);
+  tokensRef.current = tokens;
+  const configRef = useRef<AuthConfig | null>(null);
+  configRef.current = config;
 
   // Fetch auth config on mount
   useEffect(() => {
@@ -161,6 +190,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     [config],
   );
+
+  // Register 401 interceptor: refresh the token and return the new access token
+  useEffect(() => {
+    setOnUnauthorized(async () => {
+      const currentTokens = tokensRef.current;
+      const currentConfig = configRef.current;
+      if (!currentTokens?.refreshToken || !currentConfig) return null;
+      try {
+        const result = await refreshTokens(
+          currentTokens.refreshToken,
+          import.meta.env.VITE_COGNITO_USER_CLIENT_ID,
+          currentConfig.region,
+        );
+        if (result.AuthenticationResult) {
+          const newTokens: AuthTokens = {
+            idToken: result.AuthenticationResult.IdToken,
+            accessToken: result.AuthenticationResult.AccessToken,
+            refreshToken: currentTokens.refreshToken,
+          };
+          setTokens(newTokens);
+          setAuthToken(newTokens.accessToken);
+          scheduleRefresh(newTokens.accessToken, newTokens.refreshToken);
+          return newTokens.accessToken;
+        }
+      } catch {
+        setTokens(null);
+        setUser(null);
+        setAuthToken(null);
+      }
+      return null;
+    });
+    return () => setOnUnauthorized(null);
+  }, [scheduleRefresh]);
 
   const processAuthResult = useCallback(
     (result: CognitoAuthResult) => {
