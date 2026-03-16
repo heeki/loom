@@ -254,7 +254,7 @@ Full deployment form with sections:
 
 **Content:**
 - `SecurityAdminPage` with sections for:
-  - **Managed Roles**: list, create (import existing / wizard), view policy document, delete. Uses `SortableCardGrid` with drag-to-reorder (storage key `security-roles`), default alphabetical sort by role name, and A-Z/Z-A sort toggle.
+  - **Managed Roles**: list, create (import existing / wizard), view policy document, delete. Uses `SortableCardGrid` with drag-to-reorder (storage key `security-roles`), full-width single-column layout (role cards contain long ARNs and expandable policy documents), default alphabetical sort by role name, and A-Z/Z-A sort toggle.
   - **Authorizer Configs**: list, create (Cognito type with pool selection and auto-populated discovery URL), update, delete. Uses `SortableCardGrid` with drag-to-reorder (storage key `security-authorizers`), default alphabetical sort by config name, and A-Z/Z-A sort toggle.
   - **Authorizer Credentials**: per-config credential management (add label + client_id + client_secret, list, delete). Credential form uses 1/4 / 1/4 / 1/2 field widths. Authorizer type displayed as "Amazon Cognito" for cognito type.
   - **Permission Requests**: create requests for additional IAM permissions, review (approve/deny) with role application. Uses `SortableCardGrid` with drag-to-reorder (storage key `security-permissions`), default alphabetical sort by role name, and A-Z/Z-A sort toggle.
@@ -414,7 +414,7 @@ ThemeContext manages theme state with localStorage persistence. Latte uses `:roo
 
 **Table view column sorting:** Pages with table views (CatalogPage, AgentListPage, MemoryManagementPanel) use `SortableTableHead` for clickable column headers. Clicking a column header sorts by that column (ascending); clicking again reverses to descending. An arrow indicator (ArrowUp/ArrowDown) shows the active sort column and direction. The `sortRows()` helper provides generic multi-column sorting with support for both string and numeric values.
 
-**Applied to all card grids:** CatalogPage (agents, memories), AgentListPage (agents), MemoryManagementPanel (memories), TaggingPage (policies, profiles), RoleManagementPanel (roles), AuthorizerManagementPanel (authorizers), PermissionRequestsPanel (permissions).
+**Applied to all card grids:** CatalogPage (agents, memories), AgentListPage (agents), MemoryManagementPanel (memories), TaggingPage (policies, profiles), RoleManagementPanel (roles, full-width single-column), AuthorizerManagementPanel (authorizers), PermissionRequestsPanel (permissions).
 
 ### Tailwind CSS v4 (Vite Plugin)
 Using the `@tailwindcss/vite` plugin instead of PostCSS. Configuration is handled via CSS `@theme` blocks in `index.css`.

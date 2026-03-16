@@ -344,7 +344,7 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - `SortableCardGrid` uses controlled `sortDirection` prop with `onSortDirectionChange` callback. Exported helpers: `loadSortDirection()`, `saveSortDirection()`, `toggleSortDirection()`, `SortButton`, `SortDirection`.
 - `SortableTableHead` component for clickable sortable table column headers with arrow indicators (ArrowUp/ArrowDown). `sortRows()` helper for generic multi-column sorting (string and numeric).
 - Table view column sorting: pages with table views (CatalogPage, AgentListPage, MemoryManagementPanel) support click-to-sort on any column header.
-- Security admin panels (RoleManagementPanel, AuthorizerManagementPanel, PermissionRequestsPanel) converted from stacked `<div className="space-y-2">` layouts to `SortableCardGrid` with responsive grid (`md:grid-cols-2 lg:grid-cols-3`), drag-to-reorder, and alphabetical sort controls.
+- Security admin panels (RoleManagementPanel, AuthorizerManagementPanel, PermissionRequestsPanel) converted from stacked `<div className="space-y-2">` layouts to `SortableCardGrid` with drag-to-reorder and alphabetical sort controls. AuthorizerManagementPanel and PermissionRequestsPanel use responsive grid (`md:grid-cols-2 lg:grid-cols-3`); RoleManagementPanel uses full-width single-column layout since role cards contain long ARNs and expandable policy documents.
 - All existing card grid consumers updated: CatalogPage (agents, memories), AgentListPage (agents), MemoryManagementPanel (memories), TaggingPage (policies, profiles).
 
 ### Phase 13 — Advanced Operations
