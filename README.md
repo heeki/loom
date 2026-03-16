@@ -5,9 +5,10 @@ A platform for building, testing, and operating AI agents on Amazon Bedrock Agen
 ## Features
 
 - **Cognito User Authentication** — Optional login with automatic token refresh and NEW_PASSWORD_REQUIRED challenge handling
-- **Platform Catalog** — Browse agents, memory resources, and platform resources in a unified view
+- **Platform Catalog** — Browse agents, memory resources, MCP servers, and platform resources in a unified view
 - **Agent Management** — Deploy new agents or import existing AgentCore Runtime agents
 - **Memory Management** — Create and manage AgentCore Memory resources with configurable strategies (semantic, summary, user preference, episodic, custom)
+- **MCP Server Management** — Register and manage MCP servers with OAuth2 authentication, tool discovery, and per-persona access control (all_tools or selected_tools granularity)
 - **Security Administration** — Manage IAM roles, authorizer configs, credentials, and permission requests
 - **Resource Tagging** — Configurable tag policies (platform + custom) and named tag profiles applied to all deployed resources (agents, memory, IAM roles). Tag badges on cards with show/hide toggle for custom tags. Progressive disclosure filtering with persistent filter state across navigation
 - **Tagging** — Dedicated page for managing tag policies (platform read-only with lock icon, custom editable/deletable) and tag profiles (create, edit, delete named tag presets with drag-to-reorder)
@@ -142,5 +143,5 @@ make -C frontend dev    # Start frontend dev server
 
 - **Backend:** FastAPI with SQLAlchemy (SQLite), boto3 for AWS interactions, SSE streaming via `StreamingResponse`
 - **Frontend:** React 18, TypeScript, Vite, shadcn/ui, Tailwind CSS v4
-- **Persona Navigation:** Sidebar with Platform Catalog, Agents, Memory, Security Admin, Tagging, Settings, plus MCP Servers and A2A Agents (coming soon)
+- **Persona Navigation:** Sidebar with Platform Catalog, Agents, Memory, Security Admin, MCP Servers, Tagging, Settings, plus A2A Agents (coming soon)
 - **Session Liveness:** Computed locally using an idle timeout heuristic (`LOOM_SESSION_IDLE_TIMEOUT_SECONDS`). No AWS control plane APIs are called — the Bedrock AgentCore SDK does not expose session listing/querying APIs.

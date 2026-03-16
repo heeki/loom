@@ -12,10 +12,12 @@ from app.models.authorizer_credential import AuthorizerCredential
 from app.models.memory import Memory
 from app.models.tag_policy import TagPolicy
 from app.models.tag_profile import TagProfile
+from app.models.mcp import McpServer, McpTool, McpServerAccess
 
 __all__ = [
     "Agent", "InvocationSession", "Invocation", "ConfigEntry",
     "CredentialProvider", "Integration",
     "ManagedRole", "AuthorizerConfig", "PermissionRequest",
     "AuthorizerCredential", "Memory", "TagPolicy", "TagProfile",
+    "McpServer", "McpTool", "McpServerAccess",
 ]

@@ -415,3 +415,77 @@ export interface TagProfileCreateRequest {
   name: string;
   tags: Record<string, string>;
 }
+
+// MCP Server types
+export interface McpServer {
+  id: number;
+  name: string;
+  description: string | null;
+  endpoint_url: string;
+  transport_type: "sse" | "streamable_http";
+  status: "active" | "inactive" | "error";
+  auth_type: "none" | "oauth2";
+  oauth2_well_known_url: string | null;
+  oauth2_client_id: string | null;
+  oauth2_scopes: string | null;
+  has_oauth2_secret: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface McpServerCreateRequest {
+  name: string;
+  description?: string;
+  endpoint_url: string;
+  transport_type: "sse" | "streamable_http";
+  auth_type?: "none" | "oauth2";
+  oauth2_well_known_url?: string;
+  oauth2_client_id?: string;
+  oauth2_client_secret?: string;
+  oauth2_scopes?: string;
+}
+
+export interface McpServerUpdateRequest {
+  name?: string;
+  description?: string;
+  endpoint_url?: string;
+  transport_type?: "sse" | "streamable_http";
+  status?: "active" | "inactive" | "error";
+  auth_type?: "none" | "oauth2";
+  oauth2_well_known_url?: string;
+  oauth2_client_id?: string;
+  oauth2_client_secret?: string;
+  oauth2_scopes?: string;
+}
+
+export interface McpTool {
+  id: number;
+  server_id: number;
+  tool_name: string;
+  description: string | null;
+  input_schema: Record<string, unknown> | null;
+  last_refreshed_at: string | null;
+}
+
+export interface McpServerAccess {
+  id: number;
+  server_id: number;
+  persona_id: number;
+  access_level: "all_tools" | "selected_tools";
+  allowed_tool_names: string[] | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface McpAccessUpdateRequest {
+  rules: Array<{
+    persona_id: number;
+    access_level: "all_tools" | "selected_tools";
+    allowed_tool_names?: string[];
+  }>;
+}
+
+export interface TestConnectionResult {
+  success: boolean;
+  message: string;
+}

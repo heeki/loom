@@ -1,6 +1,6 @@
 # Loom Backend
 
-FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, security administration, tag policy management, and tag profile management.
+FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, MCP server management, security administration, tag policy management, and tag profile management.
 
 ## Technology Stack
 
@@ -72,6 +72,7 @@ backend/
 │   │   ├── authorizer_credential.py # AuthorizerCredential ORM model
 │   │   ├── permission_request.py   # PermissionRequest ORM model
 │   │   ├── memory.py        # Memory ORM model (AgentCore Memory resources)
+│   │   ├── mcp.py           # McpServer, McpTool, McpServerAccess ORM models
 │   │   ├── tag_policy.py    # TagPolicy ORM model (configurable tag policies)
 │   │   └── tag_profile.py   # TagProfile ORM model (named tag presets)
 │   ├── dependencies/
@@ -82,6 +83,7 @@ backend/
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
 │   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
 │   │   ├── memories.py      # Memory resource CRUD + strategy mapping
+│   │   ├── mcp.py           # MCP server CRUD, tool discovery, access control
 │   │   ├── security.py      # Security admin: roles, authorizers, credentials, permissions
 │   │   ├── settings.py      # Tag policy + tag profile CRUD (/api/settings/tags, /api/settings/tag-profiles)
 │   │   └── utils.py         # Shared router utilities
@@ -94,6 +96,7 @@ backend/
 │       ├── iam.py           # IAM role management + Cognito pool listing
 │       ├── jwt_validator.py # JWT validation against Cognito JWKS
 │       ├── latency.py       # Pure computation: cold_start_latency_ms, client_duration_ms
+│       ├── mcp.py           # MCP connection test + tool fetch stubs
 │       ├── memory.py        # boto3 wrapper: AgentCore Memory CRUD
 │       └── secrets.py       # Secrets Manager wrapper with caching
 ├── scripts/
@@ -137,6 +140,18 @@ Stores configurable tag policies for AWS resource tagging. Each policy defines a
 ### `tag_profiles`
 
 Stores named presets of tag key-value pairs. Each profile has a unique name and a JSON dict of tags. When a profile is selected during deployment, its tag values are merged with deploy-time policy defaults and applied to all created AWS resources. Tag values are limited to 128 characters.
+
+### `mcp_servers`
+
+Stores registered MCP servers. Columns include `name`, `url`, `transport` (sse or streamable_http), `description`, `auth_type` (none or oauth2), OAuth2 fields (`oauth2_client_id`, `oauth2_client_secret`, `oauth2_token_url`, `oauth2_scopes`, `oauth2_well_known_url`), `status` (active/inactive), and timestamps. The `oauth2_client_secret` is write-only — it is never returned in GET responses; a boolean `has_oauth2_secret` is returned instead.
+
+### `mcp_tools`
+
+Stores discovered tools for each MCP server. Columns include `server_id` (FK to mcp_servers), `name`, `description`, and `input_schema` (JSON). Tools are refreshed via the tool discovery endpoint. Cascade-deletes when the parent server is removed.
+
+### `mcp_server_access`
+
+Stores per-persona access rules for MCP server tools. Columns include `server_id` (FK to mcp_servers), `persona` (unique per server), `allowed` (boolean), `access_mode` (all_tools or selected_tools), and `allowed_tool_names` (JSON list). Defaults to deny (no access) until explicitly granted. Cascade-deletes when the parent server is removed.
 
 ### `memories`
 
@@ -226,6 +241,23 @@ Stores per-invocation timing measurements and status. Fields include `client_inv
 | `DELETE` | `/api/memories/{memory_id}/purge` | Remove from local DB only (no AWS call) |
 
 Supports five memory strategy types: semantic, summary, user_preference, episodic, and custom. Strategies are mapped to AWS tagged union format on creation. The delete endpoint supports async deletion: when `cleanup_aws=true`, it initiates deletion in AWS and marks the resource as DELETING. The frontend polls via refresh and uses purge to clean up locally after AWS confirms deletion (404).
+
+### MCP Server Management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/mcp/servers` | Register an MCP server |
+| `GET` | `/api/mcp/servers` | List all MCP servers |
+| `GET` | `/api/mcp/servers/{server_id}` | Get a specific MCP server |
+| `PUT` | `/api/mcp/servers/{server_id}` | Update an MCP server |
+| `DELETE` | `/api/mcp/servers/{server_id}` | Delete an MCP server (cascades to tools and access) |
+| `POST` | `/api/mcp/servers/{server_id}/test-connection` | Test connectivity to an MCP server |
+| `GET` | `/api/mcp/servers/{server_id}/tools` | List discovered tools for a server |
+| `POST` | `/api/mcp/servers/{server_id}/tools/refresh` | Refresh tools via discovery |
+| `GET` | `/api/mcp/servers/{server_id}/access` | Get access rules for a server |
+| `PUT` | `/api/mcp/servers/{server_id}/access` | Update access rules for a server |
+
+OAuth2 authentication supports well-known URL discovery for auto-populating token URLs and scopes. The `oauth2_client_secret` field is write-only — never included in GET responses; a `has_oauth2_secret` boolean is returned instead. Conditional validation ensures all required OAuth2 fields are present when `auth_type` is `oauth2`. Scope enforcement: `mcp:read` for GET, `mcp:write` for POST/PUT/DELETE.
 
 ### Agent Invocation (SSE Streaming)
 

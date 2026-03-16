@@ -56,6 +56,7 @@ backend/
 │   │   ├── authorizer_credential.py # AuthorizerCredential ORM model
 │   │   ├── permission_request.py   # PermissionRequest ORM model
 │   │   ├── memory.py        # Memory ORM model (AgentCore Memory resources)
+│   │   ├── mcp.py           # MCP models: McpServer, McpTool, McpServerAccess
 │   │   ├── tag_policy.py    # TagPolicy ORM model (configurable resource tagging)
 │   │   └── tag_profile.py   # TagProfile ORM model (named tag presets)
 │   ├── dependencies/
@@ -68,6 +69,7 @@ backend/
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
 │   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
 │   │   ├── memories.py      # Memory resource CRUD + strategy mapping
+│   │   ├── mcp.py           # MCP server CRUD, tools, access control
 │   │   ├── security.py      # Security admin: roles, authorizers, credentials, permissions
 │   │   └── utils.py         # Shared router utilities (get_agent_or_404)
 │   └── services/
@@ -79,6 +81,7 @@ backend/
 │       ├── iam.py           # IAM role creation/deletion, Cognito pool listing
 │       ├── jwt_validator.py # JWT validation against Cognito JWKS (with caching)
 │       ├── latency.py       # Latency calculation helpers
+│       ├── mcp.py           # MCP server connection test and tool discovery stubs
 │       ├── memory.py        # Bedrock AgentCore Memory API wrapper
 │       └── secrets.py       # AWS Secrets Manager wrapper with in-memory caching
 ├── scripts/
@@ -94,6 +97,7 @@ backend/
 │   ├── test_logs.py         # Logs router tests
 │   ├── test_memories.py     # Memory resource tests
 │   ├── test_security.py     # Security router tests (roles, authorizers)
+│   ├── test_mcp.py          # MCP server CRUD, tools, access control tests
 │   ├── test_scopes.py       # Scope enforcement and GROUP_SCOPES mapping tests
 │   └── test_tags.py         # Tag policy, tag profile, and tag enforcement tests
 ├── etc/
@@ -242,6 +246,49 @@ backend/
 | `updated_at` | DATETIME | Last update timestamp |
 
 Tag profiles are named presets of tag values that satisfy required tag policies. When a profile is selected during deployment, its tag values are merged with policy defaults and applied to all created AWS resources. Tag values are limited to 128 characters.
+
+### `mcp_servers` table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | Internal ID |
+| `name` | TEXT NOT NULL | Display name for the MCP server |
+| `description` | TEXT | Human-readable description |
+| `endpoint_url` | TEXT NOT NULL | MCP server SSE or Streamable HTTP endpoint URL |
+| `transport_type` | TEXT NOT NULL | `sse` or `streamable_http` |
+| `status` | TEXT NOT NULL | `active`, `inactive`, `error` |
+| `auth_type` | TEXT NOT NULL | `none` or `oauth2` |
+| `oauth2_well_known_url` | TEXT | OAuth2 `.well-known` URL (required when auth_type is `oauth2`) |
+| `oauth2_client_id` | TEXT | OAuth2 client ID (required when auth_type is `oauth2`) |
+| `oauth2_client_secret` | TEXT | OAuth2 client secret (write-only, never returned in GET responses) |
+| `oauth2_scopes` | TEXT | Space-separated OAuth2 scopes |
+| `created_at` | DATETIME | Creation timestamp |
+| `updated_at` | DATETIME | Last update timestamp |
+
+### `mcp_tools` table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | Internal ID |
+| `server_id` | INTEGER FK → mcp_servers.id (CASCADE delete) | Associated MCP server |
+| `tool_name` | TEXT NOT NULL | Tool name as reported by the MCP server |
+| `description` | TEXT | Tool description |
+| `input_schema` | TEXT | JSON Schema for tool input parameters |
+| `last_refreshed_at` | DATETIME | When this tool was last synced from the server |
+
+### `mcp_server_access` table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | Internal ID |
+| `server_id` | INTEGER FK → mcp_servers.id (CASCADE delete) | Associated MCP server |
+| `persona_id` | INTEGER | Reference to agent (persona) ID |
+| `access_level` | TEXT NOT NULL | `all_tools` or `selected_tools` |
+| `allowed_tool_names` | TEXT | JSON list of allowed tool names (when access_level is `selected_tools`) |
+| `created_at` | DATETIME | Creation timestamp |
+| `updated_at` | DATETIME | Last update timestamp |
+
+A persona with no access rule for a given MCP server has no access (deny by default).
 
 ### `memories` table
 
@@ -537,6 +584,52 @@ Removes the memory record from the local database without any AWS API call. Used
 | `AccessDeniedException` | 403 |
 | `ThrottledException` | 429 |
 
+### MCP Server Management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/mcp/servers` | Register a new MCP server. |
+| `GET` | `/api/mcp/servers` | List all registered MCP servers. |
+| `GET` | `/api/mcp/servers/{server_id}` | Get details of a specific MCP server. |
+| `PUT` | `/api/mcp/servers/{server_id}` | Update an MCP server configuration. |
+| `DELETE` | `/api/mcp/servers/{server_id}` | Remove an MCP server (cascades to tools and access rules). |
+| `POST` | `/api/mcp/servers/{server_id}/test-connection` | Test MCP server connectivity and OAuth2 token acquisition. |
+| `GET` | `/api/mcp/servers/{server_id}/tools` | Get cached tool list for a server. |
+| `POST` | `/api/mcp/servers/{server_id}/tools/refresh` | Refresh tool list from the MCP server. |
+| `GET` | `/api/mcp/servers/{server_id}/access` | Get access control rules for a server. |
+| `PUT` | `/api/mcp/servers/{server_id}/access` | Replace all access control rules for a server. |
+
+**`POST /api/mcp/servers` request body:**
+```json
+{
+  "name": "My MCP Server",
+  "description": "Optional description",
+  "endpoint_url": "https://example.com/mcp",
+  "transport_type": "sse",
+  "auth_type": "oauth2",
+  "oauth2_well_known_url": "https://auth.example.com/.well-known/openid-configuration",
+  "oauth2_client_id": "client-id",
+  "oauth2_client_secret": "client-secret",
+  "oauth2_scopes": "openid profile"
+}
+```
+
+When `auth_type` is `oauth2`, `oauth2_well_known_url` and `oauth2_client_id` are required (validated via Pydantic model validator).
+
+**Security:** `oauth2_client_secret` is write-only — it is never included in GET responses. The response includes `has_oauth2_secret: bool` instead.
+
+**`PUT /api/mcp/servers/{server_id}/access` request body:**
+```json
+{
+  "rules": [
+    {"persona_id": 1, "access_level": "all_tools"},
+    {"persona_id": 2, "access_level": "selected_tools", "allowed_tool_names": ["tool_a", "tool_b"]}
+  ]
+}
+```
+
+Replaces all existing access rules for the server. Personas not listed have no access (deny by default).
+
 ### Agent Invocation (SSE Streaming)
 
 | Method | Path | Description |
@@ -648,9 +741,17 @@ Core authentication and authorization module. Provides:
 | `memories.py` | `memory:read` | `memory:write` |
 | `security.py` | `security:read` | `security:write` |
 | `settings.py` | `settings:read` | `settings:write` |
+| `mcp.py` | `mcp:read` | `mcp:write` |
 | `auth.py` | Public (no guard) | — |
 
 **Tag-based resource isolation (R5):** Users in the `users` group only see agents and memories tagged with `loom:group=users`. Demo-admins are restricted at the data layer: create/delete operations enforce that the resource's `loom:group` tag matches `demo-admins`.
+
+### `services/mcp.py`
+
+Stub service for MCP server integration:
+
+- `test_mcp_connection(server) -> dict` — Returns success/failure with message. Validates OAuth2 well-known URL when auth_type is `oauth2`. Actual MCP client connectivity is future work.
+- `fetch_mcp_tools(server) -> list[dict]` — Returns empty list (stub). A real implementation would connect to the server and call `tools/list`.
 
 ### `services/secrets.py`
 

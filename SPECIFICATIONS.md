@@ -20,7 +20,7 @@ The frontend is organized around persona-based workflows, accessible via a sideb
 - **Memory** — Create new AgentCore Memory resources with configurable strategies or import existing ones.
 - **Tagging** — Manage tag policies (platform + custom) and tag profiles. Accessible to all scopes; write operations require `*:write`.
 - **Settings** — Manage display preferences (theme, timezone). Accessible to all scopes.
-- **MCP Servers** (coming soon) — Disabled sidebar entry for future MCP server management.
+- **MCP Servers** — Register and manage MCP servers, view available tools, and control persona access.
 - **A2A Agents** (coming soon) — Disabled sidebar entry for future A2A agent management.
 
 ---
@@ -49,6 +49,7 @@ loom/
 │   │   │   ├── authorizer_credential.py
 │   │   │   ├── permission_request.py
 │   │   │   ├── memory.py
+│   │   │   ├── mcp.py
 │   │   │   └── tag_profile.py
 │   │   ├── dependencies/
 │   │   │   └── auth.py
@@ -58,11 +59,13 @@ loom/
 │   │   │   ├── invocations.py
 │   │   │   ├── logs.py
 │   │   │   ├── memories.py
+│   │   │   ├── mcp.py
 │   │   │   ├── security.py
 │   │   │   ├── settings.py
 │   │   │   └── utils.py
 │   │   └── services/
 │   │       ├── agentcore.py
+│   │       ├── mcp.py
 │   │       ├── memory.py
 │   │       ├── secrets.py
 │   │       ├── cognito.py
@@ -347,7 +350,16 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Security admin panels (RoleManagementPanel, AuthorizerManagementPanel, PermissionRequestsPanel) converted from stacked `<div className="space-y-2">` layouts to `SortableCardGrid` with drag-to-reorder and alphabetical sort controls. AuthorizerManagementPanel and PermissionRequestsPanel use responsive grid (`md:grid-cols-2 lg:grid-cols-3`); RoleManagementPanel uses full-width single-column layout since role cards contain long ARNs and expandable policy documents.
 - All existing card grid consumers updated: CatalogPage (agents, memories), AgentListPage (agents), MemoryManagementPanel (memories), TaggingPage (policies, profiles).
 
-### Phase 13 — Advanced Operations
+### Phase 13 — MCP Server Integration *(Complete)*
+- Backend: `McpServer`, `McpTool`, `McpServerAccess` ORM models with full CRUD API under `/api/mcp/servers`. MCP server registration with name, endpoint URL, and transport type (SSE or Streamable HTTP). OAuth2 authentication configuration with well-known URL, client ID, client secret (write-only), and scopes. Conditional validation: OAuth2 fields required when auth_type is `oauth2`. Client secrets never returned in GET responses (`has_oauth2_secret` flag instead).
+- Tool discovery: `GET /api/mcp/servers/{id}/tools` returns cached tools, `POST /api/mcp/servers/{id}/tools/refresh` fetches from server (stub implementation). Each tool stores name, description, and input schema (JSON).
+- Access control: `GET/PUT /api/mcp/servers/{id}/access` manages per-persona access rules. Access levels: `all_tools` (any tool including future ones) or `selected_tools` (specific tool names). Deny by default — no rule means no access.
+- Connection test: `POST /api/mcp/servers/{id}/test-connection` validates OAuth2 configuration (stub for actual MCP connectivity).
+- Frontend: `McpServersPage` with card/table view toggle, sortable columns, server detail view with Tools/Access tabs. `McpServerForm` with progressive OAuth2 field disclosure. `McpToolList` with refresh, collapsible input schema display. `McpAccessControl` with per-agent toggle, all_tools/selected_tools radio, individual tool checkboxes.
+- MCP Servers sidebar item activated (no longer disabled/coming soon). Scope-gated by `mcp:read`/`mcp:write`.
+- 25 backend tests covering all CRUD operations, validation, secret exclusion, OAuth2 conditional fields, tools, access rules, and cascade delete.
+
+### Phase 14 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

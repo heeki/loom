@@ -28,6 +28,7 @@ frontend/
 │   │   ├── agents.ts           # Agent CRUD + fetchRoles(), fetchCognitoPools(), fetchModels(), fetchDefaults()
 │   │   ├── invocations.ts      # Session queries + SSE stream consumer (with auth header)
 │   │   ├── logs.ts             # CloudWatch log queries
+│   │   ├── mcp.ts              # MCP server CRUD, tools, access, test connection
 │   │   ├── memories.ts         # Memory resource CRUD + refresh
 │   │   ├── security.ts         # Security admin: roles, authorizers, credentials, permissions
 │   │   └── settings.ts        # Settings API: tag policy + tag profile CRUD
@@ -40,7 +41,8 @@ frontend/
 │   │   ├── useSessions.ts      # Session list state per agent
 │   │   ├── useInvoke.ts        # Streaming invocation state + AbortController
 │   │   ├── useLogs.ts          # Session log fetching
-│   │   └── useDeployment.ts    # Agent config, credential providers, integrations hooks
+│   │   ├── useDeployment.ts    # Agent config, credential providers, integrations hooks
+│   │   └── useMcpServers.ts   # MCP server list state + CRUD actions
 │   ├── components/
 │   │   ├── ui/                 # shadcn primitives + searchable-select.tsx + multi-select.tsx + add-filter-dropdown.tsx
 │   │   ├── SortableCardGrid.tsx — Drag-to-reorder card grid using @dnd-kit, default alphabetical sort, SortButton, localStorage persistence
@@ -49,6 +51,9 @@ frontend/
 │   │   ├── AgentRegistrationForm.tsx  # Tabbed form: ARN registration + agent deployment
 │   │   ├── JsonConfigSection.tsx     # Shared collapsible JSON import/export section
 │   │   ├── AuthorizerManagementPanel.tsx # Authorizer config + credential management
+│   │   ├── McpAccessControl.tsx        # Persona access control for MCP servers and tools
+│   │   ├── McpServerForm.tsx          # Form for adding/editing MCP servers with OAuth2 config
+│   │   ├── McpToolList.tsx            # Tool list display with schema details
 │   │   ├── MemoryCard.tsx              # Memory resource summary card
 │   │   ├── MemoryManagementPanel.tsx    # Memory resource create form + list table
 │   │   ├── ResourceTagFields.tsx       # Shared tag profile selector + tag resolution
@@ -64,6 +69,7 @@ frontend/
 │   │   ├── CatalogPage.tsx     # Platform Catalog: agents, memory, MCP, A2A sections
 │   │   ├── SecurityAdminPage.tsx  # Security persona: roles, authorizers, credentials, permissions
 │   │   ├── LoginPage.tsx        # Cognito login + NEW_PASSWORD_REQUIRED challenge
+│   │   ├── McpServersPage.tsx  # MCP server management: list, detail, tools, access
 │   │   ├── MemoryManagementPage.tsx # Memory persona: memory resource management
 │   │   ├── TaggingPage.tsx         # Tagging persona: tag policy + tag profile CRUD
 │   │   ├── SettingsPage.tsx        # Settings persona: display preferences
@@ -102,7 +108,7 @@ The app uses a persona-based single-page architecture with a sidebar for workflo
 | Security Admin | Shield | Manage roles, authorizers, credentials, permissions | `security:read` or `security:write` | |
 | Tagging | Tags | Manage tag policies and tag profiles | Always visible | |
 | Settings | Settings | Manage display preferences | Always visible | |
-| MCP Servers | Network | Future MCP server management (disabled) | `mcp:read` or `mcp:write` | |
+| MCP Servers | Network | Register and manage MCP servers, tools, and access control | `mcp:read` or `mcp:write` | |
 | A2A Agents | Users | Future A2A agent management (disabled) | `a2a:read` or `a2a:write` | |
 
 Sidebar items are conditionally rendered based on the user's scopes derived from their Cognito group membership. When auth is not configured, all items are visible.
@@ -333,6 +339,50 @@ When no memory resources exist: centered muted text "No memory resources yet. Ad
 
 ---
 
+## 8a. MCP Servers View (MCP Server Administration)
+
+**Purpose:** Register and manage MCP (Model Context Protocol) servers, view available tools, and control persona access.
+
+**Layout:** Page header "MCP Server Administration" with card/table view toggle (top-right), followed by "Add MCP Server" button, create form (toggle), and server list (cards default or table).
+
+### Server List
+
+**Card view** (default): `SortableCardGrid` with drag-to-reorder (storage key `mcp-servers`), default alphabetical sort by name, and A-Z/Z-A sort toggle. Each card displays server name, status badge (`active`=default, `inactive`=secondary, `error`=destructive), endpoint URL, transport type badge, auth type badge, created timestamp. Delete with inline confirmation overlay (same pattern as AgentCard).
+
+**Table view**: Sortable columns — Name (25%), Endpoint (30%), Transport (12%), Status (10%), Auth (10%), Created (13%).
+
+### Server Detail View
+
+Accessed by clicking a server card/row. Shows:
+- Header with server name, endpoint URL, status/transport/auth badges
+- "Edit Server" button (opens inline McpServerForm with pre-filled data)
+- Tab bar: Tools | Access
+
+**Tools tab** (`McpToolList`):
+- Tool count and last-refreshed timestamp
+- "Refresh Tools" button to fetch from the MCP server
+- Each tool displayed as a card: tool name (bold), description, collapsible input schema (formatted JSON in monospace `pre` block)
+- Empty state: "No tools discovered. Click 'Refresh Tools' to fetch from the MCP server."
+
+**Access tab** (`McpAccessControl`):
+- Lists all registered agents (personas) with checkbox to grant/revoke access
+- When access granted: radio for "All Tools" / "Selected Tools"
+- When "Selected Tools": checkboxes for individual tools (from cached tool list)
+- "Save" button to persist changes
+- Deny by default — personas without an explicit rule cannot use the server
+
+### McpServerForm
+
+Create/edit form with:
+- Name (required, 1/3 width) and Endpoint URL (required, flex-1) and Transport Type (select: SSE/Streamable HTTP, 180px)
+- Description (textarea)
+- Authentication section: radio toggle for None / OAuth2
+- When OAuth2: well-known URL, client ID, client secret (password input with "(unchanged)" placeholder in edit mode), scopes (space-separated)
+- "Test Connection" button (only shown in edit mode) with success/failure badge result
+- Create/Update and Cancel buttons
+
+---
+
 ## 9. Settings View
 
 **Purpose:** Manage display preferences.
@@ -512,7 +562,6 @@ The invoke panel's credential dropdown includes a "Manual token" sentinel value.
 ## 12. Future Work
 
 - **Markdown rendering** for agent responses
-- **MCP server integration** configuration
 - **A2A agent integration** configuration
 - **VPC network mode** support
 - **MCP and A2A protocol** support
