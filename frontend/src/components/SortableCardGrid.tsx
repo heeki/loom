@@ -100,7 +100,7 @@ export function SortableCardGrid<T>({
   onSortDirectionChange,
 }: SortableCardGridProps<T>) {
   const [orderedIds, setOrderedIds] = useState<string[]>(() => loadOrder(storageKey));
-  const [sortDirection, setSortDirection] = useState<SortDirection | null>(() => loadSortDirection(storageKey));
+  const [sortDirection, setSortDirection] = useState<SortDirection | null>(() => loadSortDirection(storageKey) ?? "asc");
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
