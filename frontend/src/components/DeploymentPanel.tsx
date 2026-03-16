@@ -11,11 +11,19 @@ interface DeploymentPanelProps {
   onRedeploy: (id: number) => Promise<void>;
 }
 
+const DEPLOY_IN_PROGRESS = new Set([
+  "initializing",
+  "creating_credentials",
+  "creating_role",
+  "building_artifact",
+  "deploying",
+  "ENDPOINT_CREATING",
+]);
+
 function isCreating(agent: AgentResponse): boolean {
   return (
     agent.status === "CREATING" ||
-    agent.deployment_status === "deploying" ||
-    agent.deployment_status === "ENDPOINT_CREATING" ||
+    DEPLOY_IN_PROGRESS.has(agent.deployment_status ?? "") ||
     agent.endpoint_status === "CREATING"
   );
 }

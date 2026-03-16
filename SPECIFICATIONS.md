@@ -357,6 +357,15 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Connection test: `POST /api/mcp/servers/{id}/test-connection` validates OAuth2 configuration (stub for actual MCP connectivity).
 - Frontend: `McpServersPage` with card/table view toggle, sortable columns, server detail view with Tools/Access tabs. `McpServerForm` with progressive OAuth2 field disclosure. `McpToolList` with refresh, collapsible input schema display. `McpAccessControl` with per-agent toggle, all_tools/selected_tools radio, individual tool checkboxes.
 - MCP Servers sidebar item activated (no longer disabled/coming soon). Scope-gated by `mcp:read`/`mcp:write`.
+- Agent deployment with MCP server selection: multi-select dropdown on deploy form allows selecting MCP servers from catalog. Selected servers attached to agent during deployment.
+- OAuth2 credential provider creation: for OAuth2-enabled MCP servers, backend calls AgentCore `create_oauth2_credential_provider` API using `CustomOauth2` vendor with `discoveryUrl` from server configuration. Credential providers auto-named `{agent_name}-mcp-{server_name}`.
+- Background deployment with progressive status updates: deploy endpoint returns immediately with `creating_credentials` status. Background task progresses through `creating_role`, `building_artifact`, `deploying` phases with DB updates. Frontend polls at 2-second intervals.
+- Frontend progressive deployment status display: agent cards show human-readable status messages (Creating credential provider, Creating IAM role, Building artifact, Deploying runtime, Completing deployment, Finalizing endpoint) with spinner and elapsed timer.
+- Smart polling optimization: frontend skips AWS API calls during `creating_credentials`, `creating_role`, and `building_artifact` phases (local operations only), reducing unnecessary backend load.
+- Credential provider cascade delete: when agents are deleted, associated OAuth2 credential providers are automatically cleaned up via AgentCore API.
+- Agent runtime deferred MCP client initialization: OAuth2 MCP clients are initialized at invocation time (not handler startup) since workload tokens are only available during active requests.
+- Agent runtime `_OAuth2Auth` httpx handler: exchanges ephemeral workload token for downstream OAuth2 access token via AgentCore Identity service M2M flow. Workload token retrieved from `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE` environment variable.
+- Agent deletion with background polling: delete endpoint returns `DELETING` status. Background task polls AgentCore until runtime deletion completes, then purges local DB record. Endpoint status badge hidden during deletion.
 - 25 backend tests covering all CRUD operations, validation, secret exclusion, OAuth2 conditional fields, tools, access rules, and cascade delete.
 
 ### Phase 14 — Advanced Operations

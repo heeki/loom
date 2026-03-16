@@ -126,7 +126,7 @@ backend/
 | `available_qualifiers` | TEXT | JSON array of endpoint names (e.g., `["DEFAULT"]`) |
 | `raw_metadata` | TEXT | Full JSON from AgentCore describe API |
 | `source` | TEXT | `register` or `deploy` |
-| `deployment_status` | TEXT | `deploying`, `deployed`, `failed`, `removing` |
+| `deployment_status` | TEXT | `initializing`, `creating_credentials`, `creating_role`, `building_artifact`, `deploying`, `deployed`, `failed`, `removing`, `READY` |
 | `execution_role_arn` | TEXT | IAM execution role ARN |
 | `config_hash` | TEXT | Configuration hash |
 | `endpoint_name` | TEXT | Runtime endpoint name |
@@ -139,6 +139,9 @@ backend/
 | `registered_at` | DATETIME | Timestamp of local registration |
 | `deployed_at` | DATETIME | Deployment timestamp |
 | `last_refreshed_at` | DATETIME | Last time metadata was fetched from AWS |
+
+**Relationships:**
+- `credential_providers` — One-to-many relationship with credential providers created for MCP OAuth2 integrations. Cascade-deleted when agent is deleted.
 
 ### `agent_config_entries` table
 
@@ -397,10 +400,23 @@ The `/api/auth/config` endpoint returns only the pool ID and region. The user cl
 
 **`DELETE /api/agents/{agent_id}` behavior:**
 - When `cleanup_aws=false` or agent has no `runtime_id`: immediately deletes from local DB, returns the `AgentResponse` with HTTP 200.
-- When `cleanup_aws=true` and agent has a `runtime_id`: initiates async deletion (endpoint + runtime + Secrets Manager cleanup), marks agent as `status="DELETING"`, `deployment_status="removing"`, returns the `AgentResponse` with HTTP 200. The frontend polls via the status endpoint and uses purge to clean up locally after AWS confirms deletion (404).
+- When `cleanup_aws=true` and agent has a `runtime_id`: initiates async deletion via `BackgroundTasks`. The background task:
+  1. Deletes non-DEFAULT runtime endpoints (AWS automatically handles DEFAULT endpoints).
+  2. Deletes the runtime.
+  3. Cleans up Secrets Manager secrets.
+  4. Parses `AGENT_CONFIG_JSON` to extract `integrations.mcp_servers[].auth.credential_provider_name` values.
+  5. Deletes each credential provider via `delete_oauth2_credential_provider`.
+  6. Polls runtime deletion status (5-second intervals, 30 max attempts).
+  7. Purges the agent DB record using `db.flush()` before `db.commit()` for reliable SQLite writes.
+- Returns the `AgentResponse` with `status="DELETING"`, `deployment_status="removing"`, HTTP 200. The frontend polls via the status endpoint and uses purge to clean up locally after AWS confirms deletion (404).
 
 **`DELETE /api/agents/{agent_id}/purge`:**
 Removes the agent record from the local database without any AWS API call. Used by the frontend after confirming that AWS deletion is complete (404 on status poll). Returns 204 No Content.
+
+**`GET /api/agents/{agent_id}` status polling behavior:**
+- **Smart polling during local phases**: When `deployment_status` is `initializing`, `creating_credentials`, `creating_role`, or `building_artifact`, the endpoint returns DB state immediately without making AWS API calls.
+- **AWS polling after deployment**: Once `deployment_status` reaches `deployed`, the endpoint queries AWS for current runtime state via `get_agent_runtime`.
+- **Permanent error detection**: If AWS returns `AccessDeniedException` or `UnauthorizedException`, the backend marks the agent as `deployment_status="failed"` to stop frontend polling.
 
 **`POST /api/agents` register request body:**
 ```json
@@ -436,9 +452,14 @@ The `model_id` field is optional on registration and stored as an `AGENT_CONFIG_
 | `authorizer_client_id` | Client ID for token retrieval |
 | `authorizer_client_secret` | Client secret for token retrieval |
 | `memory_enabled` | Whether memory is enabled |
-| `mcp_servers` | MCP server configuration |
+| `mcp_servers` | MCP server configuration (stored in `AGENT_CONFIG_JSON` as `integrations.mcp_servers`) |
 | `a2a_agents` | A2A agent configuration |
 | `tags` | Build-time tag values (e.g., `{"team": "aws", "owner": "heeki"}`) |
+
+The `mcp_servers` configuration is stored in the `AGENT_CONFIG_JSON` config entry under `integrations.mcp_servers` as an array. Each MCP server with OAuth2 authentication includes:
+- `auth.credential_provider_name` — Name of the AgentCore credential provider created during deployment
+- `auth.well_known_endpoint` — OAuth2 discovery URL
+- `auth.scopes` — Array of OAuth2 scopes
 
 **`GET /api/agents` response includes:**
 - `tags` — resolved tags (profile values + policy defaults) stored on the agent record
@@ -713,6 +734,13 @@ Handles agent artifact build and runtime lifecycle:
 
 - `get_cognito_token(pool_id: str, client_id: str, client_secret: str, scopes: list[str]) -> str` — exchanges client credentials for an access token via the Cognito OAuth2 token endpoint.
 
+### `services/credential.py`
+
+AgentCore credential provider management:
+
+- `create_oauth2_credential_provider(name: str, discovery_url: str, region: str) -> str` — creates an OAuth2 credential provider using the `CustomOauth2` vendor type and returns the credential provider ARN.
+- `delete_oauth2_credential_provider(credential_provider_name: str, region: str)` — deletes an OAuth2 credential provider by name.
+
 ### `services/jwt_validator.py`
 
 - `validate_cognito_token(token: str, user_pool_id: str, region: str, client_id: str | None) -> dict` — validates a JWT against the Cognito JWKS endpoint. Caches JWKS keys for 1 hour.
@@ -784,16 +812,19 @@ Wraps `boto3.client('bedrock-agentcore-control')` for memory operations:
 
 ## 8. Agent Deployment Flow
 
+Deployment runs asynchronously via FastAPI `BackgroundTasks` with progressive `deployment_status` updates:
+
 1. User submits a deploy form with agent configuration (model and IAM role are required).
-2. Backend uses the provided IAM execution role.
-3. Builds the deployment artifact:
-   - Copies source from `agents/strands_agent/src/`.
-   - Runs `pip install` against `requirements.txt` targeting `linux/arm64` (`manylinux2014_aarch64`).
-   - Fixes console script shebangs (e.g. `opentelemetry-instrument`) to use `#!/usr/bin/env python3` for Linux compatibility.
-   - Zips the package and uploads it to S3.
-4. Calls `create_agent_runtime` with the artifact location, environment variables (including `OTEL_SERVICE_NAME` set to the agent name and `AGENT_OBSERVABILITY_ENABLED=true` to activate the `aws-opentelemetry-distro` export pipeline), network/protocol/lifecycle/authorizer configuration.
-5. Stores authorizer config on the agent record. Stores the Cognito `client_id` as a config entry. Stores the `client_secret` in AWS Secrets Manager and saves the resulting ARN as a config entry.
-6. On delete with `cleanup_aws=true`: deletes the endpoint, deletes the runtime, and cleans up the Secrets Manager secret.
+2. Backend creates the agent record with `deployment_status="initializing"` and returns immediately with HTTP 202.
+3. Background task progresses through deployment phases:
+   - **`creating_credentials`**: For each MCP server with OAuth2 auth, calls `create_oauth2_credential_provider` (vendor=`CustomOauth2`, using `discoveryUrl` from MCP config). Stores credential provider names in `AGENT_CONFIG_JSON` under `integrations.mcp_servers[].auth.credential_provider_name`, along with `well_known_endpoint` and `scopes`.
+   - **`creating_role`**: Creates or validates the IAM execution role (if needed).
+   - **`building_artifact`**: Builds the deployment artifact by copying source from `agents/strands_agent/src/`, running `pip install` against `requirements.txt` targeting `linux/arm64` (`manylinux2014_aarch64`), fixing console script shebangs (e.g. `opentelemetry-instrument`) to use `#!/usr/bin/env python3` for Linux compatibility, zipping the package and uploading it to S3.
+   - **`deploying`**: Calls `create_agent_runtime` with the artifact location, environment variables (including `OTEL_SERVICE_NAME` set to the agent name and `AGENT_OBSERVABILITY_ENABLED=true` to activate the `aws-opentelemetry-distro` export pipeline), network/protocol/lifecycle/authorizer configuration.
+   - **`deployed`**: Stores authorizer config on the agent record. Stores the Cognito `client_id` as a config entry. Stores the `client_secret` in AWS Secrets Manager and saves the resulting ARN as a config entry. Updates `deployment_status="deployed"` and `status="READY"`.
+4. On error during any phase: sets `deployment_status="failed"`.
+5. Frontend polls the status endpoint to track progress. Smart polling returns DB state immediately during local build phases (`creating_credentials`, `creating_role`, `building_artifact`) without AWS API calls. Only when `deployment_status="deployed"` does the status endpoint query AWS for runtime state.
+6. Permanent errors (e.g., `AccessDeniedException`, `UnauthorizedException`) mark the agent as FAILED to stop polling.
 
 ---
 

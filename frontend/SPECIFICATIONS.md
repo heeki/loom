@@ -156,8 +156,11 @@ Each card displays:
 - Agent name (or runtime ID fallback)
 - Protocol badge (e.g., `HTTP`) — inline with name
 - Status badge (color-coded: READY=default, CREATING=secondary, FAILED=destructive) — inline with name
+- Progressive deployment status phases: `initializing`, `creating_credentials` (Creating credential provider), `creating_role` (Creating IAM role), `building_artifact` (Building artifact), `deploying` (Deploying runtime), then "Completing deployment", "Finalizing endpoint"
 - Spinner animation when agent is in a creating/deploying state
 - Spinner animation and elapsed timer when agent is in DELETING state, using `deleteStartTime` prop for accurate timer display
+- Endpoint status badge hidden during DELETING state
+- `DEPLOY_IN_PROGRESS` set for determining transitional states
 - Active session count badge (when > 0)
 - Region, Account ID, Network mode, Available qualifiers, Authorizer (name, "Cognito", "external", or "None"), Registered timestamp
 - Tag badges (secondary variant) for tags marked `show_on_card` in tag policies, formatted as `key: value`
@@ -207,7 +210,7 @@ Full deployment form with sections:
   - Other: textbox for discovery URL, tag inputs for allowed clients and scopes
 - **Lifecycle**: idle timeout and max lifetime fields with dynamic placeholders fetched from `/api/agents/defaults` (e.g., "300" and "3600")
 - **Resource Tags**: `ResourceTagFields` component with tag profile dropdown (persisted in `sessionStorage`). Deploy-time tags are auto-applied; build-time tags are resolved from the selected tag profile.
-- **Integrations**: Memory, MCP Servers, A2A Agents — all shown as disabled checkboxes with "coming soon" labels
+- **Integrations**: Memory (enabled), MCP Servers (enabled with multi-select dropdown), A2A Agents (coming soon)
 
 ---
 
@@ -312,6 +315,12 @@ Status badges use `statusVariant()` mapping:
 - **CREATING** — secondary variant + spinning `Loader2` icon
 - **FAILED** — destructive variant
 - **DELETING** — secondary variant + spinning `Loader2` icon
+- **initializing** — secondary variant
+- **creating_credentials** — secondary variant
+- **creating_role** — secondary variant
+- **building_artifact** — secondary variant
+- **deploying** — secondary variant
+- **ENDPOINT_CREATING** — secondary variant
 
 ### Timer Accuracy
 
@@ -341,7 +350,7 @@ When no memory resources exist: centered muted text "No memory resources yet. Ad
 
 ## 8a. MCP Servers View (MCP Server Administration)
 
-**Purpose:** Register and manage MCP (Model Context Protocol) servers, view available tools, and control persona access.
+**Purpose:** Register and manage MCP (Model Context Protocol) servers, view available tools, and control persona access. MCP servers can be selected during agent deployment for runtime integration.
 
 **Layout:** Page header "MCP Server Administration" with card/table view toggle (top-right), followed by "Add MCP Server" button, create form (toggle), and server list (cards default or table).
 
@@ -537,7 +546,7 @@ Computed server-side using `LOOM_SESSION_IDLE_TIMEOUT_SECONDS`. The frontend dis
 Card/table view mode state is lifted to `App.tsx` with separate state variables per page (`catalogViewMode`, `agentsViewMode`, `memoryViewMode`). Each page receives its mode and setter as props. This ensures the selection persists when switching between personas — the page components unmount but the state lives in the parent.
 
 ### Deploy Flow
-Agent deployment uses a fire-and-forget pattern. The form collapses immediately on deploy, the backend creates a DB record before starting the AWS call, and `fetchAgents()` picks up the new record. The `useAgents` hook polls transitional agents (deploying/CREATING/endpoint CREATING) at 5-second intervals using a `watchIds` effect dependency. An `initialLoadDone` ref prevents skeleton flash on subsequent fetches. Agent cards show two-phase creation status: deploying → completing deployment → finalizing endpoint, with a timer using `registered_at` to avoid resets on phase transitions. Agent deletion with AWS cleanup follows a matching async pattern: the DELETE endpoint marks the agent as DELETING, the hook polls at 5-second intervals, detects 404 when the runtime is fully deleted, calls the purge endpoint to remove the local record, and shows a success toast.
+Agent deployment uses a fire-and-forget pattern. The form collapses immediately on deploy, the backend creates a DB record before starting the AWS call, and `fetchAgents()` picks up the new record. The `useAgents` hook polls transitional agents (deploying/CREATING/endpoint CREATING) at 2-second intervals using a `watchIds` effect dependency. Smart polling: during local build phases (`creating_credentials`, `creating_role`, `building_artifact`, `deploying`), the backend returns DB state without AWS API calls. An `initialLoadDone` ref prevents skeleton flash on subsequent fetches. Agent cards show two-phase creation status: deploying → completing deployment → finalizing endpoint, with a timer using `registered_at` to avoid resets on phase transitions. Agent deletion with AWS cleanup follows a matching async pattern: the DELETE endpoint marks the agent as DELETING, the hook polls at 2-second intervals, detects 404 when the runtime is fully deleted, uses a background task for DB purge after runtime is confirmed deleted, and shows a success toast.
 
 ### SSE Stream Consumer
 `invokeAgentStream()` uses `ReadableStream` to consume POST-based SSE responses with buffer-based line parsing, typed callback dispatch, and `AbortSignal` for cancellation.

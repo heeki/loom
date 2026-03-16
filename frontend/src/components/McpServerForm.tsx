@@ -12,6 +12,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
 import { testConnection } from "@/api/mcp";
+import { JsonConfigSection } from "./JsonConfigSection";
 import type { McpServerCreateRequest, TestConnectionResult } from "@/api/types";
 
 interface McpServerFormProps {
@@ -75,6 +76,46 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
 
   return (
     <div className="space-y-3">
+      <JsonConfigSection
+        onApply={(json) => {
+          try {
+            const parsed = JSON.parse(json);
+            if (parsed.name) setName(parsed.name);
+            if (parsed.description !== undefined) setDescription(parsed.description);
+            if (parsed.endpoint_url) setEndpointUrl(parsed.endpoint_url);
+            if (parsed.transport_type && ["sse", "streamable_http"].includes(parsed.transport_type)) {
+              setTransportType(parsed.transport_type);
+            }
+            if (parsed.auth_type && ["none", "oauth2"].includes(parsed.auth_type)) {
+              setAuthType(parsed.auth_type);
+            }
+            if (parsed.oauth2_well_known_url !== undefined) setWellKnownUrl(parsed.oauth2_well_known_url);
+            if (parsed.oauth2_client_id !== undefined) setClientId(parsed.oauth2_client_id);
+            if (parsed.oauth2_client_secret !== undefined) setClientSecret(parsed.oauth2_client_secret);
+            if (parsed.oauth2_scopes !== undefined) setScopes(parsed.oauth2_scopes);
+            return null;
+          } catch {
+            return "Invalid JSON. Please check the format and try again.";
+          }
+        }}
+        onExport={() => {
+          const result: Record<string, unknown> = {};
+          if (name) result.name = name;
+          if (endpointUrl) result.endpoint_url = endpointUrl;
+          result.transport_type = transportType;
+          if (description) result.description = description;
+          result.auth_type = authType;
+          if (authType === "oauth2") {
+            if (wellKnownUrl) result.oauth2_well_known_url = wellKnownUrl;
+            if (clientId) result.oauth2_client_id = clientId;
+            result.oauth2_client_secret = "(redacted)";
+            if (scopes) result.oauth2_scopes = scopes;
+          }
+          return JSON.stringify(result, null, 2);
+        }}
+        placeholder='{"name": "...", "endpoint_url": "https://...", "transport_type": "sse", "auth_type": "none"}'
+      />
+
       <div className="flex gap-3">
         <div className="w-1/3 min-w-0">
           <label className="text-xs text-muted-foreground">Name *</label>

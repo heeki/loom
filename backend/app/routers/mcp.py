@@ -13,6 +13,7 @@ from app.dependencies.auth import UserInfo, require_scopes
 from app.models.mcp import McpServer, McpTool, McpServerAccess
 from app.services.mcp import test_mcp_connection as svc_test_connection
 from app.services.mcp import fetch_mcp_tools as svc_fetch_tools
+from app.services.mcp import invoke_mcp_tool as svc_invoke_tool
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,18 @@ class McpAccessUpdateRequest(BaseModel):
 class TestConnectionResponse(BaseModel):
     success: bool
     message: str
+
+
+class ToolInvokeRequest(BaseModel):
+    tool_name: str = Field(..., description="Name of the tool to invoke")
+    arguments: dict = Field(default_factory=dict, description="Arguments to pass to the tool")
+
+
+class ToolInvokeResponse(BaseModel):
+    success: bool
+    request: dict
+    result: dict | None = None
+    error: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +270,18 @@ def refresh_mcp_tools(
         db.refresh(t)
 
     return [McpToolResponse(**t.to_dict()) for t in new_tools]
+
+
+@router.post("/{server_id}/tools/invoke", response_model=ToolInvokeResponse)
+def invoke_mcp_tool(
+    server_id: int,
+    request: ToolInvokeRequest,
+    user: UserInfo = Depends(require_scopes("mcp:write")),
+    db: Session = Depends(get_db),
+) -> ToolInvokeResponse:
+    server = _get_server_or_404(server_id, db)
+    result = svc_invoke_tool(server, request.tool_name, request.arguments)
+    return ToolInvokeResponse(**result)
 
 
 # ---------------------------------------------------------------------------

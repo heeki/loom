@@ -477,20 +477,13 @@ function AppContent() {
               loading={loading}
               viewMode={agentsViewMode}
               onViewModeChange={setAgentsViewMode}
-              onRegister={async (arn, modelId) => {
-                await registerAgent(arn, modelId);
-                await fetchAgents();
-              }}
-              onDeploy={async (req) => {
-                await deployAgent(req);
-                await fetchAgents();
-              }}
+              onRegister={registerAgent}
+              onDeploy={deployAgent}
               onSelectAgent={(id) => {
                 setSelectedAgentId(id);
                 setActivePersona("catalog");
               }}
               onRefreshAgent={refreshAgent}
-              onFetchAgents={() => void fetchAgents()}
               onDelete={handleDelete}
               readOnly={!effectiveHasScope("agent:write")}
               groupRestriction={groupRestriction}

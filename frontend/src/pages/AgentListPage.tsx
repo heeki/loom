@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, LayoutGrid, TableIcon, Network, Users, X, Eye, EyeOff } from "lucide-react";
+import { Plus, LayoutGrid, TableIcon, X, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -35,7 +35,6 @@ interface AgentListPageProps {
   onDeploy?: (request: AgentDeployRequest) => Promise<unknown>;
   onSelectAgent: (id: number) => void;
   onRefreshAgent: (id: number) => void;
-  onFetchAgents?: () => void;
   onDelete: (id: number, cleanupAws: boolean) => void;
   readOnly?: boolean;
   groupRestriction?: string;
@@ -51,7 +50,6 @@ export function AgentListPage({
   onDeploy,
   onSelectAgent,
   onRefreshAgent,
-  onFetchAgents,
   onDelete,
   readOnly,
   groupRestriction,
@@ -75,18 +73,14 @@ export function AgentListPage({
   useEffect(() => {
     if (deployingName) {
       const real = agents.find((a) => a.name === deployingName);
-      if (real && real.status !== "CREATING" && real.endpoint_status !== "CREATING" && real.deployment_status !== "deploying") {
+      const inProgress = new Set(["initializing", "creating_credentials", "creating_role", "building_artifact", "deploying"]);
+      if (real && real.status !== "CREATING" && real.endpoint_status !== "CREATING" && !inProgress.has(real.deployment_status ?? "")) {
         setDeployingName(null);
       }
     }
   }, [agents, deployingName]);
 
-  // Immediate fetch to pick up the new DB record; useAgents handles ongoing polling
-  useEffect(() => {
-    if (deployingName && onFetchAgents) {
-      onFetchAgents();
-    }
-  }, [deployingName, onFetchAgents]);
+
 
   const showOnCardPolicies = tagPolicies.filter(tp => tp.show_on_card);
   const showOnCardKeys = showOnCardPolicies.map(tp => tp.key);
@@ -431,22 +425,6 @@ export function AgentListPage({
           </>
         )}
       </div>
-
-      <section className="space-y-3 pt-2">
-        <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Additional Configuration</h4>
-        <div className="space-y-2 text-xs text-muted-foreground">
-          <div className="flex items-center gap-2">
-            <Network className="h-3.5 w-3.5" />
-            <span>MCP Servers</span>
-            <span className="text-[10px] italic">Coming soon</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Users className="h-3.5 w-3.5" />
-            <span>A2A Agents</span>
-            <span className="text-[10px] italic">Coming soon</span>
-          </div>
-        </div>
-      </section>
     </div>
   );
 }

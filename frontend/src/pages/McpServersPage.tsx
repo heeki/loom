@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { LayoutGrid, TableIcon, Plus, Trash2 } from "lucide-react";
+import { LayoutGrid, TableIcon, Plus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -21,17 +20,6 @@ import { McpAccessControl } from "@/components/McpAccessControl";
 import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "@/components/SortableCardGrid";
 import { SortableTableHead, sortRows } from "@/components/SortableTableHead";
 import type { McpServer, McpServerCreateRequest } from "@/api/types";
-
-type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
-
-function mcpStatusVariant(status: string): BadgeVariant {
-  switch (status) {
-    case "active": return "default";
-    case "inactive": return "secondary";
-    case "error": return "destructive";
-    default: return "outline";
-  }
-}
 
 interface McpServersPageProps {
   viewMode: "cards" | "table";
@@ -95,24 +83,15 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
   if (selectedServer) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <Button variant="ghost" size="sm" onClick={() => { setSelectedServerId(null); setEditingServer(null); }} className="mb-2">
-              &larr; Back to servers
-            </Button>
-            <h2 className="text-lg font-semibold">{selectedServer.name}</h2>
-            <p className="text-sm text-muted-foreground">{selectedServer.endpoint_url}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge variant={mcpStatusVariant(selectedServer.status)} className="text-xs">
-              {selectedServer.status}
-            </Badge>
-            <Badge variant="outline" className="text-xs">{selectedServer.transport_type}</Badge>
-            <Badge variant="outline" className="text-xs">{selectedServer.auth_type}</Badge>
-          </div>
+        <div>
+          <Button variant="ghost" size="sm" onClick={() => { setSelectedServerId(null); setEditingServer(null); }} className="mb-2">
+            &larr; Back to servers
+          </Button>
+          <h2 className="text-lg font-semibold">{selectedServer.name}</h2>
+          {selectedServer.description && <p className="text-sm text-muted-foreground">{selectedServer.description}</p>}
         </div>
 
-        {editingServer ? (
+        {editingServer && (
           <Card>
             <CardContent className="pt-4">
               <McpServerForm
@@ -132,12 +111,6 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
               />
             </CardContent>
           </Card>
-        ) : (
-          !readOnly && (
-            <Button size="sm" variant="outline" onClick={() => setEditingServer(selectedServer)}>
-              Edit Server
-            </Button>
-          )
         )}
 
         <div className="flex rounded-md border text-sm w-fit" role="tablist">
@@ -253,39 +226,42 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
               className="relative cursor-pointer transition-colors hover:bg-accent/50 py-3 gap-1"
               onClick={() => setSelectedServerId(server.id)}
             >
-              <CardHeader className="gap-1 pb-3">
+              <CardHeader className="gap-1 pb-2">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <CardTitle className="text-sm font-medium truncate" title={server.name}>
-                      {server.name}
-                    </CardTitle>
-                    <Badge variant={mcpStatusVariant(server.status)} className="text-[10px] px-1.5 py-0 shrink-0">
-                      {server.status}
-                    </Badge>
+                  <div className="text-sm font-medium truncate min-w-0" title={server.name}>
+                    {server.name}
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     {!readOnly && (
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); setConfirmingDeleteId(server.id); }}
-                        className="text-muted-foreground/50 hover:text-destructive transition-colors"
-                        title="Delete server"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setEditingServer(server); setSelectedServerId(server.id); }}
+                          className="text-muted-foreground/50 hover:text-foreground transition-colors"
+                          title="Edit server"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setConfirmingDeleteId(server.id); }}
+                          className="text-muted-foreground/50 hover:text-destructive transition-colors"
+                          title="Delete server"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-2 text-xs text-muted-foreground">
                 <div className="rounded border bg-input-bg p-3 space-y-0.5">
-                  <div className="truncate">Endpoint: {server.endpoint_url}</div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">{server.transport_type}</Badge>
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">{server.auth_type}</Badge>
-                  </div>
+                  <div className="truncate" title={server.endpoint_url}><span className="text-muted-foreground/70">Endpoint:</span> {server.endpoint_url}</div>
+                  <div><span className="text-muted-foreground/70">Transport:</span> {server.transport_type === "streamable_http" ? "Streamable HTTP" : "SSE"}</div>
+                  <div><span className="text-muted-foreground/70">Authentication:</span> {server.auth_type === "oauth2" ? "OAuth2" : "None"}</div>
                   {server.created_at && (
-                    <div>Created: {formatTimestamp(server.created_at, timezone)}</div>
+                    <div><span className="text-muted-foreground/70">Created:</span> {formatTimestamp(server.created_at, timezone)}</div>
                   )}
                 </div>
                 {confirmingDeleteId === server.id && (
@@ -323,11 +299,10 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
             <TableHeader>
               <TableRow className="bg-card hover:bg-card">
                 <SortableTableHead column="name" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[25%]">Name</SortableTableHead>
-                <SortableTableHead column="endpoint" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[30%]">Endpoint</SortableTableHead>
-                <SortableTableHead column="transport" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[12%]">Transport</SortableTableHead>
-                <SortableTableHead column="status" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[10%]">Status</SortableTableHead>
-                <SortableTableHead column="auth" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[10%]">Auth</SortableTableHead>
-                <SortableTableHead column="created" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[13%]">Created</SortableTableHead>
+                <SortableTableHead column="endpoint" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[32%]">Endpoint</SortableTableHead>
+                <SortableTableHead column="transport" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[15%]">Transport</SortableTableHead>
+                <SortableTableHead column="auth" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[12%]">Auth</SortableTableHead>
+                <SortableTableHead column="created" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[16%]">Created</SortableTableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -335,7 +310,6 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
                 name: (s) => s.name,
                 endpoint: (s) => s.endpoint_url,
                 transport: (s) => s.transport_type,
-                status: (s) => s.status,
                 auth: (s) => s.auth_type,
                 created: (s) => s.created_at ?? "",
               }).map((server) => (
@@ -346,15 +320,8 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
                 >
                   <TableCell className="font-medium text-sm">{server.name}</TableCell>
                   <TableCell className="text-xs text-muted-foreground truncate">{server.endpoint_url}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">{server.transport_type}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={mcpStatusVariant(server.status)} className="text-[10px] px-1.5 py-0">{server.status}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">{server.auth_type}</Badge>
-                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{server.transport_type === "streamable_http" ? "Streamable HTTP" : "SSE"}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{server.auth_type === "oauth2" ? "OAuth2" : "None"}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {formatTimestamp(server.created_at, timezone)}
                   </TableCell>

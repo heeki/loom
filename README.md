@@ -8,7 +8,7 @@ A platform for building, testing, and operating AI agents on Amazon Bedrock Agen
 - **Platform Catalog** — Browse agents, memory resources, MCP servers, and platform resources in a unified view
 - **Agent Management** — Deploy new agents or import existing AgentCore Runtime agents
 - **Memory Management** — Create and manage AgentCore Memory resources with configurable strategies (semantic, summary, user preference, episodic, custom)
-- **MCP Server Management** — Register and manage MCP servers with OAuth2 authentication, tool discovery, and per-persona access control (all_tools or selected_tools granularity)
+- **MCP Server Management** — Register and manage MCP servers with OAuth2 authentication, tool discovery, and per-persona access control (all_tools or selected_tools granularity). MCP servers are selected from the catalog and deployed as runtime integrations with OAuth2 credential provider support
 - **Security Administration** — Manage IAM roles, authorizer configs, credentials, and permission requests
 - **Resource Tagging** — Configurable tag policies (platform + custom) and named tag profiles applied to all deployed resources (agents, memory, IAM roles). Tag badges on cards with show/hide toggle for custom tags. Progressive disclosure filtering with persistent filter state across navigation
 - **Tagging** — Dedicated page for managing tag policies (platform read-only with lock icon, custom editable/deletable) and tag profiles (create, edit, delete named tag presets with drag-to-reorder)
@@ -25,7 +25,7 @@ A platform for building, testing, and operating AI agents on Amazon Bedrock Agen
 - OpenTelemetry observability with ADOT auto-instrumentation (traces for invocations, tool calls, model calls)
 - Timezone-aware timestamp display (local / UTC toggle)
 - 10 color themes: 5 light (Ayu, Catppuccin Latte, Everforest, Rosé Pine Dawn, Solarized) and 5 dark (Catppuccin Mocha, Dracula, Gruvbox, Nord, Tokyo Night)
-- Instant deploy feedback with two-phase creation status tracking (deploying, completing deployment, finalizing endpoint)
+- Instant deploy feedback with progressive deployment status tracking (creating credential provider, creating IAM role, building artifact, deploying runtime) and 2-second polling intervals
 - Async agent deletion — when deleting from AWS, agents show DELETING status with spinner and timer until fully removed
 - Credential suggestions on access denied errors — identifies the correct authorizer for the agent
 - Default alphabetical sorting (A-Z) for all card grids with A-Z/Z-A sort toggle controls
@@ -143,5 +143,5 @@ make -C frontend dev    # Start frontend dev server
 
 - **Backend:** FastAPI with SQLAlchemy (SQLite), boto3 for AWS interactions, SSE streaming via `StreamingResponse`
 - **Frontend:** React 18, TypeScript, Vite, shadcn/ui, Tailwind CSS v4
-- **Persona Navigation:** Sidebar with Platform Catalog, Agents, Memory, Security Admin, MCP Servers, Tagging, Settings, plus A2A Agents (coming soon)
+- **Persona Navigation:** Sidebar with Platform Catalog, Agents, Memory, Security Admin, MCP Servers, Tagging, Settings, plus A2A Agents (coming soon). MCP Servers fully active
 - **Session Liveness:** Computed locally using an idle timeout heuristic (`LOOM_SESSION_IDLE_TIMEOUT_SECONDS`). No AWS control plane APIs are called — the Bedrock AgentCore SDK does not expose session listing/querying APIs.

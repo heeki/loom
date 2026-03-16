@@ -22,6 +22,10 @@ export function deploymentStatusVariant(status: string | null): BadgeVariant {
     case "deployed":
     case "READY":
       return "default";
+    case "initializing":
+    case "creating_credentials":
+    case "creating_role":
+    case "building_artifact":
     case "deploying":
     case "ENDPOINT_CREATING":
       return "secondary";

@@ -207,7 +207,16 @@ def build_base_policy(region: str, account_id: str, agent_name: str) -> dict:
                     f"arn:aws:bedrock-agentcore:{region}:{account_id}:workload-identity-directory/default",
                     f"arn:aws:bedrock-agentcore:{region}:{account_id}:workload-identity-directory/default/workload-identity/{agent_name}-*",
                 ],
-            }
+            },
+            {
+                "Effect": "Allow",
+                "Action": [
+                    "bedrock-agentcore:GetResourceOauth2Token",
+                ],
+                "Resource": [
+                    f"arn:aws:bedrock-agentcore:{region}:{account_id}:token-vault/default/oauth2credentialprovider/*",
+                ],
+            },
         ],
     }
 

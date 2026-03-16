@@ -267,6 +267,51 @@ class TestMcpRouter(unittest.TestCase):
         response = self.client.get("/api/mcp/servers/999/access")
         self.assertEqual(response.status_code, 404)
 
+    # ----- TOOL INVOKE -----
+    @patch("app.routers.mcp.svc_invoke_tool")
+    def test_invoke_tool(self, mock_invoke):
+        mock_invoke.return_value = {
+            "success": True,
+            "request": {"name": "hello_world", "arguments": {"name": "Loom"}},
+            "result": {"content": [{"type": "text", "text": "Hello, Loom!"}]},
+        }
+        created = self._create_server()
+        sid = created["id"]
+        response = self.client.post(f"/api/mcp/servers/{sid}/tools/invoke", json={
+            "tool_name": "hello_world",
+            "arguments": {"name": "Loom"},
+        })
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertIn("content", data["result"])
+        mock_invoke.assert_called_once()
+
+    @patch("app.routers.mcp.svc_invoke_tool")
+    def test_invoke_tool_error(self, mock_invoke):
+        mock_invoke.return_value = {
+            "success": False,
+            "request": {"name": "bad_tool", "arguments": {}},
+            "error": "Tool not found",
+        }
+        created = self._create_server()
+        sid = created["id"]
+        response = self.client.post(f"/api/mcp/servers/{sid}/tools/invoke", json={
+            "tool_name": "bad_tool",
+            "arguments": {},
+        })
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertFalse(data["success"])
+        self.assertEqual(data["error"], "Tool not found")
+
+    def test_invoke_tool_server_not_found(self):
+        response = self.client.post("/api/mcp/servers/999/tools/invoke", json={
+            "tool_name": "hello_world",
+            "arguments": {},
+        })
+        self.assertEqual(response.status_code, 404)
+
     # ----- CASCADE DELETE -----
     @patch("app.routers.mcp.svc_fetch_tools")
     def test_delete_server_cascades_tools_and_access(self, mock_fetch):

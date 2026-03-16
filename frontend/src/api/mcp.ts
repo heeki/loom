@@ -6,6 +6,8 @@ import type {
   McpTool,
   McpServerAccess,
   McpAccessUpdateRequest,
+  ToolInvokeRequest,
+  ToolInvokeResult,
   TestConnectionResult,
 } from "./types";
 
@@ -50,6 +52,13 @@ export function getServerTools(serverId: number): Promise<McpTool[]> {
 export function refreshServerTools(serverId: number): Promise<McpTool[]> {
   return apiFetch<McpTool[]>(`/api/mcp/servers/${serverId}/tools/refresh`, {
     method: "POST",
+  });
+}
+
+export function invokeServerTool(serverId: number, request: ToolInvokeRequest): Promise<ToolInvokeResult> {
+  return apiFetch<ToolInvokeResult>(`/api/mcp/servers/${serverId}/tools/invoke`, {
+    method: "POST",
+    body: JSON.stringify(request),
   });
 }
 

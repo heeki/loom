@@ -18,18 +18,33 @@ interface AgentCardProps {
   deleteStartTime?: number;
 }
 
+const DEPLOY_IN_PROGRESS = new Set([
+  "initializing",
+  "creating_credentials",
+  "creating_role",
+  "building_artifact",
+  "deploying",
+]);
+
 function isTransitional(agent: AgentResponse): boolean {
   return (
     agent.status === "CREATING" ||
     agent.status === "DELETING" ||
-    agent.deployment_status === "deploying" ||
+    DEPLOY_IN_PROGRESS.has(agent.deployment_status ?? "") ||
     agent.endpoint_status === "CREATING"
   );
 }
 
 function phaseLabel(agent: AgentResponse): string | null {
   if (agent.status === "DELETING") return "Deleting";
-  if (agent.deployment_status === "deploying") return "Deploying";
+  switch (agent.deployment_status) {
+    case "initializing": return "Initializing";
+    case "creating_credentials": return "Creating credential provider";
+    case "creating_role": return "Creating IAM role";
+    case "building_artifact": return "Building artifact";
+    case "deploying": return "Deploying runtime";
+    default: break;
+  }
   if (agent.status === "CREATING") return "Completing deployment";
   if (agent.status === "READY" && agent.endpoint_status === "CREATING") return "Finalizing endpoint";
   return null;
@@ -137,7 +152,7 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
             <Loader2 className="h-3 w-3 animate-spin" />
             <span className="text-[10px] tabular-nums">({elapsedSeconds}s)</span>
             <span className="text-[10px]">{label ?? "Creating"}</span>
-            {agent.endpoint_status && agent.endpoint_status !== agent.status && (
+            {agent.status !== "DELETING" && agent.endpoint_status && agent.endpoint_status !== agent.status && (
               <Badge variant={statusVariant(agent.endpoint_status)} className="text-[10px] px-1.5 py-0">
                 Endpoint: {agent.endpoint_status}
               </Badge>

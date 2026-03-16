@@ -13,6 +13,8 @@ class AuthConfig:
     type: str
     well_known_endpoint: str = ""
     credentials_secret_arn: str = ""
+    credential_provider_name: str = ""
+    scopes: str = ""
 
 
 @dataclass
@@ -70,6 +72,8 @@ def _parse_auth(data: Optional[dict]) -> Optional[AuthConfig]:
         type=data.get("type", ""),
         well_known_endpoint=data.get("well_known_endpoint", ""),
         credentials_secret_arn=data.get("credentials_secret_arn", ""),
+        credential_provider_name=data.get("credential_provider_name", ""),
+        scopes=data.get("scopes", ""),
     )
 
 

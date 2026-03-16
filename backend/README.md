@@ -111,7 +111,7 @@ backend/
 
 ### `agents`
 
-Stores registered and deployed AgentCore Runtime agents. Uses an auto-incrementing integer PK for internal references; `arn` and `runtime_id` are stored as indexed columns for AWS lookups. Includes columns for: `source`, `deployment_status`, `execution_role_arn`, `endpoint_name`, `endpoint_arn`, `endpoint_status`, `protocol`, `network_mode`, `authorizer_config`, `deployed_at`, and `tags` (JSON dict of resolved tag key-value pairs).
+Stores registered and deployed AgentCore Runtime agents. Uses an auto-incrementing integer PK for internal references; `arn` and `runtime_id` are stored as indexed columns for AWS lookups. Includes columns for: `source`, `deployment_status`, `execution_role_arn`, `endpoint_name`, `endpoint_arn`, `endpoint_status`, `protocol`, `network_mode`, `authorizer_config`, `credential_providers`, `deployed_at`, and `tags` (JSON dict of resolved tag key-value pairs).
 
 ### `agent_config_entries`
 
@@ -174,6 +174,7 @@ Stores per-invocation timing measurements and status. Fields include `client_inv
 | `POST` | `/api/agents` | Register an agent by ARN or deploy a new agent |
 | `GET` | `/api/agents` | List all registered agents (includes `model_id` and `active_session_count`) |
 | `GET` | `/api/agents/{agent_id}` | Get agent metadata |
+| `GET` | `/api/agents/{agent_id}/status` | Poll AWS for runtime/endpoint status during deployment |
 | `DELETE` | `/api/agents/{agent_id}?cleanup_aws=true` | Remove agent; optionally initiate async AWS deletion (returns DELETING status) |
 | `DELETE` | `/api/agents/{agent_id}/purge` | Remove agent from local DB only (after AWS deletion confirmed) |
 | `POST` | `/api/agents/{agent_id}/refresh` | Re-fetch metadata from AWS |
@@ -299,9 +300,22 @@ Cold-start latency is computed automatically during the invoke flow:
 
 ## Agent Deployment
 
-Deploy creates a Strands Agent runtime on AgentCore. The build step cross-compiles an ARM64 artifact (pip install into a target directory, zips the result, and uploads to S3). Model and IAM role are required fields. The deployment supports configurable protocol (HTTP), network mode (PUBLIC), authorizer, and lifecycle settings. Cognito client secrets are stored in Secrets Manager and never persisted in the local database. Deletion optionally cleans up the AgentCore runtime and associated Secrets Manager entries. The deployment automatically sets `OTEL_SERVICE_NAME` to the agent name for AgentCore Observability integration.
+Deploy creates a Strands Agent runtime on AgentCore with background deployment and progressive status updates. The deployment flow includes:
 
-Tags are resolved from the tag policy system at deploy time. Deploy-time tags are auto-applied from their default values; build-time tags are resolved from the selected tag profile. Required tags that are missing cause deployment to fail with a 400 error. Resolved tags are applied to all created AWS resources (AgentCore runtimes, endpoints, IAM execution roles, memory resources) and stored locally on Agent and Memory records. For registered agents and imported memories, tags are fetched from AWS via `list_tags_for_resource`; missing required tags are filled with `"missing"`. Deletion with `cleanup_aws=true` initiates async AWS deletion (endpoint + runtime + Secrets Manager cleanup), marks the agent as DELETING, and returns the updated agent. The frontend polls the status endpoint until AWS confirms deletion (404), then calls the purge endpoint to remove the local record.
+1. **OAuth2 credential provider creation** — MCP server integrations with OAuth2 are provisioned as AgentCore credential providers
+2. **IAM role creation** — Execution role provisioning (if creating new role)
+3. **Artifact build** — Cross-compiles ARM64 artifact (pip install into target directory, zips, uploads to S3)
+4. **Runtime deployment** — Creates AgentCore runtime and endpoint
+
+The `deployment_status` field tracks progression through phases: `creating_credential_provider`, `creating_iam_role`, `building_artifact`, `deploying_runtime`, `completing_deployment`, `finalizing_endpoint`, `deployed`, `failed`, `deleting`.
+
+Smart status polling: during local build phases (credential provider, IAM role, artifact build), the frontend polls the local database only. Once the runtime deployment begins, the `/api/agents/{agent_id}/status` endpoint queries AWS for runtime and endpoint status.
+
+Model and IAM role are required fields. The deployment supports configurable protocol (HTTP), network mode (PUBLIC), authorizer, and lifecycle settings. Cognito client secrets are stored in Secrets Manager and never persisted in the local database. The deployment automatically sets `OTEL_SERVICE_NAME` to the agent name for AgentCore Observability integration.
+
+Tags are resolved from the tag policy system at deploy time. Deploy-time tags are auto-applied from their default values; build-time tags are resolved from the selected tag profile. Required tags that are missing cause deployment to fail with a 400 error. Resolved tags are applied to all created AWS resources (AgentCore runtimes, endpoints, IAM execution roles, memory resources) and stored locally on Agent and Memory records. For registered agents and imported memories, tags are fetched from AWS via `list_tags_for_resource`; missing required tags are filled with `"missing"`.
+
+Deletion with `cleanup_aws=true` initiates background async AWS deletion (endpoint + runtime + credential providers + Secrets Manager cleanup), marks the agent as DELETING, and returns the updated agent. The frontend polls the status endpoint until AWS confirms deletion (404), then calls the purge endpoint to remove the local record. Credential providers cascade delete when the agent is deleted.
 
 ## Authenticated Invocation
 

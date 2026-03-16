@@ -54,7 +54,7 @@ export interface AgentDeployRequest {
   authorizer_client_id: string | null;
   authorizer_client_secret: string | null;
   memory_enabled: boolean;
-  mcp_servers: unknown[];
+  mcp_servers: number[];
   a2a_agents: unknown[];
   tags?: Record<string, string>;
 }
@@ -483,6 +483,18 @@ export interface McpAccessUpdateRequest {
     access_level: "all_tools" | "selected_tools";
     allowed_tool_names?: string[];
   }>;
+}
+
+export interface ToolInvokeRequest {
+  tool_name: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface ToolInvokeResult {
+  success: boolean;
+  request: Record<string, unknown>;
+  result: Record<string, unknown> | null;
+  error: string | null;
 }
 
 export interface TestConnectionResult {

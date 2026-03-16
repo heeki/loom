@@ -25,6 +25,7 @@ role.deploy:
 			pBedrockModelArns=$(P_BEDROCK_MODEL_ARNS) \
 			pAgentCoreRegions=$(P_AGENTCORE_REGIONS) \
 			pLogsRegion=$(P_LOGS_REGION) \
+			pMemoryArn=${P_MEMORY_ARN} \
 			pTagApplication=$(P_TAG_APPLICATION) \
 			pTagGroup=$(P_TAG_GROUP) \
 			pTagOwner=$(P_TAG_OWNER) \
