@@ -43,7 +43,8 @@ frontend/
 │   │   └── useDeployment.ts    # Agent config, credential providers, integrations hooks
 │   ├── components/
 │   │   ├── ui/                 # shadcn primitives + searchable-select.tsx + multi-select.tsx + add-filter-dropdown.tsx
-│   │   ├── SortableCardGrid.tsx — Drag-to-reorder card grid using @dnd-kit, default alphabetical sort, A-Z/Z-A toggle, localStorage persistence
+│   │   ├── SortableCardGrid.tsx — Drag-to-reorder card grid using @dnd-kit, default alphabetical sort, SortButton, localStorage persistence
+│   │   ├── SortableTableHead.tsx — Clickable sortable table column headers with arrow indicators
 │   │   ├── AgentCard.tsx       # Agent summary card with refresh + Trash2 icon deletion
 │   │   ├── AgentRegistrationForm.tsx  # Tabbed form: ARN registration + agent deployment
 │   │   ├── JsonConfigSection.tsx     # Shared collapsible JSON import/export section
@@ -409,9 +410,9 @@ ThemeContext manages theme state with localStorage persistence. Latte uses `:roo
 
 **Default alphabetical sorting:** All cards are sorted alphabetically (case-insensitive, A-Z) on initial load when no persisted custom order exists. The `getName` prop extracts the display name from each item for sorting. New items not in a persisted order are sorted alphabetically among themselves and appended after persisted items.
 
-**Sort toggle control:** Each grid renders an A-Z/Z-A toggle button (ArrowDownAZ/ArrowUpAZ icons from lucide-react) above the grid. Clicking the toggle switches between ascending and descending alphabetical order, overriding any persisted drag-and-drop order. The selected sort preference is persisted to localStorage per grid (keyed as `loom-sort-${storageKey}`). After applying a sort option, drag-to-reorder still works — once the user drags a card, the new order becomes the custom order, the sort direction is cleared, and the custom order is persisted.
+**Sort toggle control:** A standalone `SortButton` component (ArrowDownAZ/ArrowUpAZ icons) is placed inline with each section header, next to "Add" buttons. Sort direction is controlled by the parent component and persisted to localStorage per grid (keyed as `loom-sort-${storageKey}`). `SortableCardGrid` accepts `sortDirection` as a controlled prop. After applying a sort option, drag-to-reorder still works — once the user drags a card, the new order becomes the custom order, the sort direction is cleared via the `onSortDirectionChange(null)` callback, and the custom order is persisted. Exported helpers: `loadSortDirection()`, `saveSortDirection()`, `toggleSortDirection()`.
 
-**Table view sync:** Pages with card/table view toggles (CatalogPage, AgentListPage, MemoryManagementPanel) sync the sort direction from the card grid to the table view via the `onSortDirectionChange` callback, ensuring consistent sort order across both views.
+**Table view column sorting:** Pages with table views (CatalogPage, AgentListPage, MemoryManagementPanel) use `SortableTableHead` for clickable column headers. Clicking a column header sorts by that column (ascending); clicking again reverses to descending. An arrow indicator (ArrowUp/ArrowDown) shows the active sort column and direction. The `sortRows()` helper provides generic multi-column sorting with support for both string and numeric values.
 
 **Applied to all card grids:** CatalogPage (agents, memories), AgentListPage (agents), MemoryManagementPanel (memories), TaggingPage (policies, profiles), RoleManagementPanel (roles), AuthorizerManagementPanel (authorizers), PermissionRequestsPanel (permissions).
 

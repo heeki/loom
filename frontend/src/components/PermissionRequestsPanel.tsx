@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { SortableCardGrid } from "@/components/SortableCardGrid";
+import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "@/components/SortableCardGrid";
 import { usePermissionRequests } from "@/hooks/useSecurity";
 import { CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
@@ -20,6 +20,7 @@ export function PermissionRequestsPanel({ readOnly }: { readOnly?: boolean }) {
   const [denyingId, setDenyingId] = useState<number | null>(null);
   const [reviewerNotes, setReviewerNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [sortDir, setSortDir] = useState<SortDirection>(() => loadSortDirection("security-permissions"));
 
   const handleApprove = async (id: number) => {
     setSubmitting(true);
@@ -59,7 +60,9 @@ export function PermissionRequestsPanel({ readOnly }: { readOnly?: boolean }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium">Permission Requests</h3>
-        <Select value={statusFilter ?? "all"} onValueChange={(v) => setStatusFilter(v === "all" ? undefined : v)}>
+        <div className="flex items-center gap-2">
+          <SortButton direction={sortDir} onClick={() => setSortDir(toggleSortDirection("security-permissions", sortDir))} />
+          <Select value={statusFilter ?? "all"} onValueChange={(v) => setStatusFilter(v === "all" ? undefined : v)}>
           <SelectTrigger className="w-36 text-sm">
             <SelectValue placeholder="Filter by status" />
           </SelectTrigger>
@@ -70,6 +73,7 @@ export function PermissionRequestsPanel({ readOnly }: { readOnly?: boolean }) {
             <SelectItem value="denied">Denied</SelectItem>
           </SelectContent>
         </Select>
+        </div>
       </div>
 
       {requests.length === 0 ? (
@@ -80,6 +84,8 @@ export function PermissionRequestsPanel({ readOnly }: { readOnly?: boolean }) {
           getId={(r) => r.id.toString()}
           getName={(r) => r.role_name ?? `Role #${r.managed_role_id}`}
           storageKey="security-permissions"
+          sortDirection={sortDir}
+          onSortDirectionChange={(d) => { if (d) { setSortDir(d); saveSortDirection("security-permissions", d); } }}
           className="grid gap-2 md:grid-cols-2 lg:grid-cols-3"
           renderItem={(req) => (
             <div className="rounded-lg border p-3 space-y-2">

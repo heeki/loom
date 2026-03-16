@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { AgentCard } from "@/components/AgentCard";
 import { MemoryCard } from "@/components/MemoryCard";
-import { SortableCardGrid, type SortDirection } from "@/components/SortableCardGrid";
+import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "@/components/SortableCardGrid";
+import { SortableTableHead, sortRows } from "@/components/SortableTableHead";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -11,7 +12,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
@@ -85,8 +85,29 @@ export function CatalogPage({
     });
   };
 
-  const [agentSortDir, setAgentSortDir] = useState<SortDirection>("asc");
-  const [memorySortDir, setMemorySortDir] = useState<SortDirection>("asc");
+  const [agentSortDir, setAgentSortDir] = useState<SortDirection>(() => loadSortDirection("catalog-agents"));
+  const [memorySortDir, setMemorySortDir] = useState<SortDirection>(() => loadSortDirection("catalog-memories"));
+  const [agentTableCol, setAgentTableCol] = useState<string | null>("name");
+  const [agentTableDir, setAgentTableDir] = useState<SortDirection>("asc");
+  const [memoryTableCol, setMemoryTableCol] = useState<string | null>("name");
+  const [memoryTableDir, setMemoryTableDir] = useState<SortDirection>("asc");
+
+  const handleAgentTableSort = (col: string) => {
+    if (agentTableCol === col) {
+      setAgentTableDir(agentTableDir === "asc" ? "desc" : "asc");
+    } else {
+      setAgentTableCol(col);
+      setAgentTableDir("asc");
+    }
+  };
+  const handleMemoryTableSort = (col: string) => {
+    if (memoryTableCol === col) {
+      setMemoryTableDir(memoryTableDir === "asc" ? "desc" : "asc");
+    } else {
+      setMemoryTableCol(col);
+      setMemoryTableDir("asc");
+    }
+  };
 
   const filteredAgents = agents.filter(agent => matchesFilters(agent.tags));
 
@@ -338,7 +359,10 @@ export function CatalogPage({
 
       {/* Agents Section */}
       <section className="space-y-3">
-        <h3 className="text-sm font-medium">Agents</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium">Agents</h3>
+          <SortButton direction={agentSortDir} onClick={() => setAgentSortDir(toggleSortDirection("catalog-agents", agentSortDir))} />
+        </div>
 
         {loading ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -360,7 +384,8 @@ export function CatalogPage({
                 getId={(a) => String(a.id)}
                 getName={(a) => a.name ?? a.runtime_id ?? ""}
                 storageKey="catalog-agents"
-                onSortDirectionChange={setAgentSortDir}
+                sortDirection={agentSortDir}
+                onSortDirectionChange={(d) => { if (d) { setAgentSortDir(d); saveSortDirection("catalog-agents", d); } }}
                 renderItem={(agent) => (
                   <AgentCard
                     agent={agent}
@@ -378,20 +403,22 @@ export function CatalogPage({
                 <Table className="table-fixed">
                   <TableHeader>
                     <TableRow className="bg-card hover:bg-card">
-                      <TableHead className="w-[30%]">Name</TableHead>
-                      <TableHead className="w-[12%]">Status</TableHead>
-                      <TableHead className="w-[14%]">Protocol</TableHead>
-                      <TableHead className="w-[14%]">Network</TableHead>
-                      <TableHead className="w-[14%]">Region</TableHead>
-                      <TableHead className="w-[16%]">Registered</TableHead>
+                      <SortableTableHead column="name" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[30%]">Name</SortableTableHead>
+                      <SortableTableHead column="status" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Status</SortableTableHead>
+                      <SortableTableHead column="protocol" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[14%]">Protocol</SortableTableHead>
+                      <SortableTableHead column="network" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[14%]">Network</SortableTableHead>
+                      <SortableTableHead column="region" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[14%]">Region</SortableTableHead>
+                      <SortableTableHead column="registered" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[16%]">Registered</SortableTableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {[...filteredAgents].sort((a, b) => {
-                      const nameA = (a.name ?? a.runtime_id ?? "").toLowerCase();
-                      const nameB = (b.name ?? b.runtime_id ?? "").toLowerCase();
-                      const cmp = nameA.localeCompare(nameB);
-                      return agentSortDir === "desc" ? -cmp : cmp;
+                    {sortRows(filteredAgents, agentTableCol, agentTableDir, {
+                      name: (a) => a.name ?? a.runtime_id ?? "",
+                      status: (a) => a.status ?? "",
+                      protocol: (a) => a.protocol ?? "",
+                      network: (a) => a.network_mode ?? "",
+                      region: (a) => a.region ?? "",
+                      registered: (a) => a.registered_at ?? "",
                     }).map((agent) => (
                       <TableRow
                         key={agent.id}
@@ -428,7 +455,10 @@ export function CatalogPage({
 
       {/* Memory Resources Section */}
       <section className="space-y-3">
-        <h3 className="text-sm font-medium">Memory Resources</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium">Memory Resources</h3>
+          <SortButton direction={memorySortDir} onClick={() => setMemorySortDir(toggleSortDirection("catalog-memories", memorySortDir))} />
+        </div>
 
         {memoriesLoading ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -448,7 +478,8 @@ export function CatalogPage({
             getId={(m) => String(m.id)}
             getName={(m) => m.name}
             storageKey="catalog-memories"
-            onSortDirectionChange={setMemorySortDir}
+            sortDirection={memorySortDir}
+            onSortDirectionChange={(d) => { if (d) { setMemorySortDir(d); saveSortDirection("catalog-memories", d); } }}
             renderItem={(mem) => (
               <MemoryCard
                 memory={mem}
@@ -468,18 +499,22 @@ export function CatalogPage({
             <Table className="table-fixed">
               <TableHeader>
                 <TableRow className="bg-card hover:bg-card">
-                  <TableHead className="w-[30%]">Name</TableHead>
-                  <TableHead className="w-[12%]">Status</TableHead>
-                  <TableHead className="w-[14%]">Strategies</TableHead>
-                  <TableHead className="w-[14%]">Event Expiry</TableHead>
-                  <TableHead className="w-[14%]">Region</TableHead>
-                  <TableHead className="w-[16%]">Registered</TableHead>
+                  <SortableTableHead column="name" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[30%]">Name</SortableTableHead>
+                  <SortableTableHead column="status" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[12%]">Status</SortableTableHead>
+                  <SortableTableHead column="strategies" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[14%]">Strategies</SortableTableHead>
+                  <SortableTableHead column="expiry" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[14%]">Event Expiry</SortableTableHead>
+                  <SortableTableHead column="region" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[14%]">Region</SortableTableHead>
+                  <SortableTableHead column="registered" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[16%]">Registered</SortableTableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {[...filteredMemories].sort((a, b) => {
-                  const cmp = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
-                  return memorySortDir === "desc" ? -cmp : cmp;
+                {sortRows(filteredMemories, memoryTableCol, memoryTableDir, {
+                  name: (m) => m.name,
+                  status: (m) => m.status,
+                  strategies: (m) => Array.isArray(m.strategies_config) ? m.strategies_config.length : Array.isArray(m.strategies_response) ? m.strategies_response.length : 0,
+                  expiry: (m) => m.event_expiry_duration,
+                  region: (m) => m.region ?? "",
+                  registered: (m) => m.created_at ?? "",
                 }).map((mem) => (
                   <TableRow key={mem.id} className="bg-input-bg hover:bg-input-bg/80">
                     <TableCell className="font-medium text-sm">{mem.name}</TableCell>

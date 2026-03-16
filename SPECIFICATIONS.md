@@ -338,11 +338,12 @@ Model selectors in the UI are searchable by both display name and model ID, with
 
 ### Phase 12 — Card Sorting and Sort Controls *(Complete)*
 - Default alphabetical sorting (case-insensitive, A-Z) for all card grids on initial load when no persisted custom order exists.
-- Sort toggle control (A-Z / Z-A) on each card grid section, using ArrowDownAZ/ArrowUpAZ icons. Selecting a sort option re-sorts all cards alphabetically, overriding any persisted drag-and-drop order. Sort preference persisted to localStorage per grid (`loom-sort-${storageKey}`).
+- Standalone `SortButton` component (A-Z / Z-A toggle) placed inline with section headers, next to "Add" buttons. Sort preference persisted to localStorage per grid (`loom-sort-${storageKey}`).
 - After drag-to-reorder, custom order takes precedence and sort direction is cleared.
 - New items not in persisted order are sorted alphabetically among themselves and appended after persisted items.
-- `SortableCardGrid` updated with required `getName` prop and optional `onSortDirectionChange` callback. Exported `SortDirection` type.
-- Table view sorting: pages with card/table toggle (CatalogPage, AgentListPage, MemoryManagementPanel) sync sort direction from the card grid to the table view.
+- `SortableCardGrid` uses controlled `sortDirection` prop with `onSortDirectionChange` callback. Exported helpers: `loadSortDirection()`, `saveSortDirection()`, `toggleSortDirection()`, `SortButton`, `SortDirection`.
+- `SortableTableHead` component for clickable sortable table column headers with arrow indicators (ArrowUp/ArrowDown). `sortRows()` helper for generic multi-column sorting (string and numeric).
+- Table view column sorting: pages with table views (CatalogPage, AgentListPage, MemoryManagementPanel) support click-to-sort on any column header.
 - Security admin panels (RoleManagementPanel, AuthorizerManagementPanel, PermissionRequestsPanel) converted from stacked `<div className="space-y-2">` layouts to `SortableCardGrid` with responsive grid (`md:grid-cols-2 lg:grid-cols-3`), drag-to-reorder, and alphabetical sort controls.
 - All existing card grid consumers updated: CatalogPage (agents, memories), AgentListPage (agents), MemoryManagementPanel (memories), TaggingPage (policies, profiles).
 

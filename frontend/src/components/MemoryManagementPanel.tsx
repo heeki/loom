@@ -8,7 +8,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
@@ -31,7 +30,8 @@ import { listTagPolicies, listTagProfiles } from "@/api/settings";
 import { ApiError } from "@/api/client";
 import type { MemoryResponse, MemoryStrategyRequest, TagPolicy, TagProfile } from "@/api/types";
 import { MemoryCard } from "./MemoryCard";
-import { SortableCardGrid, type SortDirection } from "./SortableCardGrid";
+import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "./SortableCardGrid";
+import { SortableTableHead, sortRows } from "./SortableTableHead";
 import { ResourceTagFields } from "./ResourceTagFields";
 import { JsonConfigSection } from "./JsonConfigSection";
 
@@ -357,7 +357,18 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
   const requiredKeySet = new Set(requiredPolicies.map(tp => tp.key));
   const effectiveShowOnCardKeys = showCustomTags ? showOnCardKeys : showOnCardKeys.filter(k => requiredKeySet.has(k));
 
-  const [memorySortDir, setMemorySortDir] = useState<SortDirection>("asc");
+  const [memorySortDir, setMemorySortDir] = useState<SortDirection>(() => loadSortDirection("memory-resources"));
+  const [memoryTableCol, setMemoryTableCol] = useState<string | null>("name");
+  const [memoryTableDir, setMemoryTableDir] = useState<SortDirection>("asc");
+
+  const handleMemoryTableSort = (col: string) => {
+    if (memoryTableCol === col) {
+      setMemoryTableDir(memoryTableDir === "asc" ? "desc" : "asc");
+    } else {
+      setMemoryTableCol(col);
+      setMemoryTableDir("asc");
+    }
+  };
 
   const filteredMemories = memories.filter(mem => {
     return Object.entries(tagFilters).every(([key, values]) => {
@@ -393,19 +404,21 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
             {"A memory resource is attached to an agent.\nBy default, it includes only short-term memory. If long-term memory is desired, add the appropriate strategy."}
           </p>
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          className="shrink-0 ml-4"
-          onClick={() => {
-            setShowAddForm(!showAddForm);
-            resetForm();
-          }}
-          disabled={readOnly}
-        >
-          <Plus className="h-3.5 w-3.5 mr-1" />
-          Add Memory
-        </Button>
+        <div className="flex items-center gap-2 shrink-0 ml-4">
+          <SortButton direction={memorySortDir} onClick={() => setMemorySortDir(toggleSortDirection("memory-resources", memorySortDir))} />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setShowAddForm(!showAddForm);
+              resetForm();
+            }}
+            disabled={readOnly}
+          >
+            <Plus className="h-3.5 w-3.5 mr-1" />
+            Add Memory
+          </Button>
+        </div>
       </div>
 
       {showAddForm && (
@@ -796,7 +809,8 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
               getId={(m) => String(m.id)}
               getName={(m) => m.name}
               storageKey="memory-resources"
-              onSortDirectionChange={setMemorySortDir}
+              sortDirection={memorySortDir}
+              onSortDirectionChange={(d) => { if (d) { setMemorySortDir(d); saveSortDirection("memory-resources", d); } }}
               renderItem={(mem) => (
                 <MemoryCard
                   memory={mem}
@@ -816,18 +830,22 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
               <Table className="table-fixed">
                 <TableHeader>
                   <TableRow className="bg-card hover:bg-card">
-                    <TableHead className="w-[30%]">Name</TableHead>
-                    <TableHead className="w-[12%]">Status</TableHead>
-                    <TableHead className="w-[14%]">Strategies</TableHead>
-                    <TableHead className="w-[14%]">Event Expiry</TableHead>
-                    <TableHead className="w-[14%]">Region</TableHead>
-                    <TableHead className="w-[16%]">Registered</TableHead>
+                    <SortableTableHead column="name" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[30%]">Name</SortableTableHead>
+                    <SortableTableHead column="status" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[12%]">Status</SortableTableHead>
+                    <SortableTableHead column="strategies" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[14%]">Strategies</SortableTableHead>
+                    <SortableTableHead column="expiry" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[14%]">Event Expiry</SortableTableHead>
+                    <SortableTableHead column="region" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[14%]">Region</SortableTableHead>
+                    <SortableTableHead column="registered" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[16%]">Registered</SortableTableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {[...filteredMemories].sort((a, b) => {
-                    const cmp = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
-                    return memorySortDir === "desc" ? -cmp : cmp;
+                  {sortRows(filteredMemories, memoryTableCol, memoryTableDir, {
+                    name: (m) => m.name,
+                    status: (m) => m.status,
+                    strategies: (m) => Array.isArray(m.strategies_config) ? m.strategies_config.length : Array.isArray(m.strategies_response) ? m.strategies_response.length : 0,
+                    expiry: (m) => m.event_expiry_duration,
+                    region: (m) => m.region ?? "",
+                    registered: (m) => m.created_at ?? "",
                   }).map((mem) => (
                     <TableRow key={mem.id} className="bg-input-bg hover:bg-input-bg/80">
                       <TableCell className="font-medium text-sm">{mem.name}</TableCell>

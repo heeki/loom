@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PolicyViewer } from "@/components/PolicyViewer";
-import { SortableCardGrid } from "@/components/SortableCardGrid";
+import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "@/components/SortableCardGrid";
 import { useManagedRoles } from "@/hooks/useSecurity";
 import { ChevronDown, ChevronRight, Trash2, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -17,6 +17,7 @@ export function RoleManagementPanel({ readOnly }: { readOnly?: boolean }) {
   const [expandedRoleId, setExpandedRoleId] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [sortDir, setSortDir] = useState<SortDirection>(() => loadSortDirection("security-roles"));
 
   const handleCreate = async () => {
     if (!importArn.trim()) return;
@@ -65,10 +66,13 @@ export function RoleManagementPanel({ readOnly }: { readOnly?: boolean }) {
             Role management is the responsibility of the security team.
           </p>
         </div>
-        <Button size="sm" variant="outline" className="shrink-0 ml-4" onClick={() => setShowAddForm(!showAddForm)} disabled={readOnly}>
-          <Plus className="h-3.5 w-3.5 mr-1" />
-          Add Role
-        </Button>
+        <div className="flex items-center gap-2 shrink-0 ml-4">
+          <SortButton direction={sortDir} onClick={() => setSortDir(toggleSortDirection("security-roles", sortDir))} />
+          <Button size="sm" variant="outline" onClick={() => setShowAddForm(!showAddForm)} disabled={readOnly}>
+            <Plus className="h-3.5 w-3.5 mr-1" />
+            Add Role
+          </Button>
+        </div>
       </div>
 
       {showAddForm && (
@@ -97,6 +101,8 @@ export function RoleManagementPanel({ readOnly }: { readOnly?: boolean }) {
           getId={(r) => r.id.toString()}
           getName={(r) => r.role_name}
           storageKey="security-roles"
+          sortDirection={sortDir}
+          onSortDirectionChange={(d) => { if (d) { setSortDir(d); saveSortDirection("security-roles", d); } }}
           className="grid gap-2 md:grid-cols-2 lg:grid-cols-3"
           renderItem={(role) => (
             <Card className="relative py-3 gap-1">
