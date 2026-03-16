@@ -31,7 +31,7 @@ import { listTagPolicies, listTagProfiles } from "@/api/settings";
 import { ApiError } from "@/api/client";
 import type { MemoryResponse, MemoryStrategyRequest, TagPolicy, TagProfile } from "@/api/types";
 import { MemoryCard } from "./MemoryCard";
-import { SortableCardGrid } from "./SortableCardGrid";
+import { SortableCardGrid, type SortDirection } from "./SortableCardGrid";
 import { ResourceTagFields } from "./ResourceTagFields";
 import { JsonConfigSection } from "./JsonConfigSection";
 
@@ -356,6 +356,8 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
   const [showCustomTags, setShowCustomTags] = useState(() => localStorage.getItem("loom:showCustomTags") !== "false");
   const requiredKeySet = new Set(requiredPolicies.map(tp => tp.key));
   const effectiveShowOnCardKeys = showCustomTags ? showOnCardKeys : showOnCardKeys.filter(k => requiredKeySet.has(k));
+
+  const [memorySortDir, setMemorySortDir] = useState<SortDirection>("asc");
 
   const filteredMemories = memories.filter(mem => {
     return Object.entries(tagFilters).every(([key, values]) => {
@@ -792,7 +794,9 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
             <SortableCardGrid
               items={filteredMemories}
               getId={(m) => String(m.id)}
+              getName={(m) => m.name}
               storageKey="memory-resources"
+              onSortDirectionChange={setMemorySortDir}
               renderItem={(mem) => (
                 <MemoryCard
                   memory={mem}
@@ -821,7 +825,10 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredMemories.map((mem) => (
+                  {[...filteredMemories].sort((a, b) => {
+                    const cmp = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+                    return memorySortDir === "desc" ? -cmp : cmp;
+                  }).map((mem) => (
                     <TableRow key={mem.id} className="bg-input-bg hover:bg-input-bg/80">
                       <TableCell className="font-medium text-sm">{mem.name}</TableCell>
                       <TableCell>

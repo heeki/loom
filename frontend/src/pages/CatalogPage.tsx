@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { AgentCard } from "@/components/AgentCard";
 import { MemoryCard } from "@/components/MemoryCard";
-import { SortableCardGrid } from "@/components/SortableCardGrid";
+import { SortableCardGrid, type SortDirection } from "@/components/SortableCardGrid";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -84,6 +84,9 @@ export function CatalogPage({
       return values.includes(tags?.[key] ?? "");
     });
   };
+
+  const [agentSortDir, setAgentSortDir] = useState<SortDirection>("asc");
+  const [memorySortDir, setMemorySortDir] = useState<SortDirection>("asc");
 
   const filteredAgents = agents.filter(agent => matchesFilters(agent.tags));
 
@@ -355,7 +358,9 @@ export function CatalogPage({
               <SortableCardGrid
                 items={filteredAgents}
                 getId={(a) => String(a.id)}
+                getName={(a) => a.name ?? a.runtime_id ?? ""}
                 storageKey="catalog-agents"
+                onSortDirectionChange={setAgentSortDir}
                 renderItem={(agent) => (
                   <AgentCard
                     agent={agent}
@@ -382,7 +387,12 @@ export function CatalogPage({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredAgents.map((agent) => (
+                    {[...filteredAgents].sort((a, b) => {
+                      const nameA = (a.name ?? a.runtime_id ?? "").toLowerCase();
+                      const nameB = (b.name ?? b.runtime_id ?? "").toLowerCase();
+                      const cmp = nameA.localeCompare(nameB);
+                      return agentSortDir === "desc" ? -cmp : cmp;
+                    }).map((agent) => (
                       <TableRow
                         key={agent.id}
                         className="bg-input-bg hover:bg-input-bg/80 cursor-pointer"
@@ -436,7 +446,9 @@ export function CatalogPage({
           <SortableCardGrid
             items={filteredMemories}
             getId={(m) => String(m.id)}
+            getName={(m) => m.name}
             storageKey="catalog-memories"
+            onSortDirectionChange={setMemorySortDir}
             renderItem={(mem) => (
               <MemoryCard
                 memory={mem}
@@ -465,7 +477,10 @@ export function CatalogPage({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredMemories.map((mem) => (
+                {[...filteredMemories].sort((a, b) => {
+                  const cmp = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+                  return memorySortDir === "desc" ? -cmp : cmp;
+                }).map((mem) => (
                   <TableRow key={mem.id} className="bg-input-bg hover:bg-input-bg/80">
                     <TableCell className="font-medium text-sm">{mem.name}</TableCell>
                     <TableCell>

@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SortableCardGrid } from "@/components/SortableCardGrid";
 import { useAuthorizerConfigs } from "@/hooks/useSecurity";
 import { listCognitoPools, listAuthorizerCredentials, createAuthorizerCredential, deleteAuthorizerCredential } from "@/api/security";
 import { Badge } from "@/components/ui/badge";
@@ -363,9 +364,14 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
       {configs.length === 0 ? (
         <p className="text-sm text-muted-foreground py-8">No authorizer configs yet. Add one above.</p>
       ) : (
-        <div className="space-y-2">
-          {configs.map((config) => (
-            <Card key={config.id} className="relative py-3 gap-1">
+        <SortableCardGrid
+          items={configs}
+          getId={(c) => c.id.toString()}
+          getName={(c) => c.name}
+          storageKey="security-authorizers"
+          className="grid gap-2 md:grid-cols-2 lg:grid-cols-3"
+          renderItem={(config) => (
+            <Card className="relative py-3 gap-1">
               <CardHeader className="gap-1 pb-2">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
@@ -585,8 +591,8 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
                 )}
               </CardContent>
             </Card>
-          ))}
-        </div>
+          )}
+        />
       )}
     </div>
   );

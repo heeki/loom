@@ -16,7 +16,7 @@ import { MultiSelect } from "@/components/ui/multi-select";
 import { AddFilterDropdown } from "@/components/ui/add-filter-dropdown";
 import { AgentRegistrationForm } from "@/components/AgentRegistrationForm";
 import { AgentCard } from "@/components/AgentCard";
-import { SortableCardGrid } from "@/components/SortableCardGrid";
+import { SortableCardGrid, type SortDirection } from "@/components/SortableCardGrid";
 import { toast } from "sonner";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
@@ -106,6 +106,8 @@ export function AgentListPage({
   const [showCustomTags, setShowCustomTags] = useState(() => localStorage.getItem("loom:showCustomTags") !== "false");
   const requiredKeySet = new Set(requiredPolicies.map(tp => tp.key));
   const effectiveShowOnCardKeys = showCustomTags ? showOnCardKeys : showOnCardKeys.filter(k => requiredKeySet.has(k));
+
+  const [agentSortDir, setAgentSortDir] = useState<SortDirection>("asc");
 
   const filteredAgents = agents.filter(agent => {
     return Object.entries(tagFilters).every(([key, values]) => {
@@ -346,7 +348,9 @@ export function AgentListPage({
               <SortableCardGrid
                 items={filteredAgents}
                 getId={(a) => String(a.id)}
+                getName={(a) => a.name ?? a.runtime_id ?? ""}
                 storageKey="builder-agents"
+                onSortDirectionChange={setAgentSortDir}
                 renderItem={(agent) => (
                   <AgentCard
                     agent={agent}
@@ -373,7 +377,12 @@ export function AgentListPage({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredAgents.map((agent) => (
+                    {[...filteredAgents].sort((a, b) => {
+                      const nameA = (a.name ?? a.runtime_id ?? "").toLowerCase();
+                      const nameB = (b.name ?? b.runtime_id ?? "").toLowerCase();
+                      const cmp = nameA.localeCompare(nameB);
+                      return agentSortDir === "desc" ? -cmp : cmp;
+                    }).map((agent) => (
                       <TableRow
                         key={agent.id}
                         className="bg-input-bg hover:bg-input-bg/80 cursor-pointer"

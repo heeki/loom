@@ -354,6 +354,7 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
           <SortableCardGrid
             items={tagPolicies}
             getId={(p) => p.id.toString()}
+            getName={(p) => p.key}
             storageKey="tag-policies"
             className="grid gap-2 md:grid-cols-2 lg:grid-cols-3"
             renderItem={(policy) =>
@@ -581,6 +582,7 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
           <SortableCardGrid
             items={profiles}
             getId={(p) => p.id.toString()}
+            getName={(p) => p.name}
             storageKey="tag-profiles"
             className="grid gap-2 md:grid-cols-2 lg:grid-cols-3"
             renderItem={(profile) => (

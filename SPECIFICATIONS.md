@@ -336,7 +336,17 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Consistent visual behavior across both forms: same collapse/expand toggle, textarea styling, and button layout.
 - Agent async deletion polling: agent DELETE endpoint returns `AgentResponse` with DELETING status (instead of 204) when `cleanup_aws=true` and agent has a runtime. Frontend `useAgents` hook polls DELETING agents at 5-second intervals; on 404, calls the new purge endpoint (`DELETE /api/agents/{id}/purge`) to clean up locally. Agent cards show spinner and elapsed timer during deletion, matching the memory deletion pattern. New `deleteStartTimes` state tracks deletion initiation timestamps for accurate timer display.
 
-### Phase 12 — Advanced Operations
+### Phase 12 — Card Sorting and Sort Controls *(Complete)*
+- Default alphabetical sorting (case-insensitive, A-Z) for all card grids on initial load when no persisted custom order exists.
+- Sort toggle control (A-Z / Z-A) on each card grid section, using ArrowDownAZ/ArrowUpAZ icons. Selecting a sort option re-sorts all cards alphabetically, overriding any persisted drag-and-drop order. Sort preference persisted to localStorage per grid (`loom-sort-${storageKey}`).
+- After drag-to-reorder, custom order takes precedence and sort direction is cleared.
+- New items not in persisted order are sorted alphabetically among themselves and appended after persisted items.
+- `SortableCardGrid` updated with required `getName` prop and optional `onSortDirectionChange` callback. Exported `SortDirection` type.
+- Table view sorting: pages with card/table toggle (CatalogPage, AgentListPage, MemoryManagementPanel) sync sort direction from the card grid to the table view.
+- Security admin panels (RoleManagementPanel, AuthorizerManagementPanel, PermissionRequestsPanel) converted from stacked `<div className="space-y-2">` layouts to `SortableCardGrid` with responsive grid (`md:grid-cols-2 lg:grid-cols-3`), drag-to-reorder, and alphabetical sort controls.
+- All existing card grid consumers updated: CatalogPage (agents, memories), AgentListPage (agents), MemoryManagementPanel (memories), TaggingPage (policies, profiles).
+
+### Phase 13 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

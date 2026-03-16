@@ -93,7 +93,7 @@ src/
 ├── hooks/        # Custom React hooks for data fetching
 ├── components/   # Application components + shadcn ui/ primitives
 │   ├── AgentCard.tsx              # Agent card with refresh + eraser icon deletion + overlay confirmation
-│   ├── SortableCardGrid.tsx       # Drag-to-reorder card grid with @dnd-kit
+│   ├── SortableCardGrid.tsx       # Drag-to-reorder card grid with @dnd-kit, alphabetical sort, A-Z/Z-A toggle
 │   ├── AgentRegistrationForm.tsx  # Import (ARN + model) and Deploy (full form) tabs
 │   ├── JsonConfigSection.tsx     # Shared collapsible JSON import/export section
 │   ├── AuthorizerManagementPanel.tsx # Authorizer config and credential management

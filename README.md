@@ -27,6 +27,7 @@ A platform for building, testing, and operating AI agents on Amazon Bedrock Agen
 - Instant deploy feedback with two-phase creation status tracking (deploying, completing deployment, finalizing endpoint)
 - Async agent deletion — when deleting from AWS, agents show DELETING status with spinner and timer until fully removed
 - Credential suggestions on access denied errors — identifies the correct authorizer for the agent
+- Default alphabetical sorting (A-Z) for all card grids with A-Z/Z-A sort toggle controls
 - Drag-to-reorder cards within grid sections with persistent ordering
 - Admin user view switching — simulate specific users (admin, demo-admin-1, demo-user-1, etc.) to preview their scoped experience
 

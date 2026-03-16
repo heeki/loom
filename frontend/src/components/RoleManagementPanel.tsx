@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PolicyViewer } from "@/components/PolicyViewer";
+import { SortableCardGrid } from "@/components/SortableCardGrid";
 import { useManagedRoles } from "@/hooks/useSecurity";
 import { ChevronDown, ChevronRight, Trash2, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -91,9 +92,14 @@ export function RoleManagementPanel({ readOnly }: { readOnly?: boolean }) {
       {roles.length === 0 ? (
         <p className="text-sm text-muted-foreground py-8">No managed roles yet. Add one above.</p>
       ) : (
-        <div className="space-y-2">
-          {roles.map((role) => (
-            <Card key={role.id} className="relative py-3 gap-1">
+        <SortableCardGrid
+          items={roles}
+          getId={(r) => r.id.toString()}
+          getName={(r) => r.role_name}
+          storageKey="security-roles"
+          className="grid gap-2 md:grid-cols-2 lg:grid-cols-3"
+          renderItem={(role) => (
+            <Card className="relative py-3 gap-1">
               <CardHeader className="gap-1 pb-2">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
@@ -157,8 +163,8 @@ export function RoleManagementPanel({ readOnly }: { readOnly?: boolean }) {
                 )}
               </CardContent>
             </Card>
-          ))}
-        </div>
+          )}
+        />
       )}
     </div>
   );
