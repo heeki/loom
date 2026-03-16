@@ -153,7 +153,7 @@ function AppContent() {
     ? undefined
     : effectiveGroups.find((g) => g !== "users");
 
-  const { agents, loading, fetchAgents, registerAgent, deployAgent, redeployAgent, refreshAgent, deleteAgent } = useAgents();
+  const { agents, loading, deleteStartTimes, fetchAgents, registerAgent, deployAgent, redeployAgent, refreshAgent, deleteAgent } = useAgents();
 
   // Re-fetch agents after authentication completes (initial fetch may race with login)
   useEffect(() => {
@@ -222,7 +222,6 @@ function AppContent() {
   const handleDelete = async (id: number, cleanupAws: boolean) => {
     try {
       await deleteAgent(id, cleanupAws);
-      toast.success(cleanupAws ? "Agent removed from Loom and AgentCore" : "Agent removed from Loom");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Delete failed");
     }
@@ -438,6 +437,7 @@ function AppContent() {
                   onRefreshAgent={refreshAgent}
                   onDelete={handleDelete}
                   readOnly={!effectiveHasScope("agent:write")}
+                  agentDeleteStartTimes={deleteStartTimes}
                 />
               )}
 
@@ -493,6 +493,7 @@ function AppContent() {
               onDelete={handleDelete}
               readOnly={!effectiveHasScope("agent:write")}
               groupRestriction={groupRestriction}
+              deleteStartTimes={deleteStartTimes}
             />
           )}
 

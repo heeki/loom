@@ -1,16 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { AgentResponse, AgentDeployRequest } from "@/api/types";
 import * as agentsApi from "@/api/agents";
+import { ApiError } from "@/api/client";
+import { toast } from "sonner";
 
 const POLL_INTERVAL_MS = 5000;
 
 function needsPolling(agent: AgentResponse): boolean {
   return (
-    agent.source === "deploy" &&
-    (agent.status === "CREATING" ||
-      agent.deployment_status === "deploying" ||
-      agent.deployment_status === "ENDPOINT_CREATING" ||
-      agent.endpoint_status === "CREATING")
+    agent.status === "DELETING" ||
+    (agent.source === "deploy" &&
+      (agent.status === "CREATING" ||
+        agent.deployment_status === "deploying" ||
+        agent.deployment_status === "ENDPOINT_CREATING" ||
+        agent.endpoint_status === "CREATING"))
   );
 }
 
@@ -18,6 +21,7 @@ export function useAgents() {
   const [agents, setAgents] = useState<AgentResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deleteStartTimes, setDeleteStartTimes] = useState<Record<number, number>>({});
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const initialLoadDone = useRef(false);
@@ -42,7 +46,7 @@ export function useAgents() {
     void fetchAgents();
   }, [fetchAgents]);
 
-  // Status polling for agents that are still creating
+  // Status polling for agents that are creating or deleting
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
 
@@ -81,8 +85,22 @@ export function useAgents() {
           setAgents((prev) =>
             prev.map((a) => (a.id === updated.id ? updated : a)),
           );
-        } catch {
-          // Ignore individual poll failures
+        } catch (e) {
+          // If a DELETING agent returns 404, it's gone from AWS — purge locally
+          if (agent.status === "DELETING" && e instanceof ApiError && e.status === 404) {
+            try {
+              await agentsApi.purgeAgent(agent.id);
+            } catch {
+              // ignore cleanup errors
+            }
+            setAgents((prev) => prev.filter((a) => a.id !== agent.id));
+            setDeleteStartTimes((prev) => {
+              const next = { ...prev };
+              delete next[agent.id];
+              return next;
+            });
+            toast.success("Agent deleted");
+          }
         }
       }
     }, POLL_INTERVAL_MS);
@@ -133,11 +151,20 @@ export function useAgents() {
 
   const deleteAgent = useCallback(
     async (id: number, cleanupAws: boolean = false) => {
-      await agentsApi.deleteAgent(id, cleanupAws);
-      await fetchAgents();
+      const updated = await agentsApi.deleteAgent(id, cleanupAws);
+      if (updated.status === "DELETING") {
+        // Async deletion — update local state so polling picks it up
+        setDeleteStartTimes((prev) => ({ ...prev, [id]: Date.now() }));
+        setAgents((prev) => prev.map((a) => (a.id === id ? updated : a)));
+        toast.success("Agent deletion initiated");
+      } else {
+        // Immediately removed (local-only or no runtime)
+        setAgents((prev) => prev.filter((a) => a.id !== id));
+        toast.success(cleanupAws ? "Agent deleted" : "Agent removed from Loom");
+      }
     },
-    [fetchAgents],
+    [],
   );
 
-  return { agents, loading, error, fetchAgents, registerAgent, deployAgent, redeployAgent, refreshAgent, deleteAgent };
+  return { agents, loading, error, deleteStartTimes, fetchAgents, registerAgent, deployAgent, redeployAgent, refreshAgent, deleteAgent };
 }

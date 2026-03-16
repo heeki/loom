@@ -43,73 +43,17 @@ const STRATEGY_TYPES = [
   { value: "custom", label: "Custom" },
 ] as const;
 
-function TagInput({
-  values,
-  onChange,
-  placeholder,
-}: {
-  values: string[];
-  onChange: (values: string[]) => void;
-  placeholder?: string;
-}) {
-  const [input, setInput] = useState("");
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      const trimmed = input.trim();
-      if (trimmed && !values.includes(trimmed)) {
-        onChange([...values, trimmed]);
-      }
-      setInput("");
-    }
-  };
-
-  const remove = (value: string) => {
-    onChange(values.filter((v) => v !== value));
-  };
-
-  return (
-    <div className="space-y-1.5">
-      <Input
-        placeholder={placeholder}
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={handleKeyDown}
-        className="text-sm"
-      />
-      {values.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {values.map((v) => (
-            <span
-              key={v}
-              className="inline-flex items-center gap-1 rounded bg-accent px-2 py-0.5 text-xs"
-            >
-              {v}
-              <button
-                type="button"
-                onClick={() => remove(v)}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                &times;
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 interface StrategyFormState {
   strategy_type: MemoryStrategyRequest["strategy_type"];
   name: string;
   description: string;
-  namespaces: string[];
+  namespace: string;
 }
 
 function emptyStrategy(): StrategyFormState {
-  return { strategy_type: "semantic", name: "", description: "", namespaces: [] };
+  return { strategy_type: "semantic", name: "", description: "", namespace: "" };
 }
 
 function mapErrorMessage(status: number, detail: string): string {
@@ -307,7 +251,7 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
               strategy_type: s.strategy_type,
               name: s.name,
               description: s.description || undefined,
-              namespaces: s.namespaces.length > 0 ? s.namespaces : undefined,
+              namespaces: s.namespace ? [s.namespace] : undefined,
             }))
           : undefined;
 
@@ -517,7 +461,7 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
                             strategy_type: s.strategy_type || "semantic",
                             name: s.name || "",
                             description: s.description || "",
-                            namespaces: Array.isArray(s.namespaces) ? s.namespaces : [],
+                            namespace: s.namespace || "",
                           });
                         }
                         setFormStrategies(strategies);
@@ -544,13 +488,13 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
                           name: s.name,
                         };
                         if (s.description) strat.description = s.description;
-                        if (s.namespaces.length > 0) strat.namespaces = s.namespaces;
+                        if (s.namespace) strat.namespace = s.namespace;
                         return strat;
                       });
                     }
                     return JSON.stringify(result, null, 2);
                   }}
-                  placeholder='{"name": "...", "description": "...", "event_expiry_duration": 7, "strategies": [{"strategy_type": "semantic", "name": "..."}]}'
+                  placeholder='{"name": "...", "description": "...", "strategies": [{"name": "...", "strategy_type": "semantic", "description": "...", "namespace": "..."}], "tags": "..."}'
                 />
                 <div className="flex gap-3">
                   <div className="w-1/3 min-w-0">
@@ -660,12 +604,12 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
                       </div>
                       <div>
                         <label className="text-xs text-muted-foreground">
-                          Namespaces (press Enter to add)
+                          Namespace
                         </label>
-                        <TagInput
-                          values={strategy.namespaces}
-                          onChange={(namespaces) => updateStrategy(idx, { namespaces })}
-                          placeholder="e.g. user_preferences, conversation_history, task_context"
+                        <Input
+                          value={strategy.namespace}
+                          onChange={(e) => updateStrategy(idx, { namespace: e.target.value })}
+                          placeholder="e.g. /strategy/{memoryStrategyId}/actor/{actorId}/"
                         />
                       </div>
                     </div>

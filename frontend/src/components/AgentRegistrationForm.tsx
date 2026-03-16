@@ -324,8 +324,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                   if (behavioralGuidelines) result.instructions = behavioralGuidelines;
                   if (outputExpectations) result.behavior = outputExpectations;
                   if (modelId) {
-                    const model = models.find((m) => m.model_id === modelId);
-                    result.model = model?.display_name ?? modelId;
+                    result.model = modelId;
                   }
                   if (selectedRoleId) {
                     const role = managedRoles.find((r) => r.id.toString() === selectedRoleId);
@@ -342,7 +341,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                   }
                   return JSON.stringify(result, null, 2);
                 }}
-                placeholder='{"name": "...", "description": "...", "persona": "...", "instructions": "...", "behavior": "...", "model": "...", "role": "...", "authorizer": "..."}'
+                placeholder='{"name": "...", "description": "...", "persona": "...", "instructions": "...", "behavior": "...", "model": "...", "role": "...", "authorizer": "...", "tags": "..."}'
               />
 
               {/* Agent Identity */}
