@@ -804,13 +804,13 @@ def get_agent_status(agent_id: int, user: UserInfo = Depends(require_scopes("age
     return _agent_response(agent, db)
 
 
-@router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{agent_id}", response_model=AgentResponse)
 def delete_agent(
     agent_id: int,
     cleanup_aws: bool = False,
     user: UserInfo = Depends(require_scopes("agent:write")),
     db: Session = Depends(get_db),
-) -> None:
+) -> AgentResponse:
     """Remove an agent from the local registry.
 
     Args:
@@ -826,19 +826,30 @@ def delete_agent(
                 detail="Cannot modify resources outside your group",
             )
 
-    if cleanup_aws and agent.runtime_id:
-        # Delete endpoint first
-        if agent.endpoint_name:
-            try:
-                delete_runtime_endpoint(agent.runtime_id, agent.endpoint_name, agent.region)
-            except Exception as e:
-                logger.warning("Failed to delete endpoint %s: %s", agent.endpoint_name, e)
+    # For local-only deletion (no AWS cleanup or no runtime)
+    if not cleanup_aws or not agent.runtime_id:
+        # Clean up Cognito client secret from Secrets Manager
+        config_map = {e.key: e.value for e in agent.config_entries}
+        secret_arn = config_map.get("COGNITO_CLIENT_SECRET_ARN")
+        if secret_arn:
+            delete_secret(secret_arn, agent.region)
 
-        # Delete runtime
+        result = _agent_response(agent, db)
+        db.delete(agent)
+        db.commit()
+        return result
+
+    # Initiate async deletion in AWS
+    if agent.endpoint_name:
         try:
-            delete_runtime(agent.runtime_id, agent.region)
+            delete_runtime_endpoint(agent.runtime_id, agent.endpoint_name, agent.region)
         except Exception as e:
-            logger.warning("Failed to delete runtime %s: %s", agent.runtime_id, e)
+            logger.warning("Failed to delete endpoint %s: %s", agent.endpoint_name, e)
+
+    try:
+        delete_runtime(agent.runtime_id, agent.region)
+    except Exception as e:
+        logger.warning("Failed to delete runtime %s: %s", agent.runtime_id, e)
 
     # Clean up Cognito client secret from Secrets Manager
     config_map = {e.key: e.value for e in agent.config_entries}
@@ -846,6 +857,22 @@ def delete_agent(
     if secret_arn:
         delete_secret(secret_arn, agent.region)
 
+    # Mark as DELETING so frontend can poll for completion
+    agent.status = "DELETING"
+    agent.deployment_status = "removing"
+    db.commit()
+    db.refresh(agent)
+    return _agent_response(agent, db)
+
+
+@router.delete("/{agent_id}/purge", status_code=status.HTTP_204_NO_CONTENT)
+def purge_agent(
+    agent_id: int,
+    user: UserInfo = Depends(require_scopes("agent:write")),
+    db: Session = Depends(get_db),
+) -> None:
+    """Remove an agent from the local database (no AWS call)."""
+    agent = get_agent_or_404(agent_id, db)
     db.delete(agent)
     db.commit()
 

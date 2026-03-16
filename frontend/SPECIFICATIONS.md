@@ -46,6 +46,7 @@ frontend/
 │   │   ├── SortableCardGrid.tsx — Drag-to-reorder card grid using @dnd-kit, localStorage persistence
 │   │   ├── AgentCard.tsx       # Agent summary card with refresh + Trash2 icon deletion
 │   │   ├── AgentRegistrationForm.tsx  # Tabbed form: ARN registration + agent deployment
+│   │   ├── JsonConfigSection.tsx     # Shared collapsible JSON import/export section
 │   │   ├── AuthorizerManagementPanel.tsx # Authorizer config + credential management
 │   │   ├── MemoryCard.tsx              # Memory resource summary card
 │   │   ├── MemoryManagementPanel.tsx    # Memory resource create form + list table
@@ -149,6 +150,7 @@ Each card displays:
 - Protocol badge (e.g., `HTTP`) — inline with name
 - Status badge (color-coded: READY=default, CREATING=secondary, FAILED=destructive) — inline with name
 - Spinner animation when agent is in a creating/deploying state
+- Spinner animation and elapsed timer when agent is in DELETING state, using `deleteStartTime` prop for accurate timer display
 - Active session count badge (when > 0)
 - Region, Account ID, Network mode, Available qualifiers, Authorizer (name, "Cognito", "external", or "None"), Registered timestamp
 - Tag badges (secondary variant) for tags marked `show_on_card` in tag policies, formatted as `key: value`
@@ -161,6 +163,8 @@ Clicking the Trash2 icon triggers an overlay confirmation panel:
 - "Also delete in AgentCore" checkbox (right-aligned, shown only when agent has a runtime_id)
 - Cancel and Confirm buttons (right-aligned)
 - Clicks within the overlay are stopped from propagating to the card's `onClick`
+
+When deletion is confirmed with "Also delete in AgentCore" checked, the agent transitions to DELETING status with a spinner and timer on the card. The `useAgents` hook polls the agent status at 5-second intervals. When the poll returns 404, the hook calls the purge endpoint to remove the agent from the local database and shows a success toast.
 
 ---
 
@@ -186,7 +190,7 @@ Clicking the Trash2 icon triggers an overlay confirmation panel:
 ### Deploy Tab
 
 Full deployment form with sections:
-- **JSON Paste**: Collapsible section (ChevronDown/ChevronRight toggle) with monospace textarea for pasting JSON agent configuration. Maps `name`, `description`, `persona` (→ agent description), `instructions` (→ behavioral guidelines), `behavior` (→ output expectations). Apply/Cancel buttons. Invalid JSON shows inline error without clearing existing fields.
+- **JSON Import/Export**: Collapsible section (ChevronDown/ChevronRight toggle) via the shared `JsonConfigSection` component. Import maps `name`, `description`, `persona` (→ agent description), `instructions` (→ behavioral guidelines), `behavior` (→ output expectations), `model`, `role`, `network_mode`, `authorizer`, `tags` (tag profile name). Export serializes the current form state to JSON using human-readable identifiers (model ID, role name, authorizer name, tag profile name); empty/default fields are omitted. Apply/Export/Cancel buttons. Invalid JSON shows inline error without clearing existing fields.
 - **Agent Identity**: name (1/3 width) and description (2/3 width)
 - **System Prompt**: agent description, behavioral guidelines, output expectations — each with placeholder examples
 - **Model / Protocol / Network / IAM Role**: single flex row with explicit widths (20% / 10% / 10% / flex-1). Model uses `SearchableSelect` with grouped options, no default selection. Protocol offers HTTP as selectable; MCP and A2A shown as disabled. Network offers PUBLIC; VPC shown as disabled. IAM Role uses a `SearchableSelect` with searchable dropdown. Both model and IAM role are required — deploy button is disabled until both are selected.
@@ -266,13 +270,14 @@ Full deployment form with sections:
 
 Toggled via the "Add Memory" button. Contained in a `Card` with the following fields:
 
+- **JSON Import/Export**: Collapsible section via the shared `JsonConfigSection` component. Import maps `name`, `description`, `event_expiry_duration` (validated 3-364), `tags` (tag profile name lookup), `strategies` (array with strategy_type validation). Export serializes the current form state; empty/default fields are omitted. Apply/Export/Cancel buttons.
 - **Name** (required, flex-1) and **Event Expiry** (days, fixed 140px width) — same row
 - **Description** — full width, optional
 - **Memory Execution Role ARN** and **Encryption Key ARN** — 2-column grid, optional
 - **Strategies** — dynamic list, each strategy in a dashed-border card:
   - **Type** (Select: Semantic, Summary, User Preference, Episodic, Custom) and **Name** — same row
   - **Description** — full width, optional
-  - **Namespaces** — `TagInput` (press Enter to add, click × to remove)
+  - **Namespace** — single text input field
   - Trash icon to remove individual strategies
   - "Add Strategy" ghost button to add more
 - **Resource Tags**: `ResourceTagFields` component (same as agent deploy form) — tag profile dropdown with `sessionStorage` persistence
@@ -411,6 +416,9 @@ All timestamps use shared utilities in `src/lib/format.ts`. A `TimezoneContext` 
 ### SearchableSelect Component
 Custom combobox with click-outside detection, filtered option list, check mark for selected item, and optional group headers. Accepts a `className` prop for width control. Filter matches both `label` and `value` fields.
 
+### JsonConfigSection Component
+Shared collapsible component for JSON import/export on forms. Encapsulates the collapse/expand toggle (ChevronRight/ChevronDown), monospace textarea, and Apply/Export/Cancel button row. Props: `onApply(json) => string | null` (returns error or null on success), `onExport() => string`, optional `label` and `placeholder`. On successful apply, the input clears and the section auto-collapses. On export, the serialized JSON is written to the textarea and the section expands if collapsed. Used by both `AgentRegistrationForm` and `MemoryManagementPanel` to ensure consistent behavior. Export produces human-readable JSON (model ID for agents, role names, profile names rather than internal IDs) that is valid input for import (round-trip capable).
+
 ### TagInput Pattern
 Inline component for adding/removing tag-style values (clients, scopes). Single textbox with Enter to add, badge with X to remove.
 
@@ -470,7 +478,7 @@ Computed server-side using `LOOM_SESSION_IDLE_TIMEOUT_SECONDS`. The frontend dis
 Card/table view mode state is lifted to `App.tsx` with separate state variables per page (`catalogViewMode`, `agentsViewMode`, `memoryViewMode`). Each page receives its mode and setter as props. This ensures the selection persists when switching between personas — the page components unmount but the state lives in the parent.
 
 ### Deploy Flow
-Agent deployment uses a fire-and-forget pattern. The form collapses immediately on deploy, the backend creates a DB record before starting the AWS call, and `fetchAgents()` picks up the new record. The `useAgents` hook polls transitional agents (deploying/CREATING/endpoint CREATING) at 5-second intervals using a `watchIds` effect dependency. An `initialLoadDone` ref prevents skeleton flash on subsequent fetches. Agent cards show two-phase creation status: deploying → completing deployment → finalizing endpoint, with a timer using `registered_at` to avoid resets on phase transitions.
+Agent deployment uses a fire-and-forget pattern. The form collapses immediately on deploy, the backend creates a DB record before starting the AWS call, and `fetchAgents()` picks up the new record. The `useAgents` hook polls transitional agents (deploying/CREATING/endpoint CREATING) at 5-second intervals using a `watchIds` effect dependency. An `initialLoadDone` ref prevents skeleton flash on subsequent fetches. Agent cards show two-phase creation status: deploying → completing deployment → finalizing endpoint, with a timer using `registered_at` to avoid resets on phase transitions. Agent deletion with AWS cleanup follows a matching async pattern: the DELETE endpoint marks the agent as DELETING, the hook polls at 5-second intervals, detects 404 when the runtime is fully deleted, calls the purge endpoint to remove the local record, and shows a success toast.
 
 ### SSE Stream Consumer
 `invokeAgentStream()` uses `ReadableStream` to consume POST-based SSE responses with buffer-based line parsing, typed callback dispatch, and `AbortSignal` for cancellation.

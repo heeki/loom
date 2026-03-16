@@ -15,17 +15,20 @@ interface AgentCardProps {
   onDelete: (id: number, cleanupAws: boolean) => void;
   readOnly?: boolean;
   showOnCardKeys?: string[];
+  deleteStartTime?: number;
 }
 
 function isTransitional(agent: AgentResponse): boolean {
   return (
     agent.status === "CREATING" ||
+    agent.status === "DELETING" ||
     agent.deployment_status === "deploying" ||
     agent.endpoint_status === "CREATING"
   );
 }
 
-function creationPhaseLabel(agent: AgentResponse): string | null {
+function phaseLabel(agent: AgentResponse): string | null {
+  if (agent.status === "DELETING") return "Deleting";
   if (agent.deployment_status === "deploying") return "Deploying";
   if (agent.status === "CREATING") return "Completing deployment";
   if (agent.status === "READY" && agent.endpoint_status === "CREATING") return "Finalizing endpoint";
@@ -36,7 +39,7 @@ function existsInAgentCore(agent: AgentResponse): boolean {
   return !!agent.runtime_id;
 }
 
-export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, showOnCardKeys }: AgentCardProps) {
+export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, showOnCardKeys, deleteStartTime }: AgentCardProps) {
   const { timezone } = useTimezone();
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [cleanupAws, setCleanupAws] = useState(false);
@@ -45,7 +48,7 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const creating = isTransitional(agent);
-  const phaseLabel = creationPhaseLabel(agent);
+  const label = phaseLabel(agent);
 
   useEffect(() => {
     if (creating) {
@@ -60,6 +63,10 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
 
   const elapsedSeconds = (() => {
     if (!creating) return 0;
+    if (agent.status === "DELETING") {
+      if (!deleteStartTime) return 0;
+      return Math.max(0, Math.floor((now - deleteStartTime) / 1000));
+    }
     const ts = agent.registered_at ?? agent.deployed_at;
     if (!ts) return 0;
     return Math.max(0, Math.floor((now - new Date(ts).getTime()) / 1000));
@@ -129,7 +136,7 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
           <div className="flex items-center gap-1.5 text-muted-foreground">
             <Loader2 className="h-3 w-3 animate-spin" />
             <span className="text-[10px] tabular-nums">({elapsedSeconds}s)</span>
-            <span className="text-[10px]">{phaseLabel ?? "Creating"}</span>
+            <span className="text-[10px]">{label ?? "Creating"}</span>
             {agent.endpoint_status && agent.endpoint_status !== agent.status && (
               <Badge variant={statusVariant(agent.endpoint_status)} className="text-[10px] px-1.5 py-0">
                 Endpoint: {agent.endpoint_status}

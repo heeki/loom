@@ -311,9 +311,9 @@ class TestAgentsDeployRouter(unittest.TestCase):
         )
         agent_id = create_resp.json()["id"]
 
-        # Without cleanup_aws, should NOT call AWS delete
+        # Without cleanup_aws, should NOT call AWS delete (immediate removal)
         response = self.client.delete(f"/api/agents/{agent_id}")
-        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.status_code, 200)
         mock_delete_rt.assert_not_called()
 
     @patch("app.routers.agents.delete_execution_role")
@@ -344,7 +344,10 @@ class TestAgentsDeployRouter(unittest.TestCase):
         agent_id = create_resp.json()["id"]
 
         response = self.client.delete(f"/api/agents/{agent_id}?cleanup_aws=true")
-        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["status"], "DELETING")
+        self.assertEqual(data["deployment_status"], "removing")
         mock_delete_rt.assert_called_once_with("rt-del2", "us-east-1")
 
     def test_deploy_agent_missing_name(self):

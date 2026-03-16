@@ -27,12 +27,13 @@ import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { statusVariant } from "@/lib/status";
 import { listMemories, createMemory, importMemory, refreshMemory, deleteMemory, purgeMemory } from "@/api/memories";
-import { listTagPolicies } from "@/api/settings";
+import { listTagPolicies, listTagProfiles } from "@/api/settings";
 import { ApiError } from "@/api/client";
-import type { MemoryResponse, MemoryStrategyRequest, TagPolicy } from "@/api/types";
+import type { MemoryResponse, MemoryStrategyRequest, TagPolicy, TagProfile } from "@/api/types";
 import { MemoryCard } from "./MemoryCard";
 import { SortableCardGrid } from "./SortableCardGrid";
 import { ResourceTagFields } from "./ResourceTagFields";
+import { JsonConfigSection } from "./JsonConfigSection";
 
 const STRATEGY_TYPES = [
   { value: "semantic", label: "Semantic" },
@@ -42,73 +43,17 @@ const STRATEGY_TYPES = [
   { value: "custom", label: "Custom" },
 ] as const;
 
-function TagInput({
-  values,
-  onChange,
-  placeholder,
-}: {
-  values: string[];
-  onChange: (values: string[]) => void;
-  placeholder?: string;
-}) {
-  const [input, setInput] = useState("");
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      const trimmed = input.trim();
-      if (trimmed && !values.includes(trimmed)) {
-        onChange([...values, trimmed]);
-      }
-      setInput("");
-    }
-  };
-
-  const remove = (value: string) => {
-    onChange(values.filter((v) => v !== value));
-  };
-
-  return (
-    <div className="space-y-1.5">
-      <Input
-        placeholder={placeholder}
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={handleKeyDown}
-        className="text-sm"
-      />
-      {values.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {values.map((v) => (
-            <span
-              key={v}
-              className="inline-flex items-center gap-1 rounded bg-accent px-2 py-0.5 text-xs"
-            >
-              {v}
-              <button
-                type="button"
-                onClick={() => remove(v)}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                &times;
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 interface StrategyFormState {
   strategy_type: MemoryStrategyRequest["strategy_type"];
   name: string;
   description: string;
-  namespaces: string[];
+  namespace: string;
 }
 
 function emptyStrategy(): StrategyFormState {
-  return { strategy_type: "semantic", name: "", description: "", namespaces: [] };
+  return { strategy_type: "semantic", name: "", description: "", namespace: "" };
 }
 
 function mapErrorMessage(status: number, detail: string): string {
@@ -172,6 +117,7 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
   // Tag state
   const [tagValues, setTagValues] = useState<Record<string, string>>({});
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
+  const [tagProfiles, setTagProfiles] = useState<TagProfile[]>([]);
   const [tagFilters, setTagFilters] = useState<Record<string, string[]>>(() => {
     try { return JSON.parse(localStorage.getItem("loom:tagFilters:memories") || "{}") as Record<string, string[]>; } catch { return {}; }
   });
@@ -193,6 +139,7 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
   useEffect(() => {
     void fetchMemories();
     void listTagPolicies().then(setTagPolicies).catch(() => {});
+    void listTagProfiles().then(setTagProfiles).catch(() => {});
   }, [fetchMemories]);
 
   // 1-second tick for elapsed display, 3-second poll for AWS status
@@ -304,7 +251,7 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
               strategy_type: s.strategy_type,
               name: s.name,
               description: s.description || undefined,
-              namespaces: s.namespaces.length > 0 ? s.namespaces : undefined,
+              namespaces: s.namespace ? [s.namespace] : undefined,
             }))
           : undefined;
 
@@ -485,6 +432,70 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
 
             {addMode === "create" ? (
               <>
+                <JsonConfigSection
+                  onApply={(json) => {
+                    try {
+                      const parsed = JSON.parse(json);
+                      if (parsed.name) setFormName(parsed.name);
+                      if (parsed.description) setFormDescription(parsed.description);
+                      if (parsed.event_expiry_duration !== undefined) {
+                        const days = Number(parsed.event_expiry_duration);
+                        if (isNaN(days) || days < 3 || days > 364) {
+                          return "event_expiry_duration must be between 3 and 364.";
+                        }
+                        setFormExpiryDays(days);
+                        setFormExpiryError("");
+                      }
+                      if (parsed.tags) {
+                        const match = tagProfiles.find((p) => p.name === parsed.tags);
+                        if (match) {
+                          sessionStorage.setItem("loom:selectedTagProfileId", match.id.toString());
+                        }
+                      }
+                      if (Array.isArray(parsed.strategies)) {
+                        const validTypes = ["semantic", "summary", "user_preference", "episodic", "custom"];
+                        const strategies: StrategyFormState[] = [];
+                        for (const s of parsed.strategies) {
+                          if (s.strategy_type && !validTypes.includes(s.strategy_type)) continue;
+                          strategies.push({
+                            strategy_type: s.strategy_type || "semantic",
+                            name: s.name || "",
+                            description: s.description || "",
+                            namespace: s.namespace || "",
+                          });
+                        }
+                        setFormStrategies(strategies);
+                      }
+                      return null;
+                    } catch {
+                      return "Invalid JSON. Please check the format and try again.";
+                    }
+                  }}
+                  onExport={() => {
+                    const result: Record<string, unknown> = {};
+                    if (formName) result.name = formName;
+                    if (formDescription) result.description = formDescription;
+                    if (formExpiryDays !== 7) result.event_expiry_duration = formExpiryDays;
+                    const profileId = sessionStorage.getItem("loom:selectedTagProfileId");
+                    if (profileId) {
+                      const profile = tagProfiles.find((p) => p.id.toString() === profileId);
+                      if (profile) result.tags = profile.name;
+                    }
+                    if (formStrategies.length > 0) {
+                      result.strategies = formStrategies.map((s) => {
+                        const strat: Record<string, unknown> = {
+                          strategy_type: s.strategy_type,
+                          name: s.name,
+                        };
+                        if (s.description) strat.description = s.description;
+                        if (s.namespace) strat.namespace = s.namespace;
+                        return strat;
+                      });
+                    }
+                    return JSON.stringify(result, null, 2);
+                  }}
+                  placeholder='{"name": "...", "description": "...", "strategies": [{"name": "...", "strategy_type": "semantic", "description": "...", "namespace": "..."}], "tags": "..."}'
+                />
                 <div className="flex gap-3">
                   <div className="w-1/3 min-w-0">
                     <label className="text-xs text-muted-foreground">Name *</label>
@@ -593,12 +604,12 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
                       </div>
                       <div>
                         <label className="text-xs text-muted-foreground">
-                          Namespaces (press Enter to add)
+                          Namespace
                         </label>
-                        <TagInput
-                          values={strategy.namespaces}
-                          onChange={(namespaces) => updateStrategy(idx, { namespaces })}
-                          placeholder="e.g. user_preferences, conversation_history, task_context"
+                        <Input
+                          value={strategy.namespace}
+                          onChange={(e) => updateStrategy(idx, { namespace: e.target.value })}
+                          placeholder="e.g. /strategy/{memoryStrategyId}/actor/{actorId}/"
                         />
                       </div>
                     </div>

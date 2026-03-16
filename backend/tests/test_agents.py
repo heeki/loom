@@ -172,9 +172,9 @@ class TestAgentsRouter(unittest.TestCase):
         )
         agent_id = register_response.json()["id"]
 
-        # Delete agent
+        # Delete agent (no cleanup_aws — immediate removal, returns AgentResponse)
         response = self.client.delete(f"/api/agents/{agent_id}")
-        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.status_code, 200)
 
         # Verify it's gone
         get_response = self.client.get(f"/api/agents/{agent_id}")
@@ -273,9 +273,9 @@ class TestAgentsRouter(unittest.TestCase):
             Invocation.session_id.in_(["session-cascade-1", "session-cascade-2"])
         ).count(), 3)
 
-        # Delete the agent via API
+        # Delete the agent via API (no cleanup_aws — immediate removal)
         delete_response = self.client.delete(f"/api/agents/{agent_id}")
-        self.assertEqual(delete_response.status_code, 204)
+        self.assertEqual(delete_response.status_code, 200)
 
         # Verify agent is gone
         self.assertIsNone(self.session.query(Agent).filter_by(id=agent_id).first())

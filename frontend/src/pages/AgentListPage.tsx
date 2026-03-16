@@ -39,6 +39,7 @@ interface AgentListPageProps {
   onDelete: (id: number, cleanupAws: boolean) => void;
   readOnly?: boolean;
   groupRestriction?: string;
+  deleteStartTimes?: Record<number, number>;
 }
 
 export function AgentListPage({
@@ -54,6 +55,7 @@ export function AgentListPage({
   onDelete,
   readOnly,
   groupRestriction,
+  deleteStartTimes,
 }: AgentListPageProps) {
   const { timezone } = useTimezone();
   const [submitting, setSubmitting] = useState(false);
@@ -353,6 +355,7 @@ export function AgentListPage({
                     onDelete={onDelete}
                     readOnly={readOnly}
                     showOnCardKeys={effectiveShowOnCardKeys}
+                    deleteStartTime={deleteStartTimes?.[agent.id]}
                   />
                 )}
               />

@@ -34,6 +34,7 @@ interface CatalogPageProps {
   onRefreshAgent: (id: number) => void;
   onDelete: (id: number, cleanupAws: boolean) => void;
   readOnly?: boolean;
+  agentDeleteStartTimes?: Record<number, number>;
 }
 
 export function CatalogPage({
@@ -45,6 +46,7 @@ export function CatalogPage({
   onRefreshAgent,
   onDelete,
   readOnly,
+  agentDeleteStartTimes,
 }: CatalogPageProps) {
   const { timezone } = useTimezone();
   // Tag filter state
@@ -362,6 +364,7 @@ export function CatalogPage({
                     onDelete={onDelete}
                     readOnly={readOnly}
                     showOnCardKeys={effectiveShowOnCardKeys}
+                    deleteStartTime={agentDeleteStartTimes?.[agent.id]}
                   />
                 )}
               />

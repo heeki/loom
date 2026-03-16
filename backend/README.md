@@ -159,7 +159,8 @@ Stores per-invocation timing measurements and status. Fields include `client_inv
 | `POST` | `/api/agents` | Register an agent by ARN or deploy a new agent |
 | `GET` | `/api/agents` | List all registered agents (includes `model_id` and `active_session_count`) |
 | `GET` | `/api/agents/{agent_id}` | Get agent metadata |
-| `DELETE` | `/api/agents/{agent_id}?cleanup_aws=true` | Remove agent; optionally clean up AWS resources |
+| `DELETE` | `/api/agents/{agent_id}?cleanup_aws=true` | Remove agent; optionally initiate async AWS deletion (returns DELETING status) |
+| `DELETE` | `/api/agents/{agent_id}/purge` | Remove agent from local DB only (after AWS deletion confirmed) |
 | `POST` | `/api/agents/{agent_id}/refresh` | Re-fetch metadata from AWS |
 | `POST` | `/api/agents/{agent_id}/redeploy` | Redeploy with current config |
 | `GET` | `/api/agents/roles` | List IAM roles for AgentCore |
@@ -268,7 +269,7 @@ Cold-start latency is computed automatically during the invoke flow:
 
 Deploy creates a Strands Agent runtime on AgentCore. The build step cross-compiles an ARM64 artifact (pip install into a target directory, zips the result, and uploads to S3). Model and IAM role are required fields. The deployment supports configurable protocol (HTTP), network mode (PUBLIC), authorizer, and lifecycle settings. Cognito client secrets are stored in Secrets Manager and never persisted in the local database. Deletion optionally cleans up the AgentCore runtime and associated Secrets Manager entries. The deployment automatically sets `OTEL_SERVICE_NAME` to the agent name for AgentCore Observability integration.
 
-Tags are resolved from the tag policy system at deploy time. Deploy-time tags are auto-applied from their default values; build-time tags are resolved from the selected tag profile. Required tags that are missing cause deployment to fail with a 400 error. Resolved tags are applied to all created AWS resources (AgentCore runtimes, endpoints, IAM execution roles, memory resources) and stored locally on Agent and Memory records. For registered agents and imported memories, tags are fetched from AWS via `list_tags_for_resource`; missing required tags are filled with `"missing"`.
+Tags are resolved from the tag policy system at deploy time. Deploy-time tags are auto-applied from their default values; build-time tags are resolved from the selected tag profile. Required tags that are missing cause deployment to fail with a 400 error. Resolved tags are applied to all created AWS resources (AgentCore runtimes, endpoints, IAM execution roles, memory resources) and stored locally on Agent and Memory records. For registered agents and imported memories, tags are fetched from AWS via `list_tags_for_resource`; missing required tags are filled with `"missing"`. Deletion with `cleanup_aws=true` initiates async AWS deletion (endpoint + runtime + Secrets Manager cleanup), marks the agent as DELETING, and returns the updated agent. The frontend polls the status endpoint until AWS confirms deletion (404), then calls the purge endpoint to remove the local record.
 
 ## Authenticated Invocation
 
