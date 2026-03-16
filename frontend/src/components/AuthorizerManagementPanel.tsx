@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "@/components/SortableCardGrid";
 import { useAuthorizerConfigs } from "@/hooks/useSecurity";
 import { listCognitoPools, listAuthorizerCredentials, createAuthorizerCredential, deleteAuthorizerCredential } from "@/api/security";
 import { Badge } from "@/components/ui/badge";
@@ -84,6 +85,7 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [sortDir, setSortDir] = useState<SortDirection>(() => loadSortDirection("security-authorizers"));
 
   // Cognito pools from AWS
   const [cognitoPools, setCognitoPools] = useState<CognitoPool[]>([]);
@@ -346,10 +348,13 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
             Authorizer management is the responsibility of the security team.
           </p>
         </div>
-        <Button size="sm" variant="outline" className="shrink-0 ml-4" onClick={() => { setShowAddForm(!showAddForm); resetForm(); }} disabled={readOnly}>
-          <Plus className="h-3.5 w-3.5 mr-1" />
-          Add Authorizer
-        </Button>
+        <div className="flex items-center gap-2 shrink-0 ml-4">
+          <SortButton direction={sortDir} onClick={() => setSortDir(toggleSortDirection("security-authorizers", sortDir))} />
+          <Button size="sm" variant="outline" onClick={() => { setShowAddForm(!showAddForm); resetForm(); }} disabled={readOnly}>
+            <Plus className="h-3.5 w-3.5 mr-1" />
+            Add Authorizer
+          </Button>
+        </div>
       </div>
 
       {showAddForm && (
@@ -363,9 +368,16 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
       {configs.length === 0 ? (
         <p className="text-sm text-muted-foreground py-8">No authorizer configs yet. Add one above.</p>
       ) : (
-        <div className="space-y-2">
-          {configs.map((config) => (
-            <Card key={config.id} className="relative py-3 gap-1">
+        <SortableCardGrid
+          items={configs}
+          getId={(c) => c.id.toString()}
+          getName={(c) => c.name}
+          storageKey="security-authorizers"
+          sortDirection={sortDir}
+          onSortDirectionChange={(d) => { if (d) { setSortDir(d); saveSortDirection("security-authorizers", d); } }}
+          className="grid gap-2 md:grid-cols-2 lg:grid-cols-3"
+          renderItem={(config) => (
+            <Card className="relative py-3 gap-1">
               <CardHeader className="gap-1 pb-2">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
@@ -585,8 +597,8 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
                 )}
               </CardContent>
             </Card>
-          ))}
-        </div>
+          )}
+        />
       )}
     </div>
   );

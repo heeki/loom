@@ -8,7 +8,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
@@ -16,7 +15,8 @@ import { MultiSelect } from "@/components/ui/multi-select";
 import { AddFilterDropdown } from "@/components/ui/add-filter-dropdown";
 import { AgentRegistrationForm } from "@/components/AgentRegistrationForm";
 import { AgentCard } from "@/components/AgentCard";
-import { SortableCardGrid } from "@/components/SortableCardGrid";
+import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "@/components/SortableCardGrid";
+import { SortableTableHead, sortRows } from "@/components/SortableTableHead";
 import { toast } from "sonner";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
@@ -107,6 +107,19 @@ export function AgentListPage({
   const requiredKeySet = new Set(requiredPolicies.map(tp => tp.key));
   const effectiveShowOnCardKeys = showCustomTags ? showOnCardKeys : showOnCardKeys.filter(k => requiredKeySet.has(k));
 
+  const [agentSortDir, setAgentSortDir] = useState<SortDirection>(() => loadSortDirection("builder-agents"));
+  const [agentTableCol, setAgentTableCol] = useState<string | null>("name");
+  const [agentTableDir, setAgentTableDir] = useState<SortDirection>("asc");
+
+  const handleAgentTableSort = (col: string) => {
+    if (agentTableCol === col) {
+      setAgentTableDir(agentTableDir === "asc" ? "desc" : "asc");
+    } else {
+      setAgentTableCol(col);
+      setAgentTableDir("asc");
+    }
+  };
+
   const filteredAgents = agents.filter(agent => {
     return Object.entries(tagFilters).every(([key, values]) => {
       if (values.length === 0) return true;
@@ -181,16 +194,18 @@ export function AgentListPage({
               {"An agent can be deployed directly from here.\nAn agent that was previously created can also be imported here."}
             </p>
           </div>
-          <Button
-            size="sm"
-            variant="outline"
-            className="shrink-0 ml-4"
-            onClick={() => setShowAddForm(!showAddForm)}
-            disabled={readOnly}
-          >
-            <Plus className="h-3.5 w-3.5 mr-1" />
-            Add Agent
-          </Button>
+          <div className="flex items-center gap-2 shrink-0 ml-4">
+            <SortButton direction={agentSortDir} onClick={() => setAgentSortDir(toggleSortDirection("builder-agents", agentSortDir))} />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowAddForm(!showAddForm)}
+              disabled={readOnly}
+            >
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              Add Agent
+            </Button>
+          </div>
         </div>
 
         {showAddForm && (
@@ -346,7 +361,10 @@ export function AgentListPage({
               <SortableCardGrid
                 items={filteredAgents}
                 getId={(a) => String(a.id)}
+                getName={(a) => a.name ?? a.runtime_id ?? ""}
                 storageKey="builder-agents"
+                sortDirection={agentSortDir}
+                onSortDirectionChange={(d) => { if (d) { setAgentSortDir(d); saveSortDirection("builder-agents", d); } }}
                 renderItem={(agent) => (
                   <AgentCard
                     agent={agent}
@@ -364,16 +382,23 @@ export function AgentListPage({
                 <Table className="table-fixed">
                   <TableHeader>
                     <TableRow className="bg-card hover:bg-card">
-                      <TableHead className="w-[30%]">Name</TableHead>
-                      <TableHead className="w-[12%]">Status</TableHead>
-                      <TableHead className="w-[14%]">Protocol</TableHead>
-                      <TableHead className="w-[14%]">Network</TableHead>
-                      <TableHead className="w-[14%]">Region</TableHead>
-                      <TableHead className="w-[16%]">Registered</TableHead>
+                      <SortableTableHead column="name" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[30%]">Name</SortableTableHead>
+                      <SortableTableHead column="status" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Status</SortableTableHead>
+                      <SortableTableHead column="protocol" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[14%]">Protocol</SortableTableHead>
+                      <SortableTableHead column="network" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[14%]">Network</SortableTableHead>
+                      <SortableTableHead column="region" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[14%]">Region</SortableTableHead>
+                      <SortableTableHead column="registered" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[16%]">Registered</SortableTableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredAgents.map((agent) => (
+                    {sortRows(filteredAgents, agentTableCol, agentTableDir, {
+                      name: (a) => a.name ?? a.runtime_id ?? "",
+                      status: (a) => a.status ?? "",
+                      protocol: (a) => a.protocol ?? "",
+                      network: (a) => a.network_mode ?? "",
+                      region: (a) => a.region ?? "",
+                      registered: (a) => a.registered_at ?? "",
+                    }).map((agent) => (
                       <TableRow
                         key={agent.id}
                         className="bg-input-bg hover:bg-input-bg/80 cursor-pointer"

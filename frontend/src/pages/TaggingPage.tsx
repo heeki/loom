@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, Pencil, Trash2, Lock } from "lucide-react";
 import { toast } from "sonner";
-import { SortableCardGrid } from "@/components/SortableCardGrid";
+import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "@/components/SortableCardGrid";
 import {
   listTagPolicies,
   listTagProfiles,
@@ -27,6 +27,8 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
   const [profiles, setProfiles] = useState<TagProfile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [policySortDir, setPolicySortDir] = useState<SortDirection>(() => loadSortDirection("tag-policies"));
+  const [profileSortDir, setProfileSortDir] = useState<SortDirection>(() => loadSortDirection("tag-profiles"));
 
   // Profile form state
   const [showProfileForm, setShowProfileForm] = useState(false);
@@ -269,20 +271,22 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
               Platform tags are required for all resources. Custom tags are optional and can be included in profiles.
             </p>
           </div>
-          {!readOnly && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="shrink-0 ml-4"
-              onClick={() => {
-                resetPolicyForm();
-                setShowPolicyForm(true);
-              }}
-            >
-              <Plus className="h-3.5 w-3.5 mr-1" />
-              Add Custom Tag
-            </Button>
-          )}
+          <div className="flex items-center gap-2 shrink-0 ml-4">
+            <SortButton direction={policySortDir} onClick={() => setPolicySortDir(toggleSortDirection("tag-policies", policySortDir))} />
+            {!readOnly && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  resetPolicyForm();
+                  setShowPolicyForm(true);
+                }}
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Add Custom Tag
+              </Button>
+            )}
+          </div>
         </div>
 
         {showPolicyForm && (
@@ -354,7 +358,10 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
           <SortableCardGrid
             items={tagPolicies}
             getId={(p) => p.id.toString()}
+            getName={(p) => p.key}
             storageKey="tag-policies"
+            sortDirection={policySortDir}
+            onSortDirectionChange={(d) => { if (d) { setPolicySortDir(d); saveSortDirection("tag-policies", d); } }}
             className="grid gap-2 md:grid-cols-2 lg:grid-cols-3"
             renderItem={(policy) =>
               policy.designation === "platform:required" ? (
@@ -453,17 +460,19 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
               Tag profiles are named sets of tag values applied to resources deployed by Loom.
             </p>
           </div>
-          {!readOnly && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="shrink-0 ml-4"
-              onClick={startCreateProfile}
-            >
-              <Plus className="h-3.5 w-3.5 mr-1" />
-              Add Profile
-            </Button>
-          )}
+          <div className="flex items-center gap-2 shrink-0 ml-4">
+            <SortButton direction={profileSortDir} onClick={() => setProfileSortDir(toggleSortDirection("tag-profiles", profileSortDir))} />
+            {!readOnly && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={startCreateProfile}
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Add Profile
+              </Button>
+            )}
+          </div>
         </div>
 
         {showProfileForm && (
@@ -581,7 +590,10 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
           <SortableCardGrid
             items={profiles}
             getId={(p) => p.id.toString()}
+            getName={(p) => p.name}
             storageKey="tag-profiles"
+            sortDirection={profileSortDir}
+            onSortDirectionChange={(d) => { if (d) { setProfileSortDir(d); saveSortDirection("tag-profiles", d); } }}
             className="grid gap-2 md:grid-cols-2 lg:grid-cols-3"
             renderItem={(profile) => (
               <Card className="relative py-3 gap-1">

@@ -43,7 +43,8 @@ frontend/
 │   │   └── useDeployment.ts    # Agent config, credential providers, integrations hooks
 │   ├── components/
 │   │   ├── ui/                 # shadcn primitives + searchable-select.tsx + multi-select.tsx + add-filter-dropdown.tsx
-│   │   ├── SortableCardGrid.tsx — Drag-to-reorder card grid using @dnd-kit, localStorage persistence
+│   │   ├── SortableCardGrid.tsx — Drag-to-reorder card grid using @dnd-kit, default alphabetical sort, SortButton, localStorage persistence
+│   │   ├── SortableTableHead.tsx — Clickable sortable table column headers with arrow indicators
 │   │   ├── AgentCard.tsx       # Agent summary card with refresh + Trash2 icon deletion
 │   │   ├── AgentRegistrationForm.tsx  # Tabbed form: ARN registration + agent deployment
 │   │   ├── JsonConfigSection.tsx     # Shared collapsible JSON import/export section
@@ -253,10 +254,10 @@ Full deployment form with sections:
 
 **Content:**
 - `SecurityAdminPage` with sections for:
-  - **Managed Roles**: list, create (import existing / wizard), view policy document, delete
-  - **Authorizer Configs**: list, create (Cognito type with pool selection and auto-populated discovery URL), update, delete
+  - **Managed Roles**: list, create (import existing / wizard), view policy document, delete. Uses `SortableCardGrid` with drag-to-reorder (storage key `security-roles`), full-width single-column layout (role cards contain long ARNs and expandable policy documents), default alphabetical sort by role name, and A-Z/Z-A sort toggle.
+  - **Authorizer Configs**: list, create (Cognito type with pool selection and auto-populated discovery URL), update, delete. Uses `SortableCardGrid` with drag-to-reorder (storage key `security-authorizers`), default alphabetical sort by config name, and A-Z/Z-A sort toggle.
   - **Authorizer Credentials**: per-config credential management (add label + client_id + client_secret, list, delete). Credential form uses 1/4 / 1/4 / 1/2 field widths. Authorizer type displayed as "Amazon Cognito" for cognito type.
-  - **Permission Requests**: create requests for additional IAM permissions, review (approve/deny) with role application
+  - **Permission Requests**: create requests for additional IAM permissions, review (approve/deny) with role application. Uses `SortableCardGrid` with drag-to-reorder (storage key `security-permissions`), default alphabetical sort by role name, and A-Z/Z-A sort toggle.
 
 ---
 
@@ -404,8 +405,16 @@ Model selection uses `SearchableSelect` with group headers (Anthropic / Amazon).
 
 ThemeContext manages theme state with localStorage persistence. Latte uses `:root` variables (no class); all other themes use CSS class selectors on `<html>`. The `@custom-variant dark` includes all dark theme classes. Light themes have darkened foreground/muted-foreground/border for readability; dark themes have brightened values. Badge `default` and `secondary` variants include `border-border` for visibility across all themes.
 
-### Drag-to-Reorder Card Grid
+### Drag-to-Reorder Card Grid with Alphabetical Sorting
 `SortableCardGrid` uses @dnd-kit/core + @dnd-kit/sortable for drag-and-drop reordering of cards within grid sections. Order is persisted to localStorage keyed by `storageKey`. Uses `PointerSensor` with 8px activation distance, `rectSortingStrategy`, and `closestCenter` collision detection.
+
+**Default alphabetical sorting:** All cards are sorted alphabetically (case-insensitive, A-Z) on initial load when no persisted custom order exists. The `getName` prop extracts the display name from each item for sorting. New items not in a persisted order are sorted alphabetically among themselves and appended after persisted items.
+
+**Sort toggle control:** A standalone `SortButton` component (ArrowDownAZ/ArrowUpAZ icons) is placed inline with each section header, next to "Add" buttons. Sort direction is controlled by the parent component and persisted to localStorage per grid (keyed as `loom-sort-${storageKey}`). `SortableCardGrid` accepts `sortDirection` as a controlled prop. After applying a sort option, drag-to-reorder still works — once the user drags a card, the new order becomes the custom order, the sort direction is cleared via the `onSortDirectionChange(null)` callback, and the custom order is persisted. Exported helpers: `loadSortDirection()`, `saveSortDirection()`, `toggleSortDirection()`.
+
+**Table view column sorting:** Pages with table views (CatalogPage, AgentListPage, MemoryManagementPanel) use `SortableTableHead` for clickable column headers. Clicking a column header sorts by that column (ascending); clicking again reverses to descending. An arrow indicator (ArrowUp/ArrowDown) shows the active sort column and direction. The `sortRows()` helper provides generic multi-column sorting with support for both string and numeric values.
+
+**Applied to all card grids:** CatalogPage (agents, memories), AgentListPage (agents), MemoryManagementPanel (memories), TaggingPage (policies, profiles), RoleManagementPanel (roles, full-width single-column), AuthorizerManagementPanel (authorizers), PermissionRequestsPanel (permissions).
 
 ### Tailwind CSS v4 (Vite Plugin)
 Using the `@tailwindcss/vite` plugin instead of PostCSS. Configuration is handled via CSS `@theme` blocks in `index.css`.
