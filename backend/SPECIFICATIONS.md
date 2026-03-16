@@ -337,7 +337,8 @@ The `/api/auth/config` endpoint returns only the pool ID and region. The user cl
 | `POST` | `/api/agents` | Create agent (register by ARN or deploy new runtime). |
 | `GET` | `/api/agents` | List all registered agents. |
 | `GET` | `/api/agents/{agent_id}` | Get metadata for a specific registered agent. |
-| `DELETE` | `/api/agents/{agent_id}?cleanup_aws=true` | Remove agent; optionally delete runtime from AgentCore. |
+| `DELETE` | `/api/agents/{agent_id}?cleanup_aws=true` | Remove agent; optionally initiate async AWS deletion (returns DELETING status). |
+| `DELETE` | `/api/agents/{agent_id}/purge` | Remove agent from local DB only (no AWS call). Used after confirming AWS deletion is complete. |
 | `POST` | `/api/agents/{agent_id}/refresh` | Re-fetch metadata from AgentCore and update the local record. |
 | `POST` | `/api/agents/{agent_id}/redeploy` | Redeploy an agent with current config. |
 | `GET` | `/api/agents/roles` | List IAM roles suitable for AgentCore. |
@@ -346,6 +347,13 @@ The `/api/auth/config` endpoint returns only the pool ID and region. The user cl
 | `GET` | `/api/agents/defaults` | Get configurable defaults (idle timeout, max lifetime). |
 | `PUT` | `/api/agents/{agent_id}/config` | Update agent configuration entries. |
 | `GET` | `/api/agents/{agent_id}/config` | Get agent configuration entries. |
+
+**`DELETE /api/agents/{agent_id}` behavior:**
+- When `cleanup_aws=false` or agent has no `runtime_id`: immediately deletes from local DB, returns the `AgentResponse` with HTTP 200.
+- When `cleanup_aws=true` and agent has a `runtime_id`: initiates async deletion (endpoint + runtime + Secrets Manager cleanup), marks agent as `status="DELETING"`, `deployment_status="removing"`, returns the `AgentResponse` with HTTP 200. The frontend polls via the status endpoint and uses purge to clean up locally after AWS confirms deletion (404).
+
+**`DELETE /api/agents/{agent_id}/purge`:**
+Removes the agent record from the local database without any AWS API call. Used by the frontend after confirming that AWS deletion is complete (404 on status poll). Returns 204 No Content.
 
 **`POST /api/agents` register request body:**
 ```json
