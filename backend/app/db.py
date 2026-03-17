@@ -74,6 +74,9 @@ def _migrate_add_columns(eng) -> None:
         ("managed_roles", "tags", "TEXT"),
         ("authorizer_configs", "tags", "TEXT"),
         ("a2a_agents", "agentcore_session_id", "VARCHAR"),
+        ("invocations", "input_tokens", "INTEGER"),
+        ("invocations", "output_tokens", "INTEGER"),
+        ("invocations", "estimated_cost", "REAL"),
     ]
 
     for table, column, col_type in migrations:

@@ -25,6 +25,12 @@ export interface AgentResponse {
   model_id: string | null;
   deployed_at: string | null;
   tags: Record<string, string>;
+  cost_summary: {
+    total_input_tokens: number;
+    total_output_tokens: number;
+    total_estimated_cost: number;
+    total_invocations: number;
+  } | null;
 }
 
 export interface AgentRegisterRequest {
@@ -162,6 +168,9 @@ export interface InvocationResponse {
   prompt_text: string | null;
   thinking_text: string | null;
   response_text: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  estimated_cost: number | null;
   created_at: string | null;
 }
 
@@ -371,6 +380,9 @@ export interface SSESessionEnd {
   client_duration_ms: number;
   cold_start_latency_ms: number | null;
   agent_start_time: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  estimated_cost: number | null;
 }
 
 export interface SSEError {
@@ -584,4 +596,37 @@ export interface A2aAccessUpdateRequest {
     access_level: "all_skills" | "selected_skills";
     allowed_skill_ids?: string[];
   }>;
+}
+
+// Pricing types
+export interface ModelPricing {
+  model_id: string;
+  display_name: string;
+  group: string;
+  max_tokens: number;
+  input_price_per_1k_tokens: number;
+  output_price_per_1k_tokens: number;
+  pricing_as_of: string;
+}
+
+// Cost dashboard types
+export interface AgentCostSummary {
+  agent_id: number;
+  agent_name: string | null;
+  model_id: string | null;
+  total_invocations: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_estimated_cost: number;
+  avg_cost_per_invocation: number;
+}
+
+export interface CostDashboardResponse {
+  group: string | null;
+  days: number;
+  total_invocations: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_estimated_cost: number;
+  agents: AgentCostSummary[];
 }

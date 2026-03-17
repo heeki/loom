@@ -180,7 +180,7 @@ Groups related invocations. Uses `session_id` (UUID string) as the primary key â
 
 ### `invocations`
 
-Stores per-invocation timing measurements and status. Fields include `client_invoke_time`, `client_done_time`, `agent_start_time`, `cold_start_latency_ms`, `client_duration_ms`, and `status`. Prompt text, thinking text, and response text are stored per invocation.
+Stores per-invocation timing measurements, token usage, and status. Fields include `client_invoke_time`, `client_done_time`, `agent_start_time`, `cold_start_latency_ms`, `client_duration_ms`, `input_tokens`, `output_tokens`, `estimated_cost`, and `status`. Prompt text, thinking text, and response text are stored per invocation. Token counts use a 4-character-per-token heuristic; cost is computed from per-model pricing data.
 
 ## API Endpoints
 
@@ -199,6 +199,7 @@ Stores per-invocation timing measurements and status. Fields include `client_inv
 | `GET` | `/api/agents/roles` | List IAM roles for AgentCore |
 | `GET` | `/api/agents/cognito-pools` | List Cognito user pools |
 | `GET` | `/api/agents/models` | List supported models (with display name and group) |
+| `GET` | `/api/agents/models/pricing` | List models with pricing metadata |
 | `GET` | `/api/agents/defaults` | Get configurable defaults (idle timeout, max lifetime) |
 
 ### Security Administration
@@ -239,6 +240,12 @@ Stores per-invocation timing measurements and status. Fields include `client_inv
 | `POST` | `/api/settings/tag-profiles` | Create a tag profile |
 | `PUT` | `/api/settings/tag-profiles/{profile_id}` | Update a tag profile |
 | `DELETE` | `/api/settings/tag-profiles/{profile_id}` | Delete a tag profile |
+
+### Cost Dashboard
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/dashboard/costs` | Aggregate cost data across agents (group filter, time-range filter) |
 
 ### Authentication
 

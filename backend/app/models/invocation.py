@@ -25,6 +25,11 @@ class Invocation(Base):
     cold_start_latency_ms = Column(Float, nullable=True)
     client_duration_ms = Column(Float, nullable=True)
 
+    # Token usage and cost
+    input_tokens = Column(Integer, nullable=True)
+    output_tokens = Column(Integer, nullable=True)
+    estimated_cost = Column(Float, nullable=True)
+
     # Invocation status
     status = Column(String, nullable=False, default="pending")  # pending, streaming, complete, error
     error_message = Column(Text, nullable=True)
@@ -50,6 +55,9 @@ class Invocation(Base):
             "agent_start_time": self.agent_start_time,
             "cold_start_latency_ms": self.cold_start_latency_ms,
             "client_duration_ms": self.client_duration_ms,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "estimated_cost": self.estimated_cost,
             "status": self.status,
             "error_message": self.error_message,
             "prompt_text": self.prompt_text,

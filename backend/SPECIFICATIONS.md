@@ -343,6 +343,9 @@ Each session contains one or more invocations. Timing measurements and latency d
 | `agent_start_time` | REAL | Unix timestamp parsed from "Start time:" in CloudWatch logs |
 | `cold_start_latency_ms` | REAL | `(agent_start_time - client_invoke_time) * 1000` |
 | `client_duration_ms` | REAL | `(client_done_time - client_invoke_time) * 1000` |
+| `input_tokens` | INTEGER | Estimated input token count (4 chars/token heuristic) |
+| `output_tokens` | INTEGER | Estimated output token count (4 chars/token heuristic) |
+| `estimated_cost` | REAL | Estimated cost based on model pricing |
 | `status` | TEXT NOT NULL | `pending`, `streaming`, `complete`, `error` |
 | `error_message` | TEXT | Error detail if status is `error` |
 | `created_at` | DATETIME NOT NULL | Invocation creation timestamp |
@@ -398,6 +401,7 @@ The `/api/auth/config` endpoint returns only the pool ID and region. The user cl
 | `GET` | `/api/agents/roles` | List IAM roles suitable for AgentCore. |
 | `GET` | `/api/agents/cognito-pools` | List Cognito user pools. |
 | `GET` | `/api/agents/models` | List supported foundation models (with display name and group). |
+| `GET` | `/api/agents/models/pricing` | List models with pricing metadata (input/output price per 1K tokens). |
 | `GET` | `/api/agents/defaults` | Get configurable defaults (idle timeout, max lifetime). |
 | `PUT` | `/api/agents/{agent_id}/config` | Update agent configuration entries. |
 | `GET` | `/api/agents/{agent_id}/config` | Get agent configuration entries. |
@@ -747,13 +751,25 @@ event: chunk
 data: {"text": "Hello! I am your agent."}
 
 event: session_end
-data: {"session_id": "uuid-...", "invocation_id": "uuid-...", "qualifier": "DEFAULT", "client_invoke_time": 1708000000.123, "client_done_time": 1708000002.456, "client_duration_ms": 2333.0, "cold_start_latency_ms": 500.0, "agent_start_time": 1708000000.623}
+data: {"session_id": "uuid-...", "invocation_id": "uuid-...", "qualifier": "DEFAULT", "client_invoke_time": 1708000000.123, "client_done_time": 1708000002.456, "client_duration_ms": 2333.0, "cold_start_latency_ms": 500.0, "agent_start_time": 1708000000.623, "input_tokens": 25, "output_tokens": 150, "estimated_cost": 0.001125}
 
 event: error
 data: {"message": "Invocation failed: ..."}
 ```
 
 The `has_token` and `token_source` fields in `session_start` indicate whether an OAuth token was used for the invocation.
+
+### Cost Dashboard
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/dashboard/costs` | Aggregate cost data across agents. Supports `group` (loom:group tag filter) and `days` (time range: 7, 30, 90, or 0 for all) query parameters. Non-super-admins are restricted to their own group. Returns per-agent cost breakdown with totals. |
+
+**Token estimation:** AgentCore does not expose token counts. A heuristic of 4 characters per token is applied to both prompt and response text. Cost is computed as `(input_tokens / 1000 * input_price) + (output_tokens / 1000 * output_price)` using per-model pricing data from `SUPPORTED_MODELS`.
+
+**Model pricing:** Each entry in `SUPPORTED_MODELS` includes `input_price_per_1k_tokens`, `output_price_per_1k_tokens`, and `pricing_as_of` fields. `AGENTCORE_RUNTIME_PRICING` tracks CPU ($0.0895/vCPU-hour) and Memory ($0.00945/GB-hour) rates.
+
+**Agent cost summary:** `AgentResponse` includes a computed `cost_summary` field aggregating `total_input_tokens`, `total_output_tokens`, `total_estimated_cost`, and `total_invocations` across all invocations for the agent.
 
 ### CloudWatch Logs
 

@@ -28,12 +28,13 @@ import { SettingsPage } from "@/pages/SettingsPage";
 import { TaggingPage } from "@/pages/TaggingPage";
 import { McpServersPage } from "@/pages/McpServersPage";
 import { A2aAgentsPage } from "@/pages/A2aAgentsPage";
+import { CostDashboardPage } from "@/pages/CostDashboardPage";
 import type { SessionResponse, InvocationResponse } from "@/api/types";
 import { AuthProvider, useAuth, type Scope } from "@/contexts/AuthContext";
 import { LoginPage } from "@/pages/LoginPage";
-import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings, Eye, Tags } from "lucide-react";
+import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings, Eye, Tags, DollarSign } from "lucide-react";
 
-type Persona = "catalog" | "security" | "builder" | "memory" | "tagging" | "settings" | "mcp" | "a2a";
+type Persona = "catalog" | "security" | "builder" | "memory" | "tagging" | "settings" | "mcp" | "a2a" | "costs";
 
 const GROUP_SCOPES: Record<string, Scope[]> = {
   "super-admins": [
@@ -358,6 +359,14 @@ function AppContent() {
               onClick={() => setActivePersona("a2a")}
             />
           )}
+          {effectiveHasScope("catalog:read") && (
+            <SidebarItem
+              icon={DollarSign}
+              label="Costs"
+              active={activePersona === "costs"}
+              onClick={() => setActivePersona("costs")}
+            />
+          )}
           <SidebarItem
             icon={Settings}
             label="Settings"
@@ -514,6 +523,9 @@ function AppContent() {
           {activePersona === "mcp" && <McpServersPage viewMode={mcpViewMode} onViewModeChange={setMcpViewMode} readOnly={!effectiveHasScope("mcp:write")} />}
           {activePersona === "a2a" && <A2aAgentsPage viewMode={a2aViewMode} onViewModeChange={setA2aViewMode} readOnly={!effectiveHasScope("a2a:write")} />}
           {activePersona === "settings" && <SettingsPage />}
+          {activePersona === "costs" && (
+            <CostDashboardPage readOnly={!effectiveHasScope("catalog:write")} />
+          )}
         </main>
       </div>
 

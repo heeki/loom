@@ -100,18 +100,22 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
             <CardTitle className="text-sm font-medium truncate">
               {agent.name ?? agent.runtime_id}
             </CardTitle>
-            {agent.protocol && (
-              <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
-                {agent.protocol}
+            {agent.status && agent.status !== "READY" && (
+              <Badge variant={statusVariant(agent.status)} className="text-[10px] px-1.5 py-0 shrink-0">
+                {agent.status}
               </Badge>
             )}
-            <Badge variant={statusVariant(agent.status)} className="text-[10px] px-1.5 py-0 shrink-0">
-              {agent.status ?? "unknown"}
-            </Badge>
             {agent.active_session_count > 0 && (
               <span className="inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-primary text-primary-foreground text-[10px] font-medium shrink-0">
                 {agent.active_session_count}
               </span>
+            )}
+            {agent.cost_summary && agent.cost_summary.total_estimated_cost > 0 && (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0 font-mono">
+                ${agent.cost_summary.total_estimated_cost < 0.01
+                  ? agent.cost_summary.total_estimated_cost.toFixed(6)
+                  : agent.cost_summary.total_estimated_cost.toFixed(4)}
+              </Badge>
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">

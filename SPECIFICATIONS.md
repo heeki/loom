@@ -389,7 +389,22 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - JSON import/export: agent deploy form supports `a2a_agents` and `memories` arrays (names) in JSON configuration alongside `mcp_servers`.
 - 26 backend tests covering CRUD operations, Agent Card fetching, skill sync, card refresh, secret exclusion, OAuth2 validation, access rules, and cascade delete.
 
-### Phase 15 — Advanced Operations
+### Phase 15 — Token Usage Tracking and Cost Display *(Complete)*
+- Backend schema: `input_tokens`, `output_tokens`, `estimated_cost` columns added to `invocations` table via SQLAlchemy migration (`_migrate_add_columns`).
+- Token estimation: 4 characters per token heuristic used since AgentCore doesn't expose token counts directly. Applied to both prompt and response text.
+- Cost calculation: `(input_tokens / 1000 * input_price_per_1k_tokens) + (output_tokens / 1000 * output_price_per_1k_tokens)` using per-model pricing data.
+- Model pricing metadata: `SUPPORTED_MODELS` extended with `input_price_per_1k_tokens`, `output_price_per_1k_tokens`, and `pricing_as_of` fields for all models (Anthropic and Amazon).
+- AgentCore Runtime pricing constant: `AGENTCORE_RUNTIME_PRICING` tracks CPU ($0.0895/vCPU-hour) and Memory ($0.00945/GB-hour) rates for future runtime cost calculation.
+- New endpoints: `GET /api/agents/models/pricing` returns models with pricing metadata; `GET /api/dashboard/costs` provides cost aggregation with group filtering, time-range filtering (7d/30d/90d/all), and per-agent breakdown.
+- Cost summary in responses: `AgentResponse` includes `cost_summary` field with `total_input_tokens`, `total_output_tokens`, `total_estimated_cost`, and `total_invocations`.
+- SSE streaming: `session_end` event includes token counts and estimated cost for immediate display after invocation completes.
+- Database integrity: `PRAGMA foreign_keys=ON` added to all test engines for proper SQLite FK enforcement. Explicit cascade delete for invocations before sessions to prevent FK constraint violations.
+- Frontend invocation metrics: InvocationTable expanded to 7 columns — Client Invoke, Agent Start, Cold Start, Duration, Input Tokens, Output Tokens, Est. Cost — all displayed in a single row.
+- Frontend agent cards: cost badge displayed when `total_estimated_cost > 0`. READY status badge hidden to reduce clutter. Memory cards hide ACTIVE status badge.
+- Frontend cost dashboard: new `CostDashboardPage` with time-range selector (7d/30d/90d/All Time), summary cards (Total Cost, Total Invocations, Avg Cost/Invocation, Active Agents), and per-agent cost breakdown table with sortable columns.
+- Costs sidebar item: new navigation entry (above Settings) visible to users with `catalog:read` scope.
+
+### Phase 16 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

@@ -32,7 +32,8 @@ frontend/
 │   │   ├── a2a.ts              # A2A agent CRUD, test connection, card refresh, access
 │   │   ├── memories.ts         # Memory resource CRUD + refresh
 │   │   ├── security.ts         # Security admin: roles, authorizers, credentials, permissions
-│   │   └── settings.ts        # Settings API: tag policy + tag profile CRUD
+│   │   ├── settings.ts        # Settings API: tag policy + tag profile CRUD
+│   │   └── costs.ts           # Cost dashboard + model pricing API
 │   ├── contexts/
 │   │   ├── AuthContext.tsx      # Cognito auth provider (login, logout, token refresh)
 │   │   ├── TimezoneContext.tsx  # Timezone preference provider + hook
@@ -65,9 +66,9 @@ frontend/
 │   │   ├── ResourceTagFields.tsx       # Shared tag profile selector + tag resolution
 │   │   ├── DeploymentPanel.tsx # Deployment details panel
 │   │   ├── InvokePanel.tsx     # Qualifier select, credential select, prompt input, invoke/cancel
-│   │   ├── LatencySummary.tsx  # Timing breakdown
+│   │   ├── LatencySummary.tsx  # Invocation metrics (timing + token usage + cost)
 │   │   ├── SessionTable.tsx    # Clickable session list
-│   │   ├── InvocationTable.tsx # Invocation timing data
+│   │   ├── InvocationTable.tsx # Invocation timing data + token/cost columns
 │   │   └── LogViewer.tsx       # Scrollable log viewer
 │   ├── pages/
 │   │   ├── AgentListPage.tsx   # Agents persona: registration form + agent grid
@@ -80,6 +81,7 @@ frontend/
 │   │   ├── MemoryManagementPage.tsx # Memory persona: memory resource management
 │   │   ├── TaggingPage.tsx         # Tagging persona: tag policy + tag profile CRUD
 │   │   ├── SettingsPage.tsx        # Settings persona: display preferences
+│   │   ├── CostDashboardPage.tsx  # Cost dashboard with time-range selector and per-agent breakdown
 │   │   └── SessionDetailPage.tsx  # Session metadata, invocations, logs
 │   ├── lib/
 │   │   ├── utils.ts            # shadcn cn() utility
@@ -117,6 +119,7 @@ The app uses a persona-based single-page architecture with a sidebar for workflo
 | Settings | Settings | Manage display preferences | Always visible | |
 | MCP Servers | Network | Register and manage MCP servers, tools, and access control | `mcp:read` or `mcp:write` | |
 | A2A Agents | Users | Register and manage A2A agents, view Agent Cards, and control access | `a2a:read` or `a2a:write` | |
+| Costs | DollarSign | Cost dashboard with token usage and cost aggregation | `catalog:read` | |
 
 Sidebar items are conditionally rendered based on the user's scopes derived from their Cognito group membership. When auth is not configured, all items are visible.
 
@@ -631,6 +634,15 @@ The invoke panel's credential dropdown includes a "Manual token" sentinel value.
 | View | Persona | Description |
 |------|---------|-------------|
 | A2aAgentsPage | A2A Agents | A2A agent CRUD, agent detail with Agent Card and Access tabs, card/table views |
+| CostDashboardPage | Costs | Cost dashboard with time-range selector (7d/30d/90d/All Time), summary cards (Total Cost, Invocations, Input Tokens, Output Tokens), and per-agent cost breakdown table with sortable columns |
+
+### Token Usage and Cost Display
+
+- **LatencySummary** renamed to "Invocation Metrics": single-row layout with 7 metrics — Client Invoke, Agent Start, Cold Start, Duration, Input Tokens, Output Tokens, Est. Cost.
+- **InvocationTable**: 3 additional columns — Input Tokens, Output Tokens, Est. Cost with formatting helpers.
+- **AgentCard**: READY status badge hidden; cost badge shown when `total_estimated_cost > 0`.
+- **MemoryCard**: ACTIVE status badge hidden for visual cleanliness.
+- **CostDashboardPage**: time-range selector, summary metric cards with compact padding, sortable agent cost table using `SortableTableHead`.
 
 ---
 

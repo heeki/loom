@@ -54,17 +54,24 @@ router = APIRouter(prefix="/api/agents", tags=["agents"])
 DEFAULT_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 SUPPORTED_MODELS = [
-    {"model_id": "us.anthropic.claude-opus-4-6-v1", "display_name": "Claude Opus 4.6", "group": "Anthropic", "max_tokens": 16384},
-    {"model_id": "us.anthropic.claude-sonnet-4-6", "display_name": "Claude Sonnet 4.6", "group": "Anthropic", "max_tokens": 16384},
-    {"model_id": "us.anthropic.claude-opus-4-5-20251101-v1:0", "display_name": "Claude Opus 4.5", "group": "Anthropic", "max_tokens": 16384},
-    {"model_id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "display_name": "Claude Sonnet 4.5", "group": "Anthropic", "max_tokens": 16384},
-    {"model_id": "us.anthropic.claude-haiku-4-5-20251001-v1:0", "display_name": "Claude Haiku 4.5", "group": "Anthropic", "max_tokens": 8192},
-    {"model_id": "us.amazon.nova-2-lite-v1:0", "display_name": "Nova 2 Lite", "group": "Amazon", "max_tokens": 5120},
-    {"model_id": "us.amazon.nova-premier-v1:0", "display_name": "Nova Premier", "group": "Amazon", "max_tokens": 5120},
-    {"model_id": "us.amazon.nova-pro-v1:0", "display_name": "Nova Pro", "group": "Amazon", "max_tokens": 5120},
-    {"model_id": "us.amazon.nova-lite-v1:0", "display_name": "Nova Lite", "group": "Amazon", "max_tokens": 5120},
-    {"model_id": "us.amazon.nova-micro-v1:0", "display_name": "Nova Micro", "group": "Amazon", "max_tokens": 5120},
+    {"model_id": "us.anthropic.claude-opus-4-6-v1", "display_name": "Claude Opus 4.6", "group": "Anthropic", "max_tokens": 16384, "input_price_per_1k_tokens": 0.015, "output_price_per_1k_tokens": 0.075, "pricing_as_of": "2025-06-01"},
+    {"model_id": "us.anthropic.claude-sonnet-4-6", "display_name": "Claude Sonnet 4.6", "group": "Anthropic", "max_tokens": 16384, "input_price_per_1k_tokens": 0.003, "output_price_per_1k_tokens": 0.015, "pricing_as_of": "2025-06-01"},
+    {"model_id": "us.anthropic.claude-opus-4-5-20251101-v1:0", "display_name": "Claude Opus 4.5", "group": "Anthropic", "max_tokens": 16384, "input_price_per_1k_tokens": 0.015, "output_price_per_1k_tokens": 0.075, "pricing_as_of": "2025-06-01"},
+    {"model_id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "display_name": "Claude Sonnet 4.5", "group": "Anthropic", "max_tokens": 16384, "input_price_per_1k_tokens": 0.003, "output_price_per_1k_tokens": 0.015, "pricing_as_of": "2025-06-01"},
+    {"model_id": "us.anthropic.claude-haiku-4-5-20251001-v1:0", "display_name": "Claude Haiku 4.5", "group": "Anthropic", "max_tokens": 8192, "input_price_per_1k_tokens": 0.0008, "output_price_per_1k_tokens": 0.004, "pricing_as_of": "2025-06-01"},
+    {"model_id": "us.amazon.nova-2-lite-v1:0", "display_name": "Nova 2 Lite", "group": "Amazon", "max_tokens": 5120, "input_price_per_1k_tokens": 0.00006, "output_price_per_1k_tokens": 0.00024, "pricing_as_of": "2025-06-01"},
+    {"model_id": "us.amazon.nova-premier-v1:0", "display_name": "Nova Premier", "group": "Amazon", "max_tokens": 5120, "input_price_per_1k_tokens": 0.0025, "output_price_per_1k_tokens": 0.0125, "pricing_as_of": "2025-06-01"},
+    {"model_id": "us.amazon.nova-pro-v1:0", "display_name": "Nova Pro", "group": "Amazon", "max_tokens": 5120, "input_price_per_1k_tokens": 0.0008, "output_price_per_1k_tokens": 0.0032, "pricing_as_of": "2025-06-01"},
+    {"model_id": "us.amazon.nova-lite-v1:0", "display_name": "Nova Lite", "group": "Amazon", "max_tokens": 5120, "input_price_per_1k_tokens": 0.00006, "output_price_per_1k_tokens": 0.00024, "pricing_as_of": "2025-06-01"},
+    {"model_id": "us.amazon.nova-micro-v1:0", "display_name": "Nova Micro", "group": "Amazon", "max_tokens": 5120, "input_price_per_1k_tokens": 0.000035, "output_price_per_1k_tokens": 0.00014, "pricing_as_of": "2025-06-01"},
 ]
+
+# AgentCore Runtime pricing (per-hour rates)
+AGENTCORE_RUNTIME_PRICING = {
+    "cpu_per_vcpu_hour": 0.0895,
+    "memory_per_gb_hour": 0.00945,
+    "pricing_as_of": "2025-06-01",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +169,7 @@ class AgentResponse(BaseModel):
     registered_at: str | None
     last_refreshed_at: str | None
     active_session_count: int
+    cost_summary: dict | None = None
 
 
 class ConfigEntryResponse(BaseModel):
@@ -253,11 +261,32 @@ def _agent_response(agent: Agent, db: Session) -> AgentResponse:
         if ac:
             auth_cfg["name"] = ac.name
 
-    return AgentResponse(
+    # Compute cost summary from invocations
+    total_input = db.query(func.sum(Invocation.input_tokens)).join(
+        InvocationSession, Invocation.session_id == InvocationSession.session_id
+    ).filter(InvocationSession.agent_id == agent.id).scalar() or 0
+    total_output = db.query(func.sum(Invocation.output_tokens)).join(
+        InvocationSession, Invocation.session_id == InvocationSession.session_id
+    ).filter(InvocationSession.agent_id == agent.id).scalar() or 0
+    total_cost = db.query(func.sum(Invocation.estimated_cost)).join(
+        InvocationSession, Invocation.session_id == InvocationSession.session_id
+    ).filter(InvocationSession.agent_id == agent.id).scalar() or 0.0
+    inv_count = db.query(func.count(Invocation.id)).join(
+        InvocationSession, Invocation.session_id == InvocationSession.session_id
+    ).filter(InvocationSession.agent_id == agent.id).scalar() or 0
+
+    result = AgentResponse(
         **agent_dict,
         model_id=model_id,
         active_session_count=compute_active_session_count(agent.id, db)
     )
+    result.cost_summary = {
+        "total_input_tokens": total_input,
+        "total_output_tokens": total_output,
+        "total_estimated_cost": round(total_cost, 6),
+        "total_invocations": inv_count,
+    }
+    return result
 
 
 def _resolve_tags(
@@ -327,6 +356,14 @@ def get_cognito_pools(user: UserInfo = Depends(require_scopes("agent:read"))) ->
 @router.get("/models")
 def get_models(user: UserInfo = Depends(require_scopes("agent:read"))) -> list[dict]:
     """Return list of supported Bedrock model IDs."""
+    return SUPPORTED_MODELS
+
+
+@router.get("/models/pricing")
+def get_model_pricing(
+    user: UserInfo = Depends(require_scopes("agent:read")),
+) -> list[dict]:
+    """Return models with pricing data."""
     return SUPPORTED_MODELS
 
 
@@ -1121,6 +1158,14 @@ def delete_agent(
             delete_secret(secret_arn, agent.region)
 
         result = _agent_response(agent, db)
+        # Delete invocations before sessions to avoid FK constraint violations
+        # when PRAGMA foreign_keys=ON (SQLite) or equivalent DB-level enforcement.
+        session_ids = [
+            s.session_id for s in
+            db.query(InvocationSession.session_id).filter(InvocationSession.agent_id == agent.id).all()
+        ]
+        if session_ids:
+            db.query(Invocation).filter(Invocation.session_id.in_(session_ids)).delete(synchronize_session="fetch")
         db.query(InvocationSession).filter(InvocationSession.agent_id == agent.id).delete()
         db.delete(agent)
         db.flush()
@@ -1209,6 +1254,12 @@ def _delete_agent_background(
     # cascade is bypassed (e.g. stale objects, ID reuse in SQLite).
     db = SessionLocal()
     try:
+        session_ids = [
+            s.session_id for s in
+            db.query(InvocationSession.session_id).filter(InvocationSession.agent_id == agent_id).all()
+        ]
+        if session_ids:
+            db.query(Invocation).filter(Invocation.session_id.in_(session_ids)).delete(synchronize_session="fetch")
         db.query(InvocationSession).filter(InvocationSession.agent_id == agent_id).delete()
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
         if agent:
@@ -1234,7 +1285,13 @@ def purge_agent(
 ) -> None:
     """Remove an agent and its sessions/invocations from the local database (no AWS call)."""
     agent = get_agent_or_404(agent_id, db)
-    # Explicit session cleanup as a safety net alongside the ORM cascade
+    # Delete invocations before sessions to respect FK constraints
+    session_ids = [
+        s.session_id for s in
+        db.query(InvocationSession.session_id).filter(InvocationSession.agent_id == agent_id).all()
+    ]
+    if session_ids:
+        db.query(Invocation).filter(Invocation.session_id.in_(session_ids)).delete(synchronize_session="fetch")
     db.query(InvocationSession).filter(InvocationSession.agent_id == agent_id).delete()
     db.delete(agent)
     db.commit()

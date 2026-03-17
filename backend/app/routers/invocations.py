@@ -56,6 +56,9 @@ class InvocationResponse(BaseModel):
     client_duration_ms: float | None
     status: str
     error_message: str | None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    estimated_cost: float | None = None
     prompt_text: str | None = None
     thinking_text: str | None = None
     response_text: str | None = None
@@ -133,6 +136,17 @@ async def invoke_agent_stream(
     """
     session_id = session.session_id
     invocation_id = invocation.invocation_id
+
+    # Extract model_id for cost calculation
+    config_map = {e.key: e.value for e in agent.config_entries}
+    import json as _json
+    agent_model_id = None
+    config_json_str = config_map.get("AGENT_CONFIG_JSON", "")
+    if config_json_str:
+        try:
+            agent_model_id = _json.loads(config_json_str).get("model_id")
+        except (json.JSONDecodeError, TypeError):
+            pass
 
     # Update invocation with invoke time
     invocation.client_invoke_time = client_invoke_time
@@ -247,6 +261,27 @@ async def invoke_agent_stream(
         invocation.response_text = "".join(response_chunks) if response_chunks else None
         invocation.thinking_text = "\n".join(thinking_chunks) if thinking_chunks else None
 
+        # Token estimation and cost calculation
+        input_tokens = max(1, len(prompt) // 4)
+        output_text = "".join(response_chunks) if response_chunks else ""
+        output_tokens = max(1, len(output_text) // 4)
+
+        estimated_cost = None
+        if agent_model_id:
+            from app.routers.agents import SUPPORTED_MODELS
+            model_pricing = next((m for m in SUPPORTED_MODELS if m["model_id"] == agent_model_id), None)
+            if model_pricing:
+                input_price = model_pricing.get("input_price_per_1k_tokens", 0)
+                output_price = model_pricing.get("output_price_per_1k_tokens", 0)
+                estimated_cost = round(
+                    (input_tokens / 1000 * input_price) + (output_tokens / 1000 * output_price),
+                    6,
+                )
+
+        invocation.input_tokens = input_tokens
+        invocation.output_tokens = output_tokens
+        invocation.estimated_cost = estimated_cost
+
         invocation.status = "complete"
         session.status = "complete"
         completed = True
@@ -262,6 +297,9 @@ async def invoke_agent_stream(
             "client_duration_ms": invocation.client_duration_ms,
             "cold_start_latency_ms": invocation.cold_start_latency_ms,
             "agent_start_time": invocation.agent_start_time,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "estimated_cost": estimated_cost,
         }
 
         yield format_sse_event("session_end", session_end_data)
