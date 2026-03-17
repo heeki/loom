@@ -54,8 +54,9 @@ export interface AgentDeployRequest {
   authorizer_client_id: string | null;
   authorizer_client_secret: string | null;
   memory_enabled: boolean;
+  memory_ids: number[];
   mcp_servers: number[];
-  a2a_agents: unknown[];
+  a2a_agents: number[];
   tags?: Record<string, string>;
 }
 
@@ -500,4 +501,87 @@ export interface ToolInvokeResult {
 export interface TestConnectionResult {
   success: boolean;
   message: string;
+}
+
+// A2A Agent types
+export interface A2aAgent {
+  id: number;
+  base_url: string;
+  name: string;
+  description: string;
+  agent_version: string;
+  documentation_url: string | null;
+  provider_organization: string | null;
+  provider_url: string | null;
+  capabilities: {
+    streaming?: boolean;
+    pushNotifications?: boolean;
+    stateTransitionHistory?: boolean;
+  };
+  authentication_schemes: string[];
+  default_input_modes: string[];
+  default_output_modes: string[];
+  agent_card_raw: Record<string, unknown>;
+  status: "active" | "inactive" | "error";
+  auth_type: "none" | "oauth2";
+  oauth2_well_known_url: string | null;
+  oauth2_client_id: string | null;
+  oauth2_scopes: string | null;
+  has_oauth2_secret: boolean;
+  agentcore_session_id: string | null;
+  last_fetched_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface A2aAgentCreateRequest {
+  base_url: string;
+  name?: string;
+  auth_type?: "none" | "oauth2";
+  oauth2_well_known_url?: string;
+  oauth2_client_id?: string;
+  oauth2_client_secret?: string;
+  oauth2_scopes?: string;
+}
+
+export interface A2aAgentUpdateRequest {
+  base_url?: string;
+  name?: string;
+  status?: "active" | "inactive" | "error";
+  auth_type?: "none" | "oauth2";
+  oauth2_well_known_url?: string;
+  oauth2_client_id?: string;
+  oauth2_client_secret?: string;
+  oauth2_scopes?: string;
+}
+
+export interface A2aAgentSkill {
+  id: number;
+  agent_id: number;
+  skill_id: string;
+  name: string;
+  description: string;
+  tags: string[];
+  examples: string[] | null;
+  input_modes: string[] | null;
+  output_modes: string[] | null;
+  last_refreshed_at: string | null;
+}
+
+export interface A2aAgentAccess {
+  id: number;
+  agent_id: number;
+  persona_id: number;
+  access_level: "all_skills" | "selected_skills";
+  allowed_skill_ids: string[] | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface A2aAccessUpdateRequest {
+  rules: Array<{
+    persona_id: number;
+    access_level: "all_skills" | "selected_skills";
+    allowed_skill_ids?: string[];
+  }>;
 }

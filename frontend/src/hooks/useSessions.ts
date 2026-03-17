@@ -22,7 +22,10 @@ export function useSessions(agentId: number | null) {
     }
   }, [agentId]);
 
+  // Clear stale sessions immediately when the agent changes,
+  // before the new fetch completes.
   useEffect(() => {
+    setSessions([]);
     void fetchSessions();
   }, [fetchSessions]);
 

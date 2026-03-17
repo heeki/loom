@@ -1,33 +1,21 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
-import { testConnection, testConnectionPreCreate } from "@/api/mcp";
+import { testA2aConnection, testA2aConnectionPreCreate } from "@/api/a2a";
 import { JsonConfigSection } from "./JsonConfigSection";
-import type { McpServerCreateRequest, TestConnectionResult } from "@/api/types";
+import type { A2aAgentCreateRequest, TestConnectionResult } from "@/api/types";
 
-interface McpServerFormProps {
-  onSubmit: (data: McpServerCreateRequest) => Promise<void>;
+interface A2aAgentFormProps {
+  onSubmit: (data: A2aAgentCreateRequest) => Promise<void>;
   onCancel: () => void;
-  initialData?: Partial<McpServerCreateRequest> & { id?: number };
+  initialData?: Partial<A2aAgentCreateRequest> & { id?: number };
 }
 
-export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerFormProps) {
+export function A2aAgentForm({ onSubmit, onCancel, initialData }: A2aAgentFormProps) {
   const [name, setName] = useState(initialData?.name ?? "");
-  const [description, setDescription] = useState(initialData?.description ?? "");
-  const [endpointUrl, setEndpointUrl] = useState(initialData?.endpoint_url ?? "");
-  const [transportType, setTransportType] = useState<"sse" | "streamable_http">(
-    initialData?.transport_type ?? "sse",
-  );
+  const [baseUrl, setBaseUrl] = useState(initialData?.base_url ?? "");
   const [authType, setAuthType] = useState<"none" | "oauth2">(initialData?.auth_type ?? "none");
   const [wellKnownUrl, setWellKnownUrl] = useState(initialData?.oauth2_well_known_url ?? "");
   const [clientId, setClientId] = useState(initialData?.oauth2_client_id ?? "");
@@ -38,16 +26,14 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
   const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
 
   const handleSubmit = async () => {
-    if (!name.trim() || !endpointUrl.trim()) return;
+    if (!baseUrl.trim()) return;
     setSubmitting(true);
     try {
-      const request: McpServerCreateRequest = {
-        name: name.trim(),
-        description: description.trim() || undefined,
-        endpoint_url: endpointUrl.trim(),
-        transport_type: transportType,
+      const request: A2aAgentCreateRequest = {
+        base_url: baseUrl.trim(),
         auth_type: authType,
       };
+      if (name.trim()) request.name = name.trim();
       if (authType === "oauth2") {
         if (wellKnownUrl.trim()) request.oauth2_well_known_url = wellKnownUrl.trim();
         if (clientId.trim()) request.oauth2_client_id = clientId.trim();
@@ -61,17 +47,16 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
   };
 
   const handleTest = async () => {
-    if (!endpointUrl.trim()) return;
+    if (!baseUrl.trim()) return;
     setTesting(true);
     setTestResult(null);
     try {
       let result: TestConnectionResult;
       if (initialData?.id) {
-        result = await testConnection(initialData.id);
+        result = await testA2aConnection(initialData.id);
       } else {
-        const config: Parameters<typeof testConnectionPreCreate>[0] = {
-          endpoint_url: endpointUrl.trim(),
-          transport_type: transportType,
+        const config: Parameters<typeof testA2aConnectionPreCreate>[0] = {
+          base_url: baseUrl.trim(),
           auth_type: authType,
         };
         if (authType === "oauth2") {
@@ -80,7 +65,7 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
           if (clientSecret) config.oauth2_client_secret = clientSecret;
           if (scopes.trim()) config.oauth2_scopes = scopes.trim();
         }
-        result = await testConnectionPreCreate(config);
+        result = await testA2aConnectionPreCreate(config);
       }
       setTestResult(result);
     } catch (e) {
@@ -96,12 +81,8 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
         onApply={(json) => {
           try {
             const parsed = JSON.parse(json);
-            if (parsed.name) setName(parsed.name);
-            if (parsed.description !== undefined) setDescription(parsed.description);
-            if (parsed.endpoint_url) setEndpointUrl(parsed.endpoint_url);
-            if (parsed.transport_type && ["sse", "streamable_http"].includes(parsed.transport_type)) {
-              setTransportType(parsed.transport_type);
-            }
+            if (parsed.name !== undefined) setName(parsed.name);
+            if (parsed.base_url) setBaseUrl(parsed.base_url);
             if (parsed.auth_type && ["none", "oauth2"].includes(parsed.auth_type)) {
               setAuthType(parsed.auth_type);
             }
@@ -117,9 +98,7 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
         onExport={() => {
           const result: Record<string, unknown> = {};
           if (name) result.name = name;
-          if (endpointUrl) result.endpoint_url = endpointUrl;
-          result.transport_type = transportType;
-          if (description) result.description = description;
+          if (baseUrl) result.base_url = baseUrl;
           result.auth_type = authType;
           if (authType === "oauth2") {
             if (wellKnownUrl) result.oauth2_well_known_url = wellKnownUrl;
@@ -129,44 +108,25 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
           }
           return JSON.stringify(result, null, 2);
         }}
-        placeholder={'{"name": "...", "endpoint_url": "https://...", "transport_type": "sse", "auth_type": "oauth2", "oauth2_well_known_url": "https://...", "oauth2_client_id": "...", "oauth2_client_secret": "...", "oauth2_scopes": "..."}'}
+        placeholder={'{"name": "...", "base_url": "https://...", "auth_type": "oauth2", "oauth2_well_known_url": "https://...", "oauth2_client_id": "...", "oauth2_client_secret": "...", "oauth2_scopes": "..."}'}
       />
 
       <div className="flex gap-3">
-        <div className="w-1/3 min-w-0">
-          <label className="text-xs text-muted-foreground">Name *</label>
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Server name" />
+        <div className="w-[22%] min-w-0">
+          <label className="text-xs text-muted-foreground">Name</label>
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Display name (optional)" />
         </div>
         <div className="flex-1 min-w-0">
-          <label className="text-xs text-muted-foreground">Endpoint URL *</label>
+          <label className="text-xs text-muted-foreground">Base URL *</label>
           <Input
-            value={endpointUrl}
-            onChange={(e) => setEndpointUrl(e.target.value)}
-            placeholder="https://example.com/mcp"
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder="https://recipe-agent.example.com"
           />
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            The Agent Card will be fetched from &lt;base_url&gt;/.well-known/agent.json
+          </p>
         </div>
-        <div className="w-[180px]">
-          <label className="text-xs text-muted-foreground">Transport</label>
-          <Select value={transportType} onValueChange={(v) => setTransportType(v as "sse" | "streamable_http")}>
-            <SelectTrigger className="w-full text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="sse">SSE</SelectItem>
-              <SelectItem value="streamable_http">Streamable HTTP</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      <div>
-        <label className="text-xs text-muted-foreground">Description</label>
-        <Textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Optional description"
-          rows={2}
-        />
       </div>
 
       <div className="space-y-2">
@@ -194,22 +154,20 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
 
         {authType === "oauth2" && (
           <div className="space-y-2 pl-2 border-l-2 border-border ml-1">
-            <div className="flex gap-3">
-              <div className="flex-1 min-w-0">
-                <label className="text-xs text-muted-foreground">Well-Known URL</label>
-                <Input
-                  value={wellKnownUrl}
-                  onChange={(e) => setWellKnownUrl(e.target.value)}
-                  placeholder="https://auth.example.com/.well-known/openid-configuration"
-                />
-              </div>
+            <div>
+              <label className="text-xs text-muted-foreground">Well-Known URL</label>
+              <Input
+                value={wellKnownUrl}
+                onChange={(e) => setWellKnownUrl(e.target.value)}
+                placeholder="https://auth.example.com/.well-known/openid-configuration"
+              />
             </div>
             <div className="flex gap-3">
-              <div className="flex-1 min-w-0">
+              <div className="w-[25%] min-w-0">
                 <label className="text-xs text-muted-foreground">Client ID</label>
                 <Input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="Client ID" />
               </div>
-              <div className="flex-1 min-w-0">
+              <div className="w-[40%] min-w-0">
                 <label className="text-xs text-muted-foreground">Client Secret</label>
                 <Input
                   type="password"
@@ -218,17 +176,17 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
                   placeholder={initialData?.id ? "(unchanged)" : "Client secret"}
                 />
               </div>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Scopes</label>
-              <Input value={scopes} onChange={(e) => setScopes(e.target.value)} placeholder="openid profile (space-separated)" />
+              <div className="flex-1 min-w-0">
+                <label className="text-xs text-muted-foreground">Scopes</label>
+                <Input value={scopes} onChange={(e) => setScopes(e.target.value)} placeholder="openid profile (space-separated)" />
+              </div>
             </div>
           </div>
         )}
       </div>
 
       <div className="flex items-center gap-2">
-        <Button size="sm" variant="outline" onClick={handleTest} disabled={testing || !endpointUrl.trim()}>
+        <Button size="sm" variant="outline" onClick={handleTest} disabled={testing || !baseUrl.trim()}>
           {testing ? (
             <>
               <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
@@ -246,8 +204,8 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
       </div>
 
       <div className="flex items-center gap-2 pt-2">
-        <Button size="sm" className="min-w-[120px]" onClick={handleSubmit} disabled={submitting || !name.trim() || !endpointUrl.trim()}>
-          {submitting ? (initialData?.id ? "Updating..." : "Creating...") : (initialData?.id ? "Update" : "Create")}
+        <Button size="sm" className="min-w-[120px]" onClick={handleSubmit} disabled={submitting || !baseUrl.trim()}>
+          {submitting ? (initialData?.id ? "Updating..." : "Registering...") : (initialData?.id ? "Update" : "Register")}
         </Button>
         <Button size="sm" variant="ghost" onClick={onCancel}>
           Cancel

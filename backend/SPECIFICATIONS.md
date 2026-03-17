@@ -57,6 +57,7 @@ backend/
 │   │   ├── permission_request.py   # PermissionRequest ORM model
 │   │   ├── memory.py        # Memory ORM model (AgentCore Memory resources)
 │   │   ├── mcp.py           # MCP models: McpServer, McpTool, McpServerAccess
+│   │   ├── a2a.py           # A2A models: A2aAgent, A2aAgentSkill, A2aAgentAccess
 │   │   ├── tag_policy.py    # TagPolicy ORM model (configurable resource tagging)
 │   │   └── tag_profile.py   # TagProfile ORM model (named tag presets)
 │   ├── dependencies/
@@ -65,6 +66,7 @@ backend/
 │   ├── routers/
 │   │   ├── auth.py          # Authentication config endpoint (GET /api/auth/config)
 │   │   ├── agents.py        # Agent CRUD + ARN parsing + log group derivation + tag resolution
+│   │   ├── a2a.py           # A2A agent CRUD, Agent Card, skills, access control
 │   │   ├── settings.py      # Settings endpoints (tag policy CRUD, tag profile CRUD)
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
 │   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
@@ -74,6 +76,7 @@ backend/
 │   │   └── utils.py         # Shared router utilities (get_agent_or_404)
 │   └── services/
 │       ├── agentcore.py     # Bedrock AgentCore API wrapper
+│       ├── a2a.py           # A2A Agent Card fetching, parsing, connection test
 │       ├── cloudwatch.py    # CloudWatch log retrieval and parsing
 │       ├── cognito.py       # Cognito OAuth2 token retrieval (client credentials grant)
 │       ├── credential.py    # AgentCore credential provider management
@@ -90,6 +93,7 @@ backend/
 │   ├── test_agentcore.py    # AgentCore service tests
 │   ├── test_agents.py       # Agent router tests
 │   ├── test_agents_deploy.py # Deployment-specific tests
+│   ├── test_a2a.py          # A2A agent CRUD, Agent Card, skills, access tests
 │   ├── test_cloudwatch.py   # CloudWatch service tests
 │   ├── test_iam.py          # IAM service tests
 │   ├── test_invocations.py  # Invocation router tests
@@ -404,8 +408,8 @@ The `/api/auth/config` endpoint returns only the pool ID and region. The user cl
   1. Deletes non-DEFAULT runtime endpoints (AWS automatically handles DEFAULT endpoints).
   2. Deletes the runtime.
   3. Cleans up Secrets Manager secrets.
-  4. Parses `AGENT_CONFIG_JSON` to extract `integrations.mcp_servers[].auth.credential_provider_name` values.
-  5. Deletes each credential provider via `delete_oauth2_credential_provider`.
+  4. Parses `AGENT_CONFIG_JSON` to extract credential provider names from both `integrations.mcp_servers[].auth.credential_provider_name` and `integrations.a2a_agents[].auth.credential_provider_name`.
+  5. Deletes each credential provider via `delete_credential_provider`.
   6. Polls runtime deletion status (5-second intervals, 30 max attempts).
   7. Purges the agent DB record using `db.flush()` before `db.commit()` for reliable SQLite writes.
 - Returns the `AgentResponse` with `status="DELETING"`, `deployment_status="removing"`, HTTP 200. The frontend polls via the status endpoint and uses purge to clean up locally after AWS confirms deletion (404).
@@ -452,14 +456,22 @@ The `model_id` field is optional on registration and stored as an `AGENT_CONFIG_
 | `authorizer_client_id` | Client ID for token retrieval |
 | `authorizer_client_secret` | Client secret for token retrieval |
 | `memory_enabled` | Whether memory is enabled |
+| `memory_ids` | Memory resource IDs to integrate (from Memory catalog) |
 | `mcp_servers` | MCP server configuration (stored in `AGENT_CONFIG_JSON` as `integrations.mcp_servers`) |
-| `a2a_agents` | A2A agent configuration |
+| `a2a_agents` | A2A agent IDs to integrate (from A2A catalog) |
 | `tags` | Build-time tag values (e.g., `{"team": "aws", "owner": "heeki"}`) |
 
 The `mcp_servers` configuration is stored in the `AGENT_CONFIG_JSON` config entry under `integrations.mcp_servers` as an array. Each MCP server with OAuth2 authentication includes:
 - `auth.credential_provider_name` — Name of the AgentCore credential provider created during deployment
 - `auth.well_known_endpoint` — OAuth2 discovery URL
 - `auth.scopes` — Array of OAuth2 scopes
+
+The `a2a_agents` configuration is stored in the `AGENT_CONFIG_JSON` config entry under `integrations.a2a_agents` as an array. Each A2A agent with OAuth2 authentication includes:
+- `auth.credential_provider_name` — Name of the AgentCore credential provider created during deployment
+- `auth.well_known_endpoint` — OAuth2 discovery URL
+- `auth.scopes` — OAuth2 scopes string
+
+Memory resources are stored in `AGENT_CONFIG_JSON` under `integrations.memory.resources` as an array of `{name, memory_id, arn}` objects. `integrations.memory.enabled` is set to `true` when any memory resources are selected.
 
 **`GET /api/agents` response includes:**
 - `tags` — resolved tags (profile values + policy defaults) stored on the agent record
@@ -651,6 +663,57 @@ When `auth_type` is `oauth2`, `oauth2_well_known_url` and `oauth2_client_id` are
 
 Replaces all existing access rules for the server. Personas not listed have no access (deny by default).
 
+### A2A Agent Management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/a2a/agents` | Register a new A2A agent by base URL (fetches Agent Card). |
+| `GET` | `/api/a2a/agents` | List all registered A2A agents. |
+| `GET` | `/api/a2a/agents/{agent_id}` | Get details of a specific A2A agent. |
+| `PUT` | `/api/a2a/agents/{agent_id}` | Update an A2A agent configuration. |
+| `DELETE` | `/api/a2a/agents/{agent_id}` | Remove an A2A agent (cascades to skills and access rules). |
+| `POST` | `/api/a2a/agents/{agent_id}/test-connection` | Test A2A agent connectivity (fetches Agent Card with optional OAuth2). |
+| `GET` | `/api/a2a/agents/{agent_id}/card` | Get cached raw Agent Card JSON. |
+| `POST` | `/api/a2a/agents/{agent_id}/card/refresh` | Re-fetch Agent Card and sync skills. |
+| `GET` | `/api/a2a/agents/{agent_id}/skills` | Get cached skill list for an agent. |
+| `GET` | `/api/a2a/agents/{agent_id}/access` | Get access control rules for an agent. |
+| `PUT` | `/api/a2a/agents/{agent_id}/access` | Replace all access control rules for an agent. |
+
+**`POST /api/a2a/agents` request body:**
+```json
+{
+  "base_url": "https://recipe-agent.example.com",
+  "auth_type": "oauth2",
+  "oauth2_well_known_url": "https://auth.example.com/.well-known/openid-configuration",
+  "oauth2_client_id": "client-id",
+  "oauth2_client_secret": "client-secret",
+  "oauth2_scopes": "openid profile"
+}
+```
+
+On registration, the backend fetches `<base_url>/.well-known/agent.json` to retrieve the Agent Card. All agent metadata (name, description, version, capabilities, skills) is populated from the card. If the fetch fails, registration is rejected with a descriptive error.
+
+When `auth_type` is `oauth2`, `oauth2_well_known_url` and `oauth2_client_id` are required (validated via Pydantic model validator).
+
+**Security:** `oauth2_client_secret` is write-only — it is never included in GET responses. The response includes `has_oauth2_secret: bool` instead.
+
+**`PUT /api/a2a/agents/{agent_id}/access` request body:**
+```json
+{
+  "rules": [
+    {"persona_id": 1, "access_level": "all_skills"},
+    {"persona_id": 2, "access_level": "selected_skills", "allowed_skill_ids": ["find-recipe"]}
+  ]
+}
+```
+
+Replaces all existing access rules for the agent. Personas not listed have no access (deny by default).
+
+**Data model:**
+- `A2aAgent`: stores base URL, Agent Card fields (name, description, version, provider, capabilities, auth schemes, I/O modes), raw card JSON, OAuth2 config, status, and timestamps.
+- `A2aAgentSkill`: stores skill ID, name, description, tags, examples, and I/O mode overrides. Foreign key to `A2aAgent` with cascade delete.
+- `A2aAgentAccess`: stores persona_id, access_level (`all_skills`/`selected_skills`), and allowed_skill_ids (JSON). Foreign key to `A2aAgent` with cascade delete.
+
 ### Agent Invocation (SSE Streaming)
 
 | Method | Path | Description |
@@ -738,8 +801,8 @@ Handles agent artifact build and runtime lifecycle:
 
 AgentCore credential provider management:
 
-- `create_oauth2_credential_provider(name: str, discovery_url: str, region: str) -> str` — creates an OAuth2 credential provider using the `CustomOauth2` vendor type and returns the credential provider ARN.
-- `delete_oauth2_credential_provider(credential_provider_name: str, region: str)` — deletes an OAuth2 credential provider by name.
+- `create_oauth2_credential_provider(name: str, client_id: str, client_secret: str, auth_server_url: str, region: str, tags: dict | None) -> dict` — creates an OAuth2 credential provider using the `CustomOauth2` vendor type. Retries with exponential backoff (4 retries, delays 2s/4s/8s/16s) on transient failures. Raises on exhaustion.
+- `delete_credential_provider(provider_name: str, region: str)` — deletes an OAuth2 credential provider by name.
 
 ### `services/jwt_validator.py`
 
@@ -770,6 +833,7 @@ Core authentication and authorization module. Provides:
 | `security.py` | `security:read` | `security:write` |
 | `settings.py` | `settings:read` | `settings:write` |
 | `mcp.py` | `mcp:read` | `mcp:write` |
+| `a2a.py` | `a2a:read` | `a2a:write` |
 | `auth.py` | Public (no guard) | — |
 
 **Tag-based resource isolation (R5):** Users in the `users` group only see agents and memories tagged with `loom:group=users`. Demo-admins are restricted at the data layer: create/delete operations enforce that the resource's `loom:group` tag matches `demo-admins`.
@@ -780,6 +844,15 @@ Stub service for MCP server integration:
 
 - `test_mcp_connection(server) -> dict` — Returns success/failure with message. Validates OAuth2 well-known URL when auth_type is `oauth2`. Actual MCP client connectivity is future work.
 - `fetch_mcp_tools(server) -> list[dict]` — Returns empty list (stub). A real implementation would connect to the server and call `tools/list`.
+
+### `services/a2a.py`
+
+A2A Agent Card fetching and connection testing:
+
+- `fetch_agent_card(base_url: str, auth_headers: dict | None) -> dict` — fetches `<base_url>/.well-known/agent.json` and returns the raw JSON. Raises on HTTP errors or invalid JSON.
+- `parse_agent_card(card_json: dict) -> dict` — extracts structured fields (name, description, version, provider, capabilities, authentication, skills, etc.) from raw Agent Card JSON.
+- `sync_skills(db: Session, agent_id: int, skills: list[dict])` — synchronizes skills from Agent Card to the database. Adds new skills, removes stale ones.
+- `test_a2a_connection(agent) -> dict` — acquires OAuth2 token if configured and fetches the Agent Card, returning success/failure with details.
 
 ### `services/secrets.py`
 
@@ -817,12 +890,12 @@ Deployment runs asynchronously via FastAPI `BackgroundTasks` with progressive `d
 1. User submits a deploy form with agent configuration (model and IAM role are required).
 2. Backend creates the agent record with `deployment_status="initializing"` and returns immediately with HTTP 202.
 3. Background task progresses through deployment phases:
-   - **`creating_credentials`**: For each MCP server with OAuth2 auth, calls `create_oauth2_credential_provider` (vendor=`CustomOauth2`, using `discoveryUrl` from MCP config). Stores credential provider names in `AGENT_CONFIG_JSON` under `integrations.mcp_servers[].auth.credential_provider_name`, along with `well_known_endpoint` and `scopes`.
+   - **`creating_credentials`**: For each MCP server or A2A agent with OAuth2 auth, calls `create_oauth2_credential_provider` (vendor=`CustomOauth2`, using `discoveryUrl` from config) with exponential backoff retry. Stores credential provider names in `AGENT_CONFIG_JSON` under `integrations.mcp_servers[].auth.credential_provider_name` or `integrations.a2a_agents[].auth.credential_provider_name`. If credential provider creation fails after all retries, sets `deployment_status="credential_creation_failed"` and returns without deploying.
    - **`creating_role`**: Creates or validates the IAM execution role (if needed).
    - **`building_artifact`**: Builds the deployment artifact by copying source from `agents/strands_agent/src/`, running `pip install` against `requirements.txt` targeting `linux/arm64` (`manylinux2014_aarch64`), fixing console script shebangs (e.g. `opentelemetry-instrument`) to use `#!/usr/bin/env python3` for Linux compatibility, zipping the package and uploading it to S3.
    - **`deploying`**: Calls `create_agent_runtime` with the artifact location, environment variables (including `OTEL_SERVICE_NAME` set to the agent name and `AGENT_OBSERVABILITY_ENABLED=true` to activate the `aws-opentelemetry-distro` export pipeline), network/protocol/lifecycle/authorizer configuration.
    - **`deployed`**: Stores authorizer config on the agent record. Stores the Cognito `client_id` as a config entry. Stores the `client_secret` in AWS Secrets Manager and saves the resulting ARN as a config entry. Updates `deployment_status="deployed"` and `status="READY"`.
-4. On error during any phase: sets `deployment_status="failed"`.
+4. On error during any phase: sets `deployment_status="failed"` (or `"credential_creation_failed"` specifically for credential failures).
 5. Frontend polls the status endpoint to track progress. Smart polling returns DB state immediately during local build phases (`creating_credentials`, `creating_role`, `building_artifact`) without AWS API calls. Only when `deployment_status="deployed"` does the status endpoint query AWS for runtime state.
 6. Permanent errors (e.g., `AccessDeniedException`, `UnauthorizedException`) mark the agent as FAILED to stop polling.
 

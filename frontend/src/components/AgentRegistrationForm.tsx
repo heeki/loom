@@ -17,8 +17,10 @@ import * as agentsApi from "@/api/agents";
 import * as securityApi from "@/api/security";
 import * as settingsApi from "@/api/settings";
 import { listMcpServers } from "@/api/mcp";
+import { listA2aAgents } from "@/api/a2a";
+import { listMemories } from "@/api/memories";
 import { ResourceTagFields } from "@/components/ResourceTagFields";
-import type { AgentDeployRequest, ModelOption, ManagedRole, AuthorizerConfigResponse, TagProfile, McpServer } from "@/api/types";
+import type { AgentDeployRequest, ModelOption, ManagedRole, AuthorizerConfigResponse, TagProfile, McpServer, A2aAgent, MemoryResponse } from "@/api/types";
 import { toast } from "sonner";
 
 function TagInput({
@@ -123,10 +125,12 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
   const [maxLifetimeError, setMaxLifetimeError] = useState("");
 
   // Integrations state
-  const [memoryEnabled] = useState(false);
   const [selectedMcpServerIds, setSelectedMcpServerIds] = useState<number[]>([]);
-  const [a2aAgentsEnabled] = useState(false);
+  const [selectedA2aAgentIds, setSelectedA2aAgentIds] = useState<number[]>([]);
+  const [selectedMemoryIds, setSelectedMemoryIds] = useState<number[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
+  const [a2aAgents, setA2aAgents] = useState<A2aAgent[]>([]);
+  const [memories, setMemories] = useState<MemoryResponse[]>([]);
 
   // Tag state (populated by ResourceTagFields via profile selection)
   const [tagValues, setTagValues] = useState<Record<string, string>>({});
@@ -148,6 +152,8 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
       void securityApi.listAuthorizerConfigs().then(setAuthConfigs).catch(() => {});
       void settingsApi.listTagProfiles().then(setTagProfiles).catch(() => {});
       void listMcpServers().then(setMcpServers).catch(() => {});
+      void listA2aAgents().then(setA2aAgents).catch(() => {});
+      void listMemories().then(setMemories).catch(() => {});
     }
   }, [mode]);
 
@@ -235,9 +241,10 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
         authorizer_allowed_scopes: authConfig?.allowed_scopes ?? [],
         authorizer_client_id: authConfig?.client_id ?? null,
         authorizer_client_secret: null,
-        memory_enabled: memoryEnabled,
+        memory_enabled: selectedMemoryIds.length > 0,
+        memory_ids: selectedMemoryIds,
         mcp_servers: selectedMcpServerIds,
-        a2a_agents: [],
+        a2a_agents: selectedA2aAgentIds,
         tags: Object.fromEntries(
           Object.entries(tagValues).filter(([, v]) => v.trim() !== "")
         ),
@@ -257,8 +264,18 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
       setIdleTimeoutError("");
       setMaxLifetimeError("");
       setTagValues({});
+      setSelectedMcpServerIds([]);
+      setSelectedA2aAgentIds([]);
+      setSelectedMemoryIds([]);
     }
   };
+
+  // Filter resources by group if restricted
+  const filteredMcpServers = mcpServers; // MCP servers are shared (no group tag)
+  const filteredA2aAgents = a2aAgents; // A2A agents are shared (no group tag)
+  const filteredMemories = groupRestriction
+    ? memories.filter((m) => m.tags?.["loom:group"] === groupRestriction)
+    : memories;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -324,6 +341,26 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                         .filter((id: number | undefined): id is number => id !== undefined);
                       setSelectedMcpServerIds(ids);
                     }
+                    if (Array.isArray(parsed.a2a_agents)) {
+                      const ids = parsed.a2a_agents
+                        .map((s: string | number) => {
+                          if (typeof s === "number") return s;
+                          const match = a2aAgents.find((a) => a.name === s);
+                          return match?.id;
+                        })
+                        .filter((id: number | undefined): id is number => id !== undefined);
+                      setSelectedA2aAgentIds(ids);
+                    }
+                    if (Array.isArray(parsed.memories)) {
+                      const ids = parsed.memories
+                        .map((s: string | number) => {
+                          if (typeof s === "number") return s;
+                          const match = memories.find((m) => m.name === s);
+                          return match?.id;
+                        })
+                        .filter((id: number | undefined): id is number => id !== undefined);
+                      setSelectedMemoryIds(ids);
+                    }
                     return null;
                   } catch {
                     return "Invalid JSON. Please check the format and try again.";
@@ -358,9 +395,21 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                       return server?.name ?? id;
                     });
                   }
+                  if (selectedA2aAgentIds.length > 0) {
+                    result.a2a_agents = selectedA2aAgentIds.map((id) => {
+                      const agent = a2aAgents.find((a) => a.id === id);
+                      return agent?.name ?? id;
+                    });
+                  }
+                  if (selectedMemoryIds.length > 0) {
+                    result.memories = selectedMemoryIds.map((id) => {
+                      const mem = memories.find((m) => m.id === id);
+                      return mem?.name ?? id;
+                    });
+                  }
                   return JSON.stringify(result, null, 2);
                 }}
-                placeholder='{"name": "...", "description": "...", "persona": "...", "instructions": "...", "behavior": "...", "model": "...", "role": "...", "authorizer": "...", "tags": "..."}'
+                placeholder='{"name": "...", "description": "...", "persona": "...", "instructions": "...", "behavior": "...", "model": "...", "role": "...", "authorizer": "...", "tags": "...", "mcp_servers": ["..."], "a2a_agents": ["..."], "memories": ["..."]}'
               />
 
               {/* Agent Identity */}
@@ -638,15 +687,15 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                   {/* MCP Servers */}
                   <div className="space-y-1.5">
                     <label className="text-xs text-muted-foreground">MCP Servers</label>
-                    {mcpServers.length === 0 ? (
-                      <p className="text-xs text-muted-foreground italic">No MCP servers registered. Register servers on the MCP Servers page first.</p>
+                    {filteredMcpServers.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">No MCP servers available. Register servers on the MCP Servers page first.</p>
                     ) : (
                       <div className="space-y-1">
-                        {mcpServers.map((server) => (
-                          <label key={server.id} className="flex items-center gap-2 text-xs cursor-pointer">
+                        {filteredMcpServers.map((server) => (
+                          <label key={server.id} className="flex items-center gap-2 text-xs cursor-pointer min-w-0">
                             <input
                               type="checkbox"
-                              className="h-3.5 w-3.5"
+                              className="h-3.5 w-3.5 shrink-0"
                               checked={selectedMcpServerIds.includes(server.id)}
                               onChange={(e) => {
                                 if (e.target.checked) {
@@ -656,28 +705,76 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                                 }
                               }}
                             />
-                            <span>{server.name}</span>
-                            <span className="text-muted-foreground/60 truncate" title={server.endpoint_url}>{server.endpoint_url}</span>
+                            <span className="shrink-0">{server.name}</span>
+                            <span className="text-muted-foreground/60 truncate min-w-0" title={server.endpoint_url}>{server.endpoint_url}</span>
                             {server.auth_type === "oauth2" && (
-                              <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded">OAuth2</span>
+                              <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded shrink-0">OAuth2</span>
                             )}
                           </label>
                         ))}
                       </div>
                     )}
                   </div>
-                  {/* Memory & A2A (coming soon) */}
-                  <div className="space-y-2 text-xs text-muted-foreground">
-                    <div className="flex items-center gap-2">
-                      <input type="checkbox" disabled checked={memoryEnabled} className="h-3.5 w-3.5" />
-                      <span>Memory</span>
-                      <span className="text-[10px] italic">Coming soon</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <input type="checkbox" disabled checked={a2aAgentsEnabled} className="h-3.5 w-3.5" />
-                      <span>A2A Agents</span>
-                      <span className="text-[10px] italic">Coming soon</span>
-                    </div>
+                  {/* A2A Agents */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-muted-foreground">A2A Agents</label>
+                    {filteredA2aAgents.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">No A2A agents available. Register agents on the A2A Agents page first.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {filteredA2aAgents.map((agent) => (
+                          <label key={agent.id} className="flex items-center gap-2 text-xs cursor-pointer min-w-0">
+                            <input
+                              type="checkbox"
+                              className="h-3.5 w-3.5 shrink-0"
+                              checked={selectedA2aAgentIds.includes(agent.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedA2aAgentIds((prev) => [...prev, agent.id]);
+                                } else {
+                                  setSelectedA2aAgentIds((prev) => prev.filter((id) => id !== agent.id));
+                                }
+                              }}
+                            />
+                            <span className="shrink-0">{agent.name}</span>
+                            <span className="text-muted-foreground/60 truncate min-w-0" title={agent.base_url}>{agent.base_url}</span>
+                            {agent.auth_type === "oauth2" && (
+                              <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded shrink-0">OAuth2</span>
+                            )}
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {/* Memory Resources */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-muted-foreground">Memory Resources</label>
+                    {filteredMemories.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">No memory resources available{groupRestriction ? " for your group" : ""}. Create one on the Memory page first.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {filteredMemories.map((mem) => (
+                          <label key={mem.id} className="flex items-center gap-2 text-xs cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="h-3.5 w-3.5"
+                              checked={selectedMemoryIds.includes(mem.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedMemoryIds((prev) => [...prev, mem.id]);
+                                } else {
+                                  setSelectedMemoryIds((prev) => prev.filter((id) => id !== mem.id));
+                                }
+                              }}
+                            />
+                            <span>{mem.name}</span>
+                            {mem.status !== "ACTIVE" && (
+                              <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded">{mem.status}</span>
+                            )}
+                          </label>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               </section>
@@ -715,6 +812,8 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                     setMaxLifetimeError("");
                     setTagValues({});
                     setSelectedMcpServerIds([]);
+                    setSelectedA2aAgentIds([]);
+                    setSelectedMemoryIds([]);
                   }}
                   disabled={isLoading}
                 >

@@ -1,6 +1,6 @@
 # Loom Frontend
 
-Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, session liveness tracking, memory resource management, MCP server management, security administration, resource tag management, and tag profile management.
+Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, resource tag management, and tag profile management.
 
 ## Prerequisites
 
@@ -62,7 +62,7 @@ The sidebar provides access to persona-based workflows:
 | **Security Admin** | Shield | Manage IAM roles, authorizer configs, credentials, permission requests |
 | **Settings** | Settings | Manage tag profiles and configuration |
 | **MCP Servers** | Network | Register and manage MCP servers with OAuth2 auth, tool discovery, and access control |
-| **A2A Agents** | Users | Coming soon (disabled) |
+| **A2A Agents** | Users | Register and manage A2A agents with OAuth2 auth, Agent Card display, and access control |
 
 The sidebar also includes a user indicator (when authenticated), admin View As dropdown (simulates specific users like demo-admin-1, demo-user-1 with their group-based scopes), live clock, and version badge. Theme and timezone are configured on the Settings page. Each listing page has a card/table view toggle; the selection persists per-page across persona switches.
 
@@ -84,6 +84,7 @@ src/
 │   ├── agents.ts      # Agent CRUD, models, roles, cognito pools, defaults
 │   ├── invocations.ts # Session queries + SSE stream consumer
 │   ├── logs.ts        # CloudWatch log queries
+│   ├── a2a.ts         # A2A agent CRUD, card refresh, access control
 │   ├── mcp.ts         # MCP server CRUD, tool discovery, access control
 │   ├── memories.ts    # Memory resource CRUD + refresh
 │   ├── security.ts    # Roles, authorizers, credentials, permissions
@@ -92,6 +93,7 @@ src/
 ├── contexts/     # React contexts (auth, timezone preference)
 │   ├── ThemeContext.tsx   # Theme provider with 10 themes and localStorage persistence
 ├── hooks/        # Custom React hooks for data fetching
+│   ├── useA2aAgents.ts   # A2A agent list with auto-fetch, CRUD
 ├── components/   # Application components + shadcn ui/ primitives
 │   ├── AgentCard.tsx              # Agent card with refresh + eraser icon deletion + overlay confirmation
 │   ├── SortableCardGrid.tsx       # Drag-to-reorder card grid with @dnd-kit, alphabetical sort, SortButton
@@ -103,6 +105,10 @@ src/
 │   ├── McpServerForm.tsx           # MCP server create/edit form with OAuth2 disclosure
 │   ├── McpToolList.tsx             # MCP tool list with refresh and JSON schema display
 │   ├── McpAccessControl.tsx        # Per-persona access toggle with tool selection
+│   ├── A2aAgentForm.tsx          # A2A agent create/edit form with OAuth2 disclosure
+│   ├── A2aAgentCardView.tsx      # Agent Card display with capabilities and skills
+│   ├── A2aSkillList.tsx          # Expandable skill cards
+│   ├── A2aAccessControl.tsx      # Per-persona access to A2A agent skills
 │   ├── MemoryManagementPanel.tsx  # Memory resource create form + card/table list + tag filters
 │   ├── ResourceTagFields.tsx      # Shared tag profile selector + tag resolution
 │   ├── InvokePanel.tsx            # Qualifier, credential selector, model badge, prompt
@@ -117,6 +123,7 @@ src/
 │   ├── SecurityAdminPage.tsx   # Roles, authorizers, credentials, permissions
 │   ├── MemoryManagementPage.tsx # Memory resource management
 │   ├── McpServersPage.tsx      # MCP server management with tool/access tabs
+│   ├── A2aAgentsPage.tsx      # A2A agent management with card/access tabs
 │   ├── SettingsPage.tsx        # Tag profile management
 │   └── SessionDetailPage.tsx   # Session metadata, invocations, logs
 ├── lib/          # Shared utilities (cn(), format helpers, status mapping, error mapping)
@@ -143,6 +150,7 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 - `api/logs.ts` — CloudWatch log queries
 - `api/memories.ts` — Memory resource operations: create, import, list, get, refresh, delete, purge
 - `api/security.ts` — Security admin operations: managed roles, authorizer configs, authorizer credentials, permission requests
+- `api/a2a.ts` — A2A agent operations: CRUD, test connection, card retrieval/refresh, skills, access rules
 - `api/mcp.ts` — MCP server operations: CRUD, test connection, tool discovery/refresh, access rule management
 - `api/settings.ts` — Tag policy and tag profile operations: list, create, update, delete
 - `api/types.ts` — TypeScript interfaces including AgentResponse (with `model_id`, `tags`), SSESessionStart (with `has_token`, `token_source`), AuthorizerCredential, ManagedRole, PermissionRequestResponse, MemoryResponse (with `tags`), MemoryCreateRequest (with `tags`), MemoryStrategyRequest, McpServer, McpTool, McpServerAccess, TagPolicy, TagPolicyCreateRequest, TagPolicyUpdateRequest, TagProfile, TagProfileCreateRequest
@@ -153,6 +161,7 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 - `useSessions(agentId)` — Session list that re-fetches on agent change
 - `useInvoke(authorizerName?)` — Streaming state management with `AbortController`, supports credential_id and bearer_token, provides friendly error messages with authorizer-specific hints
 - `useLogs()` — On-demand session log fetching
+- `useA2aAgents()` — A2A agent list with auto-fetch, CRUD callbacks, toast notifications
 - `useMcpServers()` — MCP server list with auto-fetch, CRUD callbacks, toast notifications
 - `useDeployment()` — Agent config, credential providers, and integrations
 
@@ -169,6 +178,9 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 - **McpServerForm** — Create/edit form for MCP servers with transport selector (SSE, Streamable HTTP), progressive OAuth2 disclosure (auth_type toggle reveals client ID, secret, token URL, scopes, well-known URL fields), and test connection button in edit mode.
 - **McpToolList** — Displays discovered tools for a server with refresh button, collapsible JSON schema display per tool, and empty state guidance.
 - **McpAccessControl** — Per-persona access toggle with all_tools/selected_tools radio and individual tool checkboxes. Deny-by-default — personas have no access until explicitly granted.
+- **A2aAgentForm** — Create/edit form for A2A agents with base URL input, progressive OAuth2 disclosure, and test connection button.
+- **A2aAgentCardView** — Structured Agent Card display: capabilities, authentication schemes, input/output modes, and skills.
+- **A2aAccessControl** — Per-persona access control for A2A agent skills with all_skills/selected_skills modes.
 - **MemoryManagementPanel** — Create/import form with JSON import/export and strategy configuration (type, name, description, namespace), memory card/table list with status badges (CREATING/ACTIVE/FAILED/DELETING), refresh and delete actions with inline confirmation overlay.
 
 ### Views
@@ -183,6 +195,7 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 | SecurityAdminPage | Security | Roles, authorizers, credentials, permissions |
 | MemoryManagementPage | Memory | Memory resource create/import form (with tag profile selector), card/table list with tag badges and multi-select tag filters |
 | McpServersPage | MCP Servers | MCP server CRUD, server detail with Tools and Access tabs, card/table views |
+| A2aAgentsPage | A2A Agents | A2A agent CRUD, Agent Card detail, Access control tabs |
 | SettingsPage | Settings | Tag profile CRUD (create, edit, delete named tag presets) |
 
 ### Session Liveness

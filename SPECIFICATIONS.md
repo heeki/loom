@@ -14,14 +14,14 @@ The platform tracks session liveness using a local idle timeout heuristic, provi
 
 The frontend is organized around persona-based workflows, accessible via a sidebar:
 
-- **Platform Catalog** (default) — Browse and manage agents, memory resources, and other platform resources. Includes sections for MCP Servers and A2A Agents (coming soon).
+- **Platform Catalog** (default) — Browse and manage agents, memory resources, and other platform resources. Includes sections for MCP Servers and A2A Agents.
 - **Agents** — Deploy new agents or import existing ones. Includes agent listing with card/table view toggle.
 - **Security Admin** — Manage IAM roles, authorizer configurations, credentials, and permission requests.
 - **Memory** — Create new AgentCore Memory resources with configurable strategies or import existing ones.
 - **Tagging** — Manage tag policies (platform + custom) and tag profiles. Accessible to all scopes; write operations require `*:write`.
 - **Settings** — Manage display preferences (theme, timezone). Accessible to all scopes.
 - **MCP Servers** — Register and manage MCP servers, view available tools, and control persona access.
-- **A2A Agents** (coming soon) — Disabled sidebar entry for future A2A agent management.
+- **A2A Agents** — Register and manage A2A (Agent-to-Agent) protocol integrations, view Agent Cards, and control persona access to skills.
 
 ---
 
@@ -50,12 +50,14 @@ loom/
 │   │   │   ├── permission_request.py
 │   │   │   ├── memory.py
 │   │   │   ├── mcp.py
+│   │   │   ├── a2a.py
 │   │   │   └── tag_profile.py
 │   │   ├── dependencies/
 │   │   │   └── auth.py
 │   │   ├── routers/
 │   │   │   ├── auth.py
 │   │   │   ├── agents.py
+│   │   │   ├── a2a.py
 │   │   │   ├── invocations.py
 │   │   │   ├── logs.py
 │   │   │   ├── memories.py
@@ -65,6 +67,7 @@ loom/
 │   │   │   └── utils.py
 │   │   └── services/
 │   │       ├── agentcore.py
+│   │       ├── a2a.py
 │   │       ├── mcp.py
 │   │       ├── memory.py
 │   │       ├── secrets.py
@@ -220,8 +223,8 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Account ID extraction from runtime ARN on deploy and refresh.
 
 ### Phase 3 — Persona-Based Workflows *(Complete)*
-- Persona-based frontend navigation: Platform Catalog, Agents, Security Admin, Memory, MCP Servers (coming soon), A2A Agents (coming soon).
-- Platform Catalog page with sections for agents, memory resources, MCP servers (coming soon), and A2A agents (coming soon). Card/table view toggle with cards as default.
+- Persona-based frontend navigation: Platform Catalog, Agents, Security Admin, Memory, MCP Servers, A2A Agents.
+- Platform Catalog page with sections for agents, memory resources, MCP servers, and A2A agents. Card/table view toggle with cards as default.
 - Agents page (formerly Builder) with agent listing (card/table view toggle), Add Agent button with Deploy/Import tabs.
 - Security Admin page for managing IAM roles, authorizer configs, authorizer credentials, and permission requests.
 - Model selector on both register and deploy forms with no default selection.
@@ -358,7 +361,7 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Frontend: `McpServersPage` with card/table view toggle, sortable columns, server detail view with Tools/Access tabs. `McpServerForm` with progressive OAuth2 field disclosure. `McpToolList` with refresh, collapsible input schema display. `McpAccessControl` with per-agent toggle, all_tools/selected_tools radio, individual tool checkboxes.
 - MCP Servers sidebar item activated (no longer disabled/coming soon). Scope-gated by `mcp:read`/`mcp:write`.
 - Agent deployment with MCP server selection: multi-select dropdown on deploy form allows selecting MCP servers from catalog. Selected servers attached to agent during deployment.
-- OAuth2 credential provider creation: for OAuth2-enabled MCP servers, backend calls AgentCore `create_oauth2_credential_provider` API using `CustomOauth2` vendor with `discoveryUrl` from server configuration. Credential providers auto-named `{agent_name}-mcp-{server_name}`.
+- OAuth2 credential provider creation: for OAuth2-enabled MCP servers, backend calls AgentCore `create_oauth2_credential_provider` API using `CustomOauth2` vendor with `discoveryUrl` from server configuration. Credential providers auto-named `{agent_name}-mcp-{server_name}`. Credential provider creation uses exponential backoff retry (4 retries, delays 2s/4s/8s/16s). Deployment fails with credential_creation_failed status if all retries are exhausted.
 - Background deployment with progressive status updates: deploy endpoint returns immediately with `creating_credentials` status. Background task progresses through `creating_role`, `building_artifact`, `deploying` phases with DB updates. Frontend polls at 2-second intervals.
 - Frontend progressive deployment status display: agent cards show human-readable status messages (Creating credential provider, Creating IAM role, Building artifact, Deploying runtime, Completing deployment, Finalizing endpoint) with spinner and elapsed timer.
 - Smart polling optimization: frontend skips AWS API calls during `creating_credentials`, `creating_role`, and `building_artifact` phases (local operations only), reducing unnecessary backend load.
@@ -368,7 +371,25 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Agent deletion with background polling: delete endpoint returns `DELETING` status. Background task polls AgentCore until runtime deletion completes, then purges local DB record. Endpoint status badge hidden during deletion.
 - 25 backend tests covering all CRUD operations, validation, secret exclusion, OAuth2 conditional fields, tools, access rules, and cascade delete.
 
-### Phase 14 — Advanced Operations
+### Phase 14 — A2A Agent Integration *(Complete)*
+- Backend: `A2aAgent`, `A2aAgentSkill`, `A2aAgentAccess` ORM models with full CRUD API under `/api/a2a/agents`. A2A agent registration by base URL with automatic Agent Card fetching from `<base_url>/.well-known/agent.json`. Agent Card data cached locally: name, description, version, provider, capabilities, authentication schemes, input/output modes, and raw JSON. Skills parsed and stored in a separate table for queryability.
+- OAuth2 authentication configuration: well-known URL, client ID, client secret (write-only), and scopes. Conditional validation: OAuth2 fields required when auth_type is `oauth2`. Client secrets never returned in GET responses (`has_oauth2_secret` flag instead).
+- Agent Card endpoints: `GET /api/a2a/agents/{id}/card` returns cached raw Agent Card JSON. `POST /api/a2a/agents/{id}/card/refresh` re-fetches from remote agent, updates all cached fields and syncs skills. Failed refresh preserves existing cached data.
+- Skills endpoint: `GET /api/a2a/agents/{id}/skills` returns skills parsed from the Agent Card. Skills synced on registration and on card refresh (add new, remove stale).
+- Access control: `GET/PUT /api/a2a/agents/{id}/access` manages per-persona access rules. Access levels: `all_skills` (any skill including future ones) or `selected_skills` (specific skill IDs). Deny by default.
+- Connection test: `POST /api/a2a/agents/{id}/test-connection` acquires OAuth2 token if configured and fetches the Agent Card.
+- Agent deployment with A2A integration: multi-select dropdown on deploy form allows selecting A2A agents from catalog. Selected agents attached to agent during deployment. OAuth2-enabled A2A agents get credential providers created with exponential backoff retry. Credential provider names follow pattern `loom-{agent_name}-a2a-{a2a_name}`. Deployment fails with `credential_creation_failed` status if credential provider creation exhausts retries.
+- Agent deployment with memory integration: multi-select dropdown on deploy form allows selecting memory resources from catalog. Selected memory IDs and names passed in `AGENT_CONFIG_JSON` under `integrations.memory.resources`.
+- A2A runtime client (`agents/strands_agent/src/integrations/a2a_client.py`): `_AuthenticatedA2AAgent` subclass of the Strands SDK `A2AAgent` for OAuth2-protected A2A endpoints. Injects OAuth2 Bearer tokens via AgentCore Identity service into both agent card fetches and message sending. Handles both SSE (`text/event-stream`) and plain JSON responses. Falls back from `message/stream` to `message/send` on "Method not found". Buffers `Message` events and yields them after `Task` events so `stream_async` picks the content-bearing `Message` as `last_complete_event`. Each enabled A2A agent in the configuration is wrapped as a `@tool` function that the orchestrating agent can invoke during conversation.
+- Agent deletion cascade: credential providers for both MCP and A2A integrations are cleaned up. Explicit session/invocation deletion in all delete paths (immediate, background, purge) as safety net alongside ORM cascades.
+- Frontend: `A2aAgentsPage` with card/table view toggle, sortable columns, agent detail view with Agent Card/Access tabs. `A2aAgentForm` with base URL input and progressive OAuth2 field disclosure. `A2aAgentCardView` with structured display of capabilities (enabled/disabled badges), authentication schemes, input/output modes, and skills list. `A2aSkillList` with expandable skill cards showing tags, examples, and mode overrides. `A2aAccessControl` with per-persona toggle, all_skills/selected_skills radio, individual skill checkboxes with descriptions.
+- A2A Agents sidebar item activated (no longer disabled/coming soon). Scope-gated by `a2a:read`/`a2a:write`.
+- Frontend state management: clearing stale session/invocation state on agent selection and deletion. `useSessions` hook clears sessions immediately when agent changes before fetching new data.
+- Frontend status display: `credential_creation_failed` deployment status mapped to destructive badge variant.
+- JSON import/export: agent deploy form supports `a2a_agents` and `memories` arrays (names) in JSON configuration alongside `mcp_servers`.
+- 26 backend tests covering CRUD operations, Agent Card fetching, skill sync, card refresh, secret exclusion, OAuth2 validation, access rules, and cascade delete.
+
+### Phase 15 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

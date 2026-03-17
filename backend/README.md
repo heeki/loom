@@ -1,6 +1,6 @@
 # Loom Backend
 
-FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, MCP server management, security administration, tag policy management, and tag profile management.
+FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, tag policy management, and tag profile management.
 
 ## Technology Stack
 
@@ -73,6 +73,7 @@ backend/
 │   │   ├── permission_request.py   # PermissionRequest ORM model
 │   │   ├── memory.py        # Memory ORM model (AgentCore Memory resources)
 │   │   ├── mcp.py           # McpServer, McpTool, McpServerAccess ORM models
+│   │   ├── a2a.py           # A2aAgent, A2aAgentSkill, A2aAgentAccess
 │   │   ├── tag_policy.py    # TagPolicy ORM model (configurable tag policies)
 │   │   └── tag_profile.py   # TagProfile ORM model (named tag presets)
 │   ├── dependencies/
@@ -83,6 +84,7 @@ backend/
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
 │   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
 │   │   ├── memories.py      # Memory resource CRUD + strategy mapping
+│   │   ├── a2a.py           # A2A agent CRUD, Agent Card, skills, access control
 │   │   ├── mcp.py           # MCP server CRUD, tool discovery, access control
 │   │   ├── security.py      # Security admin: roles, authorizers, credentials, permissions
 │   │   ├── settings.py      # Tag policy + tag profile CRUD (/api/settings/tags, /api/settings/tag-profiles)
@@ -96,12 +98,15 @@ backend/
 │       ├── iam.py           # IAM role management + Cognito pool listing
 │       ├── jwt_validator.py # JWT validation against Cognito JWKS
 │       ├── latency.py       # Pure computation: cold_start_latency_ms, client_duration_ms
+│       ├── a2a.py           # A2A Agent Card fetching, parsing, connection test
 │       ├── mcp.py           # MCP connection test + tool fetch stubs
 │       ├── memory.py        # boto3 wrapper: AgentCore Memory CRUD
 │       └── secrets.py       # Secrets Manager wrapper with caching
 ├── scripts/
 │   └── stream.py            # CLI streaming client (httpx-based)
-├── tests/                   # Unit tests
+├── tests/
+│   ├── test_agents_deploy.py
+│   ├── test_a2a.py          # A2A agent CRUD, Agent Card, skills, access
 ├── makefile                 # Build, test, and manual testing targets
 ├── pyproject.toml
 └── requirements.txt
@@ -152,6 +157,18 @@ Stores discovered tools for each MCP server. Columns include `server_id` (FK to 
 ### `mcp_server_access`
 
 Stores per-persona access rules for MCP server tools. Columns include `server_id` (FK to mcp_servers), `persona` (unique per server), `allowed` (boolean), `access_mode` (all_tools or selected_tools), and `allowed_tool_names` (JSON list). Defaults to deny (no access) until explicitly granted. Cascade-deletes when the parent server is removed.
+
+### `a2a_agents`
+
+Stores registered A2A (Agent-to-Agent) protocol agents. Columns include `base_url`, `name`, `description`, `agent_version`, `documentation_url`, `provider_organization`, `provider_url`, `capabilities` (JSON), `authentication_schemes` (JSON), `default_input_modes` (JSON), `default_output_modes` (JSON), `agent_card_raw` (JSON), `status` (active/inactive/error), `auth_type` (none or oauth2), OAuth2 fields (`oauth2_client_id`, `oauth2_client_secret`, `oauth2_well_known_url`, `oauth2_scopes`), `last_fetched_at`, and timestamps. The `oauth2_client_secret` is write-only — it is never returned in GET responses.
+
+### `a2a_agent_skills`
+
+Stores skills parsed from A2A Agent Cards. Columns include `agent_id` (FK to a2a_agents), `skill_id`, `name`, `description`, `tags` (JSON), `examples` (JSON), `input_modes` (JSON), `output_modes` (JSON), and `last_refreshed_at`. Skills are synced on registration and on card refresh. Cascade-deletes when the parent agent is removed.
+
+### `a2a_agent_access`
+
+Stores per-persona access rules for A2A agent skills. Columns include `agent_id` (FK to a2a_agents), `persona_id`, `access_level` (all_skills or selected_skills), and `allowed_skill_ids` (JSON list). Defaults to deny (no access) until explicitly granted. Cascade-deletes when the parent agent is removed.
 
 ### `memories`
 
@@ -260,6 +277,24 @@ Supports five memory strategy types: semantic, summary, user_preference, episodi
 
 OAuth2 authentication supports well-known URL discovery for auto-populating token URLs and scopes. The `oauth2_client_secret` field is write-only — never included in GET responses; a `has_oauth2_secret` boolean is returned instead. Conditional validation ensures all required OAuth2 fields are present when `auth_type` is `oauth2`. Scope enforcement: `mcp:read` for GET, `mcp:write` for POST/PUT/DELETE.
 
+### A2A Agent Management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/a2a/agents` | Register an A2A agent (fetches Agent Card from base URL) |
+| `GET` | `/api/a2a/agents` | List all A2A agents |
+| `GET` | `/api/a2a/agents/{agent_id}` | Get a specific A2A agent |
+| `PUT` | `/api/a2a/agents/{agent_id}` | Update an A2A agent |
+| `DELETE` | `/api/a2a/agents/{agent_id}` | Delete an A2A agent (cascades to skills and access) |
+| `POST` | `/api/a2a/agents/{agent_id}/test-connection` | Test connectivity (OAuth2 token + Agent Card fetch) |
+| `GET` | `/api/a2a/agents/{agent_id}/card` | Get cached raw Agent Card JSON |
+| `POST` | `/api/a2a/agents/{agent_id}/card/refresh` | Re-fetch Agent Card and sync skills |
+| `GET` | `/api/a2a/agents/{agent_id}/skills` | List cached skills for an agent |
+| `GET` | `/api/a2a/agents/{agent_id}/access` | Get access rules for an agent |
+| `PUT` | `/api/a2a/agents/{agent_id}/access` | Update access rules for an agent |
+
+A2A agents are registered by base URL. On registration, the backend fetches `<base_url>/.well-known/agent.json` and populates all agent metadata from the Agent Card. Skills are parsed and stored in a separate table for queryability and fine-grained access control. OAuth2 authentication follows the same pattern as MCP servers — `oauth2_client_secret` is write-only with `has_oauth2_secret` flag. Scope enforcement: `a2a:read` for GET, `a2a:write` for POST/PUT/DELETE.
+
 ### Agent Invocation (SSE Streaming)
 
 | Method | Path | Description |
@@ -302,12 +337,12 @@ Cold-start latency is computed automatically during the invoke flow:
 
 Deploy creates a Strands Agent runtime on AgentCore with background deployment and progressive status updates. The deployment flow includes:
 
-1. **OAuth2 credential provider creation** — MCP server integrations with OAuth2 are provisioned as AgentCore credential providers
+1. **OAuth2 credential provider creation** — MCP server and A2A agent integrations with OAuth2 are provisioned as AgentCore credential providers with exponential backoff retry (4 retries, delays 2s/4s/8s/16s). Deployment fails with `credential_creation_failed` status if all retries are exhausted.
 2. **IAM role creation** — Execution role provisioning (if creating new role)
 3. **Artifact build** — Cross-compiles ARM64 artifact (pip install into target directory, zips, uploads to S3)
 4. **Runtime deployment** — Creates AgentCore runtime and endpoint
 
-The `deployment_status` field tracks progression through phases: `creating_credential_provider`, `creating_iam_role`, `building_artifact`, `deploying_runtime`, `completing_deployment`, `finalizing_endpoint`, `deployed`, `failed`, `deleting`.
+The `deployment_status` field tracks progression through phases: `creating_credentials`, `creating_iam_role`, `building_artifact`, `deploying_runtime`, `completing_deployment`, `finalizing_endpoint`, `deployed`, `failed`, `deleting`.
 
 Smart status polling: during local build phases (credential provider, IAM role, artifact build), the frontend polls the local database only. Once the runtime deployment begins, the `/api/agents/{agent_id}/status` endpoint queries AWS for runtime and endpoint status.
 
@@ -315,7 +350,7 @@ Model and IAM role are required fields. The deployment supports configurable pro
 
 Tags are resolved from the tag policy system at deploy time. Deploy-time tags are auto-applied from their default values; build-time tags are resolved from the selected tag profile. Required tags that are missing cause deployment to fail with a 400 error. Resolved tags are applied to all created AWS resources (AgentCore runtimes, endpoints, IAM execution roles, memory resources) and stored locally on Agent and Memory records. For registered agents and imported memories, tags are fetched from AWS via `list_tags_for_resource`; missing required tags are filled with `"missing"`.
 
-Deletion with `cleanup_aws=true` initiates background async AWS deletion (endpoint + runtime + credential providers + Secrets Manager cleanup), marks the agent as DELETING, and returns the updated agent. The frontend polls the status endpoint until AWS confirms deletion (404), then calls the purge endpoint to remove the local record. Credential providers cascade delete when the agent is deleted.
+Deletion with `cleanup_aws=true` initiates background async AWS deletion (endpoint + runtime + MCP and A2A credential providers + Secrets Manager cleanup), explicitly deletes sessions/invocations,, marks the agent as DELETING, and returns the updated agent. The frontend polls the status endpoint until AWS confirms deletion (404), then calls the purge endpoint to remove the local record. Credential providers cascade delete when the agent is deleted.
 
 ## Authenticated Invocation
 

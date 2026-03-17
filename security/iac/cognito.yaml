@@ -11,7 +11,7 @@ Parameters:
     Description: Cognito UserPool domain prefix (must be globally unique)
   pResourceServerIdentifier:
     Type: String
-    Description: Resource server identifier URL
+    Description: Resource server identifier (short name or URI)
   pScopes:
     Type: CommaDelimitedList
     Description: Comma-separated list of OAuth scope names

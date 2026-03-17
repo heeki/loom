@@ -30,6 +30,7 @@ export function deploymentStatusVariant(status: string | null): BadgeVariant {
     case "ENDPOINT_CREATING":
       return "secondary";
     case "failed":
+    case "credential_creation_failed":
       return "destructive";
     case "removing":
       return "outline";

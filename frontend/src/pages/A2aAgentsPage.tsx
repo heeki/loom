@@ -2,6 +2,7 @@ import { useState } from "react";
 import { LayoutGrid, TableIcon, Plus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -13,30 +14,31 @@ import {
 import { toast } from "sonner";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
-import { useMcpServers } from "@/hooks/useMcpServers";
-import { McpServerForm } from "@/components/McpServerForm";
-import { McpToolList } from "@/components/McpToolList";
-import { McpAccessControl } from "@/components/McpAccessControl";
+import { useA2aAgents } from "@/hooks/useA2aAgents";
+import { A2aAgentForm } from "@/components/A2aAgentForm";
+import { A2aAgentCardView } from "@/components/A2aAgentCardView";
+import { A2aAccessControl } from "@/components/A2aAccessControl";
 import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "@/components/SortableCardGrid";
 import { SortableTableHead, sortRows } from "@/components/SortableTableHead";
-import type { McpServer, McpServerCreateRequest } from "@/api/types";
+import type { A2aAgent, A2aAgentCreateRequest } from "@/api/types";
 
-interface McpServersPageProps {
+interface A2aAgentsPageProps {
   viewMode: "cards" | "table";
   onViewModeChange: (mode: "cards" | "table") => void;
   readOnly?: boolean;
 }
 
-export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServersPageProps) {
+export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgentsPageProps) {
   const { timezone } = useTimezone();
-  const { servers, loading, createServer, updateServer, deleteServer } = useMcpServers();
+  const { agents, loading, createAgent, updateAgent, deleteAgent, refreshCard } = useA2aAgents();
   const [showAddForm, setShowAddForm] = useState(false);
-  const [selectedServerId, setSelectedServerId] = useState<number | null>(null);
-  const [detailTab, setDetailTab] = useState<"tools" | "access">("tools");
+  const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
+  const [detailTab, setDetailTab] = useState<"card" | "access">("card");
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | null>(null);
-  const [editingServer, setEditingServer] = useState<McpServer | null>(null);
+  const [editingAgent, setEditingAgent] = useState<A2aAgent | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const [cardSortDir, setCardSortDir] = useState<SortDirection>(() => loadSortDirection("mcp-servers"));
+  const [cardSortDir, setCardSortDir] = useState<SortDirection>(() => loadSortDirection("a2a-agents"));
   const [tableCol, setTableCol] = useState<string | null>("name");
   const [tableDir, setTableDir] = useState<SortDirection>("asc");
 
@@ -49,76 +51,87 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
     }
   };
 
-  const selectedServer = servers.find((s) => s.id === selectedServerId) ?? null;
+  const selectedAgent = agents.find((a) => a.id === selectedAgentId) ?? null;
 
-  const handleCreate = async (data: McpServerCreateRequest) => {
+  const handleCreate = async (data: A2aAgentCreateRequest) => {
     try {
-      await createServer(data);
+      await createAgent(data);
       setShowAddForm(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to create server");
+      toast.error(e instanceof Error ? e.message : "Failed to register agent");
     }
   };
 
-  const handleUpdate = async (data: McpServerCreateRequest) => {
-    if (!editingServer) return;
+  const handleUpdate = async (data: A2aAgentCreateRequest) => {
+    if (!editingAgent) return;
     try {
-      await updateServer(editingServer.id, data);
-      setEditingServer(null);
+      await updateAgent(editingAgent.id, data);
+      setEditingAgent(null);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update server");
+      toast.error(e instanceof Error ? e.message : "Failed to update agent");
     }
   };
 
   const handleDelete = async (id: number) => {
     try {
-      await deleteServer(id);
+      await deleteAgent(id);
       setConfirmingDeleteId(null);
-      if (selectedServerId === id) setSelectedServerId(null);
+      if (selectedAgentId === id) setSelectedAgentId(null);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to delete server");
+      toast.error(e instanceof Error ? e.message : "Failed to delete agent");
     }
   };
 
-  if (selectedServer) {
+  const handleRefresh = async () => {
+    if (!selectedAgent) return;
+    setRefreshing(true);
+    try {
+      await refreshCard(selectedAgent.id);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to refresh Agent Card");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // Detail view
+  if (selectedAgent) {
     return (
       <div className="space-y-6">
         <div>
-          <Button variant="ghost" size="sm" onClick={() => { setSelectedServerId(null); setEditingServer(null); }} className="mb-2">
-            &larr; Back to servers
+          <Button variant="ghost" size="sm" onClick={() => { setSelectedAgentId(null); setEditingAgent(null); }} className="mb-2">
+            &larr; Back to agents
           </Button>
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-semibold">{selectedServer.name}</h2>
+            <h2 className="text-lg font-semibold">{selectedAgent.name}</h2>
             {!readOnly && (
               <button
                 type="button"
-                onClick={() => setEditingServer(selectedServer)}
+                onClick={() => setEditingAgent(selectedAgent)}
                 className="text-muted-foreground/50 hover:text-foreground transition-colors"
-                title="Edit server"
+                title="Edit agent"
               >
                 <Pencil className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
-          {selectedServer.description && <p className="text-sm text-muted-foreground">{selectedServer.description}</p>}
+          {selectedAgent.description && <p className="text-sm text-muted-foreground">{selectedAgent.description}</p>}
         </div>
 
-        {editingServer && (
+        {editingAgent && (
           <Card>
             <CardContent className="pt-4">
-              <McpServerForm
+              <A2aAgentForm
                 onSubmit={handleUpdate}
-                onCancel={() => setEditingServer(null)}
+                onCancel={() => setEditingAgent(null)}
                 initialData={{
-                  id: editingServer.id,
-                  name: editingServer.name,
-                  description: editingServer.description ?? undefined,
-                  endpoint_url: editingServer.endpoint_url,
-                  transport_type: editingServer.transport_type,
-                  auth_type: editingServer.auth_type,
-                  oauth2_well_known_url: editingServer.oauth2_well_known_url ?? undefined,
-                  oauth2_client_id: editingServer.oauth2_client_id ?? undefined,
-                  oauth2_scopes: editingServer.oauth2_scopes ?? undefined,
+                  id: editingAgent.id,
+                  name: editingAgent.name,
+                  base_url: editingAgent.base_url,
+                  auth_type: editingAgent.auth_type,
+                  oauth2_well_known_url: editingAgent.oauth2_well_known_url ?? undefined,
+                  oauth2_client_id: editingAgent.oauth2_client_id ?? undefined,
+                  oauth2_scopes: editingAgent.oauth2_scopes ?? undefined,
                 }}
               />
             </CardContent>
@@ -126,14 +139,14 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
         )}
 
         <div className="flex rounded-md border text-sm w-fit" role="tablist">
-          {(["tools", "access"] as const).map((tab) => (
+          {(["card", "access"] as const).map((tab) => (
             <button
               key={tab}
               type="button"
               role="tab"
               aria-selected={detailTab === tab}
               className={`px-4 py-1.5 transition-colors ${
-                tab === "tools" ? "rounded-l-md" : "rounded-r-md"
+                tab === "card" ? "rounded-l-md" : "rounded-r-md"
               } ${
                 detailTab === tab
                   ? "bg-primary text-primary-foreground"
@@ -141,24 +154,27 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
               }`}
               onClick={() => setDetailTab(tab)}
             >
-              {tab === "tools" ? "Tools" : "Access"}
+              {tab === "card" ? "Agent Card" : "Access"}
             </button>
           ))}
         </div>
 
-        {detailTab === "tools" && <McpToolList serverId={selectedServer.id} readOnly={readOnly} />}
-        {detailTab === "access" && <McpAccessControl serverId={selectedServer.id} readOnly={readOnly} />}
+        {detailTab === "card" && (
+          <A2aAgentCardView agent={selectedAgent} onRefresh={handleRefresh} refreshing={refreshing} />
+        )}
+        {detailTab === "access" && <A2aAccessControl agentId={selectedAgent.id} readOnly={readOnly} />}
       </div>
     );
   }
 
+  // List view
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
         <div>
-          <h2 className="text-lg font-semibold">MCP Server Administration</h2>
+          <h2 className="text-lg font-semibold">A2A Agent Administration</h2>
           <p className="text-sm text-muted-foreground">
-            Register and manage Model Context Protocol servers for agent tool access.
+            Register and manage Agent-to-Agent protocol integrations.
           </p>
         </div>
         <div className="flex rounded-md border text-sm shrink-0" role="tablist">
@@ -187,10 +203,10 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
 
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-medium">Servers</h3>
+          <h3 className="text-sm font-medium">Agents</h3>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <SortButton direction={cardSortDir} onClick={() => setCardSortDir(toggleSortDirection("mcp-servers", cardSortDir))} />
+          <SortButton direction={cardSortDir} onClick={() => setCardSortDir(toggleSortDirection("a2a-agents", cardSortDir))} />
           {!readOnly && (
             <Button
               size="sm"
@@ -198,7 +214,7 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
               onClick={() => setShowAddForm(!showAddForm)}
             >
               <Plus className="h-3.5 w-3.5 mr-1" />
-              Add MCP Server
+              Add A2A Agent
             </Button>
           )}
         </div>
@@ -207,7 +223,7 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
       {showAddForm && (
         <Card>
           <CardContent className="pt-4">
-            <McpServerForm
+            <A2aAgentForm
               onSubmit={handleCreate}
               onCancel={() => setShowAddForm(false)}
             />
@@ -221,44 +237,49 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
             <Skeleton key={i} className="h-24" />
           ))}
         </div>
-      ) : servers.length === 0 ? (
+      ) : agents.length === 0 ? (
         <p className="text-sm text-muted-foreground py-8">
-          No MCP servers registered yet. Add one above.
+          No A2A agents registered yet. Add one above.
         </p>
       ) : viewMode === "cards" ? (
         <SortableCardGrid
-          items={servers}
-          getId={(s) => String(s.id)}
-          getName={(s) => s.name}
-          storageKey="mcp-servers"
+          items={agents}
+          getId={(a) => String(a.id)}
+          getName={(a) => a.name}
+          storageKey="a2a-agents"
           sortDirection={cardSortDir}
-          onSortDirectionChange={(d) => { if (d) { setCardSortDir(d); saveSortDirection("mcp-servers", d); } }}
-          renderItem={(server) => (
+          onSortDirectionChange={(d) => { if (d) { setCardSortDir(d); saveSortDirection("a2a-agents", d); } }}
+          renderItem={(agent) => (
             <Card
               className="relative cursor-pointer transition-colors hover:bg-accent/50 py-3 gap-1"
-              onClick={() => setSelectedServerId(server.id)}
+              onClick={() => setSelectedAgentId(agent.id)}
             >
               <CardHeader className="gap-1 pb-2">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm font-medium truncate min-w-0" title={server.name}>
-                    {server.name}
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="text-sm font-medium truncate" title={agent.name}>
+                      {agent.name}
+                    </div>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
+                      v{agent.agent_version}
+                    </Badge>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     {!readOnly && (
                       <>
                         <button
                           type="button"
-                          onClick={(e) => { e.stopPropagation(); setEditingServer(server); setSelectedServerId(server.id); }}
+                          onClick={(e) => { e.stopPropagation(); setEditingAgent(agent); setSelectedAgentId(agent.id); }}
                           className="text-muted-foreground/50 hover:text-foreground transition-colors"
-                          title="Edit server"
+                          title="Edit agent"
                         >
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
                         <button
                           type="button"
-                          onClick={(e) => { e.stopPropagation(); setConfirmingDeleteId(server.id); }}
+                          onClick={(e) => { e.stopPropagation(); setConfirmingDeleteId(agent.id); }}
                           className="text-muted-foreground/50 hover:text-destructive transition-colors"
-                          title="Delete server"
+                          title="Delete agent"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -269,14 +290,16 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
               </CardHeader>
               <CardContent className="space-y-2 text-xs text-muted-foreground">
                 <div className="rounded border bg-input-bg p-3 space-y-0.5">
-                  <div className="truncate" title={server.endpoint_url}><span className="text-muted-foreground/70">Endpoint:</span> {server.endpoint_url}</div>
-                  <div><span className="text-muted-foreground/70">Transport:</span> {server.transport_type === "streamable_http" ? "Streamable HTTP" : "SSE"}</div>
-                  <div><span className="text-muted-foreground/70">Authentication:</span> {server.auth_type === "oauth2" ? "OAuth2" : "None"}</div>
-                  {server.created_at && (
-                    <div><span className="text-muted-foreground/70">Created:</span> {formatTimestamp(server.created_at, timezone)}</div>
+                  <div className="truncate" title={agent.base_url}><span className="text-muted-foreground/70">URL:</span> {agent.base_url}</div>
+                  {agent.provider_organization && (
+                    <div><span className="text-muted-foreground/70">Provider:</span> {agent.provider_organization}</div>
+                  )}
+                  <div><span className="text-muted-foreground/70">Authentication:</span> {agent.auth_type === "oauth2" ? "OAuth2" : "None"}</div>
+                  {agent.created_at && (
+                    <div><span className="text-muted-foreground/70">Created:</span> {formatTimestamp(agent.created_at, timezone)}</div>
                   )}
                 </div>
-                {confirmingDeleteId === server.id && (
+                {confirmingDeleteId === agent.id && (
                   <div
                     className="absolute inset-x-0 bottom-0 rounded-b-lg border-t bg-card px-4 py-2"
                     onClick={(e) => e.stopPropagation()}
@@ -294,7 +317,7 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
                         size="sm"
                         variant="destructive"
                         className="h-6 text-xs"
-                        onClick={() => void handleDelete(server.id)}
+                        onClick={() => void handleDelete(agent.id)}
                       >
                         Confirm
                       </Button>
@@ -311,31 +334,34 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
             <TableHeader>
               <TableRow className="bg-card hover:bg-card">
                 <SortableTableHead column="name" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[25%]">Name</SortableTableHead>
-                <SortableTableHead column="endpoint" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[32%]">Endpoint</SortableTableHead>
-                <SortableTableHead column="transport" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[15%]">Transport</SortableTableHead>
-                <SortableTableHead column="auth" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[12%]">Auth</SortableTableHead>
-                <SortableTableHead column="created" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[16%]">Created</SortableTableHead>
+                <SortableTableHead column="url" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[30%]">URL</SortableTableHead>
+                <SortableTableHead column="version" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[10%]">Version</SortableTableHead>
+                <SortableTableHead column="provider" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[15%]">Provider</SortableTableHead>
+                <SortableTableHead column="auth" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[10%]">Auth</SortableTableHead>
+                <SortableTableHead column="created" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[10%]">Created</SortableTableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortRows(servers, tableCol, tableDir, {
-                name: (s) => s.name,
-                endpoint: (s) => s.endpoint_url,
-                transport: (s) => s.transport_type,
-                auth: (s) => s.auth_type,
-                created: (s) => s.created_at ?? "",
-              }).map((server) => (
+              {sortRows(agents, tableCol, tableDir, {
+                name: (a) => a.name,
+                url: (a) => a.base_url,
+                version: (a) => a.agent_version,
+                provider: (a) => a.provider_organization ?? "",
+                auth: (a) => a.auth_type,
+                created: (a) => a.created_at ?? "",
+              }).map((agent) => (
                 <TableRow
-                  key={server.id}
+                  key={agent.id}
                   className="bg-input-bg hover:bg-input-bg/80 cursor-pointer"
-                  onClick={() => setSelectedServerId(server.id)}
+                  onClick={() => setSelectedAgentId(agent.id)}
                 >
-                  <TableCell className="font-medium text-sm">{server.name}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground truncate">{server.endpoint_url}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{server.transport_type === "streamable_http" ? "Streamable HTTP" : "SSE"}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{server.auth_type === "oauth2" ? "OAuth2" : "None"}</TableCell>
+                  <TableCell className="font-medium text-sm">{agent.name}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground truncate">{agent.base_url}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{agent.agent_version}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{agent.provider_organization ?? "-"}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{agent.auth_type === "oauth2" ? "OAuth2" : "None"}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    {formatTimestamp(server.created_at, timezone)}
+                    {formatTimestamp(agent.created_at, timezone)}
                   </TableCell>
                 </TableRow>
               ))}

@@ -5,7 +5,14 @@ This module provides functions to create and delete OAuth2 credential providers
 through the AgentCore control plane for agent integrations.
 """
 
+import logging
+import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+_MAX_RETRIES = 4
+_BASE_DELAY = 2.0  # seconds
 
 
 def create_oauth2_credential_provider(
@@ -19,6 +26,9 @@ def create_oauth2_credential_provider(
     """
     Create an OAuth2 credential provider via the AgentCore control plane.
 
+    Retries with exponential backoff on transient failures (e.g.
+    ConflictException from Secrets Manager).
+
     Args:
         name: Name for the credential provider
         client_id: OAuth2 client ID
@@ -30,6 +40,9 @@ def create_oauth2_credential_provider(
     Returns:
         Dictionary with provider details from the API response,
         including callback_url for OAuth2 flow completion
+
+    Raises:
+        Exception: If creation fails after all retries.
     """
     import boto3
 
@@ -51,8 +64,28 @@ def create_oauth2_credential_provider(
     if tags:
         kwargs['tags'] = tags
 
-    response = client.create_oauth2_credential_provider(**kwargs)
-    return response
+    last_exc: Exception | None = None
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            response = client.create_oauth2_credential_provider(**kwargs)
+            return response
+        except Exception as e:
+            last_exc = e
+            if attempt < _MAX_RETRIES:
+                delay = _BASE_DELAY * (2 ** attempt)
+                logger.warning(
+                    "Credential provider '%s' creation failed (attempt %d/%d), "
+                    "retrying in %.1fs: %s",
+                    name, attempt + 1, _MAX_RETRIES + 1, delay, e,
+                )
+                time.sleep(delay)
+            else:
+                logger.error(
+                    "Credential provider '%s' creation failed after %d attempts: %s",
+                    name, _MAX_RETRIES + 1, e,
+                )
+
+    raise last_exc  # type: ignore[misc]
 
 
 def delete_credential_provider(provider_name: str, region: str) -> None:

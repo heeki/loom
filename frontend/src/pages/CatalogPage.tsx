@@ -16,16 +16,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { LayoutGrid, TableIcon, Users, X, Eye, EyeOff } from "lucide-react";
+import { LayoutGrid, TableIcon, X, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { statusVariant } from "@/lib/status";
 import { listMemories, refreshMemory, deleteMemory, purgeMemory } from "@/api/memories";
 import { listMcpServers } from "@/api/mcp";
+import { listA2aAgents } from "@/api/a2a";
 import { listTagPolicies } from "@/api/settings";
 import { ApiError } from "@/api/client";
-import type { AgentResponse, MemoryResponse, McpServer, TagPolicy } from "@/api/types";
+import type { AgentResponse, MemoryResponse, McpServer, A2aAgent, TagPolicy } from "@/api/types";
 
 interface CatalogPageProps {
   agents: AgentResponse[];
@@ -96,6 +97,9 @@ export function CatalogPage({
   const [memoryTableDir, setMemoryTableDir] = useState<SortDirection>("asc");
   const [mcpTableCol, setMcpTableCol] = useState<string | null>("name");
   const [mcpTableDir, setMcpTableDir] = useState<SortDirection>("asc");
+  const [a2aSortDir, setA2aSortDir] = useState<SortDirection>(() => loadSortDirection("catalog-a2a"));
+  const [a2aTableCol, setA2aTableCol] = useState<string | null>("name");
+  const [a2aTableDir, setA2aTableDir] = useState<SortDirection>("asc");
 
   const handleAgentTableSort = (col: string) => {
     if (agentTableCol === col) {
@@ -121,6 +125,14 @@ export function CatalogPage({
       setMcpTableDir("asc");
     }
   };
+  const handleA2aTableSort = (col: string) => {
+    if (a2aTableCol === col) {
+      setA2aTableDir(a2aTableDir === "asc" ? "desc" : "asc");
+    } else {
+      setA2aTableCol(col);
+      setA2aTableDir("asc");
+    }
+  };
 
   const filteredAgents = agents.filter(agent => matchesFilters(agent.tags));
 
@@ -142,6 +154,25 @@ export function CatalogPage({
   useEffect(() => {
     void fetchMcpData();
   }, [fetchMcpData]);
+
+  // A2A agent data
+  const [a2aAgents, setA2aAgents] = useState<A2aAgent[]>([]);
+  const [a2aLoading, setA2aLoading] = useState(true);
+
+  const fetchA2aData = useCallback(async () => {
+    try {
+      const data = await listA2aAgents();
+      setA2aAgents(data);
+    } catch {
+      // silently ignore
+    } finally {
+      setA2aLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchA2aData();
+  }, [fetchA2aData]);
 
   // Memory data
   const [memories, setMemories] = useState<MemoryResponse[]>([]);
@@ -656,11 +687,101 @@ export function CatalogPage({
 
       {/* A2A Agents Section */}
       <section className="space-y-3">
-        <h3 className="text-sm font-medium">A2A Agents</h3>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground py-4">
-          <Users className="h-4 w-4" />
-          <span className="italic">Coming soon</span>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium">A2A Agents</h3>
+          <SortButton direction={a2aSortDir} onClick={() => setA2aSortDir(toggleSortDirection("catalog-a2a", a2aSortDir))} />
         </div>
+
+        {a2aLoading ? (
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <Skeleton key={i} className="h-32" />
+            ))}
+          </div>
+        ) : a2aAgents.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-8">
+            No A2A agents registered. Use the A2A Agents page to register one.
+          </p>
+        ) : viewMode === "cards" ? (
+          <SortableCardGrid
+            items={a2aAgents}
+            getId={(a) => String(a.id)}
+            getName={(a) => a.name}
+            storageKey="catalog-a2a"
+            sortDirection={a2aSortDir}
+            onSortDirectionChange={(d) => { if (d) { setA2aSortDir(d); saveSortDirection("catalog-a2a", d); } }}
+            renderItem={(agent) => (
+              <Card className="py-3 gap-1">
+                <CardHeader className="gap-0 pb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-medium truncate" title={agent.name}>
+                      {agent.name}
+                    </div>
+                    <Badge variant={statusVariant(agent.status)} className="text-[10px] px-1.5 py-0 shrink-0">
+                      {agent.status}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="text-xs text-muted-foreground">
+                  <div className="rounded border bg-input-bg p-3 space-y-0.5">
+                    {agent.description && (
+                      <div className="truncate" title={agent.description}>{agent.description}</div>
+                    )}
+                    <div className="truncate" title={agent.base_url}><span className="text-muted-foreground/70">URL:</span> {agent.base_url}</div>
+                    <div><span className="text-muted-foreground/70">Version:</span> {agent.agent_version}</div>
+                    <div><span className="text-muted-foreground/70">Auth:</span> {agent.auth_type === "oauth2" ? "OAuth2" : "None"}</div>
+                    {agent.provider_organization && (
+                      <div><span className="text-muted-foreground/70">Provider:</span> {agent.provider_organization}</div>
+                    )}
+                    {agent.created_at && (
+                      <div><span className="text-muted-foreground/70">Created:</span> {formatTimestamp(agent.created_at, timezone)}</div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          />
+        ) : (
+          <div className="rounded-md border overflow-hidden">
+            <Table className="table-fixed">
+              <TableHeader>
+                <TableRow className="bg-card hover:bg-card">
+                  <SortableTableHead column="name" activeColumn={a2aTableCol} direction={a2aTableDir} onSort={handleA2aTableSort} className="w-[25%]">Name</SortableTableHead>
+                  <SortableTableHead column="url" activeColumn={a2aTableCol} direction={a2aTableDir} onSort={handleA2aTableSort} className="w-[32%]">Base URL</SortableTableHead>
+                  <SortableTableHead column="version" activeColumn={a2aTableCol} direction={a2aTableDir} onSort={handleA2aTableSort} className="w-[12%]">Version</SortableTableHead>
+                  <SortableTableHead column="auth" activeColumn={a2aTableCol} direction={a2aTableDir} onSort={handleA2aTableSort} className="w-[12%]">Auth</SortableTableHead>
+                  <SortableTableHead column="status" activeColumn={a2aTableCol} direction={a2aTableDir} onSort={handleA2aTableSort} className="w-[10%]">Status</SortableTableHead>
+                  <SortableTableHead column="created" activeColumn={a2aTableCol} direction={a2aTableDir} onSort={handleA2aTableSort} className="w-[16%]">Created</SortableTableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sortRows(a2aAgents, a2aTableCol, a2aTableDir, {
+                  name: (a) => a.name,
+                  url: (a) => a.base_url,
+                  version: (a) => a.agent_version,
+                  auth: (a) => a.auth_type,
+                  status: (a) => a.status,
+                  created: (a) => a.created_at ?? "",
+                }).map((agent) => (
+                  <TableRow key={agent.id} className="bg-input-bg hover:bg-input-bg/80">
+                    <TableCell className="font-medium text-sm">{agent.name}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground truncate">{agent.base_url}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{agent.agent_version}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{agent.auth_type === "oauth2" ? "OAuth2" : "None"}</TableCell>
+                    <TableCell>
+                      <Badge variant={statusVariant(agent.status)} className="text-[10px] px-1.5 py-0">
+                        {agent.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {formatTimestamp(agent.created_at, timezone)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
       </section>
     </div>
   );

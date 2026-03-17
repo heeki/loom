@@ -27,12 +27,13 @@ import { MemoryManagementPage } from "@/pages/MemoryManagementPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { TaggingPage } from "@/pages/TaggingPage";
 import { McpServersPage } from "@/pages/McpServersPage";
+import { A2aAgentsPage } from "@/pages/A2aAgentsPage";
 import type { SessionResponse, InvocationResponse } from "@/api/types";
 import { AuthProvider, useAuth, type Scope } from "@/contexts/AuthContext";
 import { LoginPage } from "@/pages/LoginPage";
 import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings, Eye, Tags } from "lucide-react";
 
-type Persona = "catalog" | "security" | "builder" | "memory" | "tagging" | "settings" | "mcp";
+type Persona = "catalog" | "security" | "builder" | "memory" | "tagging" | "settings" | "mcp" | "a2a";
 
 const GROUP_SCOPES: Record<string, Scope[]> = {
   "super-admins": [
@@ -166,6 +167,7 @@ function AppContent() {
   const [agentsViewMode, setAgentsViewMode] = useState<ViewMode>("cards");
   const [memoryViewMode, setMemoryViewMode] = useState<ViewMode>("cards");
   const [mcpViewMode, setMcpViewMode] = useState<ViewMode>("cards");
+  const [a2aViewMode, setA2aViewMode] = useState<ViewMode>("cards");
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessionDetail, setSessionDetail] = useState<SessionResponse | null>(null);
@@ -221,9 +223,25 @@ function AppContent() {
 
 
 
+  const handleSelectAgent = (id: number) => {
+    setSelectedAgentId(id);
+    setSelectedSessionId(null);
+    setSessionDetail(null);
+    setSelectedInvocationId(null);
+    setInvocationDetail(null);
+  };
+
   const handleDelete = async (id: number, cleanupAws: boolean) => {
     try {
       await deleteAgent(id, cleanupAws);
+      // If the deleted agent was selected, clear all drill-down state
+      if (selectedAgentId === id) {
+        setSelectedAgentId(null);
+        setSelectedSessionId(null);
+        setSessionDetail(null);
+        setSelectedInvocationId(null);
+        setInvocationDetail(null);
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Delete failed");
     }
@@ -324,12 +342,6 @@ function AppContent() {
             active={activePersona === "tagging"}
             onClick={() => setActivePersona("tagging")}
           />
-          <SidebarItem
-            icon={Settings}
-            label="Settings"
-            active={activePersona === "settings"}
-            onClick={() => setActivePersona("settings")}
-          />
           {(effectiveHasScope("mcp:read") || effectiveHasScope("mcp:write")) && (
             <SidebarItem
               icon={Network}
@@ -342,11 +354,16 @@ function AppContent() {
             <SidebarItem
               icon={Users}
               label="A2A Agents"
-              active={false}
-              onClick={() => {}}
-              disabled
+              active={activePersona === "a2a"}
+              onClick={() => setActivePersona("a2a")}
             />
           )}
+          <SidebarItem
+            icon={Settings}
+            label="Settings"
+            active={activePersona === "settings"}
+            onClick={() => setActivePersona("settings")}
+          />
         </nav>
         <div className="p-2 border-t space-y-1">
           {user && (
@@ -434,7 +451,7 @@ function AppContent() {
                   loading={loading}
                   viewMode={catalogViewMode}
                   onViewModeChange={setCatalogViewMode}
-                  onSelectAgent={setSelectedAgentId}
+                  onSelectAgent={handleSelectAgent}
                   onRefreshAgent={refreshAgent}
                   onDelete={handleDelete}
                   readOnly={!effectiveHasScope("agent:write")}
@@ -480,7 +497,7 @@ function AppContent() {
               onRegister={registerAgent}
               onDeploy={deployAgent}
               onSelectAgent={(id) => {
-                setSelectedAgentId(id);
+                handleSelectAgent(id);
                 setActivePersona("catalog");
               }}
               onRefreshAgent={refreshAgent}
@@ -495,6 +512,7 @@ function AppContent() {
           {activePersona === "memory" && <MemoryManagementPage viewMode={memoryViewMode} onViewModeChange={setMemoryViewMode} readOnly={!effectiveHasScope("memory:write")} groupRestriction={groupRestriction} />}
           {activePersona === "tagging" && <TaggingPage readOnly={!(effectiveHasScope("agent:write") || effectiveHasScope("security:write") || effectiveHasScope("memory:write"))} />}
           {activePersona === "mcp" && <McpServersPage viewMode={mcpViewMode} onViewModeChange={setMcpViewMode} readOnly={!effectiveHasScope("mcp:write")} />}
+          {activePersona === "a2a" && <A2aAgentsPage viewMode={a2aViewMode} onViewModeChange={setA2aViewMode} readOnly={!effectiveHasScope("a2a:write")} />}
           {activePersona === "settings" && <SettingsPage />}
         </main>
       </div>

@@ -45,6 +45,21 @@ export function testConnection(serverId: number): Promise<TestConnectionResult> 
   });
 }
 
+export function testConnectionPreCreate(config: {
+  endpoint_url: string;
+  transport_type: string;
+  auth_type: string;
+  oauth2_well_known_url?: string;
+  oauth2_client_id?: string;
+  oauth2_client_secret?: string;
+  oauth2_scopes?: string;
+}): Promise<TestConnectionResult> {
+  return apiFetch<TestConnectionResult>("/api/mcp/servers/test-connection", {
+    method: "POST",
+    body: JSON.stringify(config),
+  });
+}
+
 export function getServerTools(serverId: number): Promise<McpTool[]> {
   return apiFetch<McpTool[]>(`/api/mcp/servers/${serverId}/tools`);
 }
