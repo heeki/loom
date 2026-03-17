@@ -12,30 +12,72 @@ The handler is async and yields streaming events via
 generated (R5).
 """
 
+import logging
+import os
+import sys
 from typing import Any, AsyncGenerator
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from strands.types.exceptions import MaxTokensReachedException
 
-from src.config import load_config
-from src.agent import build_agent
+from src.config import AgentConfig, load_config
+from src.agent import attach_mcp_tools, build_agent
+from src.integrations.mcp_client import has_oauth2_servers
 from src.telemetry import trace_invocation
+
+# Configure the root Python logger so all modules (agent, mcp_client, etc.)
+# emit to stdout where AgentCore Runtime captures them for CloudWatch.
+_log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, _log_level, logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    stream=sys.stdout,
+    force=True,
+)
 
 app = BedrockAgentCoreApp()
 logger = app.logger
 
-# Module-level agent instance, initialized once at cold start
+# Module-level state, initialized once at cold start
 _agent = None
+_config: AgentConfig | None = None
+_mcp_attached = False
 
 
 def _get_agent():
-    """Get or initialize the singleton agent instance."""
-    global _agent
+    """Get or initialize the singleton agent instance.
+
+    If the configuration includes OAuth2-authenticated MCP servers,
+    MCP client initialization is deferred until the first invocation
+    when the workload access token is available in the request context.
+    """
+    global _agent, _config
     if _agent is None:
-        config = load_config()
-        _agent = build_agent(config)
+        _config = load_config()
+        defer_mcp = has_oauth2_servers(_config.integrations.mcp_servers)
+        if defer_mcp:
+            logger.info("Deferring MCP client init — OAuth2 servers require invocation context")
+        _agent = build_agent(_config, defer_mcp=defer_mcp)
         logger.info("Agent initialized successfully")
     return _agent
+
+
+def _ensure_mcp_tools():
+    """Attach MCP tools on the first invocation when context is available."""
+    global _mcp_attached
+    if _mcp_attached or _config is None:
+        return
+    _mcp_attached = True
+
+    enabled_servers = [s for s in _config.integrations.mcp_servers if s.enabled]
+    if not enabled_servers:
+        return
+
+    logger.info("Attaching MCP tools (first invocation with context)")
+    try:
+        attach_mcp_tools(_agent, _config.integrations.mcp_servers)
+    except Exception as e:
+        logger.warning("Failed to attach MCP tools: %s. Agent will continue without MCP tools.", e)
 
 
 @app.entrypoint
@@ -56,6 +98,8 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
         Streaming events produced by the agent.
     """
     agent = _get_agent()
+    _ensure_mcp_tools()
+
     prompt = payload.get("prompt", "")
     session_id = payload.get("session_id", "")
 

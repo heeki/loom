@@ -20,7 +20,7 @@ The frontend is organized around persona-based workflows, accessible via a sideb
 - **Memory** — Create new AgentCore Memory resources with configurable strategies or import existing ones.
 - **Tagging** — Manage tag policies (platform + custom) and tag profiles. Accessible to all scopes; write operations require `*:write`.
 - **Settings** — Manage display preferences (theme, timezone). Accessible to all scopes.
-- **MCP Servers** (coming soon) — Disabled sidebar entry for future MCP server management.
+- **MCP Servers** — Register and manage MCP servers, view available tools, and control persona access.
 - **A2A Agents** (coming soon) — Disabled sidebar entry for future A2A agent management.
 
 ---
@@ -49,6 +49,7 @@ loom/
 │   │   │   ├── authorizer_credential.py
 │   │   │   ├── permission_request.py
 │   │   │   ├── memory.py
+│   │   │   ├── mcp.py
 │   │   │   └── tag_profile.py
 │   │   ├── dependencies/
 │   │   │   └── auth.py
@@ -58,11 +59,13 @@ loom/
 │   │   │   ├── invocations.py
 │   │   │   ├── logs.py
 │   │   │   ├── memories.py
+│   │   │   ├── mcp.py
 │   │   │   ├── security.py
 │   │   │   ├── settings.py
 │   │   │   └── utils.py
 │   │   └── services/
 │   │       ├── agentcore.py
+│   │       ├── mcp.py
 │   │       ├── memory.py
 │   │       ├── secrets.py
 │   │       ├── cognito.py
@@ -347,7 +350,25 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Security admin panels (RoleManagementPanel, AuthorizerManagementPanel, PermissionRequestsPanel) converted from stacked `<div className="space-y-2">` layouts to `SortableCardGrid` with drag-to-reorder and alphabetical sort controls. AuthorizerManagementPanel and PermissionRequestsPanel use responsive grid (`md:grid-cols-2 lg:grid-cols-3`); RoleManagementPanel uses full-width single-column layout since role cards contain long ARNs and expandable policy documents.
 - All existing card grid consumers updated: CatalogPage (agents, memories), AgentListPage (agents), MemoryManagementPanel (memories), TaggingPage (policies, profiles).
 
-### Phase 13 — Advanced Operations
+### Phase 13 — MCP Server Integration *(Complete)*
+- Backend: `McpServer`, `McpTool`, `McpServerAccess` ORM models with full CRUD API under `/api/mcp/servers`. MCP server registration with name, endpoint URL, and transport type (SSE or Streamable HTTP). OAuth2 authentication configuration with well-known URL, client ID, client secret (write-only), and scopes. Conditional validation: OAuth2 fields required when auth_type is `oauth2`. Client secrets never returned in GET responses (`has_oauth2_secret` flag instead).
+- Tool discovery: `GET /api/mcp/servers/{id}/tools` returns cached tools, `POST /api/mcp/servers/{id}/tools/refresh` fetches from server (stub implementation). Each tool stores name, description, and input schema (JSON).
+- Access control: `GET/PUT /api/mcp/servers/{id}/access` manages per-persona access rules. Access levels: `all_tools` (any tool including future ones) or `selected_tools` (specific tool names). Deny by default — no rule means no access.
+- Connection test: `POST /api/mcp/servers/{id}/test-connection` validates OAuth2 configuration (stub for actual MCP connectivity).
+- Frontend: `McpServersPage` with card/table view toggle, sortable columns, server detail view with Tools/Access tabs. `McpServerForm` with progressive OAuth2 field disclosure. `McpToolList` with refresh, collapsible input schema display. `McpAccessControl` with per-agent toggle, all_tools/selected_tools radio, individual tool checkboxes.
+- MCP Servers sidebar item activated (no longer disabled/coming soon). Scope-gated by `mcp:read`/`mcp:write`.
+- Agent deployment with MCP server selection: multi-select dropdown on deploy form allows selecting MCP servers from catalog. Selected servers attached to agent during deployment.
+- OAuth2 credential provider creation: for OAuth2-enabled MCP servers, backend calls AgentCore `create_oauth2_credential_provider` API using `CustomOauth2` vendor with `discoveryUrl` from server configuration. Credential providers auto-named `{agent_name}-mcp-{server_name}`.
+- Background deployment with progressive status updates: deploy endpoint returns immediately with `creating_credentials` status. Background task progresses through `creating_role`, `building_artifact`, `deploying` phases with DB updates. Frontend polls at 2-second intervals.
+- Frontend progressive deployment status display: agent cards show human-readable status messages (Creating credential provider, Creating IAM role, Building artifact, Deploying runtime, Completing deployment, Finalizing endpoint) with spinner and elapsed timer.
+- Smart polling optimization: frontend skips AWS API calls during `creating_credentials`, `creating_role`, and `building_artifact` phases (local operations only), reducing unnecessary backend load.
+- Credential provider cascade delete: when agents are deleted, associated OAuth2 credential providers are automatically cleaned up via AgentCore API.
+- Agent runtime deferred MCP client initialization: OAuth2 MCP clients are initialized at invocation time (not handler startup) since workload tokens are only available during active requests.
+- Agent runtime `_OAuth2Auth` httpx handler: exchanges ephemeral workload token for downstream OAuth2 access token via AgentCore Identity service M2M flow. Workload token retrieved from `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE` environment variable.
+- Agent deletion with background polling: delete endpoint returns `DELETING` status. Background task polls AgentCore until runtime deletion completes, then purges local DB record. Endpoint status badge hidden during deletion.
+- 25 backend tests covering all CRUD operations, validation, secret exclusion, OAuth2 conditional fields, tools, access rules, and cascade delete.
+
+### Phase 14 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

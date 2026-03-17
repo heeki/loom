@@ -4,15 +4,23 @@ import * as agentsApi from "@/api/agents";
 import { ApiError } from "@/api/client";
 import { toast } from "sonner";
 
-const POLL_INTERVAL_MS = 5000;
+const POLL_INTERVAL_MS = 2000;
+
+const DEPLOY_IN_PROGRESS = new Set([
+  "initializing",
+  "creating_credentials",
+  "creating_role",
+  "building_artifact",
+  "deploying",
+  "ENDPOINT_CREATING",
+]);
 
 function needsPolling(agent: AgentResponse): boolean {
   return (
     agent.status === "DELETING" ||
     (agent.source === "deploy" &&
       (agent.status === "CREATING" ||
-        agent.deployment_status === "deploying" ||
-        agent.deployment_status === "ENDPOINT_CREATING" ||
+        DEPLOY_IN_PROGRESS.has(agent.deployment_status ?? "") ||
         agent.endpoint_status === "CREATING"))
   );
 }

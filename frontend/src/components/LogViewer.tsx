@@ -6,9 +6,10 @@ import type { LogEvent } from "@/api/types";
 interface LogViewerProps {
   logs: LogEvent[];
   loading: boolean;
+  showTimestamp?: boolean;
 }
 
-export function LogViewer({ logs, loading }: LogViewerProps) {
+export function LogViewer({ logs, loading, showTimestamp = true }: LogViewerProps) {
   const { timezone } = useTimezone();
 
   if (loading) {
@@ -29,9 +30,11 @@ export function LogViewer({ logs, loading }: LogViewerProps) {
     <div className="rounded border bg-input-bg p-3 font-mono text-xs leading-relaxed">
       {logs.map((event, i) => (
         <div key={i} className="flex gap-3 hover:bg-accent/30 py-0.5">
-          <span className="shrink-0 text-muted-foreground">
-            {formatLogTime(event.timestamp_iso, timezone)}
-          </span>
+          {showTimestamp && (
+            <span className="shrink-0 text-muted-foreground">
+              {formatLogTime(event.timestamp_iso, timezone)}
+            </span>
+          )}
           <span className="whitespace-pre-wrap break-all">{event.message}</span>
         </div>
       ))}

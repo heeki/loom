@@ -185,7 +185,7 @@ class TestGetRuntimeEndpoint(unittest.TestCase):
         result = get_runtime_endpoint("rt-123", "my-ep", "us-east-1")
 
         mock_client.get_agent_runtime_endpoint.assert_called_once_with(
-            agentRuntimeId="rt-123", name="my-ep"
+            agentRuntimeId="rt-123", endpointName="my-ep"
         )
         self.assertEqual(result["status"], "READY")
 
@@ -217,7 +217,7 @@ class TestDeleteRuntimeEndpoint(unittest.TestCase):
         delete_runtime_endpoint("rt-123", "my-ep", "us-east-1")
 
         mock_client.delete_agent_runtime_endpoint.assert_called_once_with(
-            agentRuntimeId="rt-123", name="my-ep"
+            agentRuntimeId="rt-123", endpointName="my-ep"
         )
 
 

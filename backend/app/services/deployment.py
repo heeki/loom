@@ -307,7 +307,7 @@ def get_runtime_endpoint(
 
     client = boto3.client("bedrock-agentcore-control", region_name=region)
     return client.get_agent_runtime_endpoint(
-        agentRuntimeId=runtime_id, name=endpoint_name
+        agentRuntimeId=runtime_id, endpointName=endpoint_name
     )
 
 
@@ -326,7 +326,7 @@ def delete_runtime_endpoint(
 
     client = boto3.client("bedrock-agentcore-control", region_name=region)
     client.delete_agent_runtime_endpoint(
-        agentRuntimeId=runtime_id, name=endpoint_name
+        agentRuntimeId=runtime_id, endpointName=endpoint_name
     )
 
 

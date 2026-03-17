@@ -1,6 +1,6 @@
 # Loom Backend
 
-FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, security administration, tag policy management, and tag profile management.
+FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, MCP server management, security administration, tag policy management, and tag profile management.
 
 ## Technology Stack
 
@@ -72,6 +72,7 @@ backend/
 │   │   ├── authorizer_credential.py # AuthorizerCredential ORM model
 │   │   ├── permission_request.py   # PermissionRequest ORM model
 │   │   ├── memory.py        # Memory ORM model (AgentCore Memory resources)
+│   │   ├── mcp.py           # McpServer, McpTool, McpServerAccess ORM models
 │   │   ├── tag_policy.py    # TagPolicy ORM model (configurable tag policies)
 │   │   └── tag_profile.py   # TagProfile ORM model (named tag presets)
 │   ├── dependencies/
@@ -82,6 +83,7 @@ backend/
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
 │   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
 │   │   ├── memories.py      # Memory resource CRUD + strategy mapping
+│   │   ├── mcp.py           # MCP server CRUD, tool discovery, access control
 │   │   ├── security.py      # Security admin: roles, authorizers, credentials, permissions
 │   │   ├── settings.py      # Tag policy + tag profile CRUD (/api/settings/tags, /api/settings/tag-profiles)
 │   │   └── utils.py         # Shared router utilities
@@ -94,6 +96,7 @@ backend/
 │       ├── iam.py           # IAM role management + Cognito pool listing
 │       ├── jwt_validator.py # JWT validation against Cognito JWKS
 │       ├── latency.py       # Pure computation: cold_start_latency_ms, client_duration_ms
+│       ├── mcp.py           # MCP connection test + tool fetch stubs
 │       ├── memory.py        # boto3 wrapper: AgentCore Memory CRUD
 │       └── secrets.py       # Secrets Manager wrapper with caching
 ├── scripts/
@@ -108,7 +111,7 @@ backend/
 
 ### `agents`
 
-Stores registered and deployed AgentCore Runtime agents. Uses an auto-incrementing integer PK for internal references; `arn` and `runtime_id` are stored as indexed columns for AWS lookups. Includes columns for: `source`, `deployment_status`, `execution_role_arn`, `endpoint_name`, `endpoint_arn`, `endpoint_status`, `protocol`, `network_mode`, `authorizer_config`, `deployed_at`, and `tags` (JSON dict of resolved tag key-value pairs).
+Stores registered and deployed AgentCore Runtime agents. Uses an auto-incrementing integer PK for internal references; `arn` and `runtime_id` are stored as indexed columns for AWS lookups. Includes columns for: `source`, `deployment_status`, `execution_role_arn`, `endpoint_name`, `endpoint_arn`, `endpoint_status`, `protocol`, `network_mode`, `authorizer_config`, `credential_providers`, `deployed_at`, and `tags` (JSON dict of resolved tag key-value pairs).
 
 ### `agent_config_entries`
 
@@ -138,6 +141,18 @@ Stores configurable tag policies for AWS resource tagging. Each policy defines a
 
 Stores named presets of tag key-value pairs. Each profile has a unique name and a JSON dict of tags. When a profile is selected during deployment, its tag values are merged with deploy-time policy defaults and applied to all created AWS resources. Tag values are limited to 128 characters.
 
+### `mcp_servers`
+
+Stores registered MCP servers. Columns include `name`, `url`, `transport` (sse or streamable_http), `description`, `auth_type` (none or oauth2), OAuth2 fields (`oauth2_client_id`, `oauth2_client_secret`, `oauth2_token_url`, `oauth2_scopes`, `oauth2_well_known_url`), `status` (active/inactive), and timestamps. The `oauth2_client_secret` is write-only — it is never returned in GET responses; a boolean `has_oauth2_secret` is returned instead.
+
+### `mcp_tools`
+
+Stores discovered tools for each MCP server. Columns include `server_id` (FK to mcp_servers), `name`, `description`, and `input_schema` (JSON). Tools are refreshed via the tool discovery endpoint. Cascade-deletes when the parent server is removed.
+
+### `mcp_server_access`
+
+Stores per-persona access rules for MCP server tools. Columns include `server_id` (FK to mcp_servers), `persona` (unique per server), `allowed` (boolean), `access_mode` (all_tools or selected_tools), and `allowed_tool_names` (JSON list). Defaults to deny (no access) until explicitly granted. Cascade-deletes when the parent server is removed.
+
 ### `memories`
 
 Stores AgentCore Memory resource metadata. Columns include `name`, `arn`, `memory_id`, `region`, `account_id`, `status` (CREATING/ACTIVE/FAILED/DELETING), `event_expiry_duration`, `memory_execution_role_arn`, `encryption_key_arn`, `strategies_config` (JSON), `strategies_response` (JSON), `tags` (JSON dict of resolved tags), and `failure_reason`.
@@ -159,6 +174,7 @@ Stores per-invocation timing measurements and status. Fields include `client_inv
 | `POST` | `/api/agents` | Register an agent by ARN or deploy a new agent |
 | `GET` | `/api/agents` | List all registered agents (includes `model_id` and `active_session_count`) |
 | `GET` | `/api/agents/{agent_id}` | Get agent metadata |
+| `GET` | `/api/agents/{agent_id}/status` | Poll AWS for runtime/endpoint status during deployment |
 | `DELETE` | `/api/agents/{agent_id}?cleanup_aws=true` | Remove agent; optionally initiate async AWS deletion (returns DELETING status) |
 | `DELETE` | `/api/agents/{agent_id}/purge` | Remove agent from local DB only (after AWS deletion confirmed) |
 | `POST` | `/api/agents/{agent_id}/refresh` | Re-fetch metadata from AWS |
@@ -227,6 +243,23 @@ Stores per-invocation timing measurements and status. Fields include `client_inv
 
 Supports five memory strategy types: semantic, summary, user_preference, episodic, and custom. Strategies are mapped to AWS tagged union format on creation. The delete endpoint supports async deletion: when `cleanup_aws=true`, it initiates deletion in AWS and marks the resource as DELETING. The frontend polls via refresh and uses purge to clean up locally after AWS confirms deletion (404).
 
+### MCP Server Management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/mcp/servers` | Register an MCP server |
+| `GET` | `/api/mcp/servers` | List all MCP servers |
+| `GET` | `/api/mcp/servers/{server_id}` | Get a specific MCP server |
+| `PUT` | `/api/mcp/servers/{server_id}` | Update an MCP server |
+| `DELETE` | `/api/mcp/servers/{server_id}` | Delete an MCP server (cascades to tools and access) |
+| `POST` | `/api/mcp/servers/{server_id}/test-connection` | Test connectivity to an MCP server |
+| `GET` | `/api/mcp/servers/{server_id}/tools` | List discovered tools for a server |
+| `POST` | `/api/mcp/servers/{server_id}/tools/refresh` | Refresh tools via discovery |
+| `GET` | `/api/mcp/servers/{server_id}/access` | Get access rules for a server |
+| `PUT` | `/api/mcp/servers/{server_id}/access` | Update access rules for a server |
+
+OAuth2 authentication supports well-known URL discovery for auto-populating token URLs and scopes. The `oauth2_client_secret` field is write-only — never included in GET responses; a `has_oauth2_secret` boolean is returned instead. Conditional validation ensures all required OAuth2 fields are present when `auth_type` is `oauth2`. Scope enforcement: `mcp:read` for GET, `mcp:write` for POST/PUT/DELETE.
+
 ### Agent Invocation (SSE Streaming)
 
 | Method | Path | Description |
@@ -267,9 +300,22 @@ Cold-start latency is computed automatically during the invoke flow:
 
 ## Agent Deployment
 
-Deploy creates a Strands Agent runtime on AgentCore. The build step cross-compiles an ARM64 artifact (pip install into a target directory, zips the result, and uploads to S3). Model and IAM role are required fields. The deployment supports configurable protocol (HTTP), network mode (PUBLIC), authorizer, and lifecycle settings. Cognito client secrets are stored in Secrets Manager and never persisted in the local database. Deletion optionally cleans up the AgentCore runtime and associated Secrets Manager entries. The deployment automatically sets `OTEL_SERVICE_NAME` to the agent name for AgentCore Observability integration.
+Deploy creates a Strands Agent runtime on AgentCore with background deployment and progressive status updates. The deployment flow includes:
 
-Tags are resolved from the tag policy system at deploy time. Deploy-time tags are auto-applied from their default values; build-time tags are resolved from the selected tag profile. Required tags that are missing cause deployment to fail with a 400 error. Resolved tags are applied to all created AWS resources (AgentCore runtimes, endpoints, IAM execution roles, memory resources) and stored locally on Agent and Memory records. For registered agents and imported memories, tags are fetched from AWS via `list_tags_for_resource`; missing required tags are filled with `"missing"`. Deletion with `cleanup_aws=true` initiates async AWS deletion (endpoint + runtime + Secrets Manager cleanup), marks the agent as DELETING, and returns the updated agent. The frontend polls the status endpoint until AWS confirms deletion (404), then calls the purge endpoint to remove the local record.
+1. **OAuth2 credential provider creation** — MCP server integrations with OAuth2 are provisioned as AgentCore credential providers
+2. **IAM role creation** — Execution role provisioning (if creating new role)
+3. **Artifact build** — Cross-compiles ARM64 artifact (pip install into target directory, zips, uploads to S3)
+4. **Runtime deployment** — Creates AgentCore runtime and endpoint
+
+The `deployment_status` field tracks progression through phases: `creating_credential_provider`, `creating_iam_role`, `building_artifact`, `deploying_runtime`, `completing_deployment`, `finalizing_endpoint`, `deployed`, `failed`, `deleting`.
+
+Smart status polling: during local build phases (credential provider, IAM role, artifact build), the frontend polls the local database only. Once the runtime deployment begins, the `/api/agents/{agent_id}/status` endpoint queries AWS for runtime and endpoint status.
+
+Model and IAM role are required fields. The deployment supports configurable protocol (HTTP), network mode (PUBLIC), authorizer, and lifecycle settings. Cognito client secrets are stored in Secrets Manager and never persisted in the local database. The deployment automatically sets `OTEL_SERVICE_NAME` to the agent name for AgentCore Observability integration.
+
+Tags are resolved from the tag policy system at deploy time. Deploy-time tags are auto-applied from their default values; build-time tags are resolved from the selected tag profile. Required tags that are missing cause deployment to fail with a 400 error. Resolved tags are applied to all created AWS resources (AgentCore runtimes, endpoints, IAM execution roles, memory resources) and stored locally on Agent and Memory records. For registered agents and imported memories, tags are fetched from AWS via `list_tags_for_resource`; missing required tags are filled with `"missing"`.
+
+Deletion with `cleanup_aws=true` initiates background async AWS deletion (endpoint + runtime + credential providers + Secrets Manager cleanup), marks the agent as DELETING, and returns the updated agent. The frontend polls the status endpoint until AWS confirms deletion (404), then calls the purge endpoint to remove the local record. Credential providers cascade delete when the agent is deleted.
 
 ## Authenticated Invocation
 

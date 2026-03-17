@@ -16,8 +16,9 @@ import { JsonConfigSection } from "@/components/JsonConfigSection";
 import * as agentsApi from "@/api/agents";
 import * as securityApi from "@/api/security";
 import * as settingsApi from "@/api/settings";
+import { listMcpServers } from "@/api/mcp";
 import { ResourceTagFields } from "@/components/ResourceTagFields";
-import type { AgentDeployRequest, ModelOption, ManagedRole, AuthorizerConfigResponse, TagProfile } from "@/api/types";
+import type { AgentDeployRequest, ModelOption, ManagedRole, AuthorizerConfigResponse, TagProfile, McpServer } from "@/api/types";
 import { toast } from "sonner";
 
 function TagInput({
@@ -123,8 +124,9 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
 
   // Integrations state
   const [memoryEnabled] = useState(false);
-  const [mcpServersEnabled] = useState(false);
+  const [selectedMcpServerIds, setSelectedMcpServerIds] = useState<number[]>([]);
   const [a2aAgentsEnabled] = useState(false);
+  const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
 
   // Tag state (populated by ResourceTagFields via profile selection)
   const [tagValues, setTagValues] = useState<Record<string, string>>({});
@@ -145,6 +147,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
       void securityApi.listManagedRoles().then(setManagedRoles).catch(() => {});
       void securityApi.listAuthorizerConfigs().then(setAuthConfigs).catch(() => {});
       void settingsApi.listTagProfiles().then(setTagProfiles).catch(() => {});
+      void listMcpServers().then(setMcpServers).catch(() => {});
     }
   }, [mode]);
 
@@ -233,7 +236,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
         authorizer_client_id: authConfig?.client_id ?? null,
         authorizer_client_secret: null,
         memory_enabled: memoryEnabled,
-        mcp_servers: [],
+        mcp_servers: selectedMcpServerIds,
         a2a_agents: [],
         tags: Object.fromEntries(
           Object.entries(tagValues).filter(([, v]) => v.trim() !== "")
@@ -311,6 +314,16 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                       const match = tagProfiles.find((p) => p.name === parsed.tags);
                       if (match) setSelectedTagProfileId(match.id.toString());
                     }
+                    if (Array.isArray(parsed.mcp_servers)) {
+                      const ids = parsed.mcp_servers
+                        .map((s: string | number) => {
+                          if (typeof s === "number") return s;
+                          const match = mcpServers.find((m) => m.name === s);
+                          return match?.id;
+                        })
+                        .filter((id: number | undefined): id is number => id !== undefined);
+                      setSelectedMcpServerIds(ids);
+                    }
                     return null;
                   } catch {
                     return "Invalid JSON. Please check the format and try again.";
@@ -338,6 +351,12 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                   if (selectedTagProfileId) {
                     const profile = tagProfiles.find((p) => p.id.toString() === selectedTagProfileId);
                     if (profile) result.tags = profile.name;
+                  }
+                  if (selectedMcpServerIds.length > 0) {
+                    result.mcp_servers = selectedMcpServerIds.map((id) => {
+                      const server = mcpServers.find((s) => s.id === id);
+                      return server?.name ?? id;
+                    });
                   }
                   return JSON.stringify(result, null, 2);
                 }}
@@ -615,21 +634,50 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
               {/* Integrations */}
               <section className="space-y-3">
                 <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Integrations</h4>
-                <div className="space-y-2 text-xs text-muted-foreground">
-                  <div className="flex items-center gap-2">
-                    <input type="checkbox" disabled checked={memoryEnabled} className="h-3.5 w-3.5" />
-                    <span>Memory</span>
-                    <span className="text-[10px] italic">Coming soon</span>
+                <div className="space-y-3">
+                  {/* MCP Servers */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-muted-foreground">MCP Servers</label>
+                    {mcpServers.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">No MCP servers registered. Register servers on the MCP Servers page first.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {mcpServers.map((server) => (
+                          <label key={server.id} className="flex items-center gap-2 text-xs cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="h-3.5 w-3.5"
+                              checked={selectedMcpServerIds.includes(server.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedMcpServerIds((prev) => [...prev, server.id]);
+                                } else {
+                                  setSelectedMcpServerIds((prev) => prev.filter((id) => id !== server.id));
+                                }
+                              }}
+                            />
+                            <span>{server.name}</span>
+                            <span className="text-muted-foreground/60 truncate" title={server.endpoint_url}>{server.endpoint_url}</span>
+                            {server.auth_type === "oauth2" && (
+                              <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded">OAuth2</span>
+                            )}
+                          </label>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <input type="checkbox" disabled checked={mcpServersEnabled} className="h-3.5 w-3.5" />
-                    <span>MCP Servers</span>
-                    <span className="text-[10px] italic">Coming soon</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input type="checkbox" disabled checked={a2aAgentsEnabled} className="h-3.5 w-3.5" />
-                    <span>A2A Agents</span>
-                    <span className="text-[10px] italic">Coming soon</span>
+                  {/* Memory & A2A (coming soon) */}
+                  <div className="space-y-2 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-2">
+                      <input type="checkbox" disabled checked={memoryEnabled} className="h-3.5 w-3.5" />
+                      <span>Memory</span>
+                      <span className="text-[10px] italic">Coming soon</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input type="checkbox" disabled checked={a2aAgentsEnabled} className="h-3.5 w-3.5" />
+                      <span>A2A Agents</span>
+                      <span className="text-[10px] italic">Coming soon</span>
+                    </div>
                   </div>
                 </div>
               </section>
@@ -666,6 +714,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                     setIdleTimeoutError("");
                     setMaxLifetimeError("");
                     setTagValues({});
+                    setSelectedMcpServerIds([]);
                   }}
                   disabled={isLoading}
                 >

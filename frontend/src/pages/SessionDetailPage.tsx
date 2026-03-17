@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Clock, RefreshCw } from "lucide-react";
 import { InvocationTable } from "@/components/InvocationTable";
 import { LogViewer } from "@/components/LogViewer";
 import { useLogs } from "@/hooks/useLogs";
@@ -63,6 +64,7 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
     fetchStreamLogs,
   } = useLogs();
   const { timezone } = useTimezone();
+  const [showTimestamp, setShowTimestamp] = useState(true);
 
   const qualifier = session.qualifier || "DEFAULT";
 
@@ -172,14 +174,26 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
               <span className="text-xs text-muted-foreground">Loading streams...</span>
             )}
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={refreshLogs}
-            disabled={logsLoading}
-          >
-            {logsLoading ? "Refreshing..." : "Refresh"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant={showTimestamp ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setShowTimestamp((v) => !v)}
+            >
+              <Clock className="h-4 w-4 mr-1" />
+              Timestamps
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-[120px]"
+              onClick={refreshLogs}
+              disabled={logsLoading}
+            >
+              <RefreshCw className={`h-4 w-4 mr-1 ${logsLoading ? "animate-spin" : ""}`} />
+              {logsLoading ? "Refreshing..." : "Refresh"}
+            </Button>
+          </div>
         </div>
         <Separator className="mb-4" />
         <div className="text-xs text-muted-foreground mb-2">
@@ -188,7 +202,7 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
             : <>Showing service-level logs matching session <span className="font-mono">{session.session_id}</span></>
           }
         </div>
-        <LogViewer logs={logs} loading={logsLoading} />
+        <LogViewer logs={logs} loading={logsLoading} showTimestamp={showTimestamp} />
       </div>
     </div>
   );

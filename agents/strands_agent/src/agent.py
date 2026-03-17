@@ -6,8 +6,8 @@ from typing import Optional
 from strands import Agent
 from strands.models.bedrock import BedrockModel
 
-from src.config import AgentConfig
-from src.integrations.mcp_client import create_mcp_clients
+from src.config import AgentConfig, MCPServerConfig
+from src.integrations.mcp_client import build_mcp_clients, create_mcp_clients, has_oauth2_servers
 from src.integrations.a2a_client import create_a2a_clients
 from src.integrations.memory import MemoryHook
 from src.telemetry import TelemetryHook
@@ -15,7 +15,7 @@ from src.telemetry import TelemetryHook
 logger = logging.getLogger(__name__)
 
 
-def build_agent(config: AgentConfig) -> Agent:
+def build_agent(config: AgentConfig, defer_mcp: bool = False) -> Agent:
     """Build a Strands Agent from the provided configuration.
 
     Initializes the Bedrock model, loads enabled integrations
@@ -25,6 +25,9 @@ def build_agent(config: AgentConfig) -> Agent:
     Args:
         config: The agent configuration specifying model, system prompt,
                 and integration settings.
+        defer_mcp: If True, skip MCP client initialization.  Used when
+                   OAuth2-authenticated MCP servers require a workload
+                   access token that is only available during invocation.
 
     Returns:
         A configured Strands Agent instance.
@@ -39,8 +42,8 @@ def build_agent(config: AgentConfig) -> Agent:
     tools: list = []
     hooks: list = []
 
-    # MCP tool clients (R3)
-    if config.integrations.mcp_servers:
+    # MCP tool clients (R3) — may be deferred for OAuth2 servers
+    if not defer_mcp and config.integrations.mcp_servers:
         enabled_servers = [s for s in config.integrations.mcp_servers if s.enabled]
         if enabled_servers:
             mcp_clients = create_mcp_clients(config.integrations.mcp_servers)
@@ -67,11 +70,48 @@ def build_agent(config: AgentConfig) -> Agent:
         hooks.append(memory_hook)
         logger.info("Enabled AgentCore Memory hook")
 
-    agent = Agent(
-        model=model,
-        system_prompt=config.system_prompt,
-        tools=tools,
-        hooks=hooks,
-    )
-    logger.info("Agent initialized with %d tool(s) and %d hook(s)", len(tools), len(hooks))
+    try:
+        agent = Agent(
+            model=model,
+            system_prompt=config.system_prompt,
+            tools=tools,
+            hooks=hooks,
+        )
+    except BaseException as e:
+        if tools:
+            logger.warning(
+                "Agent init failed with %d tool(s): %s. Retrying without tools.",
+                len(tools), e,
+            )
+            for tool in tools:
+                if hasattr(tool, "stop"):
+                    try:
+                        tool.stop()
+                    except BaseException:
+                        pass
+            agent = Agent(
+                model=model,
+                system_prompt=config.system_prompt,
+                tools=[],
+                hooks=hooks,
+            )
+        else:
+            raise
+    logger.info("Agent initialized with %d tool(s) and %d hook(s)", len(agent.tool_registry.registry), len(hooks))
     return agent
+
+
+def attach_mcp_tools(agent: Agent, servers: list[MCPServerConfig]) -> None:
+    """Attach MCP tool clients to an already-initialized agent.
+
+    Called during the first invocation when the workload access token
+    is available in the request context.
+
+    Args:
+        agent: The running Strands Agent instance.
+        servers: MCP server configurations to connect.
+    """
+    mcp_clients = build_mcp_clients(servers)
+    for client in mcp_clients:
+        agent.tool_registry.process_tools([client])
+    logger.info("Attached %d MCP tool client(s) to agent", len(mcp_clients))

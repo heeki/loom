@@ -4,6 +4,7 @@ import { MemoryCard } from "@/components/MemoryCard";
 import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "@/components/SortableCardGrid";
 import { SortableTableHead, sortRows } from "@/components/SortableTableHead";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MultiSelect } from "@/components/ui/multi-select";
@@ -15,15 +16,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { LayoutGrid, TableIcon, Network, Users, X, Eye, EyeOff } from "lucide-react";
+import { LayoutGrid, TableIcon, Users, X, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { statusVariant } from "@/lib/status";
 import { listMemories, refreshMemory, deleteMemory, purgeMemory } from "@/api/memories";
+import { listMcpServers } from "@/api/mcp";
 import { listTagPolicies } from "@/api/settings";
 import { ApiError } from "@/api/client";
-import type { AgentResponse, MemoryResponse, TagPolicy } from "@/api/types";
+import type { AgentResponse, MemoryResponse, McpServer, TagPolicy } from "@/api/types";
 
 interface CatalogPageProps {
   agents: AgentResponse[];
@@ -87,10 +89,13 @@ export function CatalogPage({
 
   const [agentSortDir, setAgentSortDir] = useState<SortDirection>(() => loadSortDirection("catalog-agents"));
   const [memorySortDir, setMemorySortDir] = useState<SortDirection>(() => loadSortDirection("catalog-memories"));
+  const [mcpSortDir, setMcpSortDir] = useState<SortDirection>(() => loadSortDirection("catalog-mcp"));
   const [agentTableCol, setAgentTableCol] = useState<string | null>("name");
   const [agentTableDir, setAgentTableDir] = useState<SortDirection>("asc");
   const [memoryTableCol, setMemoryTableCol] = useState<string | null>("name");
   const [memoryTableDir, setMemoryTableDir] = useState<SortDirection>("asc");
+  const [mcpTableCol, setMcpTableCol] = useState<string | null>("name");
+  const [mcpTableDir, setMcpTableDir] = useState<SortDirection>("asc");
 
   const handleAgentTableSort = (col: string) => {
     if (agentTableCol === col) {
@@ -108,8 +113,35 @@ export function CatalogPage({
       setMemoryTableDir("asc");
     }
   };
+  const handleMcpTableSort = (col: string) => {
+    if (mcpTableCol === col) {
+      setMcpTableDir(mcpTableDir === "asc" ? "desc" : "asc");
+    } else {
+      setMcpTableCol(col);
+      setMcpTableDir("asc");
+    }
+  };
 
   const filteredAgents = agents.filter(agent => matchesFilters(agent.tags));
+
+  // MCP server data
+  const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
+  const [mcpLoading, setMcpLoading] = useState(true);
+
+  const fetchMcpData = useCallback(async () => {
+    try {
+      const data = await listMcpServers();
+      setMcpServers(data);
+    } catch {
+      // silently ignore
+    } finally {
+      setMcpLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchMcpData();
+  }, [fetchMcpData]);
 
   // Memory data
   const [memories, setMemories] = useState<MemoryResponse[]>([]);
@@ -543,11 +575,83 @@ export function CatalogPage({
 
       {/* MCP Servers Section */}
       <section className="space-y-3">
-        <h3 className="text-sm font-medium">MCP Servers</h3>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground py-4">
-          <Network className="h-4 w-4" />
-          <span className="italic">Coming soon</span>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium">MCP Servers</h3>
+          <SortButton direction={mcpSortDir} onClick={() => setMcpSortDir(toggleSortDirection("catalog-mcp", mcpSortDir))} />
         </div>
+
+        {mcpLoading ? (
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <Skeleton key={i} className="h-32" />
+            ))}
+          </div>
+        ) : mcpServers.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-8">
+            No MCP servers registered. Use the MCP Servers page to register one.
+          </p>
+        ) : viewMode === "cards" ? (
+          <SortableCardGrid
+            items={mcpServers}
+            getId={(s) => String(s.id)}
+            getName={(s) => s.name}
+            storageKey="catalog-mcp"
+            sortDirection={mcpSortDir}
+            onSortDirectionChange={(d) => { if (d) { setMcpSortDir(d); saveSortDirection("catalog-mcp", d); } }}
+            renderItem={(server) => (
+              <Card className="py-3 gap-1">
+                <CardHeader className="gap-0 pb-2">
+                  <div className="text-sm font-medium truncate" title={server.name}>
+                    {server.name}
+                  </div>
+                </CardHeader>
+                <CardContent className="text-xs text-muted-foreground">
+                  <div className="rounded border bg-input-bg p-3 space-y-0.5">
+                    <div className="truncate" title={server.endpoint_url}><span className="text-muted-foreground/70">Endpoint:</span> {server.endpoint_url}</div>
+                    <div><span className="text-muted-foreground/70">Transport:</span> {server.transport_type === "streamable_http" ? "Streamable HTTP" : "SSE"}</div>
+                    <div><span className="text-muted-foreground/70">Authentication:</span> {server.auth_type === "oauth2" ? "OAuth2" : "None"}</div>
+                    {server.created_at && (
+                      <div><span className="text-muted-foreground/70">Created:</span> {formatTimestamp(server.created_at, timezone)}</div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          />
+        ) : (
+          <div className="rounded-md border overflow-hidden">
+            <Table className="table-fixed">
+              <TableHeader>
+                <TableRow className="bg-card hover:bg-card">
+                  <SortableTableHead column="name" activeColumn={mcpTableCol} direction={mcpTableDir} onSort={handleMcpTableSort} className="w-[25%]">Name</SortableTableHead>
+                  <SortableTableHead column="endpoint" activeColumn={mcpTableCol} direction={mcpTableDir} onSort={handleMcpTableSort} className="w-[32%]">Endpoint</SortableTableHead>
+                  <SortableTableHead column="transport" activeColumn={mcpTableCol} direction={mcpTableDir} onSort={handleMcpTableSort} className="w-[15%]">Transport</SortableTableHead>
+                  <SortableTableHead column="auth" activeColumn={mcpTableCol} direction={mcpTableDir} onSort={handleMcpTableSort} className="w-[12%]">Auth</SortableTableHead>
+                  <SortableTableHead column="created" activeColumn={mcpTableCol} direction={mcpTableDir} onSort={handleMcpTableSort} className="w-[16%]">Created</SortableTableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sortRows(mcpServers, mcpTableCol, mcpTableDir, {
+                  name: (s) => s.name,
+                  endpoint: (s) => s.endpoint_url,
+                  transport: (s) => s.transport_type,
+                  auth: (s) => s.auth_type,
+                  created: (s) => s.created_at ?? "",
+                }).map((server) => (
+                  <TableRow key={server.id} className="bg-input-bg hover:bg-input-bg/80">
+                    <TableCell className="font-medium text-sm">{server.name}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground truncate">{server.endpoint_url}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{server.transport_type === "streamable_http" ? "Streamable HTTP" : "SSE"}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{server.auth_type === "oauth2" ? "OAuth2" : "None"}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {formatTimestamp(server.created_at, timezone)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
       </section>
 
       {/* A2A Agents Section */}

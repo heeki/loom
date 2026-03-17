@@ -28,6 +28,7 @@ frontend/
 │   │   ├── agents.ts           # Agent CRUD + fetchRoles(), fetchCognitoPools(), fetchModels(), fetchDefaults()
 │   │   ├── invocations.ts      # Session queries + SSE stream consumer (with auth header)
 │   │   ├── logs.ts             # CloudWatch log queries
+│   │   ├── mcp.ts              # MCP server CRUD, tools, access, test connection
 │   │   ├── memories.ts         # Memory resource CRUD + refresh
 │   │   ├── security.ts         # Security admin: roles, authorizers, credentials, permissions
 │   │   └── settings.ts        # Settings API: tag policy + tag profile CRUD
@@ -40,7 +41,8 @@ frontend/
 │   │   ├── useSessions.ts      # Session list state per agent
 │   │   ├── useInvoke.ts        # Streaming invocation state + AbortController
 │   │   ├── useLogs.ts          # Session log fetching
-│   │   └── useDeployment.ts    # Agent config, credential providers, integrations hooks
+│   │   ├── useDeployment.ts    # Agent config, credential providers, integrations hooks
+│   │   └── useMcpServers.ts   # MCP server list state + CRUD actions
 │   ├── components/
 │   │   ├── ui/                 # shadcn primitives + searchable-select.tsx + multi-select.tsx + add-filter-dropdown.tsx
 │   │   ├── SortableCardGrid.tsx — Drag-to-reorder card grid using @dnd-kit, default alphabetical sort, SortButton, localStorage persistence
@@ -49,6 +51,9 @@ frontend/
 │   │   ├── AgentRegistrationForm.tsx  # Tabbed form: ARN registration + agent deployment
 │   │   ├── JsonConfigSection.tsx     # Shared collapsible JSON import/export section
 │   │   ├── AuthorizerManagementPanel.tsx # Authorizer config + credential management
+│   │   ├── McpAccessControl.tsx        # Persona access control for MCP servers and tools
+│   │   ├── McpServerForm.tsx          # Form for adding/editing MCP servers with OAuth2 config
+│   │   ├── McpToolList.tsx            # Tool list display with schema details
 │   │   ├── MemoryCard.tsx              # Memory resource summary card
 │   │   ├── MemoryManagementPanel.tsx    # Memory resource create form + list table
 │   │   ├── ResourceTagFields.tsx       # Shared tag profile selector + tag resolution
@@ -64,6 +69,7 @@ frontend/
 │   │   ├── CatalogPage.tsx     # Platform Catalog: agents, memory, MCP, A2A sections
 │   │   ├── SecurityAdminPage.tsx  # Security persona: roles, authorizers, credentials, permissions
 │   │   ├── LoginPage.tsx        # Cognito login + NEW_PASSWORD_REQUIRED challenge
+│   │   ├── McpServersPage.tsx  # MCP server management: list, detail, tools, access
 │   │   ├── MemoryManagementPage.tsx # Memory persona: memory resource management
 │   │   ├── TaggingPage.tsx         # Tagging persona: tag policy + tag profile CRUD
 │   │   ├── SettingsPage.tsx        # Settings persona: display preferences
@@ -102,7 +108,7 @@ The app uses a persona-based single-page architecture with a sidebar for workflo
 | Security Admin | Shield | Manage roles, authorizers, credentials, permissions | `security:read` or `security:write` | |
 | Tagging | Tags | Manage tag policies and tag profiles | Always visible | |
 | Settings | Settings | Manage display preferences | Always visible | |
-| MCP Servers | Network | Future MCP server management (disabled) | `mcp:read` or `mcp:write` | |
+| MCP Servers | Network | Register and manage MCP servers, tools, and access control | `mcp:read` or `mcp:write` | |
 | A2A Agents | Users | Future A2A agent management (disabled) | `a2a:read` or `a2a:write` | |
 
 Sidebar items are conditionally rendered based on the user's scopes derived from their Cognito group membership. When auth is not configured, all items are visible.
@@ -150,8 +156,11 @@ Each card displays:
 - Agent name (or runtime ID fallback)
 - Protocol badge (e.g., `HTTP`) — inline with name
 - Status badge (color-coded: READY=default, CREATING=secondary, FAILED=destructive) — inline with name
+- Progressive deployment status phases: `initializing`, `creating_credentials` (Creating credential provider), `creating_role` (Creating IAM role), `building_artifact` (Building artifact), `deploying` (Deploying runtime), then "Completing deployment", "Finalizing endpoint"
 - Spinner animation when agent is in a creating/deploying state
 - Spinner animation and elapsed timer when agent is in DELETING state, using `deleteStartTime` prop for accurate timer display
+- Endpoint status badge hidden during DELETING state
+- `DEPLOY_IN_PROGRESS` set for determining transitional states
 - Active session count badge (when > 0)
 - Region, Account ID, Network mode, Available qualifiers, Authorizer (name, "Cognito", "external", or "None"), Registered timestamp
 - Tag badges (secondary variant) for tags marked `show_on_card` in tag policies, formatted as `key: value`
@@ -201,7 +210,7 @@ Full deployment form with sections:
   - Other: textbox for discovery URL, tag inputs for allowed clients and scopes
 - **Lifecycle**: idle timeout and max lifetime fields with dynamic placeholders fetched from `/api/agents/defaults` (e.g., "300" and "3600")
 - **Resource Tags**: `ResourceTagFields` component with tag profile dropdown (persisted in `sessionStorage`). Deploy-time tags are auto-applied; build-time tags are resolved from the selected tag profile.
-- **Integrations**: Memory, MCP Servers, A2A Agents — all shown as disabled checkboxes with "coming soon" labels
+- **Integrations**: Memory (enabled), MCP Servers (enabled with multi-select dropdown), A2A Agents (coming soon)
 
 ---
 
@@ -306,6 +315,12 @@ Status badges use `statusVariant()` mapping:
 - **CREATING** — secondary variant + spinning `Loader2` icon
 - **FAILED** — destructive variant
 - **DELETING** — secondary variant + spinning `Loader2` icon
+- **initializing** — secondary variant
+- **creating_credentials** — secondary variant
+- **creating_role** — secondary variant
+- **building_artifact** — secondary variant
+- **deploying** — secondary variant
+- **ENDPOINT_CREATING** — secondary variant
 
 ### Timer Accuracy
 
@@ -330,6 +345,50 @@ All operations show Sonner toast notifications:
 ### Empty State
 
 When no memory resources exist: centered muted text "No memory resources yet. Add one above."
+
+---
+
+## 8a. MCP Servers View (MCP Server Administration)
+
+**Purpose:** Register and manage MCP (Model Context Protocol) servers, view available tools, and control persona access. MCP servers can be selected during agent deployment for runtime integration.
+
+**Layout:** Page header "MCP Server Administration" with card/table view toggle (top-right), followed by "Add MCP Server" button, create form (toggle), and server list (cards default or table).
+
+### Server List
+
+**Card view** (default): `SortableCardGrid` with drag-to-reorder (storage key `mcp-servers`), default alphabetical sort by name, and A-Z/Z-A sort toggle. Each card displays server name, status badge (`active`=default, `inactive`=secondary, `error`=destructive), endpoint URL, transport type badge, auth type badge, created timestamp. Delete with inline confirmation overlay (same pattern as AgentCard).
+
+**Table view**: Sortable columns — Name (25%), Endpoint (30%), Transport (12%), Status (10%), Auth (10%), Created (13%).
+
+### Server Detail View
+
+Accessed by clicking a server card/row. Shows:
+- Header with server name, endpoint URL, status/transport/auth badges
+- "Edit Server" button (opens inline McpServerForm with pre-filled data)
+- Tab bar: Tools | Access
+
+**Tools tab** (`McpToolList`):
+- Tool count and last-refreshed timestamp
+- "Refresh Tools" button to fetch from the MCP server
+- Each tool displayed as a card: tool name (bold), description, collapsible input schema (formatted JSON in monospace `pre` block)
+- Empty state: "No tools discovered. Click 'Refresh Tools' to fetch from the MCP server."
+
+**Access tab** (`McpAccessControl`):
+- Lists all registered agents (personas) with checkbox to grant/revoke access
+- When access granted: radio for "All Tools" / "Selected Tools"
+- When "Selected Tools": checkboxes for individual tools (from cached tool list)
+- "Save" button to persist changes
+- Deny by default — personas without an explicit rule cannot use the server
+
+### McpServerForm
+
+Create/edit form with:
+- Name (required, 1/3 width) and Endpoint URL (required, flex-1) and Transport Type (select: SSE/Streamable HTTP, 180px)
+- Description (textarea)
+- Authentication section: radio toggle for None / OAuth2
+- When OAuth2: well-known URL, client ID, client secret (password input with "(unchanged)" placeholder in edit mode), scopes (space-separated)
+- "Test Connection" button (only shown in edit mode) with success/failure badge result
+- Create/Update and Cancel buttons
 
 ---
 
@@ -487,7 +546,7 @@ Computed server-side using `LOOM_SESSION_IDLE_TIMEOUT_SECONDS`. The frontend dis
 Card/table view mode state is lifted to `App.tsx` with separate state variables per page (`catalogViewMode`, `agentsViewMode`, `memoryViewMode`). Each page receives its mode and setter as props. This ensures the selection persists when switching between personas — the page components unmount but the state lives in the parent.
 
 ### Deploy Flow
-Agent deployment uses a fire-and-forget pattern. The form collapses immediately on deploy, the backend creates a DB record before starting the AWS call, and `fetchAgents()` picks up the new record. The `useAgents` hook polls transitional agents (deploying/CREATING/endpoint CREATING) at 5-second intervals using a `watchIds` effect dependency. An `initialLoadDone` ref prevents skeleton flash on subsequent fetches. Agent cards show two-phase creation status: deploying → completing deployment → finalizing endpoint, with a timer using `registered_at` to avoid resets on phase transitions. Agent deletion with AWS cleanup follows a matching async pattern: the DELETE endpoint marks the agent as DELETING, the hook polls at 5-second intervals, detects 404 when the runtime is fully deleted, calls the purge endpoint to remove the local record, and shows a success toast.
+Agent deployment uses a fire-and-forget pattern. The form collapses immediately on deploy, the backend creates a DB record before starting the AWS call, and `fetchAgents()` picks up the new record. The `useAgents` hook polls transitional agents (deploying/CREATING/endpoint CREATING) at 2-second intervals using a `watchIds` effect dependency. Smart polling: during local build phases (`creating_credentials`, `creating_role`, `building_artifact`, `deploying`), the backend returns DB state without AWS API calls. An `initialLoadDone` ref prevents skeleton flash on subsequent fetches. Agent cards show two-phase creation status: deploying → completing deployment → finalizing endpoint, with a timer using `registered_at` to avoid resets on phase transitions. Agent deletion with AWS cleanup follows a matching async pattern: the DELETE endpoint marks the agent as DELETING, the hook polls at 2-second intervals, detects 404 when the runtime is fully deleted, uses a background task for DB purge after runtime is confirmed deleted, and shows a success toast.
 
 ### SSE Stream Consumer
 `invokeAgentStream()` uses `ReadableStream` to consume POST-based SSE responses with buffer-based line parsing, typed callback dispatch, and `AbortSignal` for cancellation.
@@ -512,7 +571,6 @@ The invoke panel's credential dropdown includes a "Manual token" sentinel value.
 ## 12. Future Work
 
 - **Markdown rendering** for agent responses
-- **MCP server integration** configuration
 - **A2A agent integration** configuration
 - **VPC network mode** support
 - **MCP and A2A protocol** support

@@ -37,10 +37,19 @@ class TestAgentsDeployRouter(unittest.TestCase):
                 pass
 
         app.dependency_overrides[get_db] = override_get_db
+
+        # Patch SessionLocal so background tasks use the test DB
+        import app.routers.agents as _agents_mod
+        self._original_session_local = _agents_mod.SessionLocal
+        _agents_mod.SessionLocal = self.TestingSessionLocal
+
         self.client = TestClient(app)
 
     def tearDown(self):
         """Clean up database after each test."""
+        import app.routers.agents as _agents_mod
+        _agents_mod.SessionLocal = self._original_session_local
+
         self.session.rollback()
         self.session.close()
         Base.metadata.drop_all(bind=self.engine)
@@ -100,8 +109,13 @@ class TestAgentsDeployRouter(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["source"], "deploy")
         self.assertEqual(data["name"], "my_deploy_agent")
-        self.assertEqual(data["runtime_id"], "rt-new")
-        self.assertIsNotNone(data["execution_role_arn"])
+        self.assertEqual(data["deployment_status"], "initializing")
+
+        # Background task completes before TestClient returns; check DB for final state
+        agent = self.session.query(Agent).filter(Agent.name == "my_deploy_agent").first()
+        self.assertIsNotNone(agent)
+        self.assertEqual(agent.runtime_id, "rt-new")
+        self.assertIsNotNone(agent.execution_role_arn)
 
     @patch("app.routers.agents.create_runtime")
     @patch("app.routers.agents.build_agent_artifact")
@@ -129,9 +143,14 @@ class TestAgentsDeployRouter(unittest.TestCase):
 
         self.assertEqual(response.status_code, 201)
         data = response.json()
-        self.assertEqual(data["deployment_status"], "deployed")
-        self.assertEqual(data["status"], "ACTIVE")
-        self.assertIsNotNone(data["deployed_at"])
+        self.assertEqual(data["deployment_status"], "initializing")
+
+        # Background task completes before TestClient returns; check DB for final state
+        agent = self.session.query(Agent).filter(Agent.name == "success_agent").first()
+        self.assertIsNotNone(agent)
+        self.assertEqual(agent.deployment_status, "deployed")
+        self.assertEqual(agent.status, "ACTIVE")
+        self.assertIsNotNone(agent.deployed_at)
 
     @patch("app.routers.agents.create_runtime")
     @patch("app.routers.agents.build_agent_artifact")
@@ -153,10 +172,10 @@ class TestAgentsDeployRouter(unittest.TestCase):
             },
         )
 
-        self.assertEqual(response.status_code, 502)
-        self.assertIn("Failed to deploy", response.json()["detail"])
+        # Deploy returns 201 immediately; failure happens in background task
+        self.assertEqual(response.status_code, 201)
 
-        # Verify DB record was updated to failed
+        # Background task completes before TestClient returns; verify DB reflects failure
         agent = self.session.query(Agent).filter(Agent.name == "fail_agent").first()
         self.assertIsNotNone(agent)
         self.assertEqual(agent.deployment_status, "failed")
@@ -447,6 +466,49 @@ class TestAgentsDeployRouter(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["status"], "READY")
 
+    @patch("app.routers.agents.get_runtime")
+    @patch("app.routers.agents.delete_runtime")
+    @patch("app.routers.agents.delete_runtime_endpoint")
+    @patch("app.routers.agents.create_runtime")
+    @patch("app.routers.agents.build_agent_artifact")
+    @patch("app.routers.agents.create_execution_role")
+    def test_status_returns_404_when_deleting_agent_runtime_gone(
+        self, mock_create_role, mock_build_artifact, mock_create_runtime,
+        mock_delete_ep, mock_delete_rt, mock_get_runtime,
+    ):
+        """Test status endpoint returns 404 and purges agent when DELETING and runtime gone."""
+        mock_create_role.return_value = "arn:aws:iam::123:role/r"
+        mock_build_artifact.return_value = ("b", "k")
+        mock_create_runtime.return_value = {
+            "agentRuntimeArn": "arn:aws:bedrock-agentcore:us-east-1:123:runtime/rt-del",
+            "agentRuntimeId": "rt-del",
+            "status": "CREATING",
+        }
+
+        create_resp = self.client.post(
+            "/api/agents",
+            json={
+                "source": "deploy",
+                "name": "delete_poll_agent",
+                "model_id": "us.anthropic.claude-sonnet-4-6",
+            },
+        )
+        agent_id = create_resp.json()["id"]
+
+        # Delete the agent (marks as DELETING)
+        delete_resp = self.client.delete(f"/api/agents/{agent_id}?cleanup_aws=true")
+        self.assertEqual(delete_resp.status_code, 200)
+        self.assertEqual(delete_resp.json()["status"], "DELETING")
+
+        # Poll status — runtime is gone, get_runtime raises
+        mock_get_runtime.side_effect = Exception("ResourceNotFoundException")
+        status_resp = self.client.get(f"/api/agents/{agent_id}/status")
+        self.assertEqual(status_resp.status_code, 404)
+
+        # Agent should be purged from DB
+        get_resp = self.client.get(f"/api/agents/{agent_id}")
+        self.assertEqual(get_resp.status_code, 404)
+
     def test_roles_endpoint(self):
         """Test GET /api/agents/roles returns roles list."""
         with patch("app.routers.agents.list_agentcore_roles") as mock_list:
@@ -482,6 +544,142 @@ class TestAgentsDeployRouter(unittest.TestCase):
         self.assertTrue(len(data) > 0)
         model_ids = [m["model_id"] for m in data]
         self.assertIn("us.anthropic.claude-sonnet-4-6", model_ids)
+
+
+    # -------------------------------------------------------------------
+    # MCP server integration tests
+    # -------------------------------------------------------------------
+    @patch("app.routers.agents.create_runtime")
+    @patch("app.routers.agents.build_agent_artifact")
+    @patch("app.routers.agents.create_execution_role")
+    def test_deploy_agent_with_mcp_servers(
+        self, mock_create_role, mock_build_artifact, mock_create_runtime
+    ):
+        """Test deploy with MCP server IDs resolves to config."""
+        from app.models.mcp import McpServer
+        # Create an MCP server record
+        server = McpServer(
+            name="test-mcp-server",
+            endpoint_url="http://localhost:3000/mcp",
+            transport_type="streamable_http",
+            auth_type="none",
+        )
+        self.session.add(server)
+        self.session.commit()
+        self.session.refresh(server)
+
+        mock_create_role.return_value = "arn:aws:iam::123:role/r"
+        mock_build_artifact.return_value = ("b", "k")
+        mock_create_runtime.return_value = {
+            "agentRuntimeArn": "arn:aws:bedrock-agentcore:us-east-1:123:runtime/rt-mcp",
+            "agentRuntimeId": "rt-mcp",
+            "status": "CREATING",
+        }
+
+        response = self.client.post(
+            "/api/agents",
+            json={
+                "source": "deploy",
+                "name": "mcp_agent",
+                "model_id": "us.anthropic.claude-sonnet-4-6",
+                "mcp_servers": [server.id],
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+
+        # Verify the config JSON passed to create_runtime contains MCP server config
+        call_kwargs = mock_create_runtime.call_args[1]
+        import json
+        config = json.loads(call_kwargs["env_vars"]["AGENT_CONFIG_JSON"])
+        mcp_configs = config["integrations"]["mcp_servers"]
+        self.assertEqual(len(mcp_configs), 1)
+        self.assertEqual(mcp_configs[0]["name"], "test-mcp-server")
+        self.assertTrue(mcp_configs[0]["enabled"])
+        self.assertEqual(mcp_configs[0]["endpoint_url"], "http://localhost:3000/mcp")
+        self.assertEqual(mcp_configs[0]["transport"], "streamable_http")
+        self.assertNotIn("auth", mcp_configs[0])
+
+    @patch("app.routers.agents.create_oauth2_credential_provider")
+    @patch("app.routers.agents.create_runtime")
+    @patch("app.routers.agents.build_agent_artifact")
+    @patch("app.routers.agents.create_execution_role")
+    def test_deploy_agent_with_oauth2_mcp_server(
+        self, mock_create_role, mock_build_artifact, mock_create_runtime, mock_create_cp
+    ):
+        """Test deploy with OAuth2 MCP server creates credential provider."""
+        from app.models.mcp import McpServer
+        server = McpServer(
+            name="oauth_mcp",
+            endpoint_url="http://localhost:3000/mcp",
+            transport_type="streamable_http",
+            auth_type="oauth2",
+            oauth2_well_known_url="http://auth.example.com/.well-known/openid-configuration",
+            oauth2_client_id="my-client",
+            oauth2_client_secret="my-secret",
+            oauth2_scopes="read write",
+        )
+        self.session.add(server)
+        self.session.commit()
+        self.session.refresh(server)
+
+        mock_create_role.return_value = "arn:aws:iam::123:role/r"
+        mock_build_artifact.return_value = ("b", "k")
+        mock_create_runtime.return_value = {
+            "agentRuntimeArn": "arn:aws:bedrock-agentcore:us-east-1:123:runtime/rt-oauth",
+            "agentRuntimeId": "rt-oauth",
+            "status": "CREATING",
+        }
+        mock_create_cp.return_value = {"callbackUrl": "https://callback.example.com"}
+
+        response = self.client.post(
+            "/api/agents",
+            json={
+                "source": "deploy",
+                "name": "oauth_mcp_agent",
+                "model_id": "us.anthropic.claude-sonnet-4-6",
+                "mcp_servers": [server.id],
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+
+        # Verify config includes auth
+        import json
+        call_kwargs = mock_create_runtime.call_args[1]
+        config = json.loads(call_kwargs["env_vars"]["AGENT_CONFIG_JSON"])
+        mcp_configs = config["integrations"]["mcp_servers"]
+        self.assertEqual(mcp_configs[0]["auth"]["type"], "oauth2")
+        self.assertEqual(
+            mcp_configs[0]["auth"]["well_known_endpoint"],
+            "http://auth.example.com/.well-known/openid-configuration",
+        )
+        self.assertEqual(
+            mcp_configs[0]["auth"]["credential_provider_name"],
+            "loom-oauth_mcp_agent-mcp-oauth_mcp",
+        )
+        self.assertEqual(mcp_configs[0]["auth"]["scopes"], "read write")
+
+        # Verify credential provider was created with agent-name-based naming
+        mock_create_cp.assert_called_once()
+        cp_kwargs = mock_create_cp.call_args[1]
+        self.assertEqual(cp_kwargs["name"], "loom-oauth_mcp_agent-mcp-oauth_mcp")
+        self.assertEqual(cp_kwargs["client_id"], "my-client")
+        self.assertEqual(cp_kwargs["client_secret"], "my-secret")
+        # Empty tags passed when no tag policies configured (filtered in service layer)
+        self.assertEqual(cp_kwargs["tags"], {})
+
+    def test_deploy_agent_with_invalid_mcp_server_ids(self):
+        """Test deploy with non-existent MCP server IDs returns 400."""
+        response = self.client.post(
+            "/api/agents",
+            json={
+                "source": "deploy",
+                "name": "bad_mcp_agent",
+                "model_id": "us.anthropic.claude-sonnet-4-6",
+                "mcp_servers": [9999],
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("MCP server IDs not found", response.json()["detail"])
 
 
 if __name__ == "__main__":

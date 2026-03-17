@@ -349,9 +349,18 @@ class TestDeployWithTags(unittest.TestCase):
                 pass
 
         app.dependency_overrides[get_db] = override_get_db
+
+        # Patch SessionLocal so background tasks use the test DB
+        import app.routers.agents as _agents_mod
+        self._original_session_local = _agents_mod.SessionLocal
+        _agents_mod.SessionLocal = self.TestingSessionLocal
+
         self.client = TestClient(app)
 
     def tearDown(self):
+        import app.routers.agents as _agents_mod
+        _agents_mod.SessionLocal = self._original_session_local
+
         self.session.rollback()
         self.session.close()
         Base.metadata.drop_all(bind=self.engine)
@@ -384,9 +393,11 @@ class TestDeployWithTags(unittest.TestCase):
         })
 
         self.assertEqual(response.status_code, 201)
-        data = response.json()
-        self.assertEqual(data["tags"]["loom:application"], "myapp")
-        self.assertEqual(data["tags"]["loom:group"], "platform")
+        # Tags are set by background task; check DB
+        from app.models.agent import Agent
+        agent = self.session.query(Agent).filter(Agent.name == "tagged_agent").first()
+        self.assertEqual(agent.get_tags()["loom:application"], "myapp")
+        self.assertEqual(agent.get_tags()["loom:group"], "platform")
 
     def test_deploy_missing_required_tag(self):
         """Test that deployment fails when required tags are missing."""
@@ -425,7 +436,10 @@ class TestDeployWithTags(unittest.TestCase):
         })
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json()["tags"], {})
+        # Tags are set by background task; check DB
+        from app.models.agent import Agent
+        agent = self.session.query(Agent).filter(Agent.name == "no_policy_agent").first()
+        self.assertEqual(agent.get_tags(), {})
 
     @patch("app.routers.agents.create_runtime")
     @patch("app.routers.agents.build_agent_artifact")
@@ -518,7 +532,10 @@ class TestDeployWithTags(unittest.TestCase):
         })
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json()["tags"]["cost-center"], "default-cc")
+        # Tags are set by background task; check DB
+        from app.models.agent import Agent
+        agent = self.session.query(Agent).filter(Agent.name == "custom_tag_agent").first()
+        self.assertEqual(agent.get_tags()["cost-center"], "default-cc")
 
     @patch("app.routers.agents.create_runtime")
     @patch("app.routers.agents.build_agent_artifact")
@@ -546,7 +563,10 @@ class TestDeployWithTags(unittest.TestCase):
         })
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json()["tags"]["cost-center"], "eng-42")
+        # Tags are set by background task; check DB
+        from app.models.agent import Agent
+        agent = self.session.query(Agent).filter(Agent.name == "override_agent").first()
+        self.assertEqual(agent.get_tags()["cost-center"], "eng-42")
 
 
 class TestRegisterWithTags(unittest.TestCase):

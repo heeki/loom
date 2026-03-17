@@ -80,6 +80,9 @@ Resources:
                   - bedrock-agentcore:CreateWorkloadIdentity
                   - bedrock-agentcore:GetApiKeyCredential
                   - bedrock-agentcore:GetResourceApiKey
+                  - bedrock-agentcore:GetResourceOauth2Token
+                  - bedrock-agentcore:GetWorkloadAccessToken
+                  - bedrock-agentcore:GetWorkloadAccessTokenForJWT
                   - bedrock-agentcore:GetWorkloadAccessTokenForUserId
                 Resource:
                   - !Sub "arn:aws:bedrock-agentcore:${pAgentCoreRegions}:${AWS::AccountId}:apikeycredentialprovider/*"

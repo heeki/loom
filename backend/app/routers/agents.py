@@ -8,16 +8,17 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.db import get_db
+from app.db import get_db, SessionLocal
 from app.dependencies.auth import UserInfo, require_scopes
 from app.models.agent import Agent
 from app.models.authorizer_config import AuthorizerConfig
 from app.models.config_entry import ConfigEntry
+from app.models.mcp import McpServer
 from app.models.session import InvocationSession
 from app.models.invocation import Invocation
 from app.models.tag_policy import TagPolicy
@@ -41,6 +42,7 @@ from app.services.iam import (
     list_agentcore_roles,
     list_cognito_pools,
 )
+from app.services.credential import create_oauth2_credential_provider, delete_credential_provider
 from app.services.secrets import store_secret, delete_secret
 
 logger = logging.getLogger(__name__)
@@ -94,7 +96,7 @@ class AgentDeployRequest(BaseModel):
     authorizer_client_id: str | None = Field(None, description="App client ID for Cognito token retrieval")
     authorizer_client_secret: str | None = Field(None, description="App client secret for Cognito token retrieval")
     memory_enabled: bool = Field(default=False, description="Enable memory integration")
-    mcp_servers: list = Field(default_factory=list, description="MCP server configs")
+    mcp_servers: list[int] = Field(default_factory=list, description="MCP server IDs to integrate")
     a2a_agents: list = Field(default_factory=list, description="A2A agent configs")
     tags: dict[str, str] | None = Field(None, description="Build-time tag values")
 
@@ -124,7 +126,7 @@ class AgentCreateRequest(BaseModel):
     authorizer_client_id: str | None = Field(None, description="App client ID for Cognito token retrieval")
     authorizer_client_secret: str | None = Field(None, description="App client secret for Cognito token retrieval")
     memory_enabled: bool = Field(default=False, description="Enable memory integration")
-    mcp_servers: list = Field(default_factory=list, description="MCP server configs")
+    mcp_servers: list[int] = Field(default_factory=list, description="MCP server IDs to integrate")
     a2a_agents: list = Field(default_factory=list, description="A2A agent configs")
     tags: dict[str, str] | None = Field(None, description="Build-time tag values")
 
@@ -339,6 +341,7 @@ def get_defaults(user: UserInfo = Depends(require_scopes("agent:read"))) -> dict
 @router.post("", response_model=AgentResponse, status_code=status.HTTP_201_CREATED)
 def create_agent(
     request: AgentCreateRequest,
+    background_tasks: BackgroundTasks,
     user: UserInfo = Depends(require_scopes("agent:write")),
     db: Session = Depends(get_db),
 ) -> AgentResponse:
@@ -355,7 +358,7 @@ def create_agent(
     if request.source == "register":
         return _register_agent(request, db)
     elif request.source == "deploy":
-        return _deploy_agent(request, db)
+        return _deploy_agent(request, db, background_tasks)
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -479,8 +482,13 @@ def _register_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
     return AgentResponse(**agent.to_dict(), active_session_count=0)
 
 
-def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
-    """Deploy a new agent runtime to AgentCore."""
+def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: BackgroundTasks) -> AgentResponse:
+    """Deploy a new agent runtime to AgentCore.
+
+    Validates inputs synchronously, creates the agent record, then schedules the
+    heavy work (credential providers, IAM role, artifact build, runtime creation)
+    as a background task so the API returns immediately.
+    """
     if not request.name:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -510,33 +518,44 @@ def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
     # Resolve tags from tag policies + user-supplied profile values
     resolved_tags, tag_policy_dicts = _resolve_tags(db, request.tags)
 
-    # Build config JSON (includes system prompt, model, and integrations)
+    # Build system prompt and model config
     system_prompt = _build_system_prompt(request)
-    # Look up the model's max output tokens from SUPPORTED_MODELS
     model_max_tokens = next(
         (m["max_tokens"] for m in SUPPORTED_MODELS if m["model_id"] == request.model_id),
         4096,
     )
-    config_json = json.dumps({
-        "system_prompt": system_prompt,
-        "model_id": request.model_id,
-        "max_tokens": model_max_tokens,
-        "integrations": {
-            "mcp_servers": request.mcp_servers,
-            "a2a_agents": request.a2a_agents,
-            "memory": {"enabled": request.memory_enabled},
-        },
-    })
-    env_vars = {
-        "AGENT_CONFIG_JSON": config_json,
-        "OTEL_SERVICE_NAME": request.name,
-        "AGENT_OBSERVABILITY_ENABLED": "true",
-    }
+
+    # Validate MCP server IDs early (before creating agent record)
+    mcp_records: list[McpServer] = []
+    if request.mcp_servers:
+        mcp_records = db.query(McpServer).filter(McpServer.id.in_(request.mcp_servers)).all()
+        found_ids = {s.id for s in mcp_records}
+        missing = set(request.mcp_servers) - found_ids
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"MCP server IDs not found: {sorted(missing)}"
+            )
+
+    # Snapshot MCP server data for the background task (avoid lazy-load after session close)
+    mcp_snapshots = [
+        {
+            "name": s.name,
+            "endpoint_url": s.endpoint_url,
+            "transport_type": s.transport_type,
+            "auth_type": s.auth_type,
+            "oauth2_well_known_url": s.oauth2_well_known_url,
+            "oauth2_client_id": s.oauth2_client_id,
+            "oauth2_client_secret": s.oauth2_client_secret,
+            "oauth2_scopes": s.oauth2_scopes,
+        }
+        for s in mcp_records
+    ]
 
     # Use a unique placeholder for ARN until deployment completes
     placeholder_arn = f"pending-{uuid4()}"
 
-    # Create agent record with CREATING status
+    # Create agent record with CREATING status — returned to frontend immediately
     agent = Agent(
         arn=placeholder_arn,
         runtime_id="",
@@ -545,7 +564,7 @@ def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
         region=region,
         account_id=account_id,
         source="deploy",
-        deployment_status="deploying",
+        deployment_status="initializing",
         protocol=request.protocol,
         network_mode=request.network_mode,
         registered_at=datetime.utcnow(),
@@ -554,184 +573,303 @@ def _deploy_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
     db.commit()
     db.refresh(agent)
 
-    # Store config entries
-    for key, value in env_vars.items():
-        entry = ConfigEntry(
-            agent_id=agent.id,
-            key=key,
-            value=value,
-            is_secret=False,
-            source="env_var",
-        )
-        db.add(entry)
-    db.commit()
+    agent_id = agent.id
+    response_data = AgentResponse(**agent.to_dict(), active_session_count=0)
 
-    # Create or use provided IAM execution role
-    created_role = False
-    execution_role_arn = request.role_arn
-    if not execution_role_arn:
-        try:
-            execution_role_arn = create_execution_role(
-                agent_name=request.name,
-                runtime_id=f"pending-{agent.id}",
-                region=region,
-                account_id=account_id,
-                tag_policies=tag_policy_dicts,
-                extra_tags=resolved_tags,
-            )
-            created_role = True
+    # Schedule heavy deployment work in the background
+    background_tasks.add_task(
+        _deploy_agent_background,
+        agent_id=agent_id,
+        request=request,
+        mcp_snapshots=mcp_snapshots,
+        resolved_tags=resolved_tags,
+        tag_policy_dicts=tag_policy_dicts,
+        system_prompt=system_prompt,
+        model_max_tokens=model_max_tokens,
+        region=region,
+        account_id=account_id,
+    )
+
+    return response_data
+
+
+def _deploy_agent_background(
+    agent_id: int,
+    request: AgentCreateRequest,
+    mcp_snapshots: list[dict[str, Any]],
+    resolved_tags: dict[str, str],
+    tag_policy_dicts: list[dict[str, Any]],
+    system_prompt: str,
+    model_max_tokens: int,
+    region: str,
+    account_id: str,
+) -> None:
+    """Background task that performs the actual deployment steps.
+
+    Uses its own DB session since the request session is closed after the response.
+    Updates deployment_status at each stage so the frontend can show progress.
+    """
+    db = SessionLocal()
+    try:
+        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        if not agent:
+            logger.error("Background deploy: agent %s not found", agent_id)
+            return
+
+        # --- Step 1: Create credential providers (only if OAuth2 MCP servers exist) ---
+        has_oauth2 = any(s["auth_type"] == "oauth2" for s in mcp_snapshots)
+        if has_oauth2:
+            agent.deployment_status = "creating_credentials"
+            db.commit()
+
+        mcp_server_configs: list[dict[str, Any]] = []
+        for server in mcp_snapshots:
+            entry: dict[str, Any] = {
+                "name": server["name"],
+                "enabled": True,
+                "transport": server["transport_type"],
+                "endpoint_url": server["endpoint_url"],
+            }
+            if server["auth_type"] == "oauth2":
+                cp_name = f"loom-{request.name}-mcp-{server['name']}"
+                try:
+                    cp_response = create_oauth2_credential_provider(
+                        name=cp_name,
+                        client_id=server["oauth2_client_id"] or "",
+                        client_secret=server["oauth2_client_secret"] or "",
+                        auth_server_url=server["oauth2_well_known_url"] or "",
+                        region=region,
+                        tags=resolved_tags,
+                    )
+                    logger.info(
+                        "Created credential provider '%s' for MCP server '%s' (callback: %s)",
+                        cp_name, server["name"], cp_response.get("callbackUrl"),
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to create credential provider for MCP server '%s': %s",
+                        server["name"], e,
+                    )
+                auth_entry: dict[str, str] = {
+                    "type": "oauth2",
+                    "credential_provider_name": cp_name,
+                }
+                if server["oauth2_well_known_url"]:
+                    auth_entry["well_known_endpoint"] = server["oauth2_well_known_url"]
+                if server["oauth2_scopes"]:
+                    auth_entry["scopes"] = server["oauth2_scopes"]
+                entry["auth"] = auth_entry
+            mcp_server_configs.append(entry)
+
+        config_json = json.dumps({
+            "system_prompt": system_prompt,
+            "model_id": request.model_id,
+            "max_tokens": model_max_tokens,
+            "integrations": {
+                "mcp_servers": mcp_server_configs,
+                "a2a_agents": request.a2a_agents,
+                "memory": {"enabled": request.memory_enabled},
+            },
+        })
+        env_vars = {
+            "AGENT_CONFIG_JSON": config_json,
+            "OTEL_SERVICE_NAME": request.name,
+            "AGENT_OBSERVABILITY_ENABLED": "true",
+        }
+
+        # Store config entries
+        for key, value in env_vars.items():
+            db.add(ConfigEntry(
+                agent_id=agent.id,
+                key=key,
+                value=value,
+                is_secret=False,
+                source="env_var",
+            ))
+        db.commit()
+
+        # --- Step 2: Create or use provided IAM execution role ---
+        agent.deployment_status = "creating_role"
+        db.commit()
+
+        created_role = False
+        execution_role_arn = request.role_arn
+        if not execution_role_arn:
+            try:
+                execution_role_arn = create_execution_role(
+                    agent_name=request.name,
+                    runtime_id=f"pending-{agent.id}",
+                    region=region,
+                    account_id=account_id,
+                    tag_policies=tag_policy_dicts,
+                    extra_tags=resolved_tags,
+                )
+                created_role = True
+                agent.execution_role_arn = execution_role_arn
+                db.commit()
+            except Exception as e:
+                agent.deployment_status = "failed"
+                agent.status = "FAILED"
+                db.commit()
+                logger.error("Failed to create execution role for agent %s: %s", agent.id, e)
+                return
+        else:
             agent.execution_role_arn = execution_role_arn
+            db.commit()
+
+        # --- Step 3: Build agent artifact ---
+        agent.deployment_status = "building_artifact"
+        db.commit()
+
+        try:
+            artifact_bucket, artifact_key = build_agent_artifact(region)
+        except Exception as e:
+            agent.deployment_status = "failed"
+            agent.status = "FAILED"
+            db.commit()
+            if created_role and execution_role_arn:
+                _cleanup_role(execution_role_arn)
+            logger.error("Failed to build artifact for agent %s: %s", agent.id, e)
+            return
+
+        # Build optional configs
+        lifecycle_config = None
+        if request.idle_timeout or request.max_lifetime:
+            lifecycle_config = {}
+            if request.idle_timeout:
+                lifecycle_config["idleRuntimeSessionTimeout"] = request.idle_timeout
+            if request.max_lifetime:
+                lifecycle_config["maxLifetime"] = request.max_lifetime
+
+        authorizer_config = None
+        user_client_id = os.getenv("LOOM_COGNITO_USER_CLIENT_ID", "")
+        if request.authorizer_type == "cognito" and request.authorizer_pool_id:
+            jwt_config: dict[str, Any] = {
+                "discoveryUrl": f"https://cognito-idp.{region}.amazonaws.com/{request.authorizer_pool_id}/.well-known/openid-configuration"
+            }
+            allowed_clients = list(request.authorizer_allowed_clients) if request.authorizer_allowed_clients else []
+            if user_client_id and user_client_id not in allowed_clients:
+                allowed_clients.append(user_client_id)
+            if allowed_clients:
+                jwt_config["allowedClients"] = allowed_clients
+            if request.authorizer_allowed_scopes:
+                jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
+            authorizer_config = {"customJWTAuthorizer": jwt_config}
+        elif request.authorizer_type == "other" and request.authorizer_discovery_url:
+            jwt_config = {"discoveryUrl": request.authorizer_discovery_url}
+            if request.authorizer_allowed_clients:
+                jwt_config["allowedClients"] = request.authorizer_allowed_clients
+            if request.authorizer_allowed_scopes:
+                jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
+            authorizer_config = {"customJWTAuthorizer": jwt_config}
+
+        # --- Step 4: Deploy to AgentCore ---
+        agent.deployment_status = "deploying"
+        db.commit()
+
+        try:
+            response = create_runtime(
+                name=request.name,
+                description=request.description,
+                role_arn=execution_role_arn,
+                env_vars=env_vars,
+                network_mode=request.network_mode,
+                protocol=request.protocol,
+                lifecycle_config=lifecycle_config,
+                authorizer_config=authorizer_config,
+                artifact_bucket=artifact_bucket,
+                artifact_prefix=artifact_key,
+                tags=resolved_tags,
+                region=region,
+            )
+
+            runtime_arn = response.get("agentRuntimeArn", "")
+            runtime_id = response.get("agentRuntimeId", "")
+
+            # Extract account_id from the returned ARN
+            try:
+                _, arn_account_id, _ = parse_arn(runtime_arn)
+                agent.account_id = arn_account_id
+            except ValueError:
+                pass
+
+            agent.arn = runtime_arn
+            agent.runtime_id = runtime_id
+            agent.deployment_status = "deployed"
+            agent.status = response.get("status", "CREATING")
+            agent.deployed_at = datetime.utcnow()
+            agent.last_refreshed_at = datetime.utcnow()
+            agent.log_group = derive_log_group(runtime_id, "DEFAULT") if runtime_id else None
+            agent.set_available_qualifiers(["DEFAULT"])
+            agent.set_tags(resolved_tags)
+
+            # Persist authorizer config for token retrieval at invoke time
+            if request.authorizer_type:
+                stored_clients = list(request.authorizer_allowed_clients) if request.authorizer_allowed_clients else []
+                if user_client_id and user_client_id not in stored_clients:
+                    stored_clients.append(user_client_id)
+                agent.set_authorizer_config({
+                    "type": request.authorizer_type,
+                    "pool_id": request.authorizer_pool_id,
+                    "discovery_url": request.authorizer_discovery_url,
+                    "allowed_clients": stored_clients,
+                    "allowed_scopes": request.authorizer_allowed_scopes,
+                })
+
+                # Store Cognito client credentials for token retrieval
+                if request.authorizer_client_id:
+                    db.add(ConfigEntry(
+                        agent_id=agent.id,
+                        key="COGNITO_CLIENT_ID",
+                        value=request.authorizer_client_id,
+                        is_secret=False,
+                        source="env_var",
+                    ))
+                if request.authorizer_client_id and request.authorizer_client_secret:
+                    secret_name = f"loom/agents/{agent.id}/cognito-client-secret"
+                    secret_arn = store_secret(
+                        name=secret_name,
+                        secret_value=request.authorizer_client_secret,
+                        region=region,
+                        description=f"Cognito client secret for Loom agent {agent.id} (client_id: {request.authorizer_client_id})",
+                    )
+                    db.add(ConfigEntry(
+                        agent_id=agent.id,
+                        key="COGNITO_CLIENT_SECRET_ARN",
+                        value=secret_arn,
+                        is_secret=True,
+                        source="secrets_manager",
+                    ))
+
             db.commit()
         except Exception as e:
             agent.deployment_status = "failed"
             agent.status = "FAILED"
             db.commit()
-            logger.error("Failed to create execution role for agent %s: %s", agent.id, e)
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Failed to create execution role: {str(e)}"
-            )
-    else:
-        agent.execution_role_arn = execution_role_arn
-        db.commit()
-
-    # Build agent artifact
-    try:
-        artifact_bucket, artifact_key = build_agent_artifact(region)
+            if created_role and execution_role_arn:
+                _cleanup_role(execution_role_arn)
+            logger.error("Failed to deploy agent %s: %s", agent.id, e)
     except Exception as e:
-        agent.deployment_status = "failed"
-        agent.status = "FAILED"
-        db.commit()
-        if created_role and execution_role_arn:
-            _cleanup_role(execution_role_arn)
-        logger.error("Failed to build artifact for agent %s: %s", agent.id, e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to build agent artifact: {str(e)}"
-        )
-
-    # Build optional configs
-    lifecycle_config = None
-    if request.idle_timeout or request.max_lifetime:
-        lifecycle_config = {}
-        if request.idle_timeout:
-            lifecycle_config["idleRuntimeSessionTimeout"] = request.idle_timeout
-        if request.max_lifetime:
-            lifecycle_config["maxLifetime"] = request.max_lifetime
-
-    authorizer_config = None
-    user_client_id = os.getenv("LOOM_COGNITO_USER_CLIENT_ID", "")
-    if request.authorizer_type == "cognito" and request.authorizer_pool_id:
-        jwt_config: dict[str, Any] = {
-            "discoveryUrl": f"https://cognito-idp.{region}.amazonaws.com/{request.authorizer_pool_id}/.well-known/openid-configuration"
-        }
-        allowed_clients = list(request.authorizer_allowed_clients) if request.authorizer_allowed_clients else []
-        # Auto-include the user app client so login tokens are accepted
-        if user_client_id and user_client_id not in allowed_clients:
-            allowed_clients.append(user_client_id)
-        if allowed_clients:
-            jwt_config["allowedClients"] = allowed_clients
-        if request.authorizer_allowed_scopes:
-            jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
-        authorizer_config = {"customJWTAuthorizer": jwt_config}
-    elif request.authorizer_type == "other" and request.authorizer_discovery_url:
-        jwt_config = {"discoveryUrl": request.authorizer_discovery_url}
-        if request.authorizer_allowed_clients:
-            jwt_config["allowedClients"] = request.authorizer_allowed_clients
-        if request.authorizer_allowed_scopes:
-            jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
-        authorizer_config = {"customJWTAuthorizer": jwt_config}
-
-    # Deploy to AgentCore
-    try:
-        response = create_runtime(
-            name=request.name,
-            description=request.description,
-            role_arn=execution_role_arn,
-            env_vars=env_vars,
-            network_mode=request.network_mode,
-            protocol=request.protocol,
-            lifecycle_config=lifecycle_config,
-            authorizer_config=authorizer_config,
-            artifact_bucket=artifact_bucket,
-            artifact_prefix=artifact_key,
-            tags=resolved_tags,
-            region=region,
-        )
-
-        runtime_arn = response.get("agentRuntimeArn", "")
-        runtime_id = response.get("agentRuntimeId", "")
-
-        # Extract account_id from the returned ARN
+        logger.error("Unexpected error in background deploy for agent %s: %s", agent_id, e)
         try:
-            _, arn_account_id, _ = parse_arn(runtime_arn)
-            agent.account_id = arn_account_id
-        except ValueError:
+            agent = db.query(Agent).filter(Agent.id == agent_id).first()
+            if agent:
+                agent.deployment_status = "failed"
+                agent.status = "FAILED"
+                db.commit()
+        except Exception:
             pass
+    finally:
+        db.close()
 
-        agent.arn = runtime_arn
-        agent.runtime_id = runtime_id
-        agent.deployment_status = "deployed"
-        agent.status = response.get("status", "CREATING")
-        agent.deployed_at = datetime.utcnow()
-        agent.last_refreshed_at = datetime.utcnow()
-        agent.log_group = derive_log_group(runtime_id, "DEFAULT") if runtime_id else None
-        agent.set_available_qualifiers(["DEFAULT"])
-        agent.set_tags(resolved_tags)
 
-        # Persist authorizer config for token retrieval at invoke time
-        if request.authorizer_type:
-            stored_clients = list(request.authorizer_allowed_clients) if request.authorizer_allowed_clients else []
-            if user_client_id and user_client_id not in stored_clients:
-                stored_clients.append(user_client_id)
-            agent.set_authorizer_config({
-                "type": request.authorizer_type,
-                "pool_id": request.authorizer_pool_id,
-                "discovery_url": request.authorizer_discovery_url,
-                "allowed_clients": stored_clients,
-                "allowed_scopes": request.authorizer_allowed_scopes,
-            })
-
-            # Store Cognito client credentials for token retrieval
-            if request.authorizer_client_id:
-                db.add(ConfigEntry(
-                    agent_id=agent.id,
-                    key="COGNITO_CLIENT_ID",
-                    value=request.authorizer_client_id,
-                    is_secret=False,
-                    source="env_var",
-                ))
-            if request.authorizer_client_id and request.authorizer_client_secret:
-                secret_name = f"loom/agents/{agent.id}/cognito-client-secret"
-                secret_arn = store_secret(
-                    name=secret_name,
-                    secret_value=request.authorizer_client_secret,
-                    region=region,
-                    description=f"Cognito client secret for Loom agent {agent.id} (client_id: {request.authorizer_client_id})",
-                )
-                db.add(ConfigEntry(
-                    agent_id=agent.id,
-                    key="COGNITO_CLIENT_SECRET_ARN",
-                    value=secret_arn,
-                    is_secret=True,
-                    source="secrets_manager",
-                ))
-
-        db.commit()
-        db.refresh(agent)
-    except Exception as e:
-        agent.deployment_status = "failed"
-        agent.status = "FAILED"
-        db.commit()
-        if created_role and execution_role_arn:
-            _cleanup_role(execution_role_arn)
-        logger.error("Failed to deploy agent %s: %s", agent.id, e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to deploy agent runtime: {str(e)}"
-        )
-
-    return AgentResponse(**agent.to_dict(), active_session_count=0)
+def _is_permanent_error(e: Exception) -> bool:
+    """Return True if an AWS error is permanent and polling should stop."""
+    from botocore.exceptions import ClientError
+    if isinstance(e, ClientError):
+        code = e.response.get("Error", {}).get("Code", "")
+        return code in ("AccessDeniedException", "UnauthorizedException")
+    return False
 
 
 def _cleanup_role(role_arn: str) -> None:
@@ -770,8 +908,15 @@ def get_agent_status(agent_id: int, user: UserInfo = Depends(require_scopes("age
     """Poll AWS for current runtime and endpoint status, update local DB.
 
     If the runtime is READY and no endpoint exists yet, creates one automatically.
+    During local build phases (before create_runtime is called), returns current
+    DB state without making AWS API calls.
     """
     agent = get_agent_or_404(agent_id, db)
+
+    # Local build phases — runtime doesn't exist in AWS yet, just return DB state
+    _local_phases = {"initializing", "creating_credentials", "creating_role", "building_artifact", "deploying"}
+    if agent.deployment_status in _local_phases:
+        return _agent_response(agent, db)
 
     if agent.runtime_id and agent.source == "deploy":
         # Check runtime status
@@ -782,6 +927,20 @@ def get_agent_status(agent_id: int, user: UserInfo = Depends(require_scopes("age
             agent.last_refreshed_at = datetime.utcnow()
         except Exception as e:
             logger.warning("Failed to poll runtime status for %s: %s", agent.runtime_id, e)
+            # If the agent was DELETING and the runtime is gone, purge from DB
+            if agent.status == "DELETING":
+                logger.info("Runtime %s no longer exists; purging agent %s", agent.runtime_id, agent.id)
+                db.delete(agent)
+                db.flush()
+                db.commit()
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent deleted")
+            # Stop polling on permanent errors (auth, not found)
+            if _is_permanent_error(e):
+                agent.status = "FAILED"
+                agent.deployment_status = "failed"
+                db.commit()
+                db.refresh(agent)
+                return _agent_response(agent, db)
 
         # Use the DEFAULT endpoint that is auto-created with the runtime
         if agent.status == "READY" and not agent.endpoint_name:
@@ -808,6 +967,7 @@ def get_agent_status(agent_id: int, user: UserInfo = Depends(require_scopes("age
 def delete_agent(
     agent_id: int,
     cleanup_aws: bool = False,
+    background_tasks: BackgroundTasks = None,
     user: UserInfo = Depends(require_scopes("agent:write")),
     db: Session = Depends(get_db),
 ) -> AgentResponse:
@@ -826,43 +986,126 @@ def delete_agent(
                 detail="Cannot modify resources outside your group",
             )
 
+    # Extract credential provider names from agent config for cleanup
+    config_map = {e.key: e.value for e in agent.config_entries}
+    cp_names: list[str] = []
+    config_json_str = config_map.get("AGENT_CONFIG_JSON")
+    if config_json_str:
+        try:
+            agent_config = json.loads(config_json_str)
+            for mcp in agent_config.get("integrations", {}).get("mcp_servers", []):
+                cp_name = (mcp.get("auth") or {}).get("credential_provider_name")
+                if cp_name:
+                    cp_names.append(cp_name)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
     # For local-only deletion (no AWS cleanup or no runtime)
     if not cleanup_aws or not agent.runtime_id:
         # Clean up Cognito client secret from Secrets Manager
-        config_map = {e.key: e.value for e in agent.config_entries}
         secret_arn = config_map.get("COGNITO_CLIENT_SECRET_ARN")
         if secret_arn:
             delete_secret(secret_arn, agent.region)
 
         result = _agent_response(agent, db)
         db.delete(agent)
+        db.flush()
         db.commit()
         return result
 
+    # Capture values needed by the background task before the request session closes
+    _agent_id = agent.id
+    _runtime_id = agent.runtime_id
+    _endpoint_name = agent.endpoint_name
+    _region = agent.region
+    _secret_arn = config_map.get("COGNITO_CLIENT_SECRET_ARN")
+
     # Initiate async deletion in AWS
-    if agent.endpoint_name:
+    # Skip DEFAULT endpoint — AWS removes it automatically when the runtime is deleted
+    if _endpoint_name and _endpoint_name != "DEFAULT":
         try:
-            delete_runtime_endpoint(agent.runtime_id, agent.endpoint_name, agent.region)
+            delete_runtime_endpoint(_runtime_id, _endpoint_name, _region)
         except Exception as e:
-            logger.warning("Failed to delete endpoint %s: %s", agent.endpoint_name, e)
+            logger.warning("Failed to delete endpoint %s: %s", _endpoint_name, e)
 
     try:
-        delete_runtime(agent.runtime_id, agent.region)
+        delete_runtime(_runtime_id, _region)
     except Exception as e:
-        logger.warning("Failed to delete runtime %s: %s", agent.runtime_id, e)
+        logger.warning("Failed to delete runtime %s: %s", _runtime_id, e)
+
+    # Clean up credential providers
+    for cp_name in cp_names:
+        try:
+            delete_credential_provider(cp_name, _region)
+            logger.info("Deleted credential provider '%s'", cp_name)
+        except Exception as e:
+            logger.warning("Failed to delete credential provider '%s': %s", cp_name, e)
 
     # Clean up Cognito client secret from Secrets Manager
-    config_map = {e.key: e.value for e in agent.config_entries}
-    secret_arn = config_map.get("COGNITO_CLIENT_SECRET_ARN")
-    if secret_arn:
-        delete_secret(secret_arn, agent.region)
+    if _secret_arn:
+        delete_secret(_secret_arn, _region)
 
     # Mark as DELETING so frontend can poll for completion
     agent.status = "DELETING"
     agent.deployment_status = "removing"
+    db.flush()
     db.commit()
     db.refresh(agent)
-    return _agent_response(agent, db)
+    result = _agent_response(agent, db)
+
+    # Schedule background task to wait for AWS deletion and then purge the DB record
+    if background_tasks is not None:
+        background_tasks.add_task(
+            _delete_agent_background,
+            _agent_id,
+            _runtime_id,
+            _region,
+        )
+
+    return result
+
+
+def _delete_agent_background(
+    agent_id: int,
+    runtime_id: str,
+    region: str,
+) -> None:
+    """Background task: poll until the runtime is gone, then purge the DB record."""
+    max_attempts = 30
+    poll_interval = 5
+
+    for attempt in range(max_attempts):
+        time.sleep(poll_interval)
+        try:
+            rt = get_runtime(runtime_id, region)
+            rt_status = rt.get("status", "")
+            logger.info("Delete poll %d/%d for runtime %s: status=%s", attempt + 1, max_attempts, runtime_id, rt_status)
+            if rt_status == "FAILED":
+                logger.warning("Runtime %s entered FAILED state during deletion", runtime_id)
+                break
+        except Exception:
+            # Runtime no longer exists — deletion complete
+            logger.info("Runtime %s no longer exists; deletion confirmed", runtime_id)
+            break
+    else:
+        logger.warning("Runtime %s still exists after %d poll attempts; purging DB record anyway", runtime_id, max_attempts)
+
+    # Purge the agent record from the database
+    db = SessionLocal()
+    try:
+        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        if agent:
+            db.delete(agent)
+            db.flush()
+            db.commit()
+            logger.info("Purged agent %d from database", agent_id)
+        else:
+            logger.info("Agent %d already removed from database", agent_id)
+    except Exception as e:
+        db.rollback()
+        logger.warning("Failed to purge agent %d from database: %s", agent_id, e)
+    finally:
+        db.close()
 
 
 @router.delete("/{agent_id}/purge", status_code=status.HTTP_204_NO_CONTENT)

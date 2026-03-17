@@ -192,7 +192,8 @@ class TestBuildBasePolicy(unittest.TestCase):
         policy = build_base_policy("us-east-1", "123456789012", "my-agent")
 
         self.assertEqual(policy["Version"], "2012-10-17")
-        self.assertEqual(len(policy["Statement"]), 1)
+        self.assertEqual(len(policy["Statement"]), 2)
+        # Workload identity statement
         stmt = policy["Statement"][0]
         self.assertEqual(stmt["Effect"], "Allow")
         self.assertIn("bedrock-agentcore:GetWorkloadAccessToken", stmt["Action"])
@@ -202,6 +203,11 @@ class TestBuildBasePolicy(unittest.TestCase):
         self.assertTrue(any("us-east-1" in r for r in stmt["Resource"]))
         self.assertTrue(any("123456789012" in r for r in stmt["Resource"]))
         self.assertTrue(any("my-agent" in r for r in stmt["Resource"]))
+        # OAuth2 credential provider statement
+        oauth2_stmt = policy["Statement"][1]
+        self.assertEqual(oauth2_stmt["Effect"], "Allow")
+        self.assertIn("bedrock-agentcore:GetResourceOauth2Token", oauth2_stmt["Action"])
+        self.assertTrue(any("token-vault" in r for r in oauth2_stmt["Resource"]))
 
 
 class TestBuildIntegrationPolicyStatements(unittest.TestCase):
@@ -351,8 +357,8 @@ class TestUpdateRolePolicy(unittest.TestCase):
         call_kwargs = mock_client.put_role_policy.call_args[1]
         self.assertEqual(call_kwargs["RoleName"], "loom-agent-rt-123")
         policy = json.loads(call_kwargs["PolicyDocument"])
-        # Base policy statement + S3 integration statement
-        self.assertEqual(len(policy["Statement"]), 2)
+        # Base policy statements (workload identity + OAuth2 credential provider) + S3 integration
+        self.assertEqual(len(policy["Statement"]), 3)
 
 
 class TestDeleteExecutionRole(unittest.TestCase):

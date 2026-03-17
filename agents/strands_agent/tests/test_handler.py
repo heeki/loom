@@ -113,7 +113,7 @@ class TestGetAgent(unittest.TestCase):
         result = _get_agent()
 
         mock_load_config.assert_called_once()
-        mock_build_agent.assert_called_once_with(mock_config)
+        mock_build_agent.assert_called_once_with(mock_config, defer_mcp=False)
         self.assertEqual(result, mock_agent)
 
 
