@@ -1,5 +1,6 @@
 """A2A agent service layer for Agent Card fetching and connection testing."""
 import logging
+import uuid
 from typing import Any
 
 import httpx
@@ -7,6 +8,16 @@ import httpx
 logger = logging.getLogger(__name__)
 
 A2A_REQUEST_TIMEOUT = 30
+
+# Standard A2A well-known path
+AGENT_JSON_PATH = "/.well-known/agent.json"
+# AgentCore Runtime uses a different well-known path
+AGENT_CARD_JSON_PATH = "/.well-known/agent-card.json"
+
+
+def _is_agentcore_url(base_url: str) -> bool:
+    """Detect if the base URL points to an AgentCore Runtime endpoint."""
+    return "bedrock-agentcore" in base_url
 
 
 def _get_oauth2_token(agent: Any) -> str | None:
@@ -48,12 +59,20 @@ def _get_oauth2_token(agent: Any) -> str | None:
 
 
 def _build_headers(agent: Any) -> dict[str, str]:
-    """Build request headers, including auth if configured."""
-    headers: dict[str, str] = {"Accept": "application/json"}
+    """Build request headers, including auth if configured.
+
+    For AgentCore URLs, uses the stored agentcore_session_id if available,
+    otherwise generates a new UUID.
+    """
+    base_url = getattr(agent, "base_url", "")
+    headers: dict[str, str] = {"Accept": "*/*"}
     if agent.auth_type == "oauth2":
         token = _get_oauth2_token(agent)
         if token:
             headers["Authorization"] = f"Bearer {token}"
+    if _is_agentcore_url(base_url):
+        session_id = getattr(agent, "agentcore_session_id", None) or str(uuid.uuid4())
+        headers["X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"] = session_id
     return headers
 
 
@@ -70,16 +89,51 @@ def fetch_agent_card(base_url: str, auth_headers: dict[str, str] | None = None) 
     Raises:
         ValueError: If the Agent Card cannot be fetched or is invalid.
     """
-    url = base_url.rstrip("/") + "/.well-known/agent.json"
-    headers = auth_headers or {"Accept": "application/json"}
+    stripped = base_url.rstrip("/")
+    headers = auth_headers or {"Accept": "*/*"}
 
-    try:
-        resp = httpx.get(url, headers=headers, timeout=A2A_REQUEST_TIMEOUT, follow_redirects=True)
-        resp.raise_for_status()
-    except httpx.HTTPStatusError as e:
-        raise ValueError(f"Agent Card fetch returned HTTP {e.response.status_code}: {e.response.text[:200]}") from e
-    except Exception as e:
-        raise ValueError(f"Failed to fetch Agent Card from {url}: {e}") from e
+    # Try AgentCore path first for AgentCore URLs, then standard; reverse for others
+    if _is_agentcore_url(base_url):
+        paths = [AGENT_CARD_JSON_PATH, AGENT_JSON_PATH]
+    else:
+        paths = [AGENT_JSON_PATH, AGENT_CARD_JSON_PATH]
+
+    last_error: Exception | None = None
+    for path in paths:
+        url = stripped + path
+        try:
+            resp = httpx.get(url, headers=headers, timeout=A2A_REQUEST_TIMEOUT, follow_redirects=True)
+            resp.raise_for_status()
+            break
+        except httpx.HTTPStatusError as e:
+            last_error = e
+            status = e.response.status_code
+            # 404 = direct not found; 424 = AgentCore proxy received 404 from underlying agent
+            if status in (404, 424):
+                logger.debug("Agent Card not found at %s (HTTP %d), trying next path", url, status)
+                continue
+            friendly = {
+                401: "authentication required — check OAuth2 credentials",
+                403: "access denied — check OAuth2 credentials and scopes",
+                500: "the remote server returned an internal error",
+                502: "bad gateway — the remote server may be down",
+                503: "the remote server is unavailable",
+            }
+            detail = friendly.get(status, e.response.text[:200])
+            raise ValueError(f"Agent Card fetch failed (HTTP {status}): {detail}") from e
+        except httpx.ConnectError as e:
+            raise ValueError(f"Cannot connect to {base_url} — verify the URL is correct and the server is running") from e
+        except httpx.TimeoutException as e:
+            raise ValueError(f"Connection to {base_url} timed out after {A2A_REQUEST_TIMEOUT}s") from e
+        except Exception as e:
+            raise ValueError(f"Failed to fetch Agent Card from {url}: {e}") from e
+    else:
+        # Both paths returned 404/424
+        raise ValueError(
+            "No Agent Card found — tried both /.well-known/agent.json and "
+            "/.well-known/agent-card.json. The underlying agent may not implement "
+            "the A2A protocol. Verify the agent exposes an Agent Card endpoint."
+        )
 
     try:
         card = resp.json()

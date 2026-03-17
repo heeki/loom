@@ -375,7 +375,7 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
           storageKey="security-authorizers"
           sortDirection={sortDir}
           onSortDirectionChange={(d) => { if (d) { setSortDir(d); saveSortDirection("security-authorizers", d); } }}
-          className="grid gap-2 md:grid-cols-2 lg:grid-cols-3"
+          className="grid gap-2"
           renderItem={(config) => (
             <Card className="relative py-3 gap-1">
               <CardHeader className="gap-1 pb-2">

@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
-import { testConnection } from "@/api/mcp";
+import { testConnection, testConnectionPreCreate } from "@/api/mcp";
 import { JsonConfigSection } from "./JsonConfigSection";
 import type { McpServerCreateRequest, TestConnectionResult } from "@/api/types";
 
@@ -61,11 +61,27 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
   };
 
   const handleTest = async () => {
-    if (!initialData?.id) return;
+    if (!endpointUrl.trim()) return;
     setTesting(true);
     setTestResult(null);
     try {
-      const result = await testConnection(initialData.id);
+      let result: TestConnectionResult;
+      if (initialData?.id) {
+        result = await testConnection(initialData.id);
+      } else {
+        const config: Parameters<typeof testConnectionPreCreate>[0] = {
+          endpoint_url: endpointUrl.trim(),
+          transport_type: transportType,
+          auth_type: authType,
+        };
+        if (authType === "oauth2") {
+          if (wellKnownUrl.trim()) config.oauth2_well_known_url = wellKnownUrl.trim();
+          if (clientId.trim()) config.oauth2_client_id = clientId.trim();
+          if (clientSecret) config.oauth2_client_secret = clientSecret;
+          if (scopes.trim()) config.oauth2_scopes = scopes.trim();
+        }
+        result = await testConnectionPreCreate(config);
+      }
       setTestResult(result);
     } catch (e) {
       setTestResult({ success: false, message: e instanceof Error ? e.message : "Test failed" });
@@ -113,7 +129,7 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
           }
           return JSON.stringify(result, null, 2);
         }}
-        placeholder='{"name": "...", "endpoint_url": "https://...", "transport_type": "sse", "auth_type": "none"}'
+        placeholder={'{"name": "...", "endpoint_url": "https://...", "transport_type": "sse", "auth_type": "oauth2", "oauth2_well_known_url": "https://...", "oauth2_client_id": "...", "oauth2_client_secret": "...", "oauth2_scopes": "..."}'}
       />
 
       <div className="flex gap-3">
@@ -211,25 +227,23 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
         )}
       </div>
 
-      {initialData?.id && (
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={handleTest} disabled={testing}>
-            {testing ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                Testing...
-              </>
-            ) : (
-              "Test Connection"
-            )}
-          </Button>
-          {testResult && (
-            <Badge variant={testResult.success ? "default" : "destructive"} className="text-xs">
-              {testResult.message}
-            </Badge>
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="outline" onClick={handleTest} disabled={testing || !endpointUrl.trim()}>
+          {testing ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+              Testing...
+            </>
+          ) : (
+            "Test Connection"
           )}
-        </div>
-      )}
+        </Button>
+        {testResult && (
+          <Badge variant={testResult.success ? "default" : "destructive"} className="text-xs">
+            {testResult.message}
+          </Badge>
+        )}
+      </div>
 
       <div className="flex items-center gap-2 pt-2">
         <Button size="sm" className="min-w-[120px]" onClick={handleSubmit} disabled={submitting || !name.trim() || !endpointUrl.trim()}>

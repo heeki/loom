@@ -143,7 +143,16 @@ MCP (Model Context Protocol) tool servers are dynamically loaded from configurat
 
 ### A2A Agent Clients
 
-Agent-to-agent (A2A) communication uses the Strands SDK `A2AAgent` class. Each enabled A2A agent in the configuration is wrapped as a `@tool` function that the orchestrating agent can invoke during conversation. Auth credential resolution from Secrets Manager is a TODO.
+Agent-to-agent (A2A) communication uses the Strands SDK `A2AAgent` class. Each enabled A2A agent in the configuration is wrapped as a `@tool` function that the orchestrating agent can invoke during conversation.
+
+**`_AuthenticatedA2AAgent`** — Subclass of `A2AAgent` for OAuth2-protected A2A endpoints. Injects OAuth2 Bearer tokens via the AgentCore Identity service M2M flow (using the workload token from `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE`). Handles:
+
+- **Agent Card fetching** with authentication, backfilling required fields that older agent cards may omit, and overriding the card's internal URL with the external AgentCore Runtime endpoint.
+- **Message sending** via `message/stream` (SSE) with automatic fallback to `message/send` when the server returns "Method not found".
+- **SSE response parsing** — handles both `text/event-stream` (standard A2A streaming) and `application/json` (AgentCore proxy-collapsed) content types. Buffers `Message` events and yields them after `Task` events so that `stream_async` picks the content-bearing `Message` as the `last_complete_event`.
+- **Manual task tracking** instead of `ClientTaskManager` to handle duplicate `Task` events emitted by some A2A servers.
+
+**Authentication flow:** The `_OAuth2Auth` httpx handler (shared with MCP clients) exchanges the ephemeral container workload token for a downstream OAuth2 access token via the AgentCore Identity service credential provider.
 
 ### AgentCore Memory
 

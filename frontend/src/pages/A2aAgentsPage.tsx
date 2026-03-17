@@ -126,6 +126,7 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
                 onCancel={() => setEditingAgent(null)}
                 initialData={{
                   id: editingAgent.id,
+                  name: editingAgent.name,
                   base_url: editingAgent.base_url,
                   auth_type: editingAgent.auth_type,
                   oauth2_well_known_url: editingAgent.oauth2_well_known_url ?? undefined,

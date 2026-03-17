@@ -3,7 +3,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
-import { testA2aConnection } from "@/api/a2a";
+import { testA2aConnection, testA2aConnectionPreCreate } from "@/api/a2a";
+import { JsonConfigSection } from "./JsonConfigSection";
 import type { A2aAgentCreateRequest, TestConnectionResult } from "@/api/types";
 
 interface A2aAgentFormProps {
@@ -13,6 +14,7 @@ interface A2aAgentFormProps {
 }
 
 export function A2aAgentForm({ onSubmit, onCancel, initialData }: A2aAgentFormProps) {
+  const [name, setName] = useState(initialData?.name ?? "");
   const [baseUrl, setBaseUrl] = useState(initialData?.base_url ?? "");
   const [authType, setAuthType] = useState<"none" | "oauth2">(initialData?.auth_type ?? "none");
   const [wellKnownUrl, setWellKnownUrl] = useState(initialData?.oauth2_well_known_url ?? "");
@@ -31,6 +33,7 @@ export function A2aAgentForm({ onSubmit, onCancel, initialData }: A2aAgentFormPr
         base_url: baseUrl.trim(),
         auth_type: authType,
       };
+      if (name.trim()) request.name = name.trim();
       if (authType === "oauth2") {
         if (wellKnownUrl.trim()) request.oauth2_well_known_url = wellKnownUrl.trim();
         if (clientId.trim()) request.oauth2_client_id = clientId.trim();
@@ -44,11 +47,26 @@ export function A2aAgentForm({ onSubmit, onCancel, initialData }: A2aAgentFormPr
   };
 
   const handleTest = async () => {
-    if (!initialData?.id) return;
+    if (!baseUrl.trim()) return;
     setTesting(true);
     setTestResult(null);
     try {
-      const result = await testA2aConnection(initialData.id);
+      let result: TestConnectionResult;
+      if (initialData?.id) {
+        result = await testA2aConnection(initialData.id);
+      } else {
+        const config: Parameters<typeof testA2aConnectionPreCreate>[0] = {
+          base_url: baseUrl.trim(),
+          auth_type: authType,
+        };
+        if (authType === "oauth2") {
+          if (wellKnownUrl.trim()) config.oauth2_well_known_url = wellKnownUrl.trim();
+          if (clientId.trim()) config.oauth2_client_id = clientId.trim();
+          if (clientSecret) config.oauth2_client_secret = clientSecret;
+          if (scopes.trim()) config.oauth2_scopes = scopes.trim();
+        }
+        result = await testA2aConnectionPreCreate(config);
+      }
       setTestResult(result);
     } catch (e) {
       setTestResult({ success: false, message: e instanceof Error ? e.message : "Test failed" });
@@ -59,16 +77,56 @@ export function A2aAgentForm({ onSubmit, onCancel, initialData }: A2aAgentFormPr
 
   return (
     <div className="space-y-3">
-      <div>
-        <label className="text-xs text-muted-foreground">Base URL *</label>
-        <Input
-          value={baseUrl}
-          onChange={(e) => setBaseUrl(e.target.value)}
-          placeholder="https://recipe-agent.example.com"
-        />
-        <p className="text-[10px] text-muted-foreground mt-0.5">
-          The Agent Card will be fetched from &lt;base_url&gt;/.well-known/agent.json
-        </p>
+      <JsonConfigSection
+        onApply={(json) => {
+          try {
+            const parsed = JSON.parse(json);
+            if (parsed.name !== undefined) setName(parsed.name);
+            if (parsed.base_url) setBaseUrl(parsed.base_url);
+            if (parsed.auth_type && ["none", "oauth2"].includes(parsed.auth_type)) {
+              setAuthType(parsed.auth_type);
+            }
+            if (parsed.oauth2_well_known_url !== undefined) setWellKnownUrl(parsed.oauth2_well_known_url);
+            if (parsed.oauth2_client_id !== undefined) setClientId(parsed.oauth2_client_id);
+            if (parsed.oauth2_client_secret !== undefined) setClientSecret(parsed.oauth2_client_secret);
+            if (parsed.oauth2_scopes !== undefined) setScopes(parsed.oauth2_scopes);
+            return null;
+          } catch {
+            return "Invalid JSON. Please check the format and try again.";
+          }
+        }}
+        onExport={() => {
+          const result: Record<string, unknown> = {};
+          if (name) result.name = name;
+          if (baseUrl) result.base_url = baseUrl;
+          result.auth_type = authType;
+          if (authType === "oauth2") {
+            if (wellKnownUrl) result.oauth2_well_known_url = wellKnownUrl;
+            if (clientId) result.oauth2_client_id = clientId;
+            result.oauth2_client_secret = "(redacted)";
+            if (scopes) result.oauth2_scopes = scopes;
+          }
+          return JSON.stringify(result, null, 2);
+        }}
+        placeholder={'{"name": "...", "base_url": "https://...", "auth_type": "oauth2", "oauth2_well_known_url": "https://...", "oauth2_client_id": "...", "oauth2_client_secret": "...", "oauth2_scopes": "..."}'}
+      />
+
+      <div className="flex gap-3">
+        <div className="w-[22%] min-w-0">
+          <label className="text-xs text-muted-foreground">Name</label>
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Display name (optional)" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <label className="text-xs text-muted-foreground">Base URL *</label>
+          <Input
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder="https://recipe-agent.example.com"
+          />
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            The Agent Card will be fetched from &lt;base_url&gt;/.well-known/agent.json
+          </p>
+        </div>
       </div>
 
       <div className="space-y-2">
@@ -105,11 +163,11 @@ export function A2aAgentForm({ onSubmit, onCancel, initialData }: A2aAgentFormPr
               />
             </div>
             <div className="flex gap-3">
-              <div className="flex-1 min-w-0">
+              <div className="w-[25%] min-w-0">
                 <label className="text-xs text-muted-foreground">Client ID</label>
                 <Input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="Client ID" />
               </div>
-              <div className="flex-1 min-w-0">
+              <div className="w-[40%] min-w-0">
                 <label className="text-xs text-muted-foreground">Client Secret</label>
                 <Input
                   type="password"
@@ -118,34 +176,32 @@ export function A2aAgentForm({ onSubmit, onCancel, initialData }: A2aAgentFormPr
                   placeholder={initialData?.id ? "(unchanged)" : "Client secret"}
                 />
               </div>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Scopes</label>
-              <Input value={scopes} onChange={(e) => setScopes(e.target.value)} placeholder="openid profile (space-separated)" />
+              <div className="flex-1 min-w-0">
+                <label className="text-xs text-muted-foreground">Scopes</label>
+                <Input value={scopes} onChange={(e) => setScopes(e.target.value)} placeholder="openid profile (space-separated)" />
+              </div>
             </div>
           </div>
         )}
       </div>
 
-      {initialData?.id && (
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={handleTest} disabled={testing}>
-            {testing ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                Testing...
-              </>
-            ) : (
-              "Test Connection"
-            )}
-          </Button>
-          {testResult && (
-            <Badge variant={testResult.success ? "default" : "destructive"} className="text-xs">
-              {testResult.message}
-            </Badge>
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="outline" onClick={handleTest} disabled={testing || !baseUrl.trim()}>
+          {testing ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+              Testing...
+            </>
+          ) : (
+            "Test Connection"
           )}
-        </div>
-      )}
+        </Button>
+        {testResult && (
+          <Badge variant={testResult.success ? "default" : "destructive"} className="text-xs">
+            {testResult.message}
+          </Badge>
+        )}
+      </div>
 
       <div className="flex items-center gap-2 pt-2">
         <Button size="sm" className="min-w-[120px]" onClick={handleSubmit} disabled={submitting || !baseUrl.trim()}>

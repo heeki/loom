@@ -22,13 +22,14 @@
 frontend/
 ├── src/
 │   ├── api/
-│   │   ├── types.ts            # TypeScript interfaces mirroring backend models
+│   │   ├── types.ts            # TypeScript interfaces mirroring backend models (A2aAgent, A2aAgentSkill, A2aAgentAccess, A2aAgentCard)
 │   │   ├── client.ts           # apiFetch<T>() wrapper + ApiError class, automatic auth token injection, and 401 auto-refresh via `setOnUnauthorized` callback
 │   │   ├── auth.ts             # Cognito auth API (initiateAuth, respondToChallenge, refreshTokens)
 │   │   ├── agents.ts           # Agent CRUD + fetchRoles(), fetchCognitoPools(), fetchModels(), fetchDefaults()
 │   │   ├── invocations.ts      # Session queries + SSE stream consumer (with auth header)
 │   │   ├── logs.ts             # CloudWatch log queries
 │   │   ├── mcp.ts              # MCP server CRUD, tools, access, test connection
+│   │   ├── a2a.ts              # A2A agent CRUD, test connection, card refresh, access
 │   │   ├── memories.ts         # Memory resource CRUD + refresh
 │   │   ├── security.ts         # Security admin: roles, authorizers, credentials, permissions
 │   │   └── settings.ts        # Settings API: tag policy + tag profile CRUD
@@ -42,7 +43,8 @@ frontend/
 │   │   ├── useInvoke.ts        # Streaming invocation state + AbortController
 │   │   ├── useLogs.ts          # Session log fetching
 │   │   ├── useDeployment.ts    # Agent config, credential providers, integrations hooks
-│   │   └── useMcpServers.ts   # MCP server list state + CRUD actions
+│   │   ├── useMcpServers.ts   # MCP server list state + CRUD actions
+│   │   └── useA2aAgents.ts  # A2A agent list with auto-fetch, CRUD callbacks
 │   ├── components/
 │   │   ├── ui/                 # shadcn primitives + searchable-select.tsx + multi-select.tsx + add-filter-dropdown.tsx
 │   │   ├── SortableCardGrid.tsx — Drag-to-reorder card grid using @dnd-kit, default alphabetical sort, SortButton, localStorage persistence
@@ -54,6 +56,10 @@ frontend/
 │   │   ├── McpAccessControl.tsx        # Persona access control for MCP servers and tools
 │   │   ├── McpServerForm.tsx          # Form for adding/editing MCP servers with OAuth2 config
 │   │   ├── McpToolList.tsx            # Tool list display with schema details
+│   │   ├── A2aAgentForm.tsx          # A2A agent create/edit form with OAuth2 disclosure
+│   │   ├── A2aAgentCardView.tsx      # Structured Agent Card display with skills
+│   │   ├── A2aSkillList.tsx          # Expandable skill cards with tags, examples, modes
+│   │   ├── A2aAccessControl.tsx      # Per-persona access control for A2A agent skills
 │   │   ├── MemoryCard.tsx              # Memory resource summary card
 │   │   ├── MemoryManagementPanel.tsx    # Memory resource create form + list table
 │   │   ├── ResourceTagFields.tsx       # Shared tag profile selector + tag resolution
@@ -66,10 +72,11 @@ frontend/
 │   ├── pages/
 │   │   ├── AgentListPage.tsx   # Agents persona: registration form + agent grid
 │   │   ├── AgentDetailPage.tsx # Sessions, latency, invoke, response
-│   │   ├── CatalogPage.tsx     # Platform Catalog: agents, memory, MCP, A2A sections
+│   │   ├── CatalogPage.tsx     # Platform Catalog: agents, memory, MCP, A2A agents sections
 │   │   ├── SecurityAdminPage.tsx  # Security persona: roles, authorizers, credentials, permissions
 │   │   ├── LoginPage.tsx        # Cognito login + NEW_PASSWORD_REQUIRED challenge
 │   │   ├── McpServersPage.tsx  # MCP server management: list, detail, tools, access
+│   │   ├── A2aAgentsPage.tsx       # A2A agent management with card/access tabs
 │   │   ├── MemoryManagementPage.tsx # Memory persona: memory resource management
 │   │   ├── TaggingPage.tsx         # Tagging persona: tag policy + tag profile CRUD
 │   │   ├── SettingsPage.tsx        # Settings persona: display preferences
@@ -188,7 +195,6 @@ When deletion is confirmed with "Also delete in AgentCore" checked, the agent tr
 - "Add Agent" toggles a Card containing Deploy/Import tab switcher and `AgentRegistrationForm`
 - When deploy succeeds, the form collapses and an ephemeral `AgentCard` appears at the top of the grid with CREATING status and spinner/timer. Once the real agent appears in the agents list, the ephemeral card is removed.
 - Below the form: responsive grid of `AgentCard` components (cards default) or table view
-- Bottom section: "Additional Configuration" with MCP Servers and A2A Agents placeholders (coming soon)
 
 ### Import Tab
 
@@ -210,7 +216,7 @@ Full deployment form with sections:
   - Other: textbox for discovery URL, tag inputs for allowed clients and scopes
 - **Lifecycle**: idle timeout and max lifetime fields with dynamic placeholders fetched from `/api/agents/defaults` (e.g., "300" and "3600")
 - **Resource Tags**: `ResourceTagFields` component with tag profile dropdown (persisted in `sessionStorage`). Deploy-time tags are auto-applied; build-time tags are resolved from the selected tag profile.
-- **Integrations**: Memory (enabled), MCP Servers (enabled with multi-select dropdown), A2A Agents (coming soon)
+- **Integrations**: Memory (enabled, with multi-select dropdown for memory resources), MCP Servers (enabled with multi-select dropdown), A2A Agents (enabled with multi-select dropdown)
 
 ---
 
@@ -582,6 +588,7 @@ Custom dropdown for adding custom tag filters to the filter bar. Uses a plain `<
 ### API Layer Design
 - `apiFetch<T>()` is a thin wrapper around `fetch` with JSON parsing, `ApiError` class, automatic auth token injection, and 401 auto-refresh (intercepts unauthorized responses, refreshes the token, and retries once)
 - Each API domain (agents, auth, invocations, logs, security) is a separate module with typed functions
+- `api/a2a.ts` — A2A agent operations: CRUD, test connection, card retrieval/refresh, skills, access rules
 
 ### Session Liveness Display
 Computed server-side using `LOOM_SESSION_IDLE_TIMEOUT_SECONDS`. The frontend displays `live_status` with color-coded badges and `active_session_count` on agent cards.
@@ -609,6 +616,21 @@ Agent cards show the configured authorizer in the metadata section. The backend 
 
 ### Manual Bearer Token Input
 The invoke panel's credential dropdown includes a "Manual token" sentinel value. Selecting it reveals a password input for pasting a raw bearer token. The token is passed in the invoke request body as `bearer_token` and takes highest priority (Priority 0) in the backend's token selection chain — above user tokens, credential-based tokens, and agent config tokens.
+
+### Hooks
+- `useA2aAgents()` — A2A agent list with auto-fetch, CRUD callbacks, toast notifications
+
+### Key Components
+- **A2aAgentForm** — Create/edit form for A2A agents with base URL input and progressive OAuth2 disclosure (auth_type toggle reveals well-known URL, client ID, secret, scopes). Test connection button in edit mode.
+- **A2aAgentCardView** — Structured display of the full Agent Card: header (name, version, status, provider, documentation, refresh button with last-fetched timestamp), capabilities (streaming, push notifications, state history as enabled/disabled badges), authentication schemes, input/output mode badges, and skills list.
+- **A2aSkillList** — Expandable skill cards with name, skill ID, description, tag badges, examples (bulleted list), and input/output mode overrides.
+- **A2aAccessControl** — Per-persona access control for A2A agent skills. Checkbox to grant/revoke access, all_skills/selected_skills radio, individual skill checkboxes with descriptions. Deny by default.
+
+### Views
+
+| View | Persona | Description |
+|------|---------|-------------|
+| A2aAgentsPage | A2A Agents | A2A agent CRUD, agent detail with Agent Card and Access tabs, card/table views |
 
 ---
 

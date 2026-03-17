@@ -184,6 +184,19 @@ class TestMcpRouter(unittest.TestCase):
         response = self.client.post("/api/mcp/servers/999/test-connection")
         self.assertEqual(response.status_code, 404)
 
+    @patch("app.routers.mcp.svc_test_connection")
+    def test_test_connection_pre_create(self, mock_test):
+        mock_test.return_value = {"success": True, "message": "Connected to test-server v1.0"}
+        response = self.client.post("/api/mcp/servers/test-connection", json={
+            "endpoint_url": "https://example.com/mcp",
+            "transport_type": "sse",
+            "auth_type": "none",
+        })
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertIn("Connected to", data["message"])
+
     # ----- TOOLS -----
     def test_get_tools_empty(self):
         created = self._create_server()

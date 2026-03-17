@@ -54,8 +54,9 @@ export interface AgentDeployRequest {
   authorizer_client_id: string | null;
   authorizer_client_secret: string | null;
   memory_enabled: boolean;
+  memory_ids: number[];
   mcp_servers: number[];
-  a2a_agents: unknown[];
+  a2a_agents: number[];
   tags?: Record<string, string>;
 }
 
@@ -527,6 +528,7 @@ export interface A2aAgent {
   oauth2_client_id: string | null;
   oauth2_scopes: string | null;
   has_oauth2_secret: boolean;
+  agentcore_session_id: string | null;
   last_fetched_at: string | null;
   created_at: string | null;
   updated_at: string | null;
@@ -534,6 +536,7 @@ export interface A2aAgent {
 
 export interface A2aAgentCreateRequest {
   base_url: string;
+  name?: string;
   auth_type?: "none" | "oauth2";
   oauth2_well_known_url?: string;
   oauth2_client_id?: string;
@@ -543,6 +546,7 @@ export interface A2aAgentCreateRequest {
 
 export interface A2aAgentUpdateRequest {
   base_url?: string;
+  name?: string;
   status?: "active" | "inactive" | "error";
   auth_type?: "none" | "oauth2";
   oauth2_well_known_url?: string;

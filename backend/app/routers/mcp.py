@@ -212,6 +212,25 @@ def delete_mcp_server(
 # ---------------------------------------------------------------------------
 # Connection test
 # ---------------------------------------------------------------------------
+class TestConnectionRequest(BaseModel):
+    endpoint_url: str = Field(..., description="MCP server endpoint URL")
+    transport_type: str = Field(default="sse", description="Transport type: 'sse' or 'streamable_http'")
+    auth_type: str = Field(default="none", description="Auth type: 'none' or 'oauth2'")
+    oauth2_well_known_url: str | None = None
+    oauth2_client_id: str | None = None
+    oauth2_client_secret: str | None = None
+    oauth2_scopes: str | None = None
+
+
+@router.post("/test-connection", response_model=TestConnectionResponse)
+def test_connection_pre_create(
+    request: TestConnectionRequest,
+    user: UserInfo = Depends(require_scopes("mcp:write")),
+) -> TestConnectionResponse:
+    result = svc_test_connection(request)
+    return TestConnectionResponse(**result)
+
+
 @router.post("/{server_id}/test-connection", response_model=TestConnectionResponse)
 def test_connection(
     server_id: int,

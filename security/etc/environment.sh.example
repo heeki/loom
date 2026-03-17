@@ -29,7 +29,7 @@ P_TAG_OWNER=<your-owner-alias-or-email>
 # Cognito configuration
 P_COGNITO_POOL_NAME=loom
 P_COGNITO_DOMAIN=<your-globally-unique-cognito-domain>
-P_COGNITO_RESOURCE_SERVER=https://loom.agentcore.local
+P_COGNITO_RESOURCE_SERVER=loom
 P_COGNITO_SCOPES=invoke
 P_COGNITO_CALLBACK_URLS=https://localhost
 

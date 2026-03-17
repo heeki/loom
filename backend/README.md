@@ -73,6 +73,7 @@ backend/
 │   │   ├── permission_request.py   # PermissionRequest ORM model
 │   │   ├── memory.py        # Memory ORM model (AgentCore Memory resources)
 │   │   ├── mcp.py           # McpServer, McpTool, McpServerAccess ORM models
+│   │   ├── a2a.py           # A2aAgent, A2aAgentSkill, A2aAgentAccess
 │   │   ├── tag_policy.py    # TagPolicy ORM model (configurable tag policies)
 │   │   └── tag_profile.py   # TagProfile ORM model (named tag presets)
 │   ├── dependencies/
@@ -103,7 +104,9 @@ backend/
 │       └── secrets.py       # Secrets Manager wrapper with caching
 ├── scripts/
 │   └── stream.py            # CLI streaming client (httpx-based)
-├── tests/                   # Unit tests
+├── tests/
+│   ├── test_agents_deploy.py
+│   ├── test_a2a.py          # A2A agent CRUD, Agent Card, skills, access
 ├── makefile                 # Build, test, and manual testing targets
 ├── pyproject.toml
 └── requirements.txt
@@ -334,12 +337,12 @@ Cold-start latency is computed automatically during the invoke flow:
 
 Deploy creates a Strands Agent runtime on AgentCore with background deployment and progressive status updates. The deployment flow includes:
 
-1. **OAuth2 credential provider creation** — MCP server integrations with OAuth2 are provisioned as AgentCore credential providers
+1. **OAuth2 credential provider creation** — MCP server and A2A agent integrations with OAuth2 are provisioned as AgentCore credential providers with exponential backoff retry (4 retries, delays 2s/4s/8s/16s). Deployment fails with `credential_creation_failed` status if all retries are exhausted.
 2. **IAM role creation** — Execution role provisioning (if creating new role)
 3. **Artifact build** — Cross-compiles ARM64 artifact (pip install into target directory, zips, uploads to S3)
 4. **Runtime deployment** — Creates AgentCore runtime and endpoint
 
-The `deployment_status` field tracks progression through phases: `creating_credential_provider`, `creating_iam_role`, `building_artifact`, `deploying_runtime`, `completing_deployment`, `finalizing_endpoint`, `deployed`, `failed`, `deleting`.
+The `deployment_status` field tracks progression through phases: `creating_credentials`, `creating_iam_role`, `building_artifact`, `deploying_runtime`, `completing_deployment`, `finalizing_endpoint`, `deployed`, `failed`, `deleting`.
 
 Smart status polling: during local build phases (credential provider, IAM role, artifact build), the frontend polls the local database only. Once the runtime deployment begins, the `/api/agents/{agent_id}/status` endpoint queries AWS for runtime and endpoint status.
 
@@ -347,7 +350,7 @@ Model and IAM role are required fields. The deployment supports configurable pro
 
 Tags are resolved from the tag policy system at deploy time. Deploy-time tags are auto-applied from their default values; build-time tags are resolved from the selected tag profile. Required tags that are missing cause deployment to fail with a 400 error. Resolved tags are applied to all created AWS resources (AgentCore runtimes, endpoints, IAM execution roles, memory resources) and stored locally on Agent and Memory records. For registered agents and imported memories, tags are fetched from AWS via `list_tags_for_resource`; missing required tags are filled with `"missing"`.
 
-Deletion with `cleanup_aws=true` initiates background async AWS deletion (endpoint + runtime + credential providers + Secrets Manager cleanup), marks the agent as DELETING, and returns the updated agent. The frontend polls the status endpoint until AWS confirms deletion (404), then calls the purge endpoint to remove the local record. Credential providers cascade delete when the agent is deleted.
+Deletion with `cleanup_aws=true` initiates background async AWS deletion (endpoint + runtime + MCP and A2A credential providers + Secrets Manager cleanup), explicitly deletes sessions/invocations,, marks the agent as DELETING, and returns the updated agent. The frontend polls the status endpoint until AWS confirms deletion (404), then calls the purge endpoint to remove the local record. Credential providers cascade delete when the agent is deleted.
 
 ## Authenticated Invocation
 

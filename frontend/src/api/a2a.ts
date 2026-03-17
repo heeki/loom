@@ -43,6 +43,20 @@ export function testA2aConnection(agentId: number): Promise<TestConnectionResult
   });
 }
 
+export function testA2aConnectionPreCreate(config: {
+  base_url: string;
+  auth_type: string;
+  oauth2_well_known_url?: string;
+  oauth2_client_id?: string;
+  oauth2_client_secret?: string;
+  oauth2_scopes?: string;
+}): Promise<TestConnectionResult> {
+  return apiFetch<TestConnectionResult>("/api/a2a/agents/test-connection", {
+    method: "POST",
+    body: JSON.stringify(config),
+  });
+}
+
 export function getAgentCard(agentId: number): Promise<Record<string, unknown>> {
   return apiFetch<Record<string, unknown>>(`/api/a2a/agents/${agentId}/card`);
 }

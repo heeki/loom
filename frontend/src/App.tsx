@@ -223,9 +223,25 @@ function AppContent() {
 
 
 
+  const handleSelectAgent = (id: number) => {
+    setSelectedAgentId(id);
+    setSelectedSessionId(null);
+    setSessionDetail(null);
+    setSelectedInvocationId(null);
+    setInvocationDetail(null);
+  };
+
   const handleDelete = async (id: number, cleanupAws: boolean) => {
     try {
       await deleteAgent(id, cleanupAws);
+      // If the deleted agent was selected, clear all drill-down state
+      if (selectedAgentId === id) {
+        setSelectedAgentId(null);
+        setSelectedSessionId(null);
+        setSessionDetail(null);
+        setSelectedInvocationId(null);
+        setInvocationDetail(null);
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Delete failed");
     }
@@ -326,12 +342,6 @@ function AppContent() {
             active={activePersona === "tagging"}
             onClick={() => setActivePersona("tagging")}
           />
-          <SidebarItem
-            icon={Settings}
-            label="Settings"
-            active={activePersona === "settings"}
-            onClick={() => setActivePersona("settings")}
-          />
           {(effectiveHasScope("mcp:read") || effectiveHasScope("mcp:write")) && (
             <SidebarItem
               icon={Network}
@@ -348,6 +358,12 @@ function AppContent() {
               onClick={() => setActivePersona("a2a")}
             />
           )}
+          <SidebarItem
+            icon={Settings}
+            label="Settings"
+            active={activePersona === "settings"}
+            onClick={() => setActivePersona("settings")}
+          />
         </nav>
         <div className="p-2 border-t space-y-1">
           {user && (
@@ -435,7 +451,7 @@ function AppContent() {
                   loading={loading}
                   viewMode={catalogViewMode}
                   onViewModeChange={setCatalogViewMode}
-                  onSelectAgent={setSelectedAgentId}
+                  onSelectAgent={handleSelectAgent}
                   onRefreshAgent={refreshAgent}
                   onDelete={handleDelete}
                   readOnly={!effectiveHasScope("agent:write")}
@@ -481,7 +497,7 @@ function AppContent() {
               onRegister={registerAgent}
               onDeploy={deployAgent}
               onSelectAgent={(id) => {
-                setSelectedAgentId(id);
+                handleSelectAgent(id);
                 setActivePersona("catalog");
               }}
               onRefreshAgent={refreshAgent}

@@ -220,6 +220,18 @@ class TestA2aRouter(unittest.TestCase):
         response = self.client.post("/api/a2a/agents/999/test-connection")
         self.assertEqual(response.status_code, 404)
 
+    @patch("app.routers.a2a.svc_test_connection")
+    def test_test_connection_pre_create(self, mock_test):
+        mock_test.return_value = {"success": True, "message": "Connected to Recipe Agent v1.0.0"}
+        response = self.client.post("/api/a2a/agents/test-connection", json={
+            "base_url": "https://recipe-agent.example.com",
+            "auth_type": "none",
+        })
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertIn("Connected to", data["message"])
+
     # ----- AGENT CARD -----
     def test_get_agent_card(self):
         created = self._create_agent()

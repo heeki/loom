@@ -28,6 +28,7 @@ class A2aAgent(Base):
     oauth2_client_id = Column(String, nullable=True)
     oauth2_client_secret = Column(String, nullable=True)
     oauth2_scopes = Column(String, nullable=True)  # space-separated
+    agentcore_session_id = Column(String, nullable=True)  # persisted AgentCore Runtime session ID
     last_fetched_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -65,6 +66,7 @@ class A2aAgent(Base):
             "oauth2_client_id": self.oauth2_client_id,
             "oauth2_scopes": self.oauth2_scopes,
             "has_oauth2_secret": self.oauth2_client_secret is not None and self.oauth2_client_secret != "",
+            "agentcore_session_id": self.agentcore_session_id,
             "last_fetched_at": (self.last_fetched_at.isoformat() + "Z") if self.last_fetched_at else None,
             "created_at": (self.created_at.isoformat() + "Z") if self.created_at else None,
             "updated_at": (self.updated_at.isoformat() + "Z") if self.updated_at else None,

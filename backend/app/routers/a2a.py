@@ -1,6 +1,7 @@
 """A2A agent management endpoints."""
 import json
 import logging
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -12,6 +13,8 @@ from app.db import get_db
 from app.dependencies.auth import UserInfo, require_scopes
 from app.models.a2a import A2aAgent, A2aAgentSkill, A2aAgentAccess
 from app.services.a2a import (
+    _build_headers,
+    _is_agentcore_url,
     fetch_agent_card,
     parse_agent_card,
     parse_skills,
@@ -28,6 +31,7 @@ router = APIRouter(prefix="/api/a2a/agents", tags=["a2a"])
 # ---------------------------------------------------------------------------
 class A2aAgentCreateRequest(BaseModel):
     base_url: str = Field(..., description="Base URL of the A2A agent")
+    name: str | None = Field(None, description="Display name (defaults to Agent Card name if not provided)")
     auth_type: str = Field(default="none", description="Auth type: 'none' or 'oauth2'")
     oauth2_well_known_url: str | None = Field(None, description="OAuth2 well-known URL")
     oauth2_client_id: str | None = Field(None, description="OAuth2 client ID")
@@ -46,6 +50,7 @@ class A2aAgentCreateRequest(BaseModel):
 
 class A2aAgentUpdateRequest(BaseModel):
     base_url: str | None = None
+    name: str | None = None
     status: str | None = None
     auth_type: str | None = None
     oauth2_well_known_url: str | None = None
@@ -74,6 +79,7 @@ class A2aAgentResponse(BaseModel):
     oauth2_client_id: str | None = None
     oauth2_scopes: str | None = None
     has_oauth2_secret: bool = False
+    agentcore_session_id: str | None = None
     last_fetched_at: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
@@ -153,9 +159,10 @@ def _sync_skills(agent_id: int, card: dict, db: Session) -> list[A2aAgentSkill]:
     return new_skills
 
 
-def _apply_card_to_agent(agent: A2aAgent, card: dict, parsed: dict) -> None:
+def _apply_card_to_agent(agent: A2aAgent, card: dict, parsed: dict, *, preserve_name: bool = False) -> None:
     """Apply parsed Agent Card data to an A2aAgent model instance."""
-    agent.name = parsed["name"]
+    if not preserve_name:
+        agent.name = parsed["name"]
     agent.description = parsed["description"]
     agent.agent_version = parsed["agent_version"]
     agent.documentation_url = parsed.get("documentation_url")
@@ -178,9 +185,10 @@ def create_a2a_agent(
     user: UserInfo = Depends(require_scopes("a2a:write")),
     db: Session = Depends(get_db),
 ) -> A2aAgentResponse:
-    # Fetch Agent Card
+    # Fetch Agent Card using OAuth2 credentials from the request
     try:
-        card = fetch_agent_card(request.base_url)
+        headers = _build_headers(request)
+        card = fetch_agent_card(request.base_url, auth_headers=headers)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
@@ -188,7 +196,7 @@ def create_a2a_agent(
 
     agent = A2aAgent(
         base_url=request.base_url,
-        name=parsed["name"],
+        name=request.name.strip() if request.name and request.name.strip() else parsed["name"],
         description=parsed["description"],
         agent_version=parsed["agent_version"],
         documentation_url=parsed.get("documentation_url"),
@@ -204,6 +212,7 @@ def create_a2a_agent(
         oauth2_client_id=request.oauth2_client_id,
         oauth2_client_secret=request.oauth2_client_secret,
         oauth2_scopes=request.oauth2_scopes,
+        agentcore_session_id=str(uuid.uuid4()) if _is_agentcore_url(request.base_url) else None,
         last_fetched_at=datetime.utcnow(),
     )
     db.add(agent)
@@ -248,6 +257,13 @@ def update_a2a_agent(
     for field, value in update_data.items():
         setattr(agent, field, value)
 
+    # Assign AgentCore session ID if base_url changed to an AgentCore endpoint
+    if "base_url" in update_data:
+        if _is_agentcore_url(agent.base_url) and not agent.agentcore_session_id:
+            agent.agentcore_session_id = str(uuid.uuid4())
+        elif not _is_agentcore_url(agent.base_url):
+            agent.agentcore_session_id = None
+
     agent.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(agent)
@@ -270,6 +286,24 @@ def delete_a2a_agent(
 # ---------------------------------------------------------------------------
 # Connection test
 # ---------------------------------------------------------------------------
+class TestConnectionRequest(BaseModel):
+    base_url: str = Field(..., description="Base URL of the A2A agent")
+    auth_type: str = Field(default="none", description="Auth type: 'none' or 'oauth2'")
+    oauth2_well_known_url: str | None = None
+    oauth2_client_id: str | None = None
+    oauth2_client_secret: str | None = None
+    oauth2_scopes: str | None = None
+
+
+@router.post("/test-connection", response_model=TestConnectionResponse)
+def test_connection_pre_create(
+    request: TestConnectionRequest,
+    user: UserInfo = Depends(require_scopes("a2a:write")),
+) -> TestConnectionResponse:
+    result = svc_test_connection(request)
+    return TestConnectionResponse(**result)
+
+
 @router.post("/{agent_id}/test-connection", response_model=TestConnectionResponse)
 def test_connection(
     agent_id: int,
@@ -307,8 +341,6 @@ def refresh_agent_card(
     db: Session = Depends(get_db),
 ) -> A2aAgentResponse:
     agent = _get_agent_or_404(agent_id, db)
-
-    from app.services.a2a import _build_headers
     headers = _build_headers(agent)
 
     try:
@@ -317,7 +349,7 @@ def refresh_agent_card(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     parsed = parse_agent_card(card)
-    _apply_card_to_agent(agent, card, parsed)
+    _apply_card_to_agent(agent, card, parsed, preserve_name=True)
     _sync_skills(agent.id, card, db)
 
     db.commit()

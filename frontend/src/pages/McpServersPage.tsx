@@ -87,7 +87,19 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
           <Button variant="ghost" size="sm" onClick={() => { setSelectedServerId(null); setEditingServer(null); }} className="mb-2">
             &larr; Back to servers
           </Button>
-          <h2 className="text-lg font-semibold">{selectedServer.name}</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold">{selectedServer.name}</h2>
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={() => setEditingServer(selectedServer)}
+                className="text-muted-foreground/50 hover:text-foreground transition-colors"
+                title="Edit server"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
           {selectedServer.description && <p className="text-sm text-muted-foreground">{selectedServer.description}</p>}
         </div>
 

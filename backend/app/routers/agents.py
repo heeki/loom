@@ -18,6 +18,8 @@ from app.dependencies.auth import UserInfo, require_scopes
 from app.models.agent import Agent
 from app.models.authorizer_config import AuthorizerConfig
 from app.models.config_entry import ConfigEntry
+from app.models.a2a import A2aAgent as A2aAgentModel
+from app.models.memory import Memory
 from app.models.mcp import McpServer
 from app.models.session import InvocationSession
 from app.models.invocation import Invocation
@@ -96,8 +98,9 @@ class AgentDeployRequest(BaseModel):
     authorizer_client_id: str | None = Field(None, description="App client ID for Cognito token retrieval")
     authorizer_client_secret: str | None = Field(None, description="App client secret for Cognito token retrieval")
     memory_enabled: bool = Field(default=False, description="Enable memory integration")
+    memory_ids: list[int] = Field(default_factory=list, description="Memory resource IDs to integrate")
     mcp_servers: list[int] = Field(default_factory=list, description="MCP server IDs to integrate")
-    a2a_agents: list = Field(default_factory=list, description="A2A agent configs")
+    a2a_agents: list[int] = Field(default_factory=list, description="A2A agent IDs to integrate")
     tags: dict[str, str] | None = Field(None, description="Build-time tag values")
 
 
@@ -126,8 +129,9 @@ class AgentCreateRequest(BaseModel):
     authorizer_client_id: str | None = Field(None, description="App client ID for Cognito token retrieval")
     authorizer_client_secret: str | None = Field(None, description="App client secret for Cognito token retrieval")
     memory_enabled: bool = Field(default=False, description="Enable memory integration")
+    memory_ids: list[int] = Field(default_factory=list, description="Memory resource IDs to integrate")
     mcp_servers: list[int] = Field(default_factory=list, description="MCP server IDs to integrate")
-    a2a_agents: list = Field(default_factory=list, description="A2A agent configs")
+    a2a_agents: list[int] = Field(default_factory=list, description="A2A agent IDs to integrate")
     tags: dict[str, str] | None = Field(None, description="Build-time tag values")
 
 
@@ -537,6 +541,30 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
                 detail=f"MCP server IDs not found: {sorted(missing)}"
             )
 
+    # Validate A2A agent IDs early
+    a2a_records: list[A2aAgentModel] = []
+    if request.a2a_agents:
+        a2a_records = db.query(A2aAgentModel).filter(A2aAgentModel.id.in_(request.a2a_agents)).all()
+        found_ids = {a.id for a in a2a_records}
+        missing = set(request.a2a_agents) - found_ids
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"A2A agent IDs not found: {sorted(missing)}"
+            )
+
+    # Validate Memory IDs early
+    memory_records: list[Memory] = []
+    if request.memory_ids:
+        memory_records = db.query(Memory).filter(Memory.id.in_(request.memory_ids)).all()
+        found_ids = {m.id for m in memory_records}
+        missing = set(request.memory_ids) - found_ids
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Memory IDs not found: {sorted(missing)}"
+            )
+
     # Snapshot MCP server data for the background task (avoid lazy-load after session close)
     mcp_snapshots = [
         {
@@ -550,6 +578,26 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
             "oauth2_scopes": s.oauth2_scopes,
         }
         for s in mcp_records
+    ]
+
+    # Snapshot A2A agent data
+    a2a_snapshots = [
+        {
+            "name": a.name,
+            "base_url": a.base_url,
+            "auth_type": a.auth_type,
+            "oauth2_well_known_url": a.oauth2_well_known_url,
+            "oauth2_client_id": a.oauth2_client_id,
+            "oauth2_client_secret": a.oauth2_client_secret,
+            "oauth2_scopes": a.oauth2_scopes,
+        }
+        for a in a2a_records
+    ]
+
+    # Snapshot memory data
+    memory_snapshots = [
+        {"name": m.name, "memory_id": m.memory_id, "arn": m.arn}
+        for m in memory_records
     ]
 
     # Use a unique placeholder for ARN until deployment completes
@@ -582,6 +630,8 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
         agent_id=agent_id,
         request=request,
         mcp_snapshots=mcp_snapshots,
+        a2a_snapshots=a2a_snapshots,
+        memory_snapshots=memory_snapshots,
         resolved_tags=resolved_tags,
         tag_policy_dicts=tag_policy_dicts,
         system_prompt=system_prompt,
@@ -597,6 +647,8 @@ def _deploy_agent_background(
     agent_id: int,
     request: AgentCreateRequest,
     mcp_snapshots: list[dict[str, Any]],
+    a2a_snapshots: list[dict[str, Any]],
+    memory_snapshots: list[dict[str, Any]],
     resolved_tags: dict[str, str],
     tag_policy_dicts: list[dict[str, Any]],
     system_prompt: str,
@@ -616,8 +668,8 @@ def _deploy_agent_background(
             logger.error("Background deploy: agent %s not found", agent_id)
             return
 
-        # --- Step 1: Create credential providers (only if OAuth2 MCP servers exist) ---
-        has_oauth2 = any(s["auth_type"] == "oauth2" for s in mcp_snapshots)
+        # --- Step 1: Create credential providers (if OAuth2 MCP servers or A2A agents exist) ---
+        has_oauth2 = any(s["auth_type"] == "oauth2" for s in mcp_snapshots) or any(a["auth_type"] == "oauth2" for a in a2a_snapshots)
         if has_oauth2:
             agent.deployment_status = "creating_credentials"
             db.commit()
@@ -646,10 +698,14 @@ def _deploy_agent_background(
                         cp_name, server["name"], cp_response.get("callbackUrl"),
                     )
                 except Exception as e:
-                    logger.warning(
-                        "Failed to create credential provider for MCP server '%s': %s",
+                    logger.error(
+                        "Failed to create credential provider for MCP server '%s' after retries: %s",
                         server["name"], e,
                     )
+                    agent.status = "FAILED"
+                    agent.deployment_status = "credential_creation_failed"
+                    db.commit()
+                    return
                 auth_entry: dict[str, str] = {
                     "type": "oauth2",
                     "credential_provider_name": cp_name,
@@ -661,14 +717,66 @@ def _deploy_agent_background(
                 entry["auth"] = auth_entry
             mcp_server_configs.append(entry)
 
+        # Build A2A agent configs from snapshots
+        a2a_agent_configs: list[dict[str, Any]] = []
+        for a2a in a2a_snapshots:
+            entry: dict[str, Any] = {
+                "name": a2a["name"],
+                "enabled": True,
+                "endpoint_url": a2a["base_url"],
+            }
+            if a2a["auth_type"] == "oauth2":
+                cp_name = f"loom-{request.name}-a2a-{a2a['name']}"
+                try:
+                    cp_response = create_oauth2_credential_provider(
+                        name=cp_name,
+                        client_id=a2a["oauth2_client_id"] or "",
+                        client_secret=a2a["oauth2_client_secret"] or "",
+                        auth_server_url=a2a["oauth2_well_known_url"] or "",
+                        region=region,
+                        tags=resolved_tags,
+                    )
+                    logger.info(
+                        "Created credential provider '%s' for A2A agent '%s' (callback: %s)",
+                        cp_name, a2a["name"], cp_response.get("callbackUrl"),
+                    )
+                except Exception as e:
+                    logger.error(
+                        "Failed to create credential provider for A2A agent '%s' after retries: %s",
+                        a2a["name"], e,
+                    )
+                    agent.status = "FAILED"
+                    agent.deployment_status = "credential_creation_failed"
+                    db.commit()
+                    return
+                a2a_auth: dict[str, str] = {
+                    "type": "oauth2",
+                    "credential_provider_name": cp_name,
+                }
+                if a2a["oauth2_well_known_url"]:
+                    a2a_auth["well_known_endpoint"] = a2a["oauth2_well_known_url"]
+                if a2a["oauth2_scopes"]:
+                    a2a_auth["scopes"] = a2a["oauth2_scopes"]
+                entry["auth"] = a2a_auth
+            a2a_agent_configs.append(entry)
+
+        # Build memory configs from snapshots
+        memory_configs = [
+            {"name": m["name"], "memory_id": m["memory_id"], "arn": m["arn"]}
+            for m in memory_snapshots
+        ]
+
         config_json = json.dumps({
             "system_prompt": system_prompt,
             "model_id": request.model_id,
             "max_tokens": model_max_tokens,
             "integrations": {
                 "mcp_servers": mcp_server_configs,
-                "a2a_agents": request.a2a_agents,
-                "memory": {"enabled": request.memory_enabled},
+                "a2a_agents": a2a_agent_configs,
+                "memory": {
+                    "enabled": request.memory_enabled or len(memory_configs) > 0,
+                    "resources": memory_configs,
+                },
             },
         })
         env_vars = {
@@ -993,8 +1101,13 @@ def delete_agent(
     if config_json_str:
         try:
             agent_config = json.loads(config_json_str)
-            for mcp in agent_config.get("integrations", {}).get("mcp_servers", []):
+            integrations = agent_config.get("integrations", {})
+            for mcp in integrations.get("mcp_servers", []):
                 cp_name = (mcp.get("auth") or {}).get("credential_provider_name")
+                if cp_name:
+                    cp_names.append(cp_name)
+            for a2a in integrations.get("a2a_agents", []):
+                cp_name = (a2a.get("auth") or {}).get("credential_provider_name")
                 if cp_name:
                     cp_names.append(cp_name)
         except (json.JSONDecodeError, TypeError):
@@ -1008,6 +1121,7 @@ def delete_agent(
             delete_secret(secret_arn, agent.region)
 
         result = _agent_response(agent, db)
+        db.query(InvocationSession).filter(InvocationSession.agent_id == agent.id).delete()
         db.delete(agent)
         db.flush()
         db.commit()
@@ -1090,17 +1204,21 @@ def _delete_agent_background(
     else:
         logger.warning("Runtime %s still exists after %d poll attempts; purging DB record anyway", runtime_id, max_attempts)
 
-    # Purge the agent record from the database
+    # Purge the agent record and its sessions/invocations from the database.
+    # Explicitly delete sessions first to guarantee cleanup even if the ORM
+    # cascade is bypassed (e.g. stale objects, ID reuse in SQLite).
     db = SessionLocal()
     try:
+        db.query(InvocationSession).filter(InvocationSession.agent_id == agent_id).delete()
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
         if agent:
             db.delete(agent)
             db.flush()
             db.commit()
-            logger.info("Purged agent %d from database", agent_id)
+            logger.info("Purged agent %d and its sessions from database", agent_id)
         else:
-            logger.info("Agent %d already removed from database", agent_id)
+            db.commit()
+            logger.info("Agent %d already removed from database; cleaned up orphan sessions", agent_id)
     except Exception as e:
         db.rollback()
         logger.warning("Failed to purge agent %d from database: %s", agent_id, e)
@@ -1114,8 +1232,10 @@ def purge_agent(
     user: UserInfo = Depends(require_scopes("agent:write")),
     db: Session = Depends(get_db),
 ) -> None:
-    """Remove an agent from the local database (no AWS call)."""
+    """Remove an agent and its sessions/invocations from the local database (no AWS call)."""
     agent = get_agent_or_404(agent_id, db)
+    # Explicit session cleanup as a safety net alongside the ORM cascade
+    db.query(InvocationSession).filter(InvocationSession.agent_id == agent_id).delete()
     db.delete(agent)
     db.commit()
 
