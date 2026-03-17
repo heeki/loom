@@ -102,14 +102,14 @@ The app uses a persona-based single-page architecture with a sidebar for workflo
 
 | Persona | Icon | Description | Required Scope | Default |
 |---------|------|-------------|----------------|---------|
-| Platform Catalog | BookOpen | Browse agents, memory resources, MCP servers (coming soon), A2A agents (coming soon) | Always visible | Yes |
+| Platform Catalog | BookOpen | Browse agents, memory resources, MCP servers, A2A agents | Always visible | Yes |
 | Agents | Bot | Deploy new agents or import existing ones | `agent:read` or `agent:write` | |
 | Memory | Brain | Create and manage AgentCore Memory resources | `memory:read` or `memory:write` | |
 | Security Admin | Shield | Manage roles, authorizers, credentials, permissions | `security:read` or `security:write` | |
 | Tagging | Tags | Manage tag policies and tag profiles | Always visible | |
 | Settings | Settings | Manage display preferences | Always visible | |
 | MCP Servers | Network | Register and manage MCP servers, tools, and access control | `mcp:read` or `mcp:write` | |
-| A2A Agents | Users | Future A2A agent management (disabled) | `a2a:read` or `a2a:write` | |
+| A2A Agents | Users | Register and manage A2A agents, view Agent Cards, and control access | `a2a:read` or `a2a:write` | |
 
 Sidebar items are conditionally rendered based on the user's scopes derived from their Cognito group membership. When auth is not configured, all items are visible.
 
@@ -141,7 +141,7 @@ Catalog  >  [Agent Name]  >  [Session ID]
 
 **Content:**
 - Page header: "Platform Catalog" with card/table view toggle (top-right)
-- Organized into sections: Agents, Memory Resources, MCP Servers (coming soon), A2A Agents (coming soon)
+- Organized into sections: Agents, Memory Resources, MCP Servers, A2A Agents
 - Tag-based filter bar above the agents grid, with multi-select dropdowns (checkbox-based) for each tag policy with `show_on_card=true`. Client-side AND filtering with "Clear filters" button and agent count display (e.g., "Showing 3 of 12 agents")
 - Card/table view toggle applies to all sections on the page
 - Agents section: responsive grid of `AgentCard` components (3 columns on large screens) or table view
@@ -392,6 +392,50 @@ Create/edit form with:
 
 ---
 
+## 8b. A2A Agents View (A2A Agent Administration)
+
+**Purpose:** Register and manage A2A (Agent-to-Agent) protocol integrations, view structured Agent Card information, and control persona access to agent skills.
+
+**Layout:** Page header "A2A Agent Administration" with card/table view toggle (top-right), followed by "Add A2A Agent" button, create form (toggle), and agent list (cards default or table).
+
+### Agent List
+
+**Card view** (default): `SortableCardGrid` with drag-to-reorder (storage key `a2a-agents`), default alphabetical sort by name, and A-Z/Z-A sort toggle. Each card displays agent name, version badge, base URL, provider, auth type, created timestamp. Edit/Delete buttons with inline confirmation overlay.
+
+**Table view**: Sortable columns — Name (25%), URL (30%), Version (10%), Provider (15%), Auth (10%), Created (10%).
+
+### Agent Detail View
+
+Accessed by clicking an agent card/row. Shows:
+- Header with agent name, edit button, and description
+- "Edit Agent" opens inline A2aAgentForm with pre-filled data
+- Tab bar: Agent Card | Access
+
+**Agent Card tab** (`A2aAgentCardView`):
+- Header section: agent name, version badge, status badge, provider info, documentation link, "Refresh Card" button with last-fetched timestamp
+- Capabilities section: enabled/disabled badges for Streaming, Push Notifications, State History
+- Authentication Schemes section: badges for each scheme (e.g., Bearer, Basic)
+- Input/Output Modes section: MIME type badges
+- Skills section (`A2aSkillList`): expandable skill cards with name, skill ID, description, tag badges, examples (bulleted list), and input/output mode overrides
+
+**Access tab** (`A2aAccessControl`):
+- Lists all registered agents (personas) with checkbox to grant/revoke access
+- When access granted: radio for "All Skills" / "Selected Skills"
+- When "Selected Skills": checkboxes for individual skills with name and description
+- "Save" button to persist changes
+- Deny by default — personas without an explicit rule cannot use the agent
+
+### A2aAgentForm
+
+Create/edit form with:
+- Base URL (required) with helper text about Agent Card endpoint
+- Authentication section: radio toggle for None / OAuth2
+- When OAuth2: well-known URL, client ID, client secret (password input with "(unchanged)" placeholder in edit mode), scopes (space-separated)
+- "Test Connection" button (only shown in edit mode) with success/failure badge result
+- Register/Update and Cancel buttons
+
+---
+
 ## 9. Settings View
 
 **Purpose:** Manage display preferences.
@@ -571,9 +615,7 @@ The invoke panel's credential dropdown includes a "Manual token" sentinel value.
 ## 12. Future Work
 
 - **Markdown rendering** for agent responses
-- **A2A agent integration** configuration
 - **VPC network mode** support
-- **MCP and A2A protocol** support
 - **Operate Tab** — aggregate dashboard with summary cards, per-agent latency charts
 - **Real-time auto-refresh** of sessions and metrics
 - **Log stream selection** and agent-level log viewer

@@ -1,6 +1,6 @@
 # Loom Backend
 
-FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, MCP server management, security administration, tag policy management, and tag profile management.
+FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, tag policy management, and tag profile management.
 
 ## Technology Stack
 
@@ -83,6 +83,7 @@ backend/
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
 │   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
 │   │   ├── memories.py      # Memory resource CRUD + strategy mapping
+│   │   ├── a2a.py           # A2A agent CRUD, Agent Card, skills, access control
 │   │   ├── mcp.py           # MCP server CRUD, tool discovery, access control
 │   │   ├── security.py      # Security admin: roles, authorizers, credentials, permissions
 │   │   ├── settings.py      # Tag policy + tag profile CRUD (/api/settings/tags, /api/settings/tag-profiles)
@@ -96,6 +97,7 @@ backend/
 │       ├── iam.py           # IAM role management + Cognito pool listing
 │       ├── jwt_validator.py # JWT validation against Cognito JWKS
 │       ├── latency.py       # Pure computation: cold_start_latency_ms, client_duration_ms
+│       ├── a2a.py           # A2A Agent Card fetching, parsing, connection test
 │       ├── mcp.py           # MCP connection test + tool fetch stubs
 │       ├── memory.py        # boto3 wrapper: AgentCore Memory CRUD
 │       └── secrets.py       # Secrets Manager wrapper with caching
@@ -152,6 +154,18 @@ Stores discovered tools for each MCP server. Columns include `server_id` (FK to 
 ### `mcp_server_access`
 
 Stores per-persona access rules for MCP server tools. Columns include `server_id` (FK to mcp_servers), `persona` (unique per server), `allowed` (boolean), `access_mode` (all_tools or selected_tools), and `allowed_tool_names` (JSON list). Defaults to deny (no access) until explicitly granted. Cascade-deletes when the parent server is removed.
+
+### `a2a_agents`
+
+Stores registered A2A (Agent-to-Agent) protocol agents. Columns include `base_url`, `name`, `description`, `agent_version`, `documentation_url`, `provider_organization`, `provider_url`, `capabilities` (JSON), `authentication_schemes` (JSON), `default_input_modes` (JSON), `default_output_modes` (JSON), `agent_card_raw` (JSON), `status` (active/inactive/error), `auth_type` (none or oauth2), OAuth2 fields (`oauth2_client_id`, `oauth2_client_secret`, `oauth2_well_known_url`, `oauth2_scopes`), `last_fetched_at`, and timestamps. The `oauth2_client_secret` is write-only — it is never returned in GET responses.
+
+### `a2a_agent_skills`
+
+Stores skills parsed from A2A Agent Cards. Columns include `agent_id` (FK to a2a_agents), `skill_id`, `name`, `description`, `tags` (JSON), `examples` (JSON), `input_modes` (JSON), `output_modes` (JSON), and `last_refreshed_at`. Skills are synced on registration and on card refresh. Cascade-deletes when the parent agent is removed.
+
+### `a2a_agent_access`
+
+Stores per-persona access rules for A2A agent skills. Columns include `agent_id` (FK to a2a_agents), `persona_id`, `access_level` (all_skills or selected_skills), and `allowed_skill_ids` (JSON list). Defaults to deny (no access) until explicitly granted. Cascade-deletes when the parent agent is removed.
 
 ### `memories`
 
@@ -259,6 +273,24 @@ Supports five memory strategy types: semantic, summary, user_preference, episodi
 | `PUT` | `/api/mcp/servers/{server_id}/access` | Update access rules for a server |
 
 OAuth2 authentication supports well-known URL discovery for auto-populating token URLs and scopes. The `oauth2_client_secret` field is write-only — never included in GET responses; a `has_oauth2_secret` boolean is returned instead. Conditional validation ensures all required OAuth2 fields are present when `auth_type` is `oauth2`. Scope enforcement: `mcp:read` for GET, `mcp:write` for POST/PUT/DELETE.
+
+### A2A Agent Management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/a2a/agents` | Register an A2A agent (fetches Agent Card from base URL) |
+| `GET` | `/api/a2a/agents` | List all A2A agents |
+| `GET` | `/api/a2a/agents/{agent_id}` | Get a specific A2A agent |
+| `PUT` | `/api/a2a/agents/{agent_id}` | Update an A2A agent |
+| `DELETE` | `/api/a2a/agents/{agent_id}` | Delete an A2A agent (cascades to skills and access) |
+| `POST` | `/api/a2a/agents/{agent_id}/test-connection` | Test connectivity (OAuth2 token + Agent Card fetch) |
+| `GET` | `/api/a2a/agents/{agent_id}/card` | Get cached raw Agent Card JSON |
+| `POST` | `/api/a2a/agents/{agent_id}/card/refresh` | Re-fetch Agent Card and sync skills |
+| `GET` | `/api/a2a/agents/{agent_id}/skills` | List cached skills for an agent |
+| `GET` | `/api/a2a/agents/{agent_id}/access` | Get access rules for an agent |
+| `PUT` | `/api/a2a/agents/{agent_id}/access` | Update access rules for an agent |
+
+A2A agents are registered by base URL. On registration, the backend fetches `<base_url>/.well-known/agent.json` and populates all agent metadata from the Agent Card. Skills are parsed and stored in a separate table for queryability and fine-grained access control. OAuth2 authentication follows the same pattern as MCP servers — `oauth2_client_secret` is write-only with `has_oauth2_secret` flag. Scope enforcement: `a2a:read` for GET, `a2a:write` for POST/PUT/DELETE.
 
 ### Agent Invocation (SSE Streaming)
 

@@ -651,6 +651,57 @@ When `auth_type` is `oauth2`, `oauth2_well_known_url` and `oauth2_client_id` are
 
 Replaces all existing access rules for the server. Personas not listed have no access (deny by default).
 
+### A2A Agent Management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/a2a/agents` | Register a new A2A agent by base URL (fetches Agent Card). |
+| `GET` | `/api/a2a/agents` | List all registered A2A agents. |
+| `GET` | `/api/a2a/agents/{agent_id}` | Get details of a specific A2A agent. |
+| `PUT` | `/api/a2a/agents/{agent_id}` | Update an A2A agent configuration. |
+| `DELETE` | `/api/a2a/agents/{agent_id}` | Remove an A2A agent (cascades to skills and access rules). |
+| `POST` | `/api/a2a/agents/{agent_id}/test-connection` | Test A2A agent connectivity (fetches Agent Card with optional OAuth2). |
+| `GET` | `/api/a2a/agents/{agent_id}/card` | Get cached raw Agent Card JSON. |
+| `POST` | `/api/a2a/agents/{agent_id}/card/refresh` | Re-fetch Agent Card and sync skills. |
+| `GET` | `/api/a2a/agents/{agent_id}/skills` | Get cached skill list for an agent. |
+| `GET` | `/api/a2a/agents/{agent_id}/access` | Get access control rules for an agent. |
+| `PUT` | `/api/a2a/agents/{agent_id}/access` | Replace all access control rules for an agent. |
+
+**`POST /api/a2a/agents` request body:**
+```json
+{
+  "base_url": "https://recipe-agent.example.com",
+  "auth_type": "oauth2",
+  "oauth2_well_known_url": "https://auth.example.com/.well-known/openid-configuration",
+  "oauth2_client_id": "client-id",
+  "oauth2_client_secret": "client-secret",
+  "oauth2_scopes": "openid profile"
+}
+```
+
+On registration, the backend fetches `<base_url>/.well-known/agent.json` to retrieve the Agent Card. All agent metadata (name, description, version, capabilities, skills) is populated from the card. If the fetch fails, registration is rejected with a descriptive error.
+
+When `auth_type` is `oauth2`, `oauth2_well_known_url` and `oauth2_client_id` are required (validated via Pydantic model validator).
+
+**Security:** `oauth2_client_secret` is write-only — it is never included in GET responses. The response includes `has_oauth2_secret: bool` instead.
+
+**`PUT /api/a2a/agents/{agent_id}/access` request body:**
+```json
+{
+  "rules": [
+    {"persona_id": 1, "access_level": "all_skills"},
+    {"persona_id": 2, "access_level": "selected_skills", "allowed_skill_ids": ["find-recipe"]}
+  ]
+}
+```
+
+Replaces all existing access rules for the agent. Personas not listed have no access (deny by default).
+
+**Data model:**
+- `A2aAgent`: stores base URL, Agent Card fields (name, description, version, provider, capabilities, auth schemes, I/O modes), raw card JSON, OAuth2 config, status, and timestamps.
+- `A2aAgentSkill`: stores skill ID, name, description, tags, examples, and I/O mode overrides. Foreign key to `A2aAgent` with cascade delete.
+- `A2aAgentAccess`: stores persona_id, access_level (`all_skills`/`selected_skills`), and allowed_skill_ids (JSON). Foreign key to `A2aAgent` with cascade delete.
+
 ### Agent Invocation (SSE Streaming)
 
 | Method | Path | Description |

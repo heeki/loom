@@ -21,7 +21,7 @@ The frontend is organized around persona-based workflows, accessible via a sideb
 - **Tagging** — Manage tag policies (platform + custom) and tag profiles. Accessible to all scopes; write operations require `*:write`.
 - **Settings** — Manage display preferences (theme, timezone). Accessible to all scopes.
 - **MCP Servers** — Register and manage MCP servers, view available tools, and control persona access.
-- **A2A Agents** (coming soon) — Disabled sidebar entry for future A2A agent management.
+- **A2A Agents** — Register and manage A2A (Agent-to-Agent) protocol integrations, view Agent Cards, and control persona access to skills.
 
 ---
 
@@ -368,7 +368,18 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Agent deletion with background polling: delete endpoint returns `DELETING` status. Background task polls AgentCore until runtime deletion completes, then purges local DB record. Endpoint status badge hidden during deletion.
 - 25 backend tests covering all CRUD operations, validation, secret exclusion, OAuth2 conditional fields, tools, access rules, and cascade delete.
 
-### Phase 14 — Advanced Operations
+### Phase 14 — A2A Agent Integration *(Complete)*
+- Backend: `A2aAgent`, `A2aAgentSkill`, `A2aAgentAccess` ORM models with full CRUD API under `/api/a2a/agents`. A2A agent registration by base URL with automatic Agent Card fetching from `<base_url>/.well-known/agent.json`. Agent Card data cached locally: name, description, version, provider, capabilities, authentication schemes, input/output modes, and raw JSON. Skills parsed and stored in a separate table for queryability.
+- OAuth2 authentication configuration: well-known URL, client ID, client secret (write-only), and scopes. Conditional validation: OAuth2 fields required when auth_type is `oauth2`. Client secrets never returned in GET responses (`has_oauth2_secret` flag instead).
+- Agent Card endpoints: `GET /api/a2a/agents/{id}/card` returns cached raw Agent Card JSON. `POST /api/a2a/agents/{id}/card/refresh` re-fetches from remote agent, updates all cached fields and syncs skills. Failed refresh preserves existing cached data.
+- Skills endpoint: `GET /api/a2a/agents/{id}/skills` returns skills parsed from the Agent Card. Skills synced on registration and on card refresh (add new, remove stale).
+- Access control: `GET/PUT /api/a2a/agents/{id}/access` manages per-persona access rules. Access levels: `all_skills` (any skill including future ones) or `selected_skills` (specific skill IDs). Deny by default.
+- Connection test: `POST /api/a2a/agents/{id}/test-connection` acquires OAuth2 token if configured and fetches the Agent Card.
+- Frontend: `A2aAgentsPage` with card/table view toggle, sortable columns, agent detail view with Agent Card/Access tabs. `A2aAgentForm` with base URL input and progressive OAuth2 field disclosure. `A2aAgentCardView` with structured display of capabilities (enabled/disabled badges), authentication schemes, input/output modes, and skills list. `A2aSkillList` with expandable skill cards showing tags, examples, and mode overrides. `A2aAccessControl` with per-persona toggle, all_skills/selected_skills radio, individual skill checkboxes with descriptions.
+- A2A Agents sidebar item activated (no longer disabled/coming soon). Scope-gated by `a2a:read`/`a2a:write`.
+- 26 backend tests covering CRUD operations, Agent Card fetching, skill sync, card refresh, secret exclusion, OAuth2 validation, access rules, and cascade delete.
+
+### Phase 15 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

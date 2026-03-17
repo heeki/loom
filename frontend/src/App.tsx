@@ -27,12 +27,13 @@ import { MemoryManagementPage } from "@/pages/MemoryManagementPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { TaggingPage } from "@/pages/TaggingPage";
 import { McpServersPage } from "@/pages/McpServersPage";
+import { A2aAgentsPage } from "@/pages/A2aAgentsPage";
 import type { SessionResponse, InvocationResponse } from "@/api/types";
 import { AuthProvider, useAuth, type Scope } from "@/contexts/AuthContext";
 import { LoginPage } from "@/pages/LoginPage";
 import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings, Eye, Tags } from "lucide-react";
 
-type Persona = "catalog" | "security" | "builder" | "memory" | "tagging" | "settings" | "mcp";
+type Persona = "catalog" | "security" | "builder" | "memory" | "tagging" | "settings" | "mcp" | "a2a";
 
 const GROUP_SCOPES: Record<string, Scope[]> = {
   "super-admins": [
@@ -166,6 +167,7 @@ function AppContent() {
   const [agentsViewMode, setAgentsViewMode] = useState<ViewMode>("cards");
   const [memoryViewMode, setMemoryViewMode] = useState<ViewMode>("cards");
   const [mcpViewMode, setMcpViewMode] = useState<ViewMode>("cards");
+  const [a2aViewMode, setA2aViewMode] = useState<ViewMode>("cards");
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessionDetail, setSessionDetail] = useState<SessionResponse | null>(null);
@@ -342,9 +344,8 @@ function AppContent() {
             <SidebarItem
               icon={Users}
               label="A2A Agents"
-              active={false}
-              onClick={() => {}}
-              disabled
+              active={activePersona === "a2a"}
+              onClick={() => setActivePersona("a2a")}
             />
           )}
         </nav>
@@ -495,6 +496,7 @@ function AppContent() {
           {activePersona === "memory" && <MemoryManagementPage viewMode={memoryViewMode} onViewModeChange={setMemoryViewMode} readOnly={!effectiveHasScope("memory:write")} groupRestriction={groupRestriction} />}
           {activePersona === "tagging" && <TaggingPage readOnly={!(effectiveHasScope("agent:write") || effectiveHasScope("security:write") || effectiveHasScope("memory:write"))} />}
           {activePersona === "mcp" && <McpServersPage viewMode={mcpViewMode} onViewModeChange={setMcpViewMode} readOnly={!effectiveHasScope("mcp:write")} />}
+          {activePersona === "a2a" && <A2aAgentsPage viewMode={a2aViewMode} onViewModeChange={setA2aViewMode} readOnly={!effectiveHasScope("a2a:write")} />}
           {activePersona === "settings" && <SettingsPage />}
         </main>
       </div>
