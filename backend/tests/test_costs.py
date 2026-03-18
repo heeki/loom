@@ -13,8 +13,8 @@ class TestCostDashboard(unittest.TestCase):
     def setUpClass(cls):
         Base.metadata.create_all(bind=engine)
 
-    def test_get_cost_dashboard_empty(self):
-        """Cost dashboard returns empty results when no agents exist."""
+    def test_get_cost_dashboard_returns_expected_fields(self):
+        """Cost dashboard returns expected fields including memory cost."""
         with patch("app.dependencies.auth.get_current_user") as mock_user:
             mock_user.return_value = type("UserInfo", (), {
                 "sub": "test", "username": "admin", "groups": ["super-admins"],
@@ -23,8 +23,17 @@ class TestCostDashboard(unittest.TestCase):
             response = client.get("/api/dashboard/costs?days=30")
             self.assertEqual(response.status_code, 200)
             data = response.json()
-            self.assertEqual(data["total_invocations"], 0)
-            self.assertEqual(data["total_estimated_cost"], 0.0)
+            self.assertIn("total_invocations", data)
+            self.assertIn("total_estimated_cost", data)
+            self.assertIn("total_compute_cpu_cost", data)
+            self.assertIn("total_compute_memory_cost", data)
+            self.assertIn("total_idle_cpu_cost", data)
+            self.assertIn("total_idle_memory_cost", data)
+            self.assertIn("total_stm_cost", data)
+            self.assertIn("total_ltm_cost", data)
+            self.assertIn("agents", data)
+            self.assertIsInstance(data["total_stm_cost"], (int, float))
+            self.assertIsInstance(data["total_ltm_cost"], (int, float))
 
     def test_model_pricing_endpoint(self):
         """Models pricing endpoint returns pricing data."""

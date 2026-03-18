@@ -24,53 +24,118 @@ function statusVariant(status: string): "default" | "secondary" | "destructive" 
   }
 }
 
+function formatCost(cost: number | null | undefined): string {
+  if (cost == null) return "—";
+  if (cost === 0) return "$0.00";
+  if (cost < 0.01) return `$${cost.toFixed(6)}`;
+  if (cost < 1) return `$${cost.toFixed(4)}`;
+  return `$${cost.toFixed(2)}`;
+}
+
+function CostRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between items-baseline py-1">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="font-mono text-sm">{value}</span>
+    </div>
+  );
+}
+
 export function InvocationDetailPage({ invocation }: InvocationDetailPageProps) {
   const { timezone } = useTimezone();
 
+  const rtCpu = invocation.compute_cpu_cost ?? 0;
+  const rtMem = (invocation.compute_memory_cost ?? 0) + (invocation.idle_memory_cost ?? 0);
+  const rtTotal = rtCpu + rtMem;
+  const memTotal = (invocation.stm_cost ?? 0) + (invocation.ltm_cost ?? 0);
+  const modelCost = invocation.estimated_cost ?? 0;
+  const grandTotal = modelCost + rtTotal + memTotal;
+
   return (
     <div className="space-y-6">
-      <Card className="max-w-lg">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">Invocation Details</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div>
-            <div className="text-xs text-muted-foreground">Invocation ID</div>
-            <div className="font-mono text-sm">{invocation.invocation_id}</div>
-          </div>
-          <div className="flex gap-6 text-sm">
-            <div>
-              <div className="text-xs text-muted-foreground">Status</div>
-              <Badge className="mt-0.5" variant={statusVariant(invocation.status)}>
-                {invocation.status}
-              </Badge>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">Cold Start</div>
-              <div className="font-mono text-sm mt-0.5">{formatMs(invocation.cold_start_latency_ms)}</div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">Duration</div>
-              <div className="font-mono text-sm mt-0.5">{formatMs(invocation.client_duration_ms)}</div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">Created</div>
-              <div className="text-sm mt-0.5">{formatTimestamp(invocation.created_at, timezone)}</div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+        <div className="space-y-6">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Invocation Details</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <div className="text-xs text-muted-foreground">Invocation ID</div>
+                <div className="font-mono text-sm">{invocation.invocation_id}</div>
+              </div>
+              <div className="flex gap-6 text-sm">
+                <div>
+                  <div className="text-xs text-muted-foreground">Status</div>
+                  <Badge className="mt-0.5" variant={statusVariant(invocation.status)}>
+                    {invocation.status}
+                  </Badge>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Cold Start</div>
+                  <div className="font-mono text-sm mt-0.5">{formatMs(invocation.cold_start_latency_ms)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Duration</div>
+                  <div className="font-mono text-sm mt-0.5">{formatMs(invocation.client_duration_ms)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Created</div>
+                  <div className="text-sm mt-0.5">{formatTimestamp(invocation.created_at, timezone)}</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">Prompt</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <pre className="bg-input-bg rounded-md p-4 text-sm font-mono whitespace-pre-wrap overflow-x-auto">
-            {invocation.prompt_text ?? "Not captured"}
-          </pre>
-        </CardContent>
-      </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Prompt</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <pre className="bg-input-bg rounded-md p-4 text-sm font-mono whitespace-pre-wrap overflow-x-auto">
+                {invocation.prompt_text ?? "Not captured"}
+              </pre>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-sm font-medium">Cost Breakdown</CardTitle>
+              {invocation.cost_source && (
+                <Badge variant={invocation.cost_source === "usage_logs" ? "default" : "secondary"} className="text-[10px] px-1.5 py-0">
+                  {invocation.cost_source === "usage_logs" ? "actual" : "estimated"}
+                </Badge>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-1">
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider pt-1 pb-0.5">Model</div>
+            <CostRow
+              label={invocation.input_tokens != null && invocation.output_tokens != null
+                ? `Token Cost (${invocation.input_tokens.toLocaleString()} in + ${invocation.output_tokens.toLocaleString()} out)`
+                : "Token Cost"}
+              value={formatCost(invocation.estimated_cost)}
+            />
+
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider pt-3 pb-0.5">Runtime</div>
+            <CostRow label="CPU (active invocation)" value={formatCost(rtCpu > 0 ? rtCpu : null)} />
+            <CostRow label="Memory (RAM + idle timeout)" value={formatCost(rtMem > 0 ? rtMem : null)} />
+
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider pt-3 pb-0.5">Memory</div>
+            <CostRow label="Create Events (STM)" value={formatCost(invocation.stm_cost || null)} />
+            <CostRow label="Retrieve Records (LTM)" value={formatCost(invocation.ltm_cost || null)} />
+
+            <div className="border-t-2 pt-2 mt-2">
+              <div className="flex justify-between items-baseline">
+                <span className="text-xs font-medium">Total Cost</span>
+                <span className="font-mono text-sm font-semibold">{formatCost(grandTotal > 0 ? grandTotal : null)}</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       {invocation.thinking_text != null && (
         <Card>

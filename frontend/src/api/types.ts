@@ -28,7 +28,10 @@ export interface AgentResponse {
   cost_summary: {
     total_input_tokens: number;
     total_output_tokens: number;
-    total_estimated_cost: number;
+    total_model_cost: number;
+    total_runtime_cost: number;
+    total_memory_cost: number;
+    total_cost: number;
     total_invocations: number;
   } | null;
 }
@@ -171,6 +174,18 @@ export interface InvocationResponse {
   input_tokens: number | null;
   output_tokens: number | null;
   estimated_cost: number | null;
+  compute_cost: number | null;
+  compute_cpu_cost: number | null;
+  compute_memory_cost: number | null;
+  idle_timeout_cost: number | null;
+  idle_cpu_cost: number | null;
+  idle_memory_cost: number | null;
+  memory_retrievals: number | null;
+  memory_events_sent: number | null;
+  memory_estimated_cost: number | null;
+  stm_cost: number | null;
+  ltm_cost: number | null;
+  cost_source: string | null;
   created_at: string | null;
 }
 
@@ -356,6 +371,13 @@ export interface MemoryResponse {
   account_id: string;
   memory_execution_role_arn: string | null;
   encryption_key_arn: string | null;
+  cost_summary: {
+    total_memory_estimated_cost: number;
+    total_stm_cost: number;
+    total_ltm_cost: number;
+    total_retrievals: number;
+    total_events_sent: number;
+  } | null;
 }
 
 // SSE event types
@@ -383,6 +405,17 @@ export interface SSESessionEnd {
   input_tokens: number | null;
   output_tokens: number | null;
   estimated_cost: number | null;
+  compute_cost: number | null;
+  compute_cpu_cost: number | null;
+  compute_memory_cost: number | null;
+  idle_timeout_cost: number | null;
+  idle_cpu_cost: number | null;
+  idle_memory_cost: number | null;
+  memory_retrievals: number | null;
+  memory_events_sent: number | null;
+  memory_estimated_cost: number | null;
+  stm_cost: number | null;
+  ltm_cost: number | null;
 }
 
 export interface SSEError {
@@ -618,6 +651,12 @@ export interface AgentCostSummary {
   total_input_tokens: number;
   total_output_tokens: number;
   total_estimated_cost: number;
+  total_compute_cpu_cost: number;
+  total_compute_memory_cost: number;
+  total_idle_cpu_cost: number;
+  total_idle_memory_cost: number;
+  total_stm_cost: number;
+  total_ltm_cost: number;
   avg_cost_per_invocation: number;
 }
 
@@ -628,5 +667,11 @@ export interface CostDashboardResponse {
   total_input_tokens: number;
   total_output_tokens: number;
   total_estimated_cost: number;
+  total_compute_cpu_cost: number;
+  total_compute_memory_cost: number;
+  total_idle_cpu_cost: number;
+  total_idle_memory_cost: number;
+  total_stm_cost: number;
+  total_ltm_cost: number;
   agents: AgentCostSummary[];
 }

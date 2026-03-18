@@ -1,6 +1,25 @@
 import { apiFetch } from "./client";
 import type { TagPolicy, TagPolicyCreateRequest, TagPolicyUpdateRequest, TagProfile, TagProfileCreateRequest } from "./types";
 
+// Site Settings API
+export interface SiteSetting {
+  id: number | null;
+  key: string;
+  value: string;
+  updated_at: string | null;
+}
+
+export function listSiteSettings(): Promise<SiteSetting[]> {
+  return apiFetch<SiteSetting[]>("/api/settings/site");
+}
+
+export function updateSiteSetting(key: string, value: string): Promise<SiteSetting> {
+  return apiFetch<SiteSetting>(`/api/settings/site/${key}`, {
+    method: "PUT",
+    body: JSON.stringify({ key, value }),
+  });
+}
+
 export function listTagPolicies(): Promise<TagPolicy[]> {
   return apiFetch<TagPolicy[]>("/api/settings/tags");
 }

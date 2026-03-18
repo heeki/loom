@@ -313,3 +313,271 @@ def parse_agent_start_time(log_events: list[dict[str, Any]]) -> float | None:
         logger.info("Used earliest CloudWatch event timestamp as agent_start_time fallback: %.3f", earliest_ts)
 
     return earliest_ts
+
+
+def parse_memory_telemetry(log_events: list[dict[str, Any]]) -> dict[str, int]:
+    """Parse memory usage telemetry from agent log events.
+
+    Searches for the ``LOOM_MEMORY_TELEMETRY`` structured log line emitted
+    by the agent's MemoryHook after each invocation.
+
+    Log format:
+        LOOM_MEMORY_TELEMETRY: retrievals=N, events_sent=M
+
+    Args:
+        log_events: List of CloudWatch log event dictionaries.
+
+    Returns:
+        Dictionary with ``retrievals`` and ``events_sent`` counts.
+        Both default to 0 if no telemetry line is found.
+    """
+    result = {"retrievals": 0, "events_sent": 0}
+
+    for event in log_events:
+        message = event.get("message", "")
+
+        # Parse JSON-wrapped messages
+        if message.startswith("{"):
+            try:
+                log_data = json.loads(message)
+                message = log_data.get("message", "")
+            except json.JSONDecodeError:
+                pass
+
+        if "LOOM_MEMORY_TELEMETRY:" not in message:
+            continue
+
+        # Extract values from "LOOM_MEMORY_TELEMETRY: retrievals=N, events_sent=M"
+        try:
+            telemetry_str = message.split("LOOM_MEMORY_TELEMETRY:")[1].strip()
+            for part in telemetry_str.split(","):
+                part = part.strip()
+                if "=" in part:
+                    key, val = part.split("=", 1)
+                    key = key.strip()
+                    if key in result:
+                        result[key] = int(val.strip())
+        except (ValueError, IndexError):
+            continue
+
+    return result
+
+
+def get_usage_log_events(
+    runtime_id: str,
+    session_id: str,
+    region: str,
+    start_time_ms: int | None = None,
+    max_retries: int = 6,
+    retry_interval: float = 5.0,
+) -> list[dict[str, Any]]:
+    """Retrieve USAGE_LOGS events for a session from the vendedlogs log group.
+
+    USAGE_LOGS are written to a separate vendedlogs log group with 1-second
+    granularity and contain ``agent.runtime.vcpu.hours.used`` and
+    ``agent.runtime.memory.gb_hours.used`` fields.
+
+    Args:
+        runtime_id: Agent runtime ID.
+        session_id: Session ID to filter by.
+        region: AWS region name.
+        start_time_ms: Optional start time filter (ms since epoch).
+        max_retries: Maximum polling attempts (usage data can be delayed).
+        retry_interval: Seconds between retries.
+
+    Returns:
+        List of matching log event dicts.
+    """
+    import boto3
+
+    log_group = f"/aws/vendedlogs/bedrock-agentcore/runtimes/{runtime_id}"
+    client = boto3.client("logs", region_name=region)
+
+    for attempt in range(max_retries):
+        if attempt > 0:
+            time.sleep(retry_interval)
+
+        try:
+            params: dict[str, Any] = {
+                "logGroupName": log_group,
+                "filterPattern": f'"{session_id}"',
+                "limit": 200,
+            }
+            if start_time_ms is not None:
+                params["startTime"] = start_time_ms
+
+            response = client.filter_log_events(**params)
+            events = response.get("events", [])
+            if events:
+                return events
+        except client.exceptions.ResourceNotFoundException:
+            return []
+        except Exception:
+            pass
+
+    return []
+
+
+def parse_usage_telemetry(log_events: list[dict[str, Any]]) -> dict[str, float]:
+    """Parse vCPU and memory usage from USAGE_LOGS events.
+
+    Handles two USAGE_LOGS formats:
+      - Flat: top-level ``agent.runtime.vcpu.hours.used`` / ``agent.runtime.memory.gb_hours.used``
+      - Nested: ``metrics.agent.runtime.vcpu.hours.used`` / ``metrics.agent.runtime.memory.gb_hours.used``
+
+    We sum the values across all matching events to get total session
+    resource consumption for cost calculation.
+
+    Args:
+        log_events: List of CloudWatch log event dicts from USAGE_LOGS.
+
+    Returns:
+        Dictionary with ``vcpu_hours``, ``memory_gb_hours``, and
+        ``elapsed_seconds`` totals.  All default to 0.0.
+    """
+    result: dict[str, float] = {
+        "vcpu_hours": 0.0,
+        "memory_gb_hours": 0.0,
+        "elapsed_seconds": 0.0,
+    }
+
+    for event in log_events:
+        message = event.get("message", "")
+        if not message.startswith("{"):
+            continue
+
+        try:
+            data = json.loads(message)
+        except json.JSONDecodeError:
+            continue
+
+        # Handle nested metrics format
+        metrics = data.get("metrics", {})
+
+        vcpu = data.get("agent.runtime.vcpu.hours.used") or metrics.get("agent.runtime.vcpu.hours.used")
+        mem = data.get("agent.runtime.memory.gb_hours.used") or metrics.get("agent.runtime.memory.gb_hours.used")
+        elapsed = data.get("elapsed_time_seconds")
+
+        if vcpu is not None:
+            result["vcpu_hours"] += float(vcpu)
+        if mem is not None:
+            result["memory_gb_hours"] += float(mem)
+        if elapsed is not None:
+            result["elapsed_seconds"] = max(result["elapsed_seconds"], float(elapsed))
+
+    return result
+
+
+def parse_usage_events(log_events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Parse individual usage events with timestamps for matching to invocations.
+
+    Each returned dict contains:
+      - ``event_timestamp``: ISO timestamp string from the usage log
+      - ``event_timestamp_epoch``: Unix epoch seconds (float)
+      - ``vcpu_hours``: vCPU-hours used
+      - ``memory_gb_hours``: GB-hours used
+      - ``session_id``: session ID from the log event
+
+    Args:
+        log_events: Raw CloudWatch log event dicts from USAGE_LOGS.
+
+    Returns:
+        List of parsed usage event dicts.
+    """
+    parsed = []
+
+    for event in log_events:
+        message = event.get("message", "")
+        if not message.startswith("{"):
+            continue
+
+        try:
+            data = json.loads(message)
+        except json.JSONDecodeError:
+            continue
+
+        metrics = data.get("metrics", {})
+        vcpu = data.get("agent.runtime.vcpu.hours.used") or metrics.get("agent.runtime.vcpu.hours.used")
+        mem = data.get("agent.runtime.memory.gb_hours.used") or metrics.get("agent.runtime.memory.gb_hours.used")
+
+        if vcpu is None and mem is None:
+            continue
+
+        # Extract event_timestamp and convert to epoch
+        event_ts = data.get("event_timestamp")
+        epoch = None
+        if event_ts:
+            try:
+                if event_ts.endswith("Z"):
+                    event_ts = event_ts[:-1] + "+00:00"
+                epoch = datetime.fromisoformat(event_ts).timestamp()
+            except (ValueError, TypeError):
+                pass
+
+        # Fall back to CloudWatch event timestamp
+        if epoch is None:
+            cw_ts = event.get("timestamp")
+            if cw_ts is not None:
+                epoch = cw_ts / 1000.0
+
+        if epoch is None:
+            continue
+
+        parsed.append({
+            "event_timestamp": data.get("event_timestamp"),
+            "event_timestamp_epoch": epoch,
+            "vcpu_hours": float(vcpu) if vcpu is not None else 0.0,
+            "memory_gb_hours": float(mem) if mem is not None else 0.0,
+            "session_id": data.get("session.id") or data.get("session_id"),
+        })
+
+    return parsed
+
+
+def get_usage_log_events_by_time(
+    runtime_id: str,
+    region: str,
+    start_time_ms: int,
+    end_time_ms: int | None = None,
+) -> list[dict[str, Any]]:
+    """Retrieve USAGE_LOGS events for a runtime in a time window.
+
+    Unlike ``get_usage_log_events`` this does not filter by session ID and
+    does not retry — it's designed for the background poller.
+
+    Args:
+        runtime_id: Agent runtime ID.
+        region: AWS region name.
+        start_time_ms: Start time filter (ms since epoch).
+        end_time_ms: Optional end time filter (ms since epoch).
+
+    Returns:
+        List of raw log event dicts.
+    """
+    import boto3
+
+    log_group = f"/aws/vendedlogs/bedrock-agentcore/runtimes/{runtime_id}"
+    client = boto3.client("logs", region_name=region)
+
+    try:
+        params: dict[str, Any] = {
+            "logGroupName": log_group,
+            "startTime": start_time_ms,
+            "limit": 500,
+        }
+        if end_time_ms is not None:
+            params["endTime"] = end_time_ms
+
+        all_events: list[dict[str, Any]] = []
+        response = client.filter_log_events(**params)
+        all_events.extend(response.get("events", []))
+
+        # Handle pagination
+        while response.get("nextToken"):
+            params["nextToken"] = response["nextToken"]
+            response = client.filter_log_events(**params)
+            all_events.extend(response.get("events", []))
+
+        return all_events
+    except Exception:
+        return []

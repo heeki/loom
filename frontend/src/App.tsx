@@ -158,10 +158,16 @@ function AppContent() {
 
   const { agents, loading, deleteStartTimes, fetchAgents, registerAgent, deployAgent, redeployAgent, refreshAgent, deleteAgent } = useAgents();
 
-  // Re-fetch agents after authentication completes (initial fetch may race with login)
+  // Re-fetch agents after authentication completes and when navigating to agent tabs
   useEffect(() => {
     if (isAuthenticated) void fetchAgents();
   }, [isAuthenticated, fetchAgents]);
+
+  useEffect(() => {
+    if (isAuthenticated && (activePersona === "catalog" || activePersona === "builder")) {
+      void fetchAgents();
+    }
+  }, [activePersona, isAuthenticated, fetchAgents]);
 
   type ViewMode = "cards" | "table";
   const [catalogViewMode, setCatalogViewMode] = useState<ViewMode>("cards");

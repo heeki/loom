@@ -72,6 +72,13 @@ export function MemoryCard({
                 {memory.status}
               </Badge>
             )}
+            {memory.cost_summary && memory.cost_summary.total_memory_estimated_cost > 0 && (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0 font-mono">
+                ${memory.cost_summary.total_memory_estimated_cost < 0.01
+                  ? memory.cost_summary.total_memory_estimated_cost.toFixed(6)
+                  : memory.cost_summary.total_memory_estimated_cost.toFixed(4)}
+              </Badge>
+            )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
             <button

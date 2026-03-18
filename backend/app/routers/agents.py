@@ -66,10 +66,13 @@ SUPPORTED_MODELS = [
     {"model_id": "us.amazon.nova-micro-v1:0", "display_name": "Nova Micro", "group": "Amazon", "max_tokens": 5120, "input_price_per_1k_tokens": 0.000035, "output_price_per_1k_tokens": 0.00014, "pricing_as_of": "2025-06-01"},
 ]
 
-# AgentCore Runtime pricing (per-hour rates)
+# AgentCore Runtime pricing (per-hour rates) and default resource allocation
 AGENTCORE_RUNTIME_PRICING = {
     "cpu_per_vcpu_hour": 0.0895,
     "memory_per_gb_hour": 0.00945,
+    "default_vcpu": 2,
+    "default_memory_gb": 8,
+    "default_idle_timeout_seconds": 900,
     "pricing_as_of": "2025-06-01",
 }
 
@@ -262,30 +265,42 @@ def _agent_response(agent: Agent, db: Session) -> AgentResponse:
             auth_cfg["name"] = ac.name
 
     # Compute cost summary from invocations
-    total_input = db.query(func.sum(Invocation.input_tokens)).join(
+    base_q = db.query(Invocation).join(
         InvocationSession, Invocation.session_id == InvocationSession.session_id
-    ).filter(InvocationSession.agent_id == agent.id).scalar() or 0
-    total_output = db.query(func.sum(Invocation.output_tokens)).join(
-        InvocationSession, Invocation.session_id == InvocationSession.session_id
-    ).filter(InvocationSession.agent_id == agent.id).scalar() or 0
-    total_cost = db.query(func.sum(Invocation.estimated_cost)).join(
-        InvocationSession, Invocation.session_id == InvocationSession.session_id
-    ).filter(InvocationSession.agent_id == agent.id).scalar() or 0.0
-    inv_count = db.query(func.count(Invocation.id)).join(
-        InvocationSession, Invocation.session_id == InvocationSession.session_id
-    ).filter(InvocationSession.agent_id == agent.id).scalar() or 0
+    ).filter(InvocationSession.agent_id == agent.id)
+    total_input = base_q.with_entities(func.sum(Invocation.input_tokens)).scalar() or 0
+    total_output = base_q.with_entities(func.sum(Invocation.output_tokens)).scalar() or 0
+    total_est = base_q.with_entities(func.sum(Invocation.estimated_cost)).scalar() or 0.0
+    total_compute_cpu = base_q.with_entities(func.sum(Invocation.compute_cpu_cost)).scalar() or 0.0
+    total_compute_mem = base_q.with_entities(func.sum(Invocation.compute_memory_cost)).scalar() or 0.0
+    total_idle_mem = base_q.with_entities(func.sum(Invocation.idle_memory_cost)).scalar() or 0.0
+    total_stm = base_q.with_entities(func.sum(Invocation.stm_cost)).scalar() or 0.0
+    total_ltm = base_q.with_entities(func.sum(Invocation.ltm_cost)).scalar() or 0.0
+    inv_count = base_q.with_entities(func.count(Invocation.id)).scalar() or 0
+
+    rt_cpu = total_compute_cpu
+    rt_mem = total_compute_mem + total_idle_mem
+    rt_total = rt_cpu + rt_mem
+    mem_total = total_stm + total_ltm
+    grand_total = total_est + rt_total + mem_total
 
     result = AgentResponse(
         **agent_dict,
         model_id=model_id,
         active_session_count=compute_active_session_count(agent.id, db)
     )
-    result.cost_summary = {
-        "total_input_tokens": total_input,
-        "total_output_tokens": total_output,
-        "total_estimated_cost": round(total_cost, 6),
-        "total_invocations": inv_count,
-    }
+    if inv_count > 0 and grand_total > 0:
+        result.cost_summary = {
+            "total_input_tokens": total_input,
+            "total_output_tokens": total_output,
+            "total_model_cost": round(total_est, 6),
+            "total_runtime_cost": round(rt_total, 6),
+            "total_memory_cost": round(mem_total, 6),
+            "total_cost": round(grand_total, 6),
+            "total_invocations": inv_count,
+        }
+    else:
+        result.cost_summary = None
     return result
 
 
@@ -820,6 +835,7 @@ def _deploy_agent_background(
             "AGENT_CONFIG_JSON": config_json,
             "OTEL_SERVICE_NAME": request.name,
             "AGENT_OBSERVABILITY_ENABLED": "true",
+            "AWS_REGION": region,
         }
 
         # Store config entries
@@ -947,6 +963,19 @@ def _deploy_agent_background(
             agent.log_group = derive_log_group(runtime_id, "DEFAULT") if runtime_id else None
             agent.set_available_qualifiers(["DEFAULT"])
             agent.set_tags(resolved_tags)
+
+            # Enable USAGE_LOGS and APPLICATION_LOGS observability
+            try:
+                from app.services.observability import enable_runtime_observability
+                obs_result = enable_runtime_observability(
+                    runtime_arn=runtime_arn,
+                    runtime_id=runtime_id,
+                    account_id=agent.account_id,
+                    region=region,
+                )
+                logger.info("Enabled observability for agent %s: %s", agent.id, obs_result)
+            except Exception as obs_err:
+                logger.warning("Failed to enable observability for agent %s: %s", agent.id, obs_err)
 
             # Persist authorizer config for token retrieval at invoke time
             if request.authorizer_type:

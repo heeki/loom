@@ -1,5 +1,6 @@
-"""Settings endpoints for managing tag policies."""
+"""Settings endpoints for managing tag policies and site settings."""
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -9,8 +10,39 @@ from app.db import get_db
 from app.dependencies.auth import UserInfo, require_scopes
 from app.models.tag_policy import TagPolicy
 from app.models.tag_profile import TagProfile
+from app.models.site_setting import SiteSetting
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+
+# ---------------------------------------------------------------------------
+# Site settings defaults and helpers
+# ---------------------------------------------------------------------------
+SITE_SETTING_DEFAULTS: dict[str, str] = {
+    "cpu_io_wait_discount": "75",
+}
+
+
+def get_site_setting(db: Session, key: str) -> str:
+    """Get a site setting value, returning the default if not set."""
+    row = db.query(SiteSetting).filter(SiteSetting.key == key).first()
+    if row:
+        return row.value
+    return SITE_SETTING_DEFAULTS.get(key, "")
+
+
+def get_cpu_io_wait_discount(db: Session) -> float:
+    """Get the CPU I/O wait discount as a float (0.0–0.99).
+
+    Stored as an integer percentage (0–99). Returns the decimal equivalent.
+    """
+    val = get_site_setting(db, "cpu_io_wait_discount")
+    try:
+        pct = int(float(val))
+        pct = max(0, min(99, pct))
+        return pct / 100.0
+    except (ValueError, TypeError):
+        return 0.75
 
 
 class TagPolicyRequest(BaseModel):
@@ -217,3 +249,60 @@ def delete_tag_profile(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag profile not found")
     db.delete(profile)
     db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Site Settings CRUD
+# ---------------------------------------------------------------------------
+class SiteSettingRequest(BaseModel):
+    """Request body for creating/updating a site setting."""
+    key: str = Field(..., description="Setting key")
+    value: str = Field(..., description="Setting value")
+
+
+class SiteSettingResponse(BaseModel):
+    """Response model for a site setting."""
+    id: int | None
+    key: str
+    value: str
+    updated_at: str | None
+
+
+@router.get("/site", response_model=list[SiteSettingResponse])
+def list_site_settings(
+    user: UserInfo = Depends(require_scopes("settings:read")),
+    db: Session = Depends(get_db),
+) -> list[SiteSettingResponse]:
+    """List all site settings, including defaults for unset keys."""
+    stored = {s.key: s for s in db.query(SiteSetting).all()}
+    result = []
+    for key, default in SITE_SETTING_DEFAULTS.items():
+        if key in stored:
+            result.append(SiteSettingResponse(**stored[key].to_dict()))
+        else:
+            result.append(SiteSettingResponse(id=None, key=key, value=default, updated_at=None))
+    # Include any stored settings not in defaults
+    for key, setting in stored.items():
+        if key not in SITE_SETTING_DEFAULTS:
+            result.append(SiteSettingResponse(**setting.to_dict()))
+    return result
+
+
+@router.put("/site/{key}", response_model=SiteSettingResponse)
+def update_site_setting(
+    key: str,
+    request: SiteSettingRequest,
+    user: UserInfo = Depends(require_scopes("settings:write")),
+    db: Session = Depends(get_db),
+) -> SiteSettingResponse:
+    """Create or update a site setting."""
+    setting = db.query(SiteSetting).filter(SiteSetting.key == key).first()
+    if setting:
+        setting.value = request.value
+        setting.updated_at = datetime.utcnow()
+    else:
+        setting = SiteSetting(key=key, value=request.value)
+        db.add(setting)
+    db.commit()
+    db.refresh(setting)
+    return SiteSettingResponse(**setting.to_dict())

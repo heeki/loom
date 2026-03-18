@@ -30,6 +30,26 @@ class Invocation(Base):
     output_tokens = Column(Integer, nullable=True)
     estimated_cost = Column(Float, nullable=True)
 
+    # Active compute costs from USAGE_LOGS (vCPU and RAM separately)
+    compute_cost = Column(Float, nullable=True)
+    compute_cpu_cost = Column(Float, nullable=True)
+    compute_memory_cost = Column(Float, nullable=True)
+
+    # Idle session costs (upper bound — I/O wait not charged but unmeasurable)
+    idle_timeout_cost = Column(Float, nullable=True)
+    idle_cpu_cost = Column(Float, nullable=True)
+    idle_memory_cost = Column(Float, nullable=True)
+
+    # Memory usage and cost
+    memory_retrievals = Column(Integer, nullable=True)
+    memory_events_sent = Column(Integer, nullable=True)
+    memory_estimated_cost = Column(Float, nullable=True)
+    stm_cost = Column(Float, nullable=True)
+    ltm_cost = Column(Float, nullable=True)
+
+    # Cost source: "estimated" (from invoke duration) or "usage_logs" (from actual USAGE_LOGS)
+    cost_source = Column(String, nullable=True)
+
     # Invocation status
     status = Column(String, nullable=False, default="pending")  # pending, streaming, complete, error
     error_message = Column(Text, nullable=True)
@@ -58,6 +78,18 @@ class Invocation(Base):
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "estimated_cost": self.estimated_cost,
+            "compute_cost": self.compute_cost,
+            "compute_cpu_cost": self.compute_cpu_cost,
+            "compute_memory_cost": self.compute_memory_cost,
+            "idle_timeout_cost": self.idle_timeout_cost,
+            "idle_cpu_cost": self.idle_cpu_cost,
+            "idle_memory_cost": self.idle_memory_cost,
+            "memory_retrievals": self.memory_retrievals,
+            "memory_events_sent": self.memory_events_sent,
+            "memory_estimated_cost": self.memory_estimated_cost,
+            "stm_cost": self.stm_cost,
+            "ltm_cost": self.ltm_cost,
+            "cost_source": self.cost_source,
             "status": self.status,
             "error_message": self.error_message,
             "prompt_text": self.prompt_text,
