@@ -1,6 +1,6 @@
 # Loom Backend
 
-FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, tag policy management, tag profile management, cost estimation dashboard, and actual runtime cost retrieval from CloudWatch usage logs.
+FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, paginated CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, tag policy management, tag profile management, cost estimation dashboard, and actual runtime cost retrieval from CloudWatch usage logs.
 
 ## Technology Stack
 
@@ -83,7 +83,7 @@ backend/
 │   │   ├── auth.py          # Auth config endpoint (GET /api/auth/config)
 │   │   ├── agents.py        # Agent CRUD + ARN parsing + log group derivation
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
-│   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
+│   │   ├── logs.py          # CloudWatch log browsing with pagination + session log retrieval via stream-name matching
 │   │   ├── memories.py      # Memory resource CRUD + strategy mapping
 │   │   ├── a2a.py           # A2A agent CRUD, Agent Card, skills, access control
 │   │   ├── mcp.py           # MCP server CRUD, tool discovery, access control
@@ -93,7 +93,7 @@ backend/
 │   │   └── utils.py         # Shared router utilities
 │   └── services/
 │       ├── agentcore.py     # boto3 wrapper: describe, list endpoints, invoke
-│       ├── cloudwatch.py    # boto3 wrapper: log streams, log events, start time parsing
+│       ├── cloudwatch.py    # CloudWatch log retrieval with pagination, session filtering, and usage log parsing
 │       ├── cognito.py       # Cognito OAuth2 token retrieval
 │       ├── credential.py    # AgentCore credential provider management
 │       ├── deployment.py    # Agent artifact build + runtime CRUD
@@ -335,8 +335,8 @@ Agent list responses include a computed `active_session_count` field based on `L
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/agents/{agent_id}/logs/streams` | List available log streams |
-| `GET` | `/api/agents/{agent_id}/logs` | Get logs from latest (or specified) stream |
-| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/logs` | Get logs filtered to a session |
+| `GET` | `/api/agents/{agent_id}/logs` | Get logs from latest (or specified) stream with pagination |
+| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/logs` | Get all logs for a session (stream-name matching + filterPattern fallback, paginated) |
 
 ## Streaming Architecture
 
@@ -344,7 +344,7 @@ The boto3 `invoke_agent_runtime` call returns a synchronous `StreamingBody`. To 
 
 1. Each `next()` call on the chunk generator runs via `asyncio.to_thread()`.
 2. SSE events are flushed to the client in real-time as chunks arrive.
-3. After streaming completes, CloudWatch log retrieval also runs via `asyncio.to_thread()`.
+3. After streaming completes, CloudWatch log retrieval also runs via `asyncio.to_thread()`. Log retrieval now paginates via nextToken.
 
 ## Latency Measurement
 

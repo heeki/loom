@@ -148,7 +148,7 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 - `api/auth.ts` — Cognito auth API: `fetchAuthConfig`, `initiateAuth`, `respondToNewPasswordChallenge`, `refreshTokens`
 - `api/agents.ts` — Agent operations: list, get, register (with optional model_id), deploy, delete (with optional AWS cleanup), refresh, redeploy, fetchRoles, fetchCognitoPools, fetchModels, fetchDefaults
 - `api/invocations.ts` — Session queries + `invokeAgentStream()` SSE consumer (supports `credential_id`, includes auth header)
-- `api/logs.ts` — CloudWatch log queries
+- `api/logs.ts` — CloudWatch log queries with cache-busting refresh support
 - `api/memories.ts` — Memory resource operations: create, import, list, get, refresh, delete, purge
 - `api/security.ts` — Security admin operations: managed roles, authorizer configs, authorizer credentials, permission requests
 - `api/a2a.ts` — A2A agent operations: CRUD, test connection, card retrieval/refresh, skills, access rules
@@ -162,7 +162,7 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 - `useAgents()` — Agent list with auto-fetch, CRUD actions, register (with optional modelId), async deletion polling (DELETING → 404 → purge)
 - `useSessions(agentId)` — Session list that re-fetches on agent change
 - `useInvoke(authorizerName?)` — Streaming state management with `AbortController`, supports credential_id and bearer_token, provides friendly error messages with authorizer-specific hints
-- `useLogs()` — On-demand session log fetching
+- `useLogs()` — On-demand session log fetching with `noCache` support for cache-busting refresh
 - `useA2aAgents()` — A2A agent list with auto-fetch, CRUD callbacks, toast notifications
 - `useMcpServers()` — MCP server list with auto-fetch, CRUD callbacks, toast notifications
 - `useDeployment()` — Agent config, credential providers, and integrations
@@ -184,6 +184,7 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 - **A2aAgentCardView** — Structured Agent Card display: capabilities, authentication schemes, input/output modes, and skills.
 - **A2aAccessControl** — Per-persona access control for A2A agent skills with all_skills/selected_skills modes.
 - **MemoryManagementPanel** — Create/import form with JSON import/export and strategy configuration (type, name, description, namespace), memory card/table list with status badges (CREATING/ACTIVE/FAILED/DELETING), refresh and delete actions with inline confirmation overlay.
+- **LogViewer** — Paginated CloudWatch log display (200 lines/page) with toggleable line numbers and timestamps, log stream selector, and cache-busting refresh support.
 
 ### Views
 
@@ -192,7 +193,7 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 | LoginPage | — | Cognito login + set new password |
 | CatalogPage | Platform Catalog | Agents (with multi-select tag filter bar), memory resources (with tag badges), MCP servers, A2A agents sections |
 | AgentDetailPage | Platform Catalog | Sessions, invoke, latency, streaming response, deployment details |
-| SessionDetailPage | Platform Catalog | Session metadata, invocation timing, CloudWatch logs |
+| SessionDetailPage | Platform Catalog | Session metadata, invocation timing, paginated CloudWatch logs with line numbers and stream selector |
 | AgentListPage | Agents | Deploy/Import form (with tag profile selector) + agent card/table grid with multi-select tag filters |
 | SecurityAdminPage | Security | Roles, authorizers, credentials, permissions |
 | MemoryManagementPage | Memory | Memory resource create/import form (with tag profile selector), card/table list with tag badges and multi-select tag filters |

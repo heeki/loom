@@ -1,8 +1,11 @@
 """CloudWatch log retrieval endpoints."""
 import json
+import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 
@@ -142,7 +145,7 @@ def get_agent_logs(
     agent_id: int,
     qualifier: str = Query(default="DEFAULT", description="Endpoint qualifier"),
     stream: Optional[str] = Query(default=None, description="Log stream name (defaults to latest stream)"),
-    limit: int = Query(default=100, ge=1, le=1000, description="Max number of log events"),
+    limit: int = Query(default=10000, ge=1, le=10000, description="Max number of log events"),
     start_time: Optional[str] = Query(default=None, description="Filter events after this ISO 8601 timestamp"),
     end_time: Optional[str] = Query(default=None, description="Filter events before this ISO 8601 timestamp"),
     user: UserInfo = Depends(require_scopes("agent:read")),
@@ -205,7 +208,7 @@ def get_session_logs(
     agent_id: int,
     session_id: str,
     qualifier: str = Query(default="DEFAULT", description="Endpoint qualifier"),
-    limit: int = Query(default=100, ge=1, le=1000, description="Max number of log events"),
+    limit: int = Query(default=1000, ge=1, le=10000, description="Max number of log events"),
     user: UserInfo = Depends(require_scopes("agent:read")),
     db: Session = Depends(get_db),
 ) -> LogResponse:
@@ -223,7 +226,6 @@ def get_session_logs(
             session_id=session_id,
             region=agent.region,
             start_time_ms=None,
-            limit=limit,
             max_retries=1,
             retry_interval=0
         )
@@ -232,6 +234,11 @@ def get_session_logs(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Failed to retrieve logs: {str(e)}"
         )
+
+    logger.info(
+        "[get_session_logs] session_id=%s raw_events=%d limit=%d",
+        session_id, len(events), limit,
+    )
 
     # Enforce limit
     events = events[:limit]

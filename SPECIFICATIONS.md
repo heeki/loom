@@ -33,7 +33,10 @@ loom/
 │   └── strands_agent/          # Strands Agent blueprint
 │       ├── handler.py          # Agent handler / entry point (trace_invocation wrapped)
 │       ├── config.py           # Agent configuration
-│       ├── integrations.py     # Tool and service integrations
+│       ├── integrations/       # Tool and service integrations
+│       │   ├── mcp_client.py   # MCP tool client vending
+│       │   ├── a2a_client.py   # A2A agent client vending
+│       │   └── memory.py       # AgentCore Memory hooks (MemoryHook)
 │       └── telemetry.py        # OTEL setup, ADOT auto-instrumentation, TelemetryHook
 ├── backend/                    # Backend API (see backend/SPECIFICATIONS.md)
 │   ├── app/
@@ -58,6 +61,7 @@ loom/
 │   │   │   ├── auth.py
 │   │   │   ├── agents.py
 │   │   │   ├── a2a.py
+│   │   │   ├── costs.py
 │   │   │   ├── invocations.py
 │   │   │   ├── logs.py
 │   │   │   ├── memories.py
@@ -68,6 +72,7 @@ loom/
 │   │   └── services/
 │   │       ├── agentcore.py
 │   │       ├── a2a.py
+│   │       ├── cloudwatch.py    # CloudWatch log retrieval with pagination, session-filtered queries, and usage log parsing
 │   │       ├── mcp.py
 │   │       ├── memory.py
 │   │       ├── secrets.py
@@ -208,7 +213,7 @@ Model selectors in the UI are searchable by both display name and model ID, with
 ## 6. Implementation Phases
 
 ### Phase 1 — MVP (Initial Implementation) *(Complete)*
-- Backend: Agent registration, metadata retrieval, SSE invocation with real-time streaming, CloudWatch log retrieval (stream browsing + session-filtered), integrated cold-start latency calculation, SQLite persistence with session/invocation separation, session liveness tracking via idle timeout heuristic, active session count per agent.
+- Backend: Agent registration, metadata retrieval, SSE invocation with real-time streaming, CloudWatch log retrieval (stream browsing + session-filtered with pagination), integrated cold-start latency calculation, SQLite persistence with session/invocation separation, session liveness tracking via idle timeout heuristic, active session count per agent.
 - CLI: Streaming invocation client (`scripts/stream.py`) and comprehensive `makefile` targets for manual testing.
 - Frontend: Build tab (ARN registration), Test tab (invocation + streaming + latency display), Operate tab (basic dashboard), active session count display on agent cards, session live status indicators.
 - Refactored `tmp/latency/` into reusable service modules.
@@ -257,6 +262,7 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - `AGENT_OBSERVABILITY_ENABLED` is set to `true` at deploy time, which activates the `aws-opentelemetry-distro` export pipeline (X-Ray traces, CloudWatch logs/metrics).
 - Console script shebang fix: the build pipeline rewrites `opentelemetry-instrument` (and `opentelemetry-bootstrap`) scripts with a portable `#!/usr/bin/env python3` shebang so they execute correctly on the Linux-based AgentCore Runtime container.
 - Unit tests for telemetry setup idempotency, span creation, hook lifecycle, shebang fix, and noop operation.
+- **AgentCore Memory Integration:** `MemoryHook` is a Strands `HookProvider` that registers `BeforeInvocationEvent` and `AfterInvocationEvent` callbacks for automatic memory operations. Before invocation: retrieves memory records via `retrieve_memory_records` using the last user message as search query. After invocation: creates events in memory for each message in the conversation via `create_event`. Emits `LOOM_MEMORY_TELEMETRY: retrievals=N, events_sent=M` structured log line for cost tracking (always emitted, even when counters are 0). All operations logged at INFO level for visibility. Graceful degradation: AccessDeniedException and other errors are caught and logged without interrupting the agent invocation.
 
 ### Phase 6 — User Authentication *(Complete)*
 - Cognito-based user authentication with `USER_PASSWORD_AUTH` flow.
@@ -399,6 +405,7 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - CPU I/O Wait Discount: Single configurable site setting (`cpu_io_wait_discount`, default 75%) applied universally to runtime CPU costs across both estimates and actuals. Configurable on the Settings page. Stored as integer percentage (0-99).
 - Cost estimation formulas: `Runtime CPU = hours × 1 vCPU × $0.0895 × (1 − I/O wait%)`, `Runtime Mem = hours × 0.5 GB × $0.00945`, `Idle Mem = idle_seconds × 0.5 GB × $0.00945 / 3600`.
 - New endpoints: `GET /api/agents/models/pricing` returns models with pricing metadata; `GET /api/dashboard/costs` provides estimated cost aggregation with group filtering, time-range filtering (7d/30d/90d/all), and per-agent breakdown; `POST /api/dashboard/costs/actuals` pulls actual runtime costs from CloudWatch usage logs.
+- CloudWatch log retrieval strategies: (1) stream-name matching for session-specific streams (fetches all events), (2) filterPattern fallback for shared streams. Both use nextToken pagination for complete data retrieval.
 - Cost dashboard sections: **Estimated Costs** table with per-agent breakdown (Model Tokens, AgentCore Runtime CPU+Mem, AgentCore Memory STM+LTM, Per Invoke, Total) using two-row pattern (summary + detail sub-row). **Actual Costs for Runtime** table with per-session breakdown (Agent, Session, Events, Runtime CPU, Runtime Memory, Total) pulled from CloudWatch usage logs. Actuals are cached in module-level state to persist across page navigation.
 - Actuals session filtering: Only sessions tracked in Loom's `invocation_sessions` table are shown in the actuals table, filtering out external invocations against the same runtime.
 - Actuals aggregation: CloudWatch usage log events (1-second granularity) are aggregated by `(agent_name, session_id)` tuple from `attributes.agent.name` and `attributes.session.id`. Timestamps normalized from epoch milliseconds or ISO strings to UTC ISO 8601.

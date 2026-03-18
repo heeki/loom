@@ -71,7 +71,7 @@ backend/
 │   │   ├── settings.py      # Settings endpoints (tag policy CRUD, tag profile CRUD)
 │   │   ├── costs.py          # Cost dashboard: estimated costs + actuals from CloudWatch usage logs
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
-│   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
+│   │   ├── logs.py          # CloudWatch log browsing with pagination + session log retrieval via stream-name matching
 │   │   ├── memories.py      # Memory resource CRUD + strategy mapping
 │   │   ├── mcp.py           # MCP server CRUD, tools, access control
 │   │   ├── security.py      # Security admin: roles, authorizers, credentials, permissions
@@ -821,8 +821,8 @@ Current site settings:
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/agents/{agent_id}/logs/streams` | List available CloudWatch log streams. |
-| `GET` | `/api/agents/{agent_id}/logs` | Retrieve recent logs from the latest (or specified) log stream. |
-| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/logs` | Retrieve logs filtered to a specific session. |
+| `GET` | `/api/agents/{agent_id}/logs` | Retrieve logs from the latest (or specified) log stream. Paginates via `nextToken` (limit 10000). |
+| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/logs` | Retrieve all logs for a session using stream-name matching with `nextToken` pagination (limit 10000). Falls back to `filterPattern` for shared streams. |
 
 ---
 
@@ -841,10 +841,11 @@ Wraps `boto3.client('bedrock-agentcore')` and `boto3.client('bedrock-agentcore-c
 Wraps `boto3.client('logs')`:
 
 - `list_log_streams(log_group: str, region: str) -> list[dict]` — lists streams ordered by last event time.
-- `get_stream_log_events(log_group: str, stream_name: str, region: str, ...) -> list[dict]` — retrieves events from a single log stream.
-- `get_log_events(log_group: str, session_id: str, region: str, ...) -> list[dict]` — retrieves events matching the session_id filter pattern across all streams.
+- `get_stream_log_events(log_group: str, stream_name: str, region: str, ...) -> list[dict]` — retrieves all events from a single log stream with `nextToken` pagination. Default limit 10000.
+- `get_log_events(log_group: str, session_id: str, region: str, ...) -> list[dict]` — two-strategy session log retrieval: (1) matches log streams whose name contains the session ID (e.g. `[runtime-logs-<session_id>]`) and fetches all events with pagination, (2) falls back to `filterPattern` search across all streams for shared streams like `ApplicationLogs`. Both strategies paginate via `nextToken` with limit 10000.
 - `parse_agent_start_time(log_events: list[dict]) -> float | None` — parses "Agent invoked - Start time:" pattern; falls back to earliest CloudWatch event timestamp.
-- `get_usage_log_events_by_time(runtime_id, region, start_time_ms, end_time_ms)` — queries CloudWatch `BedrockAgentCoreRuntime_UsageLogs` stream for usage events within a time range.
+- `parse_memory_telemetry(log_events: list[dict]) -> dict[str, int]` — parses `LOOM_MEMORY_TELEMETRY` structured log line for memory cost tracking. Returns `retrievals` and `events_sent` counts.
+- `get_usage_log_events_by_time(runtime_id, region, start_time_ms, end_time_ms)` — queries CloudWatch `BedrockAgentCoreRuntime_UsageLogs` stream for usage events within a time range. Paginates via `nextToken`.
 - `parse_usage_events(raw_events)` — parses raw CloudWatch log events into structured usage records with vCPU hours, memory GB hours, agent name, session ID, and normalized timestamps.
 
 ### `services/deployment.py`

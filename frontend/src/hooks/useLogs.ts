@@ -10,10 +10,10 @@ export function useLogs() {
   const [activeStream, setActiveStream] = useState<string>("");
 
   const fetchSessionLogs = useCallback(
-    async (agentId: number, sessionId: string, qualifier = "DEFAULT") => {
+    async (agentId: number, sessionId: string, qualifier = "DEFAULT", noCache = false) => {
       setLoading(true);
       try {
-        const data = await getSessionLogs(agentId, sessionId, qualifier);
+        const data = await getSessionLogs(agentId, sessionId, qualifier, undefined, noCache);
         setLogs(data.events);
         setActiveStream("");
       } catch {
@@ -41,10 +41,10 @@ export function useLogs() {
   );
 
   const fetchStreamLogs = useCallback(
-    async (agentId: number, qualifier = "DEFAULT", streamName: string) => {
+    async (agentId: number, qualifier = "DEFAULT", streamName: string, noCache = false) => {
       setLoading(true);
       try {
-        const data = await getAgentLogs(agentId, qualifier, { stream: streamName });
+        const data = await getAgentLogs(agentId, qualifier, { stream: streamName, noCache });
         setLogs(data.events);
         setActiveStream(streamName);
       } catch {

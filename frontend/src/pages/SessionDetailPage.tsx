@@ -13,7 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Clock, RefreshCw } from "lucide-react";
+import { Clock, Hash, RefreshCw } from "lucide-react";
 import { InvocationTable } from "@/components/InvocationTable";
 import { LogViewer } from "@/components/LogViewer";
 import { useLogs } from "@/hooks/useLogs";
@@ -65,14 +65,15 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
   } = useLogs();
   const { timezone } = useTimezone();
   const [showTimestamp, setShowTimestamp] = useState(true);
+  const [showLineNumbers, setShowLineNumbers] = useState(true);
 
   const qualifier = session.qualifier || "DEFAULT";
 
   const refreshLogs = useCallback(() => {
     if (activeStream) {
-      void fetchStreamLogs(agent.id, qualifier, activeStream);
+      void fetchStreamLogs(agent.id, qualifier, activeStream, true);
     } else {
-      void fetchSessionLogs(agent.id, session.session_id, qualifier);
+      void fetchSessionLogs(agent.id, session.session_id, qualifier, true);
     }
   }, [agent.id, session.session_id, qualifier, activeStream, fetchSessionLogs, fetchStreamLogs]);
 
@@ -176,6 +177,14 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
           </div>
           <div className="flex items-center gap-2">
             <Button
+              variant={showLineNumbers ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setShowLineNumbers((v) => !v)}
+            >
+              <Hash className="h-4 w-4 mr-1" />
+              Lines
+            </Button>
+            <Button
               variant={showTimestamp ? "secondary" : "ghost"}
               size="sm"
               onClick={() => setShowTimestamp((v) => !v)}
@@ -202,7 +211,7 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
             : <>Showing service-level logs matching session <span className="font-mono">{session.session_id}</span></>
           }
         </div>
-        <LogViewer logs={logs} loading={logsLoading} showTimestamp={showTimestamp} />
+        <LogViewer logs={logs} loading={logsLoading} showTimestamp={showTimestamp} showLineNumbers={showLineNumbers} />
       </div>
     </div>
   );

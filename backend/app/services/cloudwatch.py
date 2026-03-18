@@ -7,9 +7,12 @@ parsing agent start times from log messages.
 """
 
 import json
+import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone as tz
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def list_log_streams(log_group: str, region: str) -> list[dict[str, Any]]:
@@ -62,7 +65,7 @@ def get_stream_log_events(
     region: str,
     start_time_ms: int | None = None,
     end_time_ms: int | None = None,
-    limit: int = 100
+    limit: int = 10000
 ) -> list[dict[str, Any]]:
     """
     Retrieve log events from a single CloudWatch log stream.
@@ -96,8 +99,20 @@ def get_stream_log_events(
     if end_time_ms is not None:
         params['endTime'] = end_time_ms
 
+    all_events: list[dict[str, Any]] = []
     response = client.filter_log_events(**params)
-    return response.get('events', [])
+    all_events.extend(response.get('events', []))
+
+    while response.get('nextToken'):
+        params['nextToken'] = response['nextToken']
+        response = client.filter_log_events(**params)
+        all_events.extend(response.get('events', []))
+
+    logger.info(
+        "[get_stream_log_events] stream=%s events=%d",
+        stream_name, len(all_events),
+    )
+    return all_events
 
 
 def get_log_events(
@@ -141,54 +156,85 @@ def get_log_events(
         # Fallback to default stream name if none found
         stream_names = ['BedrockAgentCoreRuntime_ApplicationLogs']
 
-    all_events = []
+    # Find log streams whose name contains the session ID
+    # (e.g. "2026/03/18/[runtime-logs-<session_id>]<uuid>")
+    session_streams = [s for s in stream_names if session_id in s]
+    logger.info(
+        "[get_log_events] log_group=%s session_id=%s matched_streams=%d total_streams=%d",
+        log_group, session_id, len(session_streams), len(stream_names),
+    )
+
+    all_events: list[dict[str, Any]] = []
     retry_count = 0
 
     while retry_count < max_retries:
         if retry_count > 0:
             time.sleep(retry_interval)
 
-        # Try to retrieve log events from each stream
-        for stream_name in stream_names:
+        # Strategy 1: fetch ALL events from session-specific streams
+        if session_streams:
             try:
-                # Build filter_log_events parameters
                 params: dict[str, Any] = {
                     'logGroupName': log_group,
-                    'logStreamNames': [stream_name],
-                    'limit': limit
+                    'logStreamNames': session_streams,
+                    'limit': 10000,
                 }
-
                 if start_time_ms is not None:
                     params['startTime'] = start_time_ms
 
+                page = 0
                 response = client.filter_log_events(**params)
-                events = response.get('events', [])
-                all_events.extend(events)
+                all_events.extend(response.get('events', []))
+                page += 1
 
-            except Exception:
-                # If specific stream fails, try without specifying stream names
-                try:
-                    params = {
-                        'logGroupName': log_group,
-                        'limit': limit
-                    }
-                    if start_time_ms is not None:
-                        params['startTime'] = start_time_ms
-
+                while response.get('nextToken'):
+                    params['nextToken'] = response['nextToken']
                     response = client.filter_log_events(**params)
-                    events = response.get('events', [])
-                    all_events.extend(events)
-                except Exception:
-                    pass  # Continue to next stream or retry
+                    all_events.extend(response.get('events', []))
+                    page += 1
 
-        # Filter events by session ID
-        matching_events = _filter_events_by_session_id(all_events, session_id)
+                logger.info(
+                    "[get_log_events] Strategy 1 (stream match): %d events across %d page(s) from streams %s",
+                    len(all_events), page, session_streams,
+                )
+            except Exception as e:
+                logger.warning("[get_log_events] Strategy 1 error after %d events: %s", len(all_events), e)
 
-        if matching_events:
-            return matching_events
+        # Strategy 2: fall back to filterPattern search across all streams
+        # (catches events in shared streams like ApplicationLogs)
+        if not all_events:
+            try:
+                params = {
+                    'logGroupName': log_group,
+                    'filterPattern': f'"{session_id}"',
+                    'limit': 10000,
+                }
+                if start_time_ms is not None:
+                    params['startTime'] = start_time_ms
+
+                page = 0
+                response = client.filter_log_events(**params)
+                all_events.extend(response.get('events', []))
+                page += 1
+
+                while response.get('nextToken'):
+                    params['nextToken'] = response['nextToken']
+                    response = client.filter_log_events(**params)
+                    all_events.extend(response.get('events', []))
+                    page += 1
+
+                logger.info(
+                    "[get_log_events] Strategy 2 (filterPattern): %d events across %d page(s)",
+                    len(all_events), page,
+                )
+            except Exception as e:
+                logger.warning("[get_log_events] Strategy 2 error after %d events: %s", len(all_events), e)
+
+        if all_events:
+            return all_events
 
         retry_count += 1
-        all_events = []  # Clear for next retry
+        all_events = []
 
     return []
 
@@ -507,12 +553,16 @@ def parse_usage_events(log_events: list[dict[str, Any]]) -> list[dict[str, Any]]
         event_ts = data.get("event_timestamp")
         epoch = None
         if event_ts:
-            try:
-                if event_ts.endswith("Z"):
-                    event_ts = event_ts[:-1] + "+00:00"
-                epoch = datetime.fromisoformat(event_ts).timestamp()
-            except (ValueError, TypeError):
-                pass
+            if isinstance(event_ts, (int, float)):
+                # Epoch milliseconds
+                epoch = float(event_ts) / 1000.0
+            elif isinstance(event_ts, str):
+                try:
+                    if event_ts.endswith("Z"):
+                        event_ts = event_ts[:-1] + "+00:00"
+                    epoch = datetime.fromisoformat(event_ts).timestamp()
+                except (ValueError, TypeError):
+                    pass
 
         # Fall back to CloudWatch event timestamp
         if epoch is None:
@@ -523,15 +573,27 @@ def parse_usage_events(log_events: list[dict[str, Any]]) -> list[dict[str, Any]]
         if epoch is None:
             continue
 
+        # Normalize event_timestamp to ISO 8601 UTC string
+        iso_ts = datetime.fromtimestamp(epoch, tz=tz.utc).isoformat()
+
+        # Extract agent name and session ID from attributes or top-level
+        attributes = data.get("attributes", {})
+        agent_name = attributes.get("agent.name") or data.get("agent.name")
+        session_id = attributes.get("session.id") or data.get("session.id") or data.get("session_id")
+
         parsed.append({
-            "event_timestamp": data.get("event_timestamp"),
+            "event_timestamp": iso_ts,
             "event_timestamp_epoch": epoch,
             "vcpu_hours": float(vcpu) if vcpu is not None else 0.0,
             "memory_gb_hours": float(mem) if mem is not None else 0.0,
-            "session_id": data.get("session.id") or data.get("session_id"),
+            "agent_name": agent_name,
+            "session_id": session_id,
         })
 
     return parsed
+
+
+USAGE_LOG_STREAM = "BedrockAgentCoreRuntime_UsageLogs"
 
 
 def get_usage_log_events_by_time(
@@ -542,8 +604,8 @@ def get_usage_log_events_by_time(
 ) -> list[dict[str, Any]]:
     """Retrieve USAGE_LOGS events for a runtime in a time window.
 
-    Unlike ``get_usage_log_events`` this does not filter by session ID and
-    does not retry — it's designed for the background poller.
+    Queries only the ``BedrockAgentCoreRuntime_UsageLogs`` log stream
+    within the runtime's vendedlogs log group.
 
     Args:
         runtime_id: Agent runtime ID.
@@ -562,6 +624,7 @@ def get_usage_log_events_by_time(
     try:
         params: dict[str, Any] = {
             "logGroupName": log_group,
+            "logStreamNames": [USAGE_LOG_STREAM],
             "startTime": start_time_ms,
             "limit": 500,
         }
@@ -579,5 +642,6 @@ def get_usage_log_events_by_time(
             all_events.extend(response.get("events", []))
 
         return all_events
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to query USAGE_LOGS for runtime %s: %s", runtime_id, e)
         return []

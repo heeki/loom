@@ -27,7 +27,7 @@ frontend/
 │   │   ├── auth.ts             # Cognito auth API (initiateAuth, respondToChallenge, refreshTokens)
 │   │   ├── agents.ts           # Agent CRUD + fetchRoles(), fetchCognitoPools(), fetchModels(), fetchDefaults()
 │   │   ├── invocations.ts      # Session queries + SSE stream consumer (with auth header)
-│   │   ├── logs.ts             # CloudWatch log queries
+│   │   ├── logs.ts             # CloudWatch log queries: `getSessionLogs` (limit 5000, optional `noCache`), `getAgentLogs` (optional stream, `noCache`), `listLogStreams`
 │   │   ├── mcp.ts              # MCP server CRUD, tools, access, test connection
 │   │   ├── a2a.ts              # A2A agent CRUD, test connection, card refresh, access
 │   │   ├── memories.ts         # Memory resource CRUD + refresh
@@ -42,7 +42,7 @@ frontend/
 │   │   ├── useAgents.ts        # Agent list state + CRUD actions
 │   │   ├── useSessions.ts      # Session list state per agent
 │   │   ├── useInvoke.ts        # Streaming invocation state + AbortController
-│   │   ├── useLogs.ts          # Session log fetching
+│   │   ├── useLogs.ts          # On-demand session and stream log fetching with optional cache-busting (`noCache` parameter appends `_t` timestamp)
 │   │   ├── useDeployment.ts    # Agent config, credential providers, integrations hooks
 │   │   ├── useMcpServers.ts   # MCP server list state + CRUD actions
 │   │   └── useA2aAgents.ts  # A2A agent list with auto-fetch, CRUD callbacks
@@ -69,7 +69,7 @@ frontend/
 │   │   ├── LatencySummary.tsx  # Invocation metrics (timing + token usage + cost)
 │   │   ├── SessionTable.tsx    # Clickable session list
 │   │   ├── InvocationTable.tsx # Invocation timing data + token/cost columns
-│   │   └── LogViewer.tsx       # Scrollable log viewer
+│   │   └── LogViewer.tsx       # Paginated log viewer with toggleable line numbers and timestamps
 │   ├── pages/
 │   │   ├── AgentListPage.tsx   # Agents persona: registration form + agent grid
 │   │   ├── AgentDetailPage.tsx # Sessions, latency, invoke, response
@@ -486,7 +486,9 @@ Create/edit form with:
 **Content:**
 - Session metadata card — session_id, qualifier, live status badge, created timestamp
 - Invocation table — all invocations with timing data
-- Log viewer — CloudWatch logs filtered to this session, dynamically expanding
+- Log source selector — dropdown to switch between session-filtered logs (service-level) and individual log streams (with simplified stream name display)
+- Log controls — toggle buttons for line numbers (`#` icon, enabled by default) and timestamps (clock icon, enabled by default), plus a Refresh button that cache-busts by appending a `_t` timestamp parameter
+- Log viewer — paginated display (200 lines per page) with first/prev/next/last navigation, global line numbering across pages, and "Showing N–M of T log lines" indicator. Pagination controls appear at top and bottom when content exceeds one page.
 
 ---
 
@@ -502,7 +504,7 @@ Chose lifted state in `App.tsx` over React Router. Persona selection and drill-d
 Full-width stacked layout gives each section appropriate breathing room. Sessions are shown first as primary context, followed by invoke form, latency summary, response pane, and deployment details.
 
 ### Dynamic Expansion: Response Pane and Log Viewer
-Both use plain `div` containers with no `max-height` or `ScrollArea` constraint, letting content grow naturally.
+Both use plain `div` containers with no `max-height` or `ScrollArea` constraint, letting content grow naturally. The log viewer paginates at 200 lines per page with navigation controls to avoid rendering performance issues with large log sets.
 
 ### AgentCard Grid Stability
 The delete confirmation uses absolute positioning (`absolute inset-x-0 bottom-0`) to overlay the card rather than expanding it, preventing layout shifts in the responsive grid.
