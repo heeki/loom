@@ -1,6 +1,6 @@
 # Loom Backend
 
-FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, tag policy management, and tag profile management.
+FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, tag policy management, tag profile management, cost estimation dashboard, and actual runtime cost retrieval from CloudWatch usage logs.
 
 ## Technology Stack
 
@@ -75,7 +75,8 @@ backend/
 │   │   ├── mcp.py           # McpServer, McpTool, McpServerAccess ORM models
 │   │   ├── a2a.py           # A2aAgent, A2aAgentSkill, A2aAgentAccess
 │   │   ├── tag_policy.py    # TagPolicy ORM model (configurable tag policies)
-│   │   └── tag_profile.py   # TagProfile ORM model (named tag presets)
+│   │   ├── tag_profile.py   # TagProfile ORM model (named tag presets)
+│   │   ├── site_setting.py    # SiteSetting ORM model (site-wide settings)
 │   ├── dependencies/
 │   │   └── auth.py          # Auth dependencies (get_current_user, require_scopes, UserInfo)
 │   ├── routers/
@@ -88,6 +89,7 @@ backend/
 │   │   ├── mcp.py           # MCP server CRUD, tool discovery, access control
 │   │   ├── security.py      # Security admin: roles, authorizers, credentials, permissions
 │   │   ├── settings.py      # Tag policy + tag profile CRUD (/api/settings/tags, /api/settings/tag-profiles)
+│   │   ├── costs.py          # Cost dashboard: estimates + actuals from CloudWatch usage logs
 │   │   └── utils.py         # Shared router utilities
 │   └── services/
 │       ├── agentcore.py     # boto3 wrapper: describe, list endpoints, invoke
@@ -180,7 +182,11 @@ Groups related invocations. Uses `session_id` (UUID string) as the primary key �
 
 ### `invocations`
 
-Stores per-invocation timing measurements, token usage, and status. Fields include `client_invoke_time`, `client_done_time`, `agent_start_time`, `cold_start_latency_ms`, `client_duration_ms`, `input_tokens`, `output_tokens`, `estimated_cost`, and `status`. Prompt text, thinking text, and response text are stored per invocation. Token counts use a 4-character-per-token heuristic; cost is computed from per-model pricing data.
+Stores per-invocation timing measurements, token usage, cost breakdowns, and status. Fields include `client_invoke_time`, `client_done_time`, `agent_start_time`, `cold_start_latency_ms`, `client_duration_ms`, `input_tokens`, `output_tokens`, `estimated_cost`, `compute_cpu_cost`, `compute_memory_cost`, `idle_cpu_cost`, `idle_memory_cost`, `stm_cost`, `ltm_cost`, `cost_source`, and `status`. Runtime costs are recomputed from `client_duration_ms` at view time using current pricing defaults. Token counts use a 4-character-per-token heuristic; model cost is computed from per-model pricing data.
+
+### `site_settings`
+
+Stores configurable site-wide settings. Currently includes `cpu_io_wait_discount` (default 75%) which is applied universally to runtime CPU cost calculations.
 
 ## API Endpoints
 
@@ -245,7 +251,17 @@ Stores per-invocation timing measurements, token usage, and status. Fields inclu
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/dashboard/costs` | Aggregate cost data across agents (group filter, time-range filter) |
+| `GET` | `/api/dashboard/costs` | Aggregate estimated costs (group filter, time-range filter, per-agent breakdown) |
+| `POST` | `/api/dashboard/costs/actuals` | Pull actual runtime costs from CloudWatch usage logs (per-session breakdown) |
+
+Runtime costs are recomputed from `client_duration_ms` at view time using current pricing defaults (1 vCPU, 0.5 GB memory, $0.0895/vCPU-hour, $0.00945/GB-hour). The CPU I/O Wait Discount (configurable in Settings, default 75%) is applied universally to CPU costs across both estimates and actuals. Actuals are filtered to only include sessions tracked in Loom.
+
+### Site Settings
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/settings/site` | List all site settings (includes defaults for unset keys) |
+| `PUT` | `/api/settings/site/{key}` | Create or update a site setting |
 
 ### Authentication
 

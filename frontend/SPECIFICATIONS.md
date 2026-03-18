@@ -22,7 +22,7 @@
 frontend/
 ├── src/
 │   ├── api/
-│   │   ├── types.ts            # TypeScript interfaces mirroring backend models (A2aAgent, A2aAgentSkill, A2aAgentAccess, A2aAgentCard)
+│   │   ├── types.ts            # TypeScript interfaces mirroring backend models (A2aAgent, A2aAgentSkill, A2aAgentAccess, A2aAgentCard, CostDashboardResponse, CostActualsResponse, CostActualAgent, CostActualSession, AgentCostSummary, ModelPricing)
 │   │   ├── client.ts           # apiFetch<T>() wrapper + ApiError class, automatic auth token injection, and 401 auto-refresh via `setOnUnauthorized` callback
 │   │   ├── auth.ts             # Cognito auth API (initiateAuth, respondToChallenge, refreshTokens)
 │   │   ├── agents.ts           # Agent CRUD + fetchRoles(), fetchCognitoPools(), fetchModels(), fetchDefaults()
@@ -33,7 +33,7 @@ frontend/
 │   │   ├── memories.ts         # Memory resource CRUD + refresh
 │   │   ├── security.ts         # Security admin: roles, authorizers, credentials, permissions
 │   │   ├── settings.ts        # Settings API: tag policy + tag profile CRUD
-│   │   └── costs.ts           # Cost dashboard + model pricing API
+│   │   └── costs.ts           # Cost dashboard (estimated + actuals) + model pricing API
 │   ├── contexts/
 │   │   ├── AuthContext.tsx      # Cognito auth provider (login, logout, token refresh)
 │   │   ├── TimezoneContext.tsx  # Timezone preference provider + hook
@@ -80,7 +80,7 @@ frontend/
 │   │   ├── A2aAgentsPage.tsx       # A2A agent management with card/access tabs
 │   │   ├── MemoryManagementPage.tsx # Memory persona: memory resource management
 │   │   ├── TaggingPage.tsx         # Tagging persona: tag policy + tag profile CRUD
-│   │   ├── SettingsPage.tsx        # Settings persona: display preferences
+│   │   ├── SettingsPage.tsx        # Settings persona: display preferences + cost estimation settings
 │   │   ├── CostDashboardPage.tsx  # Cost dashboard with time-range selector and per-agent breakdown
 │   │   └── SessionDetailPage.tsx  # Session metadata, invocations, logs
 │   ├── lib/
@@ -119,7 +119,7 @@ The app uses a persona-based single-page architecture with a sidebar for workflo
 | Settings | Settings | Manage display preferences | Always visible | |
 | MCP Servers | Network | Register and manage MCP servers, tools, and access control | `mcp:read` or `mcp:write` | |
 | A2A Agents | Users | Register and manage A2A agents, view Agent Cards, and control access | `a2a:read` or `a2a:write` | |
-| Costs | DollarSign | Cost dashboard with token usage and cost aggregation | `catalog:read` | |
+| Costs | DollarSign | Cost dashboard with estimated costs, actual runtime costs from CloudWatch, and cost estimation settings | `catalog:read` | |
 
 Sidebar items are conditionally rendered based on the user's scopes derived from their Cognito group membership. When auth is not configured, all items are visible.
 
@@ -634,7 +634,7 @@ The invoke panel's credential dropdown includes a "Manual token" sentinel value.
 | View | Persona | Description |
 |------|---------|-------------|
 | A2aAgentsPage | A2A Agents | A2A agent CRUD, agent detail with Agent Card and Access tabs, card/table views |
-| CostDashboardPage | Costs | Cost dashboard with time-range selector (7d/30d/90d/All Time), summary cards (Total Cost, Invocations, Input Tokens, Output Tokens), and per-agent cost breakdown table with sortable columns |
+| CostDashboardPage | Costs | Cost dashboard with time-range selector (7d/30d/90d/All), summary cards (Total Cost, Model Tokens, Runtime, Memory), Estimated Costs table with per-agent breakdown and methodology formulas, Actual Costs for Runtime table with per-session breakdown from CloudWatch usage logs, sortable columns, and two-row detail pattern |
 
 ### Token Usage and Cost Display
 
@@ -642,7 +642,13 @@ The invoke panel's credential dropdown includes a "Manual token" sentinel value.
 - **InvocationTable**: 3 additional columns — Input Tokens, Output Tokens, Est. Cost with formatting helpers.
 - **AgentCard**: READY status badge hidden; cost badge shown when `total_estimated_cost > 0`.
 - **MemoryCard**: ACTIVE status badge hidden for visual cleanliness.
-- **CostDashboardPage**: time-range selector, summary metric cards with compact padding, sortable agent cost table using `SortableTableHead`.
+- **CostDashboardPage**: Two-section cost dashboard:
+  - **Summary cards**: Total Cost (Model + Runtime + Memory), Model Tokens (with invocation count), Runtime (CPU + Mem breakdown), Memory (STM + LTM breakdown).
+  - **Estimated Costs table**: Per-agent breakdown with columns Agent, Model, Invocations, Model Tokens, AgentCore Runtime, AgentCore Memory, Per Invoke, Total. Two-row pattern: summary row + detail sub-row showing token in/out, CPU+Mem split, STM+LTM split. Methodology formulas displayed below header: `Runtime CPU = hours × 1 vCPU × $0.0895 × (1 − I/O wait%)`, `Runtime Mem = hours × 0.5 GB × $0.00945`, `Idle Mem = idle_seconds × 0.5 GB × $0.00945 / 3600`. Sortable columns via `SortableTableHead`.
+  - **Actual Costs for Runtime**: Per-session breakdown with columns Agent, Session, Events, Runtime CPU, Runtime Memory, Total. Two-row pattern: summary + detail sub-row with time range and resource hours (vCPU·h, GB·h). Pull Actuals button with loading timer. Only sessions tracked in Loom are shown. Module-level cache preserves actuals across page navigation. Sortable columns.
+  - Description: "Estimated total cost = model tokens + runtime + memory. Runtime CPU assumes N% I/O wait discount, configurable in Settings. Estimates use 1 vCPU and 0.5 GB memory allocation. Idle cost is memory only."
+  - Time-range selector: 7d, 30d, 90d, All buttons. Changing time range clears cached actuals.
+- **SettingsPage**: CPU I/O Wait Discount input (0–99%) with save-on-blur and Enter key support. Description: "Assumed % of CPU time spent waiting on I/O. Applied as a discount to runtime CPU cost across estimates and actuals."
 
 ---
 

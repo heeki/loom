@@ -59,7 +59,8 @@ backend/
 │   │   ├── mcp.py           # MCP models: McpServer, McpTool, McpServerAccess
 │   │   ├── a2a.py           # A2A models: A2aAgent, A2aAgentSkill, A2aAgentAccess
 │   │   ├── tag_policy.py    # TagPolicy ORM model (configurable resource tagging)
-│   │   └── tag_profile.py   # TagProfile ORM model (named tag presets)
+│   │   ├── tag_profile.py   # TagProfile ORM model (named tag presets)
+│   │   ├── site_setting.py    # SiteSetting ORM model (configurable site-wide settings)
 │   ├── dependencies/
 │   │   ├── __init__.py
 │   │   └── auth.py          # Auth dependencies (get_current_user, require_scopes, UserInfo)
@@ -68,6 +69,7 @@ backend/
 │   │   ├── agents.py        # Agent CRUD + ARN parsing + log group derivation + tag resolution
 │   │   ├── a2a.py           # A2A agent CRUD, Agent Card, skills, access control
 │   │   ├── settings.py      # Settings endpoints (tag policy CRUD, tag profile CRUD)
+│   │   ├── costs.py          # Cost dashboard: estimated costs + actuals from CloudWatch usage logs
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
 │   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
 │   │   ├── memories.py      # Memory resource CRUD + strategy mapping
@@ -346,6 +348,18 @@ Each session contains one or more invocations. Timing measurements and latency d
 | `input_tokens` | INTEGER | Estimated input token count (4 chars/token heuristic) |
 | `output_tokens` | INTEGER | Estimated output token count (4 chars/token heuristic) |
 | `estimated_cost` | REAL | Estimated cost based on model pricing |
+| `compute_cost` | REAL | Deprecated; use compute_cpu_cost + compute_memory_cost |
+| `compute_cpu_cost` | REAL | Runtime CPU cost (recomputed at view time from client_duration_ms) |
+| `compute_memory_cost` | REAL | Runtime memory cost (recomputed at view time from client_duration_ms) |
+| `idle_timeout_cost` | REAL | Total idle timeout cost (memory only) |
+| `idle_cpu_cost` | REAL | Idle CPU cost (always 0; kept for schema compatibility) |
+| `idle_memory_cost` | REAL | Idle memory cost (recomputed from session gaps using current pricing) |
+| `memory_retrievals` | INTEGER | Number of memory retrievals |
+| `memory_events_sent` | INTEGER | Number of memory events sent |
+| `memory_estimated_cost` | REAL | Memory feature estimated cost |
+| `stm_cost` | REAL | Short-term memory cost |
+| `ltm_cost` | REAL | Long-term memory cost |
+| `cost_source` | TEXT | "estimated" (from invoke duration) or "usage_logs" (from CloudWatch) |
 | `status` | TEXT NOT NULL | `pending`, `streaming`, `complete`, `error` |
 | `error_message` | TEXT | Error detail if status is `error` |
 | `created_at` | DATETIME NOT NULL | Invocation creation timestamp |
@@ -359,6 +373,15 @@ Each session contains one or more invocations. Timing measurements and latency d
 **Design decisions:**
 - Prompt text, thinking text, and response text are stored per invocation (`prompt_text`, `thinking_text`, `response_text` columns on the `invocations` table).
 - The `Agent` model retains an integer auto-incrementing PK. The `arn` and `runtime_id` columns serve as natural identifiers when interacting with AWS.
+
+### `site_settings` table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | Internal ID |
+| `key` | TEXT UNIQUE NOT NULL | Setting key (e.g., `cpu_io_wait_discount`) |
+| `value` | TEXT NOT NULL | Setting value |
+| `updated_at` | DATETIME | Last update timestamp |
 
 ---
 
@@ -763,13 +786,35 @@ The `has_token` and `token_source` fields in `session_start` indicate whether an
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/dashboard/costs` | Aggregate cost data across agents. Supports `group` (loom:group tag filter) and `days` (time range: 7, 30, 90, or 0 for all) query parameters. Non-super-admins are restricted to their own group. Returns per-agent cost breakdown with totals. |
+| `GET` | `/api/dashboard/costs` | Aggregate estimated cost data across agents. Supports `group` (loom:group tag filter) and `days` (time range: 7, 30, 90, or 0 for all) query parameters. Non-super-admins are restricted to their own group. Returns per-agent cost breakdown with totals. Recomputes runtime costs from `client_duration_ms` at view time. |
+| `POST` | `/api/dashboard/costs/actuals` | Pull actual runtime costs from CloudWatch usage logs. Returns per-agent, per-session cost breakdown aggregated from 1-second usage log events. Only includes sessions tracked in Loom. |
 
 **Token estimation:** AgentCore does not expose token counts. A heuristic of 4 characters per token is applied to both prompt and response text. Cost is computed as `(input_tokens / 1000 * input_price) + (output_tokens / 1000 * output_price)` using per-model pricing data from `SUPPORTED_MODELS`.
 
-**Model pricing:** Each entry in `SUPPORTED_MODELS` includes `input_price_per_1k_tokens`, `output_price_per_1k_tokens`, and `pricing_as_of` fields. `AGENTCORE_RUNTIME_PRICING` tracks CPU ($0.0895/vCPU-hour) and Memory ($0.00945/GB-hour) rates.
+**Model pricing:** Each entry in `SUPPORTED_MODELS` includes `input_price_per_1k_tokens`, `output_price_per_1k_tokens`, and `pricing_as_of` fields. `AGENTCORE_RUNTIME_PRICING` tracks CPU ($0.0895/vCPU-hour), Memory ($0.00945/GB-hour), default vCPU allocation (1), default memory allocation (0.5 GB), and default idle timeout (900 seconds).
 
-**Agent cost summary:** `AgentResponse` includes a computed `cost_summary` field aggregating `total_input_tokens`, `total_output_tokens`, `total_estimated_cost`, and `total_invocations` across all invocations for the agent.
+**View-time cost recomputation:** Runtime CPU and memory costs are recomputed from `client_duration_ms` at view time using current pricing defaults, so changing defaults retroactively affects all historical data. The `_apply_view_time_costs()` function recalculates both CPU and memory from duration, applying the I/O wait discount to CPU only. `_backfill_idle_costs()` always recomputes idle costs from session gaps to correct stale values from old defaults.
+
+**Cost estimation formulas:**
+- `Runtime CPU = invocation_duration_hours × 1 vCPU × $0.0895/vCPU·h × (1 − I/O wait%)`
+- `Runtime Memory = invocation_duration_hours × 0.5 GB × $0.00945/GB·h`
+- `Idle Memory = idle_seconds × 0.5 GB × $0.00945/GB·h ÷ 3600`
+
+**CPU I/O Wait Discount:** A single configurable site setting (`cpu_io_wait_discount`, default 75%) applied universally to runtime CPU costs across both estimates and actuals. Stored as integer percentage (0–99).
+
+**Actuals from CloudWatch usage logs:** The `POST /api/dashboard/costs/actuals` endpoint queries CloudWatch `BedrockAgentCoreRuntime_UsageLogs` streams for each runtime. Usage events (1-second granularity) are aggregated by `(agent_name, session_id)` from `attributes.agent.name` and `attributes.session.id`. Only sessions that exist in Loom's `invocation_sessions` table are included, filtering out external invocations. Timestamps are normalized from epoch milliseconds or ISO strings to UTC ISO 8601.
+
+**Agent cost summary:** `AgentResponse` includes a computed `cost_summary` field aggregating `total_input_tokens`, `total_output_tokens`, `total_model_cost`, `total_runtime_cost`, `total_memory_cost`, `total_cost`, and `total_invocations` across all invocations for the agent.
+
+### Site Settings
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/settings/site` | List all site settings (includes defaults for unset keys). |
+| `PUT` | `/api/settings/site/{key}` | Create or update a site setting. |
+
+Current site settings:
+- `cpu_io_wait_discount` (default: `75`) — CPU I/O wait discount percentage (0–99). Applied universally to runtime CPU costs.
 
 ### CloudWatch Logs
 
@@ -799,6 +844,8 @@ Wraps `boto3.client('logs')`:
 - `get_stream_log_events(log_group: str, stream_name: str, region: str, ...) -> list[dict]` — retrieves events from a single log stream.
 - `get_log_events(log_group: str, session_id: str, region: str, ...) -> list[dict]` — retrieves events matching the session_id filter pattern across all streams.
 - `parse_agent_start_time(log_events: list[dict]) -> float | None` — parses "Agent invoked - Start time:" pattern; falls back to earliest CloudWatch event timestamp.
+- `get_usage_log_events_by_time(runtime_id, region, start_time_ms, end_time_ms)` — queries CloudWatch `BedrockAgentCoreRuntime_UsageLogs` stream for usage events within a time range.
+- `parse_usage_events(raw_events)` — parses raw CloudWatch log events into structured usage records with vCPU hours, memory GB hours, agent name, session ID, and normalized timestamps.
 
 ### `services/deployment.py`
 
@@ -848,6 +895,7 @@ Core authentication and authorization module. Provides:
 | `memories.py` | `memory:read` | `memory:write` |
 | `security.py` | `security:read` | `security:write` |
 | `settings.py` | `settings:read` | `settings:write` |
+| `costs.py` | `catalog:read` | `catalog:read` |
 | `mcp.py` | `mcp:read` | `mcp:write` |
 | `a2a.py` | `a2a:read` | `a2a:write` |
 | `auth.py` | Public (no guard) | — |

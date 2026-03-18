@@ -1,6 +1,6 @@
 # Loom Frontend
 
-Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, resource tag management, and tag profile management.
+Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, resource tag management, tag profile management, cost estimation dashboard, and actual runtime cost analysis.
 
 ## Prerequisites
 
@@ -62,8 +62,8 @@ The sidebar provides access to persona-based workflows:
 | **Security Admin** | Shield | Manage IAM roles, authorizer configs, credentials, permission requests |
 | **MCP Servers** | Network | Register and manage MCP servers with OAuth2 auth, tool discovery, and access control |
 | **A2A Agents** | Users | Register and manage A2A agents with OAuth2 auth, Agent Card display, and access control |
-| **Costs** | DollarSign | Cost dashboard with token usage tracking and per-agent cost breakdown |
-| **Settings** | Settings | Manage display preferences (theme, timezone) |
+| **Costs** | DollarSign | Cost dashboard with estimated costs, actual runtime costs from CloudWatch, and cost settings |
+| **Settings** | Settings | Manage display preferences (theme, timezone) and cost estimation settings (CPU I/O wait discount) |
 
 The sidebar also includes a user indicator (when authenticated), admin View As dropdown (simulates specific users like demo-admin-1, demo-user-1 with their group-based scopes), live clock, and version badge. Theme and timezone are configured on the Settings page. Each listing page has a card/table view toggle; the selection persists per-page across persona switches.
 
@@ -125,7 +125,7 @@ src/
 │   ├── MemoryManagementPage.tsx # Memory resource management
 │   ├── McpServersPage.tsx      # MCP server management with tool/access tabs
 │   ├── A2aAgentsPage.tsx      # A2A agent management with card/access tabs
-│   ├── SettingsPage.tsx        # Tag profile management
+│   ├── SettingsPage.tsx        # Display preferences + cost estimation settings
 │   └── SessionDetailPage.tsx   # Session metadata, invocations, logs
 ├── lib/          # Shared utilities (cn(), format helpers, status mapping, error mapping)
 ├── App.tsx       # Root: auth gate + persona sidebar + navigation
@@ -154,7 +154,7 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 - `api/a2a.ts` — A2A agent operations: CRUD, test connection, card retrieval/refresh, skills, access rules
 - `api/mcp.ts` — MCP server operations: CRUD, test connection, tool discovery/refresh, access rule management
 - `api/settings.ts` — Tag policy and tag profile operations: list, create, update, delete
-- `api/costs.ts` — Cost dashboard and model pricing API: `fetchCostDashboard`, `fetchModelPricing`
+- `api/costs.ts` — Cost dashboard API: `fetchCostDashboard` (estimated costs), `fetchCostActuals` (actual runtime costs from CloudWatch usage logs), `fetchModelPricing`
 - `api/types.ts` — TypeScript interfaces including AgentResponse (with `model_id`, `tags`), SSESessionStart (with `has_token`, `token_source`), AuthorizerCredential, ManagedRole, PermissionRequestResponse, MemoryResponse (with `tags`), MemoryCreateRequest (with `tags`), MemoryStrategyRequest, McpServer, McpTool, McpServerAccess, TagPolicy, TagPolicyCreateRequest, TagPolicyUpdateRequest, TagProfile, TagProfileCreateRequest
 
 ### Hooks
@@ -198,8 +198,8 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 | MemoryManagementPage | Memory | Memory resource create/import form (with tag profile selector), card/table list with tag badges and multi-select tag filters |
 | McpServersPage | MCP Servers | MCP server CRUD, server detail with Tools and Access tabs, card/table views |
 | A2aAgentsPage | A2A Agents | A2A agent CRUD, Agent Card detail, Access control tabs |
-| CostDashboardPage | Costs | Time-range selector, summary cards, per-agent cost table with sortable columns |
-| SettingsPage | Settings | Display preferences (theme, timezone) |
+| CostDashboardPage | Costs | Estimated costs table (per-agent breakdown with methodology formulas), actual runtime costs table (per-session from CloudWatch), summary cards, time-range selector, sortable columns |
+| SettingsPage | Settings | Display preferences (theme, timezone), cost estimation settings (CPU I/O wait discount) |
 
 ### Session Liveness
 
