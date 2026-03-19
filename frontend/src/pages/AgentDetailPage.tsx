@@ -40,8 +40,6 @@ export function AgentDetailPage({
     <div className="space-y-4">
       {/* Sessions — full width across top */}
       <section>
-        <h3 className="text-sm font-medium mb-2">Sessions</h3>
-        <Separator className="mb-4" />
         <SessionTable
           sessions={sessions}
           onSelectSession={onSelectSession}
@@ -51,6 +49,7 @@ export function AgentDetailPage({
 
       {/* Invoke form */}
       <InvokePanel
+        agentId={agent.id}
         qualifiers={agent.available_qualifiers}
         sessions={sessions}
         isStreaming={isStreaming}

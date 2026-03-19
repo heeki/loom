@@ -68,11 +68,13 @@ loom/
 │   │   │   ├── mcp.py
 │   │   │   ├── security.py
 │   │   │   ├── settings.py
+│   │   │   ├── traces.py
 │   │   │   └── utils.py
 │   │   └── services/
 │   │       ├── agentcore.py
 │   │       ├── a2a.py
 │   │       ├── cloudwatch.py    # CloudWatch log retrieval with pagination, session-filtered queries, and usage log parsing
+│   │       ├── otel.py          # OTEL log parsing from CloudWatch otel-rt-logs stream
 │   │       ├── mcp.py
 │   │       ├── memory.py
 │   │       ├── secrets.py
@@ -259,7 +261,7 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - `trace_invocation()` wraps each handler invocation with a root span carrying `agent.session_id` and `agent.invocation_id` attributes.
 - Noop mode when running locally without the `opentelemetry-instrument` wrapper — no errors, no performance overhead.
 - `OTEL_SERVICE_NAME` is automatically set to the agent name at deploy time.
-- `AGENT_OBSERVABILITY_ENABLED` is set to `true` at deploy time, which activates the `aws-opentelemetry-distro` export pipeline (X-Ray traces, CloudWatch logs/metrics).
+- `AGENT_OBSERVABILITY_ENABLED` is set to `true` at deploy time, which activates the `aws-opentelemetry-distro` export pipeline (OTEL traces exported to CloudWatch logs/metrics).
 - Console script shebang fix: the build pipeline rewrites `opentelemetry-instrument` (and `opentelemetry-bootstrap`) scripts with a portable `#!/usr/bin/env python3` shebang so they execute correctly on the Linux-based AgentCore Runtime container.
 - Unit tests for telemetry setup idempotency, span creation, hook lifecycle, shebang fix, and noop operation.
 - **AgentCore Memory Integration:** `MemoryHook` is a Strands `HookProvider` that registers `BeforeInvocationEvent` and `AfterInvocationEvent` callbacks for automatic memory operations. Before invocation: retrieves memory records via `retrieve_memory_records` using the last user message as search query. After invocation: creates events in memory for each message in the conversation via `create_event`. Emits `LOOM_MEMORY_TELEMETRY: retrievals=N, events_sent=M` structured log line for cost tracking (always emitted, even when counters are 0). All operations logged at INFO level for visibility. Graceful degradation: AccessDeniedException and other errors are caught and logged without interrupting the agent invocation.
@@ -420,7 +422,15 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Frontend cost dashboard: new `CostDashboardPage` with time-range selector (7d/30d/90d/All), summary cards (Total Cost, Model Tokens, Runtime, Memory), estimated costs table with sortable columns and methodology formulas, actual costs section with separate Runtime (collapsible agent groups) and Memory (consolidated per-resource) sub-sections, Pull Actuals button with loading timer. Platform catalog page includes estimates disclaimer.
 - Costs sidebar item: new navigation entry (above Settings) visible to users with `catalog:read` scope.
 
-### Phase 16 — Advanced Operations
+### Phase 16 — Trace Visualization *(Complete)*
+- Backend OTEL log parsing service (`services/otel.py`): fetches OTEL log records from the CloudWatch `otel-rt-logs` stream via `filter_log_events`. Parses JSON log bodies containing `traceId`, `spanId`, `observedTimeUnixNano`, `body` (string or dict with input/output), `attributes` (with `session.id`), and `scope.name`. Bodies with both `input` and `output` keys are split into two separate events for accurate event counting. Groups events by trace ID for list view and by span ID for detail view.
+- Backend traces router (`routers/traces.py`): `GET /api/agents/{id}/sessions/{sid}/traces` fetches all OTEL events from the log stream (single fetch, no filter), then filters by `session.id` in Python. Returns trace summaries with trace ID, start/end time, duration, span count, and event count. `GET /api/agents/{id}/traces/{tid}` fetches events filtered by trace ID and returns full trace detail with per-span event lists, scopes, and timing.
+- Frontend Logs/Traces tabbed layout on `SessionDetailPage` using shadcn Tabs. Logs tab preserves existing log viewer unchanged. Traces tab shows trace list (Trace ID, Start Time, End Time, Duration, Spans, Events) with lazy loading on first tab activation. Description text prompts users to click a trace ID for detail.
+- Interactive `TraceGraph` component: CSS-based waterfall timeline with colored horizontal bars showing span durations relative to trace start. 8-color palette for span differentiation. Hover over spans reveals a persistent detail panel (Span ID, Scope, Duration, Events, Start/End times). Click-to-select spans with event detail expansion. Left panel shows span list with divide styling; right panel shows events with expand/collapse all toggle. Event detail lines show timestamp, span ID link, and scope/source.
+- `InvocationDetailPage` extended with Traces tab showing traces scoped to that session.
+- 12 backend tests covering trace router endpoints (7) and OTEL log parsing (5), including string body handling and input/output splitting.
+
+### Phase 17 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

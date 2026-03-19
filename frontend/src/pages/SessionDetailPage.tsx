@@ -1,8 +1,8 @@
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -16,7 +16,10 @@ import {
 import { Clock, Hash, RefreshCw } from "lucide-react";
 import { InvocationTable } from "@/components/InvocationTable";
 import { LogViewer } from "@/components/LogViewer";
+import { TraceList } from "@/components/TraceList";
+import { TraceGraph } from "@/components/TraceGraph";
 import { useLogs } from "@/hooks/useLogs";
+import { useTraces } from "@/hooks/useTraces";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import type { SessionResponse, AgentResponse, LogStreamInfo } from "@/api/types";
@@ -74,9 +77,19 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
     fetchStreamLogs,
     fetchVendedLogs,
   } = useLogs();
+  const {
+    traces,
+    tracesLoading,
+    selectedTrace,
+    traceDetailLoading,
+    fetchSessionTraces,
+    fetchTraceDetail,
+    setSelectedTrace,
+  } = useTraces();
   const { timezone } = useTimezone();
   const [showTimestamp, setShowTimestamp] = useState(true);
   const [showLineNumbers, setShowLineNumbers] = useState(true);
+  const tracesFetchedRef = useRef(false);
 
   const qualifier = session.qualifier || "DEFAULT";
 
@@ -106,6 +119,17 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
     } else {
       void fetchStreamLogs(agent.id, qualifier, value);
     }
+  };
+
+  const handleTabChange = (tab: string) => {
+    if (tab === "traces" && !tracesFetchedRef.current) {
+      tracesFetchedRef.current = true;
+      void fetchSessionTraces(agent.id, session.session_id);
+    }
+  };
+
+  const handleSelectTrace = (traceId: string) => {
+    void fetchTraceDetail(agent.id, traceId);
   };
 
   const selectedValue = activeStream || SESSION_LOGS_VALUE;
@@ -152,58 +176,59 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
         </CardContent>
       </Card>
 
-      <div>
-        <h3 className="text-sm font-medium mb-2">Invocations</h3>
-        <Separator className="mb-4" />
-        <InvocationTable invocations={session.invocations} onSelectInvocation={onSelectInvocation} />
-      </div>
+      <InvocationTable invocations={session.invocations} onSelectInvocation={onSelectInvocation} />
 
-      <div>
+      <Tabs defaultValue="logs" onValueChange={handleTabChange}>
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-3">
-            <h3 className="text-sm font-medium">Logs</h3>
-            <Select value={selectedValue} onValueChange={handleStreamChange}>
-              <SelectTrigger size="sm" className="text-xs max-w-[680px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectLabel>Source</SelectLabel>
-                  <SelectItem value={SESSION_LOGS_VALUE}>
-                    Service-level logs (filtered by session)
-                  </SelectItem>
-                </SelectGroup>
-                {sortedStreams.length > 0 && (
-                  <>
-                    <SelectSeparator />
-                    <SelectGroup>
-                      <SelectLabel>Log Streams</SelectLabel>
-                      {sortedStreams.map((s) => (
-                        <SelectItem key={s.name} value={s.name}>
-                          {formatStreamName(s.name, s.last_event_time, timezone)}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </>
-                )}
-                {vendedSources.length > 0 && (
-                  <>
-                    <SelectSeparator />
-                    <SelectGroup>
-                      <SelectLabel>Vended Logs</SelectLabel>
-                      {vendedSources.map((src) => (
-                        <SelectItem key={src.key} value={src.key}>
-                          {src.label}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </>
-                )}
-              </SelectContent>
-            </Select>
-            {streamsLoading && (
-              <span className="text-xs text-muted-foreground">Loading streams...</span>
-            )}
+            <TabsList>
+              <TabsTrigger value="logs">Logs</TabsTrigger>
+              <TabsTrigger value="traces">Traces</TabsTrigger>
+            </TabsList>
+            <TabsContent value="logs" className="mt-0 flex items-center gap-3">
+              <Select value={selectedValue} onValueChange={handleStreamChange}>
+                <SelectTrigger size="sm" className="text-xs max-w-[680px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectLabel>Source</SelectLabel>
+                    <SelectItem value={SESSION_LOGS_VALUE}>
+                      Service-level logs (filtered by session)
+                    </SelectItem>
+                  </SelectGroup>
+                  {sortedStreams.length > 0 && (
+                    <>
+                      <SelectSeparator />
+                      <SelectGroup>
+                        <SelectLabel>Log Streams</SelectLabel>
+                        {sortedStreams.map((s) => (
+                          <SelectItem key={s.name} value={s.name}>
+                            {formatStreamName(s.name, s.last_event_time, timezone)}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </>
+                  )}
+                  {vendedSources.length > 0 && (
+                    <>
+                      <SelectSeparator />
+                      <SelectGroup>
+                        <SelectLabel>Vended Logs</SelectLabel>
+                        {vendedSources.map((src) => (
+                          <SelectItem key={src.key} value={src.key}>
+                            {src.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </>
+                  )}
+                </SelectContent>
+              </Select>
+              {streamsLoading && (
+                <span className="text-xs text-muted-foreground">Loading streams...</span>
+              )}
+            </TabsContent>
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -234,17 +259,45 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
             </Button>
           </div>
         </div>
-        <Separator className="mb-4" />
-        <div className="text-xs text-muted-foreground mb-2">
-          {activeStream.startsWith("vended:")
-            ? <>Showing vended logs: {vendedSources.find((s) => s.key === activeStream)?.label ?? activeStream}</>
-            : activeStream
-              ? <>Showing stream: {formatStreamName(activeStream, undefined, timezone)}</>
-              : <>Showing service-level logs matching session <span className="font-mono">{session.session_id}</span></>
-          }
-        </div>
-        <LogViewer logs={logs} loading={logsLoading} showTimestamp={showTimestamp} showLineNumbers={showLineNumbers} />
-      </div>
+        <TabsContent value="logs" className="mt-0">
+          <div className="text-xs text-muted-foreground mb-2">
+            {activeStream.startsWith("vended:")
+              ? <>Showing vended logs: {vendedSources.find((s) => s.key === activeStream)?.label ?? activeStream}</>
+              : activeStream
+                ? <>Showing stream: {formatStreamName(activeStream, undefined, timezone)}</>
+                : <>Showing service-level logs matching session <span className="font-mono">{session.session_id}</span></>
+            }
+          </div>
+          <LogViewer logs={logs} loading={logsLoading} showTimestamp={showTimestamp} showLineNumbers={showLineNumbers} />
+        </TabsContent>
+
+        <TabsContent value="traces" className="mt-0">
+          {selectedTrace ? (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm font-medium">
+                  Trace: <span className="font-mono">{selectedTrace.trace_id}</span>
+                </h4>
+                <Button variant="ghost" size="sm" onClick={() => setSelectedTrace(null)}>
+                  Back to list
+                </Button>
+              </div>
+              <TraceGraph trace={selectedTrace} loading={traceDetailLoading} />
+            </div>
+          ) : (
+            <>
+              <div className="text-xs text-muted-foreground mb-2">
+                Showing OTEL traces for session <span className="font-mono">{session.session_id}</span>. Click a trace ID to view detailed span and event information.
+              </div>
+              <TraceList
+                traces={traces}
+                loading={tracesLoading}
+                onSelectTrace={handleSelectTrace}
+              />
+            </>
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

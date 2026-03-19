@@ -155,6 +155,7 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 - `api/mcp.ts` — MCP server operations: CRUD, test connection, tool discovery/refresh, access rule management
 - `api/settings.ts` — Tag policy and tag profile operations: list, create, update, delete
 - `api/costs.ts` — Cost dashboard API: `fetchCostDashboard` (estimated costs), `fetchCostActuals` (actual runtime + memory costs from CloudWatch logs), `fetchModelPricing`
+- `api/traces.ts` — Trace API: `getSessionTraces` (list traces for a session), `getTraceDetail` (full trace with spans)
 - `api/types.ts` — TypeScript interfaces including AgentResponse (with `model_id`, `tags`), SSESessionStart (with `has_token`, `token_source`), AuthorizerCredential, ManagedRole, PermissionRequestResponse, MemoryResponse (with `tags`), MemoryCreateRequest (with `tags`), MemoryStrategyRequest, McpServer, McpTool, McpServerAccess, TagPolicy, TagPolicyCreateRequest, TagPolicyUpdateRequest, TagProfile, TagProfileCreateRequest
 
 ### Hooks
@@ -163,6 +164,7 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 - `useSessions(agentId)` — Session list that re-fetches on agent change
 - `useInvoke(authorizerName?)` — Streaming state management with `AbortController`, supports credential_id and bearer_token, provides friendly error messages with authorizer-specific hints
 - `useLogs()` — On-demand session log fetching with `noCache` support for cache-busting refresh, vended log source management, stream log retrieval
+- `useTraces()` — Trace list and detail state management with lazy loading
 - `useA2aAgents()` — A2A agent list with auto-fetch, CRUD callbacks, toast notifications
 - `useMcpServers()` — MCP server list with auto-fetch, CRUD callbacks, toast notifications
 - `useDeployment()` — Agent config, credential providers, and integrations
@@ -185,6 +187,8 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 - **A2aAccessControl** — Per-persona access control for A2A agent skills with all_skills/selected_skills modes.
 - **MemoryManagementPanel** — Create/import form with JSON import/export and strategy configuration (type, name, description, namespace), memory card/table list with status badges (CREATING/ACTIVE/FAILED/DELETING), refresh and delete actions with inline confirmation overlay.
 - **LogViewer** — Paginated CloudWatch log display (200 lines/page) with toggleable line numbers and timestamps, log stream selector with timezone-aware timestamps, vended log source selector (runtime APPLICATION_LOGS, runtime USAGE_LOGS, memory APPLICATION_LOGS), and cache-busting refresh support.
+- **TraceList** — Trace summary table with columns: Trace ID, Start Time, End Time, Duration, Spans, Events. Clickable rows to select a trace for detailed view.
+- **TraceGraph** — Interactive CSS waterfall timeline showing span durations relative to trace start. 8-color palette for span differentiation. Persistent hover detail panel (Span ID, Scope, Duration, Events, Start/End). Left panel: span list with divide styling. Right panel: per-span events with expand/collapse all toggle. Event detail lines: timestamp, span ID link, scope/source.
 
 ### Views
 
@@ -193,7 +197,8 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 | LoginPage | — | Cognito login + set new password |
 | CatalogPage | Platform Catalog | Agents (with multi-select tag filter bar), memory resources (with tag badges), MCP servers, A2A agents sections |
 | AgentDetailPage | Platform Catalog | Sessions, invoke, latency, streaming response, deployment details |
-| SessionDetailPage | Platform Catalog | Session metadata, invocation timing, paginated CloudWatch logs with line numbers, stream selector (with timezone-aware timestamps), and vended log sources (runtime app/usage logs, memory app logs) |
+| SessionDetailPage | Platform Catalog | Session metadata, invocation timing, tabbed Logs/Traces view with paginated CloudWatch logs, stream selector, vended log sources, and interactive OTEL trace visualization (waterfall timeline) |
+| InvocationDetailPage | Platform Catalog | Invocation details, cost breakdown, prompt/response, Traces tab with invocation-scoped trace graph |
 | AgentListPage | Agents | Deploy/Import form (with tag profile selector) + agent card/table grid with multi-select tag filters |
 | SecurityAdminPage | Security | Roles, authorizers, credentials, permissions |
 | MemoryManagementPage | Memory | Memory resource create/import form (with tag profile selector), card/table list with tag badges and multi-select tag filters |

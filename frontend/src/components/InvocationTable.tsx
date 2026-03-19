@@ -24,9 +24,9 @@ function formatTokens(count: number | null | undefined): string {
 
 function formatCost(cost: number | null | undefined): string {
   if (cost == null) return "—";
-  if (cost === 0) return "$0.00";
-  if (cost < 0.01) return `$${cost.toFixed(6)}`;
-  return `$${cost.toFixed(4)}`;
+  if (cost === 0) return "~$0.00";
+  if (cost < 0.01) return `~$${cost.toFixed(6)}`;
+  return `~$${cost.toFixed(4)}`;
 }
 
 function statusVariant(status: string): "default" | "secondary" | "destructive" | "outline" {

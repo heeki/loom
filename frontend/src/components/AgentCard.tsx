@@ -113,8 +113,8 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
             {agent.cost_summary && agent.cost_summary.total_cost > 0 && (
               <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0 font-mono">
                 {agent.cost_summary.total_cost < 0.01
-                  ? `$${agent.cost_summary.total_cost.toFixed(6)}`
-                  : `$${agent.cost_summary.total_cost.toFixed(4)}`}
+                  ? `~$${agent.cost_summary.total_cost.toFixed(6)}`
+                  : `~$${agent.cost_summary.total_cost.toFixed(4)}`}
               </Badge>
             )}
           </div>

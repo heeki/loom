@@ -8,8 +8,6 @@ import { listSiteSettings } from "@/api/settings";
 import type { CostDashboardResponse, CostActualsResponse, AgentCostSummary, CostActualAgent } from "@/api/types";
 import type { SortDirection } from "@/components/SortableCardGrid";
 import { useAuth } from "@/contexts/AuthContext";
-import { useTimezone } from "@/contexts/TimezoneContext";
-import { formatTimestamp } from "@/lib/format";
 import { ScrollText, Loader2, ChevronRight, ChevronDown } from "lucide-react";
 
 interface CostDashboardPageProps {
@@ -17,10 +15,10 @@ interface CostDashboardPageProps {
 }
 
 function formatCost(cost: number): string {
-  if (cost === 0) return "$0.00";
-  if (cost < 0.01) return `$${cost.toFixed(6)}`;
-  if (cost < 1) return `$${cost.toFixed(4)}`;
-  return `$${cost.toFixed(2)}`;
+  if (cost === 0) return "~$0.00";
+  if (cost < 0.01) return `~$${cost.toFixed(6)}`;
+  if (cost < 1) return `~$${cost.toFixed(4)}`;
+  return `~$${cost.toFixed(2)}`;
 }
 
 function formatTokens(count: number): string {
@@ -82,7 +80,6 @@ let _actualsCache: CostActualsResponse | null = null;
 
 export function CostDashboardPage({ readOnly: _readOnly }: CostDashboardPageProps) {
   const { user: _user } = useAuth();
-  const { timezone } = useTimezone();
   const [data, setData] = useState<CostDashboardResponse | null>(null);
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(false);

@@ -33,7 +33,8 @@ frontend/
 │   │   ├── memories.ts         # Memory resource CRUD + refresh
 │   │   ├── security.ts         # Security admin: roles, authorizers, credentials, permissions
 │   │   ├── settings.ts        # Settings API: tag policy + tag profile CRUD
-│   │   └── costs.ts           # Cost dashboard (estimated + actuals) + model pricing API
+│   │   ├── costs.ts           # Cost dashboard (estimated + actuals) + model pricing API
+│   │   └── traces.ts          # Trace API: `getSessionTraces`, `getTraceDetail`
 │   ├── contexts/
 │   │   ├── AuthContext.tsx      # Cognito auth provider (login, logout, token refresh)
 │   │   ├── TimezoneContext.tsx  # Timezone preference provider + hook
@@ -45,7 +46,8 @@ frontend/
 │   │   ├── useLogs.ts          # On-demand session and stream log fetching with optional cache-busting (`noCache` parameter appends `_t` timestamp)
 │   │   ├── useDeployment.ts    # Agent config, credential providers, integrations hooks
 │   │   ├── useMcpServers.ts   # MCP server list state + CRUD actions
-│   │   └── useA2aAgents.ts  # A2A agent list with auto-fetch, CRUD callbacks
+│   │   ├── useA2aAgents.ts  # A2A agent list with auto-fetch, CRUD callbacks
+│   │   └── useTraces.ts    # Trace list + detail state management
 │   ├── components/
 │   │   ├── ui/                 # shadcn primitives + searchable-select.tsx + multi-select.tsx + add-filter-dropdown.tsx
 │   │   ├── SortableCardGrid.tsx — Drag-to-reorder card grid using @dnd-kit, default alphabetical sort, SortButton, localStorage persistence
@@ -69,7 +71,9 @@ frontend/
 │   │   ├── LatencySummary.tsx  # Invocation metrics (timing + token usage + cost)
 │   │   ├── SessionTable.tsx    # Clickable session list
 │   │   ├── InvocationTable.tsx # Invocation timing data + token/cost columns
-│   │   └── LogViewer.tsx       # Paginated log viewer with toggleable line numbers and timestamps
+│   │   ├── LogViewer.tsx       # Paginated log viewer with toggleable line numbers and timestamps
+│   │   ├── TraceList.tsx      # Trace summary table (Trace ID, Start/End Time, Duration, Spans, Events) with clickable rows
+│   │   └── TraceGraph.tsx     # Interactive waterfall timeline with colored span bars, hover detail panel, click-to-select events, expand/collapse all
 │   ├── pages/
 │   │   ├── AgentListPage.tsx   # Agents persona: registration form + agent grid
 │   │   ├── AgentDetailPage.tsx # Sessions, latency, invoke, response
@@ -82,7 +86,8 @@ frontend/
 │   │   ├── TaggingPage.tsx         # Tagging persona: tag policy + tag profile CRUD
 │   │   ├── SettingsPage.tsx        # Settings persona: display preferences + cost estimation settings
 │   │   ├── CostDashboardPage.tsx  # Cost dashboard with time-range selector and per-agent breakdown
-│   │   └── SessionDetailPage.tsx  # Session metadata, invocations, logs
+│   │   ├── SessionDetailPage.tsx  # Session metadata, invocations, tabbed Logs/Traces view
+│   │   └── InvocationDetailPage.tsx  # Invocation details, cost breakdown, Traces tab
 │   ├── lib/
 │   │   ├── utils.ts            # shadcn cn() utility
 │   │   ├── format.ts           # Timezone-aware timestamp + metric formatters
@@ -487,7 +492,9 @@ Create/edit form with:
 **Content:**
 - Session metadata card — session_id, qualifier, live status badge, created timestamp
 - Invocation table — all invocations with timing data
-- Log source selector — dropdown to switch between session-filtered logs (service-level), individual log streams (with simplified stream name display and timezone-aware timestamps), and vended log sources (runtime APPLICATION_LOGS, runtime USAGE_LOGS, memory APPLICATION_LOGS)
+- Tabbed layout (shadcn Tabs) with **Logs** and **Traces** tabs, defaulting to Logs
+- **Logs tab**: Log source selector — dropdown to switch between session-filtered logs (service-level), individual log streams (with simplified stream name display and timezone-aware timestamps), and vended log sources (runtime APPLICATION_LOGS, runtime USAGE_LOGS, memory APPLICATION_LOGS)
+- **Traces tab**: Trace list table (Trace ID, Start Time, End Time, Duration, Spans, Events). Description text indicates clicking a trace ID for detail. Clicking a trace shows the interactive `TraceGraph` waterfall timeline with per-span event inspection. Traces are lazy-loaded on first tab activation.
 - Log controls — toggle buttons for line numbers (`#` icon, enabled by default) and timestamps (clock icon, enabled by default), plus a Refresh button that cache-busts by appending a `_t` timestamp parameter
 - Log viewer — paginated display (200 lines per page) with first/prev/next/last navigation, global line numbering across pages, and "Showing N–M of T log lines" indicator. Pagination controls appear at top and bottom when content exceeds one page.
 

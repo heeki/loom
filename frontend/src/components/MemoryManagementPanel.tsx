@@ -118,6 +118,7 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
   const [tagValues, setTagValues] = useState<Record<string, string>>({});
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
   const [tagProfiles, setTagProfiles] = useState<TagProfile[]>([]);
+  const [selectedTagProfileId, setSelectedTagProfileId] = useState<string | undefined>(undefined);
   const [tagFilters, setTagFilters] = useState<Record<string, string[]>>(() => {
     try { return JSON.parse(localStorage.getItem("loom:tagFilters:memories") || "{}") as Record<string, string[]>; } catch { return {}; }
   });
@@ -464,7 +465,7 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
                       if (parsed.tags) {
                         const match = tagProfiles.find((p) => p.name === parsed.tags);
                         if (match) {
-                          sessionStorage.setItem("loom:selectedTagProfileId", match.id.toString());
+                          setSelectedTagProfileId(match.id.toString());
                         }
                       }
                       if (Array.isArray(parsed.strategies)) {
@@ -491,9 +492,8 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
                     if (formName) result.name = formName;
                     if (formDescription) result.description = formDescription;
                     if (formExpiryDays !== 7) result.event_expiry_duration = formExpiryDays;
-                    const profileId = sessionStorage.getItem("loom:selectedTagProfileId");
-                    if (profileId) {
-                      const profile = tagProfiles.find((p) => p.id.toString() === profileId);
+                    if (selectedTagProfileId) {
+                      const profile = tagProfiles.find((p) => p.id.toString() === selectedTagProfileId);
                       if (profile) result.tags = profile.name;
                     }
                     if (formStrategies.length > 0) {
@@ -548,7 +548,7 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
                 </div>
 
                 {/* Resource Tags */}
-                <ResourceTagFields onChange={setTagValues} groupRestriction={groupRestriction} />
+                <ResourceTagFields onChange={setTagValues} profileId={selectedTagProfileId} groupRestriction={groupRestriction} />
 
                 {/* Long-Term Strategies */}
                 <div className="space-y-2">

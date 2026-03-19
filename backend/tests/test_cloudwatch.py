@@ -163,16 +163,13 @@ class TestGetLogEvents(unittest.TestCase):
         ]
 
         target_session_id = 'target-session'
+        # CloudWatch filterPattern filters server-side; mock returns only matching events
         mock_logs_client.filter_log_events.return_value = {
             'events': [
                 {
                     'timestamp': 1708000001000,
                     'message': f'Log for {target_session_id}'
                 },
-                {
-                    'timestamp': 1708000002000,
-                    'message': 'Log for other-session'
-                }
             ]
         }
 

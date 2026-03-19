@@ -47,7 +47,8 @@ Loom is an enterprise-grade platform for building, deploying, and operating AI a
 - Model pricing metadata for all supported Anthropic and Amazon models
 
 ### Observability and UX
-- OpenTelemetry observability with ADOT auto-instrumentation
+- OpenTelemetry observability with ADOT auto-instrumentation and OTEL trace visualization
+- Interactive waterfall timeline for inspecting per-span events from OTEL log records
 - Card/table view toggle on all listing pages
 - Drag-to-reorder cards with persistent ordering
 - JSON import/export on deploy and create forms

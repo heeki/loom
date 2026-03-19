@@ -429,7 +429,7 @@ function AppContent() {
       <div className="flex-1 flex flex-col overflow-y-auto">
         {activePersona === "catalog" && selectedAgentId !== null && (
           <header className="border-b">
-            <div className="max-w-6xl px-8 py-3 flex items-center justify-between gap-4">
+            <div className="max-w-7xl px-8 py-3 flex items-center justify-between gap-4">
               <nav className="flex items-center gap-1 text-sm text-muted-foreground min-w-0">
                 {breadcrumb.map((item, i) => (
                   <span key={i} className="flex items-center gap-1 min-w-0">
@@ -451,7 +451,7 @@ function AppContent() {
           </header>
         )}
 
-        <main className="max-w-6xl px-8 py-6 flex-1 w-full">
+        <main className="max-w-7xl px-8 py-6 flex-1 w-full">
           {activePersona === "catalog" && (
             <>
               {selectedAgentId !== null && (
