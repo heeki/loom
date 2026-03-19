@@ -70,6 +70,7 @@ backend/
 │   │   ├── a2a.py           # A2A agent CRUD, Agent Card, skills, access control
 │   │   ├── settings.py      # Settings endpoints (tag policy CRUD, tag profile CRUD)
 │   │   ├── costs.py          # Cost dashboard: estimated costs + actuals from CloudWatch usage logs
+│   │   ├── traces.py        # Trace retrieval: OTEL log parsing for trace summaries and span detail
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
 │   │   ├── logs.py          # CloudWatch log browsing with pagination + session log retrieval via stream-name matching
 │   │   ├── memories.py      # Memory resource CRUD + strategy mapping
@@ -80,6 +81,7 @@ backend/
 │       ├── agentcore.py     # Bedrock AgentCore API wrapper
 │       ├── a2a.py           # A2A Agent Card fetching, parsing, connection test
 │       ├── cloudwatch.py    # CloudWatch log retrieval and parsing
+│       ├── otel.py          # OTEL log parsing: fetch events from otel-rt-logs, parse traces and spans
 │       ├── cognito.py       # Cognito OAuth2 token retrieval (client credentials grant)
 │       ├── credential.py    # AgentCore credential provider management
 │       ├── deployment.py    # Agent artifact build, runtime CRUD, secret detection
@@ -105,7 +107,8 @@ backend/
 │   ├── test_security.py     # Security router tests (roles, authorizers)
 │   ├── test_mcp.py          # MCP server CRUD, tools, access control tests
 │   ├── test_scopes.py       # Scope enforcement and GROUP_SCOPES mapping tests
-│   └── test_tags.py         # Tag policy, tag profile, and tag enforcement tests
+│   ├── test_tags.py         # Tag policy, tag profile, and tag enforcement tests
+│   └── test_traces.py       # Trace router + OTEL parsing tests (12 tests)
 ├── etc/
 │   └── environment.sh.example  # Example environment configuration template
 ├── makefile
@@ -827,12 +830,12 @@ Current site settings:
 | `GET` | `/api/agents/{agent_id}/sessions/{session_id}/logs` | Retrieve all logs for a session using stream-name matching with `nextToken` pagination (limit 10000). Falls back to `filterPattern` for shared streams. |
 | `GET` | `/api/agents/{agent_id}/logs/vended` | Retrieve logs from a vended log source (runtime or memory). Accepts `log_group` and `stream` query parameters. |
 
-### Traces (X-Ray)
+### Traces (OTEL Logs)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/traces` | List traces for all invocations in a session. Queries X-Ray by `annotation.agent_invocation_id` for each invocation within the session's time window. Returns trace summaries with trace ID, root span name, duration, span count, status, and correlated invocation ID. |
-| `GET` | `/api/agents/{agent_id}/traces/{trace_id}` | Get full trace detail with all spans. Returns the trace ID, root span info, and a flat list of spans with parent-child relationships, timing, type classification, status, and attributes. |
+| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/traces` | List traces for a session. Fetches all OTEL log records from the `otel-rt-logs` CloudWatch stream (single fetch, no filter), then filters by `session.id` attribute in Python. Returns trace summaries with trace ID, start/end time ISO, duration, span count, and event count. |
+| `GET` | `/api/agents/{agent_id}/traces/{trace_id}` | Get full trace detail. Fetches OTEL log records filtered by trace ID. Returns the trace ID and a list of spans, each with span ID, scopes, start/end times, duration, and a list of events (observed time, severity, scope, body). Bodies with both `input` and `output` keys are split into separate events. |
 
 ---
 
@@ -860,14 +863,13 @@ Wraps `boto3.client('logs')`:
 - `get_memory_log_events(memory_id, region, start_time_ms, end_time_ms)` — queries CloudWatch `BedrockAgentCoreMemory_ApplicationLogs` stream in the vended log group `/aws/vendedlogs/bedrock-agentcore/memory/APPLICATION_LOGS/{memory_id}`. Paginates via `nextToken`.
 - `parse_memory_log_events(raw_events)` — parses memory APPLICATION_LOG events by mapping `body.log` messages to operations: "Retrieving memories." → LTM retrievals, "Succeeded to upsert N records." → records stored, extraction/consolidation tracking. Returns total counts, per-session breakdowns, and computed costs.
 
-### `services/xray.py`
+### `services/otel.py`
 
-Wraps `boto3.client('xray')`:
+Parses OTEL (OpenTelemetry) log records from CloudWatch:
 
-- `get_trace_summaries(region, start_time, end_time, filter_expression)` — queries X-Ray trace summaries within a time window with optional filter expression. Paginates via NextToken.
-- `get_trace_summaries_for_invocations(region, invocation_ids, start_time, end_time)` — queries traces matching a list of invocation IDs using `annotation.agent_invocation_id` filter. Deduplicates by trace ID.
-- `batch_get_traces(region, trace_ids)` — retrieves full trace data via `batch_get_traces` (batches of 5). Returns segments with subsegments.
-- `parse_trace_to_spans(trace)` — flattens X-Ray segments/subsegments into a flat span list with parent-child references, timing, type classification (invocation/model/tool/other), status, and attributes.
+- `fetch_otel_events(log_group, region, filter_pattern, limit)` — fetches log events from the `otel-rt-logs` CloudWatch stream via `filter_log_events`. Always scopes to `logStreamNames: ["otel-rt-logs"]`. Supports optional `filterPattern` for trace ID filtering. Paginates via `nextToken`. Default limit 10000.
+- `parse_otel_traces(raw_events)` — groups raw OTEL log events by `traceId`. Computes per-trace summaries: start/end time, duration, unique span count, and event count (with input/output body splitting for accurate counts). Filters by `session.id` attribute when present.
+- `parse_otel_trace_detail(raw_events)` — groups events by `spanId` within a single trace. For each span: collects scopes, computes start/end times and duration, builds event list with observed time, severity, scope, and body. Bodies containing both `input` and `output` keys are split into two separate events via `_split_body()`.
 
 ### `services/deployment.py`
 

@@ -72,8 +72,8 @@ frontend/
 │   │   ├── SessionTable.tsx    # Clickable session list
 │   │   ├── InvocationTable.tsx # Invocation timing data + token/cost columns
 │   │   ├── LogViewer.tsx       # Paginated log viewer with toggleable line numbers and timestamps
-│   │   ├── TraceList.tsx      # Trace summary table with clickable rows
-│   │   └── TraceGraph.tsx     # SVG waterfall/Gantt trace timeline with click, hover, zoom, collapse
+│   │   ├── TraceList.tsx      # Trace summary table (Trace ID, Start/End Time, Duration, Spans, Events) with clickable rows
+│   │   └── TraceGraph.tsx     # Interactive waterfall timeline with colored span bars, hover detail panel, click-to-select events, expand/collapse all
 │   ├── pages/
 │   │   ├── AgentListPage.tsx   # Agents persona: registration form + agent grid
 │   │   ├── AgentDetailPage.tsx # Sessions, latency, invoke, response
@@ -494,7 +494,7 @@ Create/edit form with:
 - Invocation table — all invocations with timing data
 - Tabbed layout (shadcn Tabs) with **Logs** and **Traces** tabs, defaulting to Logs
 - **Logs tab**: Log source selector — dropdown to switch between session-filtered logs (service-level), individual log streams (with simplified stream name display and timezone-aware timestamps), and vended log sources (runtime APPLICATION_LOGS, runtime USAGE_LOGS, memory APPLICATION_LOGS)
-- **Traces tab**: Trace list table (Trace ID, root span name, start time, duration, span count, status, invocation ID). Clicking a trace shows the interactive `TraceGraph` waterfall timeline. Traces are lazy-loaded on first tab activation.
+- **Traces tab**: Trace list table (Trace ID, Start Time, End Time, Duration, Spans, Events). Description text indicates clicking a trace ID for detail. Clicking a trace shows the interactive `TraceGraph` waterfall timeline with per-span event inspection. Traces are lazy-loaded on first tab activation.
 - Log controls — toggle buttons for line numbers (`#` icon, enabled by default) and timestamps (clock icon, enabled by default), plus a Refresh button that cache-busts by appending a `_t` timestamp parameter
 - Log viewer — paginated display (200 lines per page) with first/prev/next/last navigation, global line numbering across pages, and "Showing N–M of T log lines" indicator. Pagination controls appear at top and bottom when content exceeds one page.
 

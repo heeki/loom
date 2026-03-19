@@ -90,12 +90,12 @@ backend/
 │   │   ├── security.py      # Security admin: roles, authorizers, credentials, permissions
 │   │   ├── settings.py      # Tag policy + tag profile CRUD (/api/settings/tags, /api/settings/tag-profiles)
 │   │   ├── costs.py          # Cost dashboard: estimates + runtime/memory actuals from CloudWatch
-│   │   ├── traces.py         # Trace retrieval: X-Ray trace summaries and span detail
+│   │   ├── traces.py         # Trace retrieval: OTEL log parsing for trace summaries and span detail
 │   │   └── utils.py         # Shared router utilities
 │   └── services/
 │       ├── agentcore.py     # boto3 wrapper: describe, list endpoints, invoke
 │       ├── cloudwatch.py    # CloudWatch log retrieval with pagination, session filtering, usage log parsing, memory log parsing
-│       ├── xray.py          # X-Ray trace retrieval: summaries, batch_get_traces, segment parsing
+│       ├── otel.py          # OTEL log parsing: fetch events from otel-rt-logs stream, parse traces and spans
 │       ├── cognito.py       # Cognito OAuth2 token retrieval
 │       ├── credential.py    # AgentCore credential provider management
 │       ├── deployment.py    # Agent artifact build + runtime CRUD
@@ -342,12 +342,12 @@ Agent list responses include a computed `active_session_count` field based on `L
 | `GET` | `/api/agents/{agent_id}/sessions/{session_id}/logs` | Get all logs for a session (stream-name matching + filterPattern fallback, paginated) |
 | `GET` | `/api/agents/{agent_id}/logs/vended` | Get logs from a vended log source (runtime or memory APPLICATION_LOGS, runtime USAGE_LOGS) |
 
-### Traces (X-Ray)
+### Traces (OTEL Logs)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/traces` | List traces for all invocations in a session (via X-Ray) |
-| `GET` | `/api/agents/{agent_id}/traces/{trace_id}` | Get full trace detail with all spans |
+| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/traces` | List traces for a session (parsed from OTEL log records in CloudWatch) |
+| `GET` | `/api/agents/{agent_id}/traces/{trace_id}` | Get full trace detail with per-span events |
 
 ## Streaming Architecture
 

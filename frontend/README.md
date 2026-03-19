@@ -187,8 +187,8 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 - **A2aAccessControl** — Per-persona access control for A2A agent skills with all_skills/selected_skills modes.
 - **MemoryManagementPanel** — Create/import form with JSON import/export and strategy configuration (type, name, description, namespace), memory card/table list with status badges (CREATING/ACTIVE/FAILED/DELETING), refresh and delete actions with inline confirmation overlay.
 - **LogViewer** — Paginated CloudWatch log display (200 lines/page) with toggleable line numbers and timestamps, log stream selector with timezone-aware timestamps, vended log source selector (runtime APPLICATION_LOGS, runtime USAGE_LOGS, memory APPLICATION_LOGS), and cache-busting refresh support.
-- **TraceList** — Trace summary table with columns: Trace ID, Root Span, Start Time, Duration, Span Count, Status, Invocation ID. Clickable rows to select a trace for detailed view.
-- **TraceGraph** — Interactive SVG waterfall/Gantt-style trace timeline. Spans rendered as color-coded bars (invocation=blue, model=green, tool=orange, error=red) with nesting depth indentation. Click to select and show span detail panel, hover tooltip, click-drag to zoom, collapse/expand parent spans. Summary metrics above graph showing total duration, span count, model vs tool time breakdown.
+- **TraceList** — Trace summary table with columns: Trace ID, Start Time, End Time, Duration, Spans, Events. Clickable rows to select a trace for detailed view.
+- **TraceGraph** — Interactive CSS waterfall timeline showing span durations relative to trace start. 8-color palette for span differentiation. Persistent hover detail panel (Span ID, Scope, Duration, Events, Start/End). Left panel: span list with divide styling. Right panel: per-span events with expand/collapse all toggle. Event detail lines: timestamp, span ID link, scope/source.
 
 ### Views
 
@@ -197,7 +197,7 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 | LoginPage | — | Cognito login + set new password |
 | CatalogPage | Platform Catalog | Agents (with multi-select tag filter bar), memory resources (with tag badges), MCP servers, A2A agents sections |
 | AgentDetailPage | Platform Catalog | Sessions, invoke, latency, streaming response, deployment details |
-| SessionDetailPage | Platform Catalog | Session metadata, invocation timing, tabbed Logs/Traces view with paginated CloudWatch logs, stream selector, vended log sources, and interactive trace visualization (X-Ray waterfall graph) |
+| SessionDetailPage | Platform Catalog | Session metadata, invocation timing, tabbed Logs/Traces view with paginated CloudWatch logs, stream selector, vended log sources, and interactive OTEL trace visualization (waterfall timeline) |
 | InvocationDetailPage | Platform Catalog | Invocation details, cost breakdown, prompt/response, Traces tab with invocation-scoped trace graph |
 | AgentListPage | Agents | Deploy/Import form (with tag profile selector) + agent card/table grid with multi-select tag filters |
 | SecurityAdminPage | Security | Roles, authorizers, credentials, permissions |
