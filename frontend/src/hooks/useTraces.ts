@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { toast } from "sonner";
 import type { TraceSummary, TraceDetailResponse } from "@/api/types";
 import { getSessionTraces, getTraceDetail } from "@/api/traces";
 
@@ -29,7 +30,9 @@ export function useTraces() {
       try {
         const data = await getTraceDetail(agentId, traceId);
         setSelectedTrace(data);
-      } catch {
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Failed to load trace detail";
+        toast.error(msg);
         setSelectedTrace(null);
       } finally {
         setTraceDetailLoading(false);

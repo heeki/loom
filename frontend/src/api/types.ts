@@ -238,38 +238,44 @@ export interface VendedLogSourcesResponse {
 // Trace types
 export interface TraceSummary {
   trace_id: string;
-  root_span_name: string;
+  session_id: string | null;
   start_time_iso: string;
+  end_time_iso: string;
   duration_ms: number;
   span_count: number;
-  status: string;
-  invocation_id: string | null;
+  event_count: number;
 }
 
 export interface TraceListResponse {
   traces: TraceSummary[];
 }
 
-export interface SpanDetail {
+export interface TraceEvent {
+  observed_time_iso: string;
+  severity_number: number;
+  scope: string;
+  body: Record<string, unknown> | string;
+}
+
+export interface TraceSpan {
   span_id: string;
-  parent_span_id: string | null;
-  name: string;
-  span_type: string;
+  scope: string;
   start_time_iso: string;
   end_time_iso: string;
   duration_ms: number;
-  status: string;
-  attributes: Record<string, string>;
+  event_count: number;
+  events: TraceEvent[];
 }
 
 export interface TraceDetailResponse {
   trace_id: string;
-  root_span_name: string;
+  session_id: string | null;
   start_time_iso: string;
+  end_time_iso: string;
   duration_ms: number;
   span_count: number;
-  status: string;
-  spans: SpanDetail[];
+  event_count: number;
+  spans: TraceSpan[];
 }
 
 // Security types

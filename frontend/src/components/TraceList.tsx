@@ -1,4 +1,3 @@
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -40,7 +39,7 @@ export function TraceList({ traces, loading, onSelectTrace }: TraceListProps) {
   if (traces.length === 0) {
     return (
       <div className="text-sm text-muted-foreground py-8 text-center">
-        No traces found. Traces are available after invocations complete and telemetry data is exported to X-Ray.
+        No traces found. Traces appear after invocations complete and OTEL telemetry is exported.
       </div>
     );
   }
@@ -49,13 +48,12 @@ export function TraceList({ traces, loading, onSelectTrace }: TraceListProps) {
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead className="w-[260px]">Trace ID</TableHead>
-          <TableHead>Root Span</TableHead>
+          <TableHead className="w-[280px]">Trace ID</TableHead>
           <TableHead>Start Time</TableHead>
+          <TableHead>End Time</TableHead>
           <TableHead className="text-right">Duration</TableHead>
           <TableHead className="text-right">Spans</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead className="w-[260px]">Invocation ID</TableHead>
+          <TableHead className="text-right">Events</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -65,12 +63,14 @@ export function TraceList({ traces, loading, onSelectTrace }: TraceListProps) {
             className={onSelectTrace ? "cursor-pointer hover:bg-muted/50" : ""}
             onClick={() => onSelectTrace?.(t.trace_id)}
           >
-            <TableCell className="font-mono text-xs truncate max-w-[260px]">
+            <TableCell className="font-mono text-xs truncate max-w-[280px]">
               {t.trace_id}
             </TableCell>
-            <TableCell className="text-sm">{t.root_span_name}</TableCell>
-            <TableCell className="text-sm">
+            <TableCell className="text-sm whitespace-nowrap">
               {formatTimestamp(t.start_time_iso, timezone)}
+            </TableCell>
+            <TableCell className="text-sm whitespace-nowrap">
+              {formatTimestamp(t.end_time_iso, timezone)}
             </TableCell>
             <TableCell className="text-right font-mono text-sm">
               {formatDuration(t.duration_ms)}
@@ -78,13 +78,8 @@ export function TraceList({ traces, loading, onSelectTrace }: TraceListProps) {
             <TableCell className="text-right font-mono text-sm">
               {t.span_count}
             </TableCell>
-            <TableCell>
-              <Badge variant={t.status === "error" ? "destructive" : "default"}>
-                {t.status.toUpperCase()}
-              </Badge>
-            </TableCell>
-            <TableCell className="font-mono text-xs truncate max-w-[260px]">
-              {t.invocation_id ?? "—"}
+            <TableCell className="text-right font-mono text-sm">
+              {t.event_count}
             </TableCell>
           </TableRow>
         ))}

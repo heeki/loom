@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTimezone } from "@/contexts/TimezoneContext";
@@ -59,6 +60,7 @@ export function InvocationDetailPage({ agent, session, invocation }: InvocationD
     traceDetailLoading,
     fetchSessionTraces,
     fetchTraceDetail,
+    setSelectedTrace,
   } = useTraces();
   const tracesFetchedRef = useRef(false);
 
@@ -68,11 +70,6 @@ export function InvocationDetailPage({ agent, session, invocation }: InvocationD
   const memTotal = (invocation.stm_cost ?? 0) + (invocation.ltm_cost ?? 0);
   const modelCost = invocation.estimated_cost ?? 0;
   const grandTotal = modelCost + rtTotal + memTotal;
-
-  // Filter traces to this invocation
-  const invocationTraces = traces.filter(
-    (t) => t.invocation_id === invocation.invocation_id,
-  );
 
   const handleTabChange = (tab: string) => {
     if (tab === "traces" && !tracesFetchedRef.current) {
@@ -93,12 +90,12 @@ export function InvocationDetailPage({ agent, session, invocation }: InvocationD
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium">Invocation Details</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <div>
-                <div className="text-xs text-muted-foreground">Request ID</div>
-                <div className="font-mono text-sm">{invocation.request_id ?? "—"}</div>
-              </div>
-              <div className="flex gap-6 text-sm">
+            <CardContent>
+              <div className="flex gap-6 text-sm flex-wrap">
+                <div>
+                  <div className="text-xs text-muted-foreground">Request ID</div>
+                  <div className="font-mono text-sm mt-0.5 break-all">{invocation.request_id ?? "—"}</div>
+                </div>
                 <div>
                   <div className="text-xs text-muted-foreground">Status</div>
                   <Badge className="mt-0.5" variant={statusVariant(invocation.status)}>
@@ -206,15 +203,24 @@ export function InvocationDetailPage({ agent, session, invocation }: InvocationD
         </TabsList>
         <Separator className="my-2" />
         <TabsContent value="traces" className="mt-0">
-          <TraceList
-            traces={invocationTraces}
-            loading={tracesLoading}
-            onSelectTrace={handleSelectTrace}
-          />
-          {selectedTrace && (
-            <div className="mt-4">
+          {selectedTrace ? (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm font-medium">
+                  Trace: <span className="font-mono">{selectedTrace.trace_id}</span>
+                </h4>
+                <Button variant="ghost" size="sm" onClick={() => setSelectedTrace(null)}>
+                  Back to list
+                </Button>
+              </div>
               <TraceGraph trace={selectedTrace} loading={traceDetailLoading} />
             </div>
+          ) : (
+            <TraceList
+              traces={traces}
+              loading={tracesLoading}
+              onSelectTrace={handleSelectTrace}
+            />
           )}
         </TabsContent>
       </Tabs>

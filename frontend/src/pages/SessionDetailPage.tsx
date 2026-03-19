@@ -2,7 +2,6 @@ import { useEffect, useCallback, useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -177,11 +176,7 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
         </CardContent>
       </Card>
 
-      <div>
-        <h3 className="text-sm font-medium mb-2">Invocations</h3>
-        <Separator className="mb-4" />
-        <InvocationTable invocations={session.invocations} onSelectInvocation={onSelectInvocation} />
-      </div>
+      <InvocationTable invocations={session.invocations} onSelectInvocation={onSelectInvocation} />
 
       <Tabs defaultValue="logs" onValueChange={handleTabChange}>
         <div className="flex items-center justify-between mb-2">
@@ -264,8 +259,6 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
             </Button>
           </div>
         </div>
-        <Separator className="mb-4" />
-
         <TabsContent value="logs" className="mt-0">
           <div className="text-xs text-muted-foreground mb-2">
             {activeStream.startsWith("vended:")
@@ -279,13 +272,8 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
         </TabsContent>
 
         <TabsContent value="traces" className="mt-0">
-          <TraceList
-            traces={traces}
-            loading={tracesLoading}
-            onSelectTrace={handleSelectTrace}
-          />
-          {selectedTrace && (
-            <div className="mt-4">
+          {selectedTrace ? (
+            <div>
               <div className="flex items-center justify-between mb-2">
                 <h4 className="text-sm font-medium">
                   Trace: <span className="font-mono">{selectedTrace.trace_id}</span>
@@ -296,6 +284,17 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
               </div>
               <TraceGraph trace={selectedTrace} loading={traceDetailLoading} />
             </div>
+          ) : (
+            <>
+              <div className="text-xs text-muted-foreground mb-2">
+                Showing OTEL traces for session <span className="font-mono">{session.session_id}</span>. Click a trace ID to view detailed span and event information.
+              </div>
+              <TraceList
+                traces={traces}
+                loading={tracesLoading}
+                onSelectTrace={handleSelectTrace}
+              />
+            </>
           )}
         </TabsContent>
       </Tabs>
