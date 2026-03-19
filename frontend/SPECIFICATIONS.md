@@ -27,7 +27,7 @@ frontend/
 │   │   ├── auth.ts             # Cognito auth API (initiateAuth, respondToChallenge, refreshTokens)
 │   │   ├── agents.ts           # Agent CRUD + fetchRoles(), fetchCognitoPools(), fetchModels(), fetchDefaults()
 │   │   ├── invocations.ts      # Session queries + SSE stream consumer (with auth header)
-│   │   ├── logs.ts             # CloudWatch log queries: `getSessionLogs` (limit 5000, optional `noCache`), `getAgentLogs` (optional stream, `noCache`), `listLogStreams`
+│   │   ├── logs.ts             # CloudWatch log queries: `getSessionLogs`, `getAgentLogs`, `listLogStreams`, `listVendedLogSources`, `getVendedLogs`
 │   │   ├── mcp.ts              # MCP server CRUD, tools, access, test connection
 │   │   ├── a2a.ts              # A2A agent CRUD, test connection, card refresh, access
 │   │   ├── memories.ts         # Memory resource CRUD + refresh
@@ -150,6 +150,7 @@ Catalog  >  [Agent Name]  >  [Session ID]
 **Purpose:** Browse and manage registered agents, memory resources, and other platform resources.
 
 **Content:**
+- Page description: "Browse and manage registered agents and resources." with estimates disclaimer: "Costs for agents and memory resources are *estimates*."
 - Page header: "Platform Catalog" with card/table view toggle (top-right)
 - Organized into sections: Agents, Memory Resources, MCP Servers, A2A Agents
 - Tag-based filter bar above the agents grid, with multi-select dropdowns (checkbox-based) for each tag policy with `show_on_card=true`. Client-side AND filtering with "Clear filters" button and agent count display (e.g., "Showing 3 of 12 agents")
@@ -486,7 +487,7 @@ Create/edit form with:
 **Content:**
 - Session metadata card — session_id, qualifier, live status badge, created timestamp
 - Invocation table — all invocations with timing data
-- Log source selector — dropdown to switch between session-filtered logs (service-level) and individual log streams (with simplified stream name display)
+- Log source selector — dropdown to switch between session-filtered logs (service-level), individual log streams (with simplified stream name display and timezone-aware timestamps), and vended log sources (runtime APPLICATION_LOGS, runtime USAGE_LOGS, memory APPLICATION_LOGS)
 - Log controls — toggle buttons for line numbers (`#` icon, enabled by default) and timestamps (clock icon, enabled by default), plus a Refresh button that cache-busts by appending a `_t` timestamp parameter
 - Log viewer — paginated display (200 lines per page) with first/prev/next/last navigation, global line numbering across pages, and "Showing N–M of T log lines" indicator. Pagination controls appear at top and bottom when content exceeds one page.
 
@@ -636,7 +637,7 @@ The invoke panel's credential dropdown includes a "Manual token" sentinel value.
 | View | Persona | Description |
 |------|---------|-------------|
 | A2aAgentsPage | A2A Agents | A2A agent CRUD, agent detail with Agent Card and Access tabs, card/table views |
-| CostDashboardPage | Costs | Cost dashboard with time-range selector (7d/30d/90d/All), summary cards (Total Cost, Model Tokens, Runtime, Memory), Estimated Costs table with per-agent breakdown and methodology formulas, Actual Costs for Runtime table with per-session breakdown from CloudWatch usage logs, sortable columns, and two-row detail pattern |
+| CostDashboardPage | Costs | Cost dashboard with time-range selector (7d/30d/90d/All), summary cards (Total Cost, Model Tokens, Runtime, Memory), Estimated Costs table with per-agent breakdown and methodology formulas, Actual Costs with separate Runtime and Memory sub-sections, collapsible agent groups for Runtime, consolidated per-resource rows for Memory, sortable columns |
 
 ### Token Usage and Cost Display
 
@@ -644,11 +645,14 @@ The invoke panel's credential dropdown includes a "Manual token" sentinel value.
 - **InvocationTable**: 3 additional columns — Input Tokens, Output Tokens, Est. Cost with formatting helpers.
 - **AgentCard**: READY status badge hidden; cost badge shown when `total_estimated_cost > 0`.
 - **MemoryCard**: ACTIVE status badge hidden for visual cleanliness.
-- **CostDashboardPage**: Two-section cost dashboard:
+- **CostDashboardPage**: Three-section cost dashboard:
   - **Summary cards**: Total Cost (Model + Runtime + Memory), Model Tokens (with invocation count), Runtime (CPU + Mem breakdown), Memory (STM + LTM breakdown).
-  - **Estimated Costs table**: Per-agent breakdown with columns Agent, Model, Invocations, Model Tokens, AgentCore Runtime, AgentCore Memory, Per Invoke, Total. Two-row pattern: summary row + detail sub-row showing token in/out, CPU+Mem split, STM+LTM split. Methodology formulas displayed below header: `Runtime CPU = hours × 1 vCPU × $0.0895 × (1 − I/O wait%)`, `Runtime Mem = hours × 0.5 GB × $0.00945`, `Idle Mem = idle_seconds × 0.5 GB × $0.00945 / 3600`. Sortable columns via `SortableTableHead`.
-  - **Actual Costs for Runtime**: Per-session breakdown with columns Agent, Session, Events, Runtime CPU, Runtime Memory, Total. Two-row pattern: summary + detail sub-row with time range and resource hours (vCPU·h, GB·h). Pull Actuals button with loading timer. Only sessions tracked in Loom are shown. Module-level cache preserves actuals across page navigation. Sortable columns.
-  - Description: "Estimated total cost = model tokens + runtime + memory. Runtime CPU assumes N% I/O wait discount, configurable in Settings. Estimates use 1 vCPU and 0.5 GB memory allocation. Idle cost is memory only."
+  - **Estimated Costs table**: Per-agent breakdown with columns Agent, Model, Invocations, Model Tokens, AgentCore Runtime, AgentCore Memory, Per Invoke, Total. Single-row per agent with sub-details as `text-[10px]` inline divs (token in/out, CPU+Mem split, STM+LTM split). Methodology formulas displayed below header. Sortable columns via `SortableTableHead`. Estimates disclaimer: costs are estimates based on token heuristics and pricing defaults.
+  - **Actual Costs** with separate Runtime and Memory sub-cards:
+    - **Runtime**: Collapsible agent groups — each agent row shows agent name, session count, total CPU cost, total memory cost, and subtotal. Expand to see individual session rows with event counts, time range, resource hours (vCPU·h, GB·h), and per-session costs. Sortable at the agent level. Description: "Costs from runtime USAGE_LOGS, filtered to Loom-tracked sessions. CPU I/O wait discount: N%, configurable in Settings."
+    - **Memory**: Consolidated per-resource table with columns Memory, Log Events, Extractions, Consolidations, LTM Retrievals, Records Stored, Total. One row per memory resource. Sortable columns. Description: "Costs from memory APPLICATION_LOGS. Memory pipeline session IDs are internal to AgentCore and do not correlate with runtime session IDs."
+    - NOTE: "Delivery of usage logs for calculating actual costs can be delayed. If costs are not showing up, try again in 15 minutes."
+  - Pull Actuals button with loading timer. Module-level cache preserves actuals across page navigation.
   - Time-range selector: 7d, 30d, 90d, All buttons. Changing time range clears cached actuals.
 - **SettingsPage**: CPU I/O Wait Discount input (0–99%) with save-on-blur and Enter key support. Description: "Assumed % of CPU time spent waiting on I/O. Applied as a discount to runtime CPU cost across estimates and actuals."
 

@@ -787,7 +787,7 @@ The `has_token` and `token_source` fields in `session_start` indicate whether an
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/dashboard/costs` | Aggregate estimated cost data across agents. Supports `group` (loom:group tag filter) and `days` (time range: 7, 30, 90, or 0 for all) query parameters. Non-super-admins are restricted to their own group. Returns per-agent cost breakdown with totals. Recomputes runtime costs from `client_duration_ms` at view time. |
-| `POST` | `/api/dashboard/costs/actuals` | Pull actual runtime costs from CloudWatch usage logs. Returns per-agent, per-session cost breakdown aggregated from 1-second usage log events. Only includes sessions tracked in Loom. |
+| `POST` | `/api/dashboard/costs/actuals` | Pull actual costs from CloudWatch usage logs (runtime) and APPLICATION_LOGS (memory). Returns per-agent, per-session runtime cost breakdown and per-memory-resource cost breakdown. Runtime actuals only include sessions tracked in Loom. Memory actuals are unfiltered (memory pipeline session IDs do not correlate with runtime session IDs). |
 
 **Token estimation:** AgentCore does not expose token counts. A heuristic of 4 characters per token is applied to both prompt and response text. Cost is computed as `(input_tokens / 1000 * input_price) + (output_tokens / 1000 * output_price)` using per-model pricing data from `SUPPORTED_MODELS`.
 
@@ -802,7 +802,9 @@ The `has_token` and `token_source` fields in `session_start` indicate whether an
 
 **CPU I/O Wait Discount:** A single configurable site setting (`cpu_io_wait_discount`, default 75%) applied universally to runtime CPU costs across both estimates and actuals. Stored as integer percentage (0–99).
 
-**Actuals from CloudWatch usage logs:** The `POST /api/dashboard/costs/actuals` endpoint queries CloudWatch `BedrockAgentCoreRuntime_UsageLogs` streams for each runtime. Usage events (1-second granularity) are aggregated by `(agent_name, session_id)` from `attributes.agent.name` and `attributes.session.id`. Only sessions that exist in Loom's `invocation_sessions` table are included, filtering out external invocations. Timestamps are normalized from epoch milliseconds or ISO strings to UTC ISO 8601.
+**Actuals from CloudWatch usage logs:** The `POST /api/dashboard/costs/actuals` endpoint queries CloudWatch `BedrockAgentCoreRuntime_UsageLogs` streams for each runtime. Usage events (1-second granularity) are aggregated by `(agent_name, session_id)` from `attributes.agent.name` and `attributes.session.id`. Only sessions that exist in Loom's `invocation_sessions` table are included, filtering out external invocations. Timestamps are normalized from epoch milliseconds or ISO strings to UTC ISO 8601. Delivery of usage logs can be delayed up to 15 minutes.
+
+**Memory actuals from CloudWatch APPLICATION_LOGS:** For each memory resource, the endpoint queries the vended log group `/aws/vendedlogs/bedrock-agentcore/memory/APPLICATION_LOGS/{memory_id}` stream `BedrockAgentCoreMemory_ApplicationLogs`. Memory pipeline session IDs are internal to AgentCore and do NOT correlate with runtime session IDs — they represent asynchronous extraction/consolidation/storage pipeline runs. The `parse_memory_log_events()` function maps `body.log` messages to pricing operations: "Retrieving memories." → LTM retrievals ($0.50/1K), "Succeeded to upsert N records." → LTM records stored ($0.75/1K/month), extraction and consolidation events are tracked as counts. Per-session breakdowns include `log_events`, `retrieve_records`, `records_stored`, `extractions`, `consolidations`, and `errors`.
 
 **Agent cost summary:** `AgentResponse` includes a computed `cost_summary` field aggregating `total_input_tokens`, `total_output_tokens`, `total_model_cost`, `total_runtime_cost`, `total_memory_cost`, `total_cost`, and `total_invocations` across all invocations for the agent.
 
@@ -820,9 +822,10 @@ Current site settings:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/agents/{agent_id}/logs/streams` | List available CloudWatch log streams. |
+| `GET` | `/api/agents/{agent_id}/logs/streams` | List available CloudWatch log streams. Also returns vended log sources (runtime APPLICATION_LOGS, runtime USAGE_LOGS, memory APPLICATION_LOGS) with display labels and last event timestamps. |
 | `GET` | `/api/agents/{agent_id}/logs` | Retrieve logs from the latest (or specified) log stream. Paginates via `nextToken` (limit 10000). |
 | `GET` | `/api/agents/{agent_id}/sessions/{session_id}/logs` | Retrieve all logs for a session using stream-name matching with `nextToken` pagination (limit 10000). Falls back to `filterPattern` for shared streams. |
+| `GET` | `/api/agents/{agent_id}/logs/vended` | Retrieve logs from a vended log source (runtime or memory). Accepts `log_group` and `stream` query parameters. |
 
 ---
 
@@ -847,6 +850,8 @@ Wraps `boto3.client('logs')`:
 - `parse_memory_telemetry(log_events: list[dict]) -> dict[str, int]` — parses `LOOM_MEMORY_TELEMETRY` structured log line for memory cost tracking. Returns `retrievals` and `events_sent` counts.
 - `get_usage_log_events_by_time(runtime_id, region, start_time_ms, end_time_ms)` — queries CloudWatch `BedrockAgentCoreRuntime_UsageLogs` stream for usage events within a time range. Paginates via `nextToken`.
 - `parse_usage_events(raw_events)` — parses raw CloudWatch log events into structured usage records with vCPU hours, memory GB hours, agent name, session ID, and normalized timestamps.
+- `get_memory_log_events(memory_id, region, start_time_ms, end_time_ms)` — queries CloudWatch `BedrockAgentCoreMemory_ApplicationLogs` stream in the vended log group `/aws/vendedlogs/bedrock-agentcore/memory/APPLICATION_LOGS/{memory_id}`. Paginates via `nextToken`.
+- `parse_memory_log_events(raw_events)` — parses memory APPLICATION_LOG events by mapping `body.log` messages to operations: "Retrieving memories." → LTM retrievals, "Succeeded to upsert N records." → records stored, extraction/consolidation tracking. Returns total counts, per-session breakdowns, and computed costs.
 
 ### `services/deployment.py`
 

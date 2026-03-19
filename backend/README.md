@@ -83,17 +83,17 @@ backend/
 │   │   ├── auth.py          # Auth config endpoint (GET /api/auth/config)
 │   │   ├── agents.py        # Agent CRUD + ARN parsing + log group derivation
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
-│   │   ├── logs.py          # CloudWatch log browsing with pagination + session log retrieval via stream-name matching
+│   │   ├── logs.py          # CloudWatch log browsing with pagination + session log retrieval + vended log sources (runtime/memory)
 │   │   ├── memories.py      # Memory resource CRUD + strategy mapping
 │   │   ├── a2a.py           # A2A agent CRUD, Agent Card, skills, access control
 │   │   ├── mcp.py           # MCP server CRUD, tool discovery, access control
 │   │   ├── security.py      # Security admin: roles, authorizers, credentials, permissions
 │   │   ├── settings.py      # Tag policy + tag profile CRUD (/api/settings/tags, /api/settings/tag-profiles)
-│   │   ├── costs.py          # Cost dashboard: estimates + actuals from CloudWatch usage logs
+│   │   ├── costs.py          # Cost dashboard: estimates + runtime/memory actuals from CloudWatch
 │   │   └── utils.py         # Shared router utilities
 │   └── services/
 │       ├── agentcore.py     # boto3 wrapper: describe, list endpoints, invoke
-│       ├── cloudwatch.py    # CloudWatch log retrieval with pagination, session filtering, and usage log parsing
+│       ├── cloudwatch.py    # CloudWatch log retrieval with pagination, session filtering, usage log parsing, memory log parsing
 │       ├── cognito.py       # Cognito OAuth2 token retrieval
 │       ├── credential.py    # AgentCore credential provider management
 │       ├── deployment.py    # Agent artifact build + runtime CRUD
@@ -105,7 +105,8 @@ backend/
 │       ├── memory.py        # boto3 wrapper: AgentCore Memory CRUD
 │       └── secrets.py       # Secrets Manager wrapper with caching
 ├── scripts/
-│   └── stream.py            # CLI streaming client (httpx-based)
+│   ├── stream.py            # CLI streaming client (httpx-based)
+│   └── debug_session_correlation.py  # Debug script to correlate session IDs across runtime and memory logs
 ├── tests/
 │   ├── test_agents_deploy.py
 │   ├── test_a2a.py          # A2A agent CRUD, Agent Card, skills, access
@@ -252,9 +253,9 @@ Stores configurable site-wide settings. Currently includes `cpu_io_wait_discount
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/dashboard/costs` | Aggregate estimated costs (group filter, time-range filter, per-agent breakdown) |
-| `POST` | `/api/dashboard/costs/actuals` | Pull actual runtime costs from CloudWatch usage logs (per-session breakdown) |
+| `POST` | `/api/dashboard/costs/actuals` | Pull actual costs from CloudWatch usage logs (runtime per-session breakdown) and APPLICATION_LOGS (memory per-resource breakdown) |
 
-Runtime costs are recomputed from `client_duration_ms` at view time using current pricing defaults (1 vCPU, 0.5 GB memory, $0.0895/vCPU-hour, $0.00945/GB-hour). The CPU I/O Wait Discount (configurable in Settings, default 75%) is applied universally to CPU costs across both estimates and actuals. Actuals are filtered to only include sessions tracked in Loom.
+Runtime costs are recomputed from `client_duration_ms` at view time using current pricing defaults (1 vCPU, 0.5 GB memory, $0.0895/vCPU-hour, $0.00945/GB-hour). The CPU I/O Wait Discount (configurable in Settings, default 75%) is applied universally to CPU costs across both estimates and actuals. Runtime actuals are filtered to only include sessions tracked in Loom. Memory actuals are parsed from vended `BedrockAgentCoreMemory_ApplicationLogs` — memory pipeline session IDs are internal to AgentCore and do not correlate with runtime session IDs.
 
 ### Site Settings
 
@@ -337,6 +338,7 @@ Agent list responses include a computed `active_session_count` field based on `L
 | `GET` | `/api/agents/{agent_id}/logs/streams` | List available log streams |
 | `GET` | `/api/agents/{agent_id}/logs` | Get logs from latest (or specified) stream with pagination |
 | `GET` | `/api/agents/{agent_id}/sessions/{session_id}/logs` | Get all logs for a session (stream-name matching + filterPattern fallback, paginated) |
+| `GET` | `/api/agents/{agent_id}/logs/vended` | Get logs from a vended log source (runtime or memory APPLICATION_LOGS, runtime USAGE_LOGS) |
 
 ## Streaming Architecture
 
