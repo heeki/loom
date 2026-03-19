@@ -20,6 +20,7 @@ const NO_CREDENTIAL = "__none__";
 const MANUAL_TOKEN = "__manual__";
 
 interface InvokePanelProps {
+  agentId: number;
   qualifiers: string[];
   sessions: SessionResponse[];
   isStreaming: boolean;
@@ -29,8 +30,17 @@ interface InvokePanelProps {
   onCancel: () => void;
 }
 
-export function InvokePanel({ qualifiers, sessions, isStreaming, modelId, authorizerName, onInvoke, onCancel }: InvokePanelProps) {
-  const [prompt, setPrompt] = useState("");
+export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelId, authorizerName, onInvoke, onCancel }: InvokePanelProps) {
+  const promptKey = `loom:invokePrompt:${agentId}`;
+  const [prompt, setPrompt] = useState(() => sessionStorage.getItem(promptKey) ?? "");
+
+  useEffect(() => {
+    if (prompt) {
+      sessionStorage.setItem(promptKey, prompt);
+    } else {
+      sessionStorage.removeItem(promptKey);
+    }
+  }, [prompt, promptKey]);
   const [qualifier, setQualifier] = useState(qualifiers[0] ?? "DEFAULT");
   const [selectedSession, setSelectedSession] = useState(NEW_SESSION);
   const [selectedCredential, setSelectedCredential] = useState(authorizerName ? USER_TOKEN : NO_CREDENTIAL);

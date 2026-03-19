@@ -51,6 +51,7 @@ export function AgentDetailPage({
 
       {/* Invoke form */}
       <InvokePanel
+        agentId={agent.id}
         qualifiers={agent.available_qualifiers}
         sessions={sessions}
         isStreaming={isStreaming}
