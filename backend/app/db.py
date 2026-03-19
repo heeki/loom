@@ -74,6 +74,22 @@ def _migrate_add_columns(eng) -> None:
         ("managed_roles", "tags", "TEXT"),
         ("authorizer_configs", "tags", "TEXT"),
         ("a2a_agents", "agentcore_session_id", "VARCHAR"),
+        ("invocations", "input_tokens", "INTEGER"),
+        ("invocations", "output_tokens", "INTEGER"),
+        ("invocations", "estimated_cost", "REAL"),
+        ("invocations", "compute_cost", "REAL"),
+        ("invocations", "compute_cpu_cost", "REAL"),
+        ("invocations", "compute_memory_cost", "REAL"),
+        ("invocations", "idle_timeout_cost", "REAL"),
+        ("invocations", "idle_cpu_cost", "REAL"),
+        ("invocations", "idle_memory_cost", "REAL"),
+        ("invocations", "memory_retrievals", "INTEGER"),
+        ("invocations", "memory_events_sent", "INTEGER"),
+        ("invocations", "memory_estimated_cost", "REAL"),
+        ("invocations", "stm_cost", "REAL"),
+        ("invocations", "ltm_cost", "REAL"),
+        ("invocations", "cost_source", "VARCHAR"),
+        ("invocations", "request_id", "VARCHAR"),
     ]
 
     for table, column, col_type in migrations:

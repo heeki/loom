@@ -8,6 +8,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from sqlalchemy import event
+
 from app.main import app
 from app.db import Base, get_db
 from app.models.agent import Agent
@@ -23,6 +25,14 @@ class TestAgentsRouter(unittest.TestCase):
         """Set up test database."""
         # Use in-memory SQLite for tests with StaticPool to share across connections
         cls.engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+
+        # Enable foreign key constraints for SQLite (required for CASCADE deletes)
+        @event.listens_for(cls.engine, "connect")
+        def _set_sqlite_pragma(dbapi_conn, connection_record):
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
         Base.metadata.create_all(bind=cls.engine)
         cls.TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=cls.engine)
 

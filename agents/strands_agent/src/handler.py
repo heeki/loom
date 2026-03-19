@@ -108,7 +108,7 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
     with trace_invocation(invocation_id=session_id) as span:
         span.set_attribute("agent.session_id", session_id)
         try:
-            stream = agent.stream_async(prompt)
+            stream = agent.stream_async(prompt, invocation_state={"session_id": session_id})
             async for event in stream:
                 if isinstance(event, dict):
                     text = None

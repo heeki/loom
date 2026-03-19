@@ -20,6 +20,9 @@ def create_memory(
     """
     Create a new AgentCore Memory resource.
 
+    The create_memory API does not accept tags inline. Tags are applied
+    separately via ``tag_resource`` after creation.
+
     Args:
         name: Name for the memory resource
         event_expiry_duration: Duration in days before memory events expire
@@ -27,7 +30,7 @@ def create_memory(
         encryption_key_arn: Optional KMS key ARN for encryption
         memory_execution_role_arn: Optional IAM role ARN for memory execution
         memory_strategies: Optional list of memory strategy configurations
-        tags: Optional tags
+        tags: Optional tags (applied via tag_resource after creation)
         region: AWS region name
 
     Returns:
@@ -49,10 +52,18 @@ def create_memory(
         params["memoryExecutionRoleArn"] = memory_execution_role_arn
     if memory_strategies:
         params["memoryStrategies"] = memory_strategies
-    if tags:
-        params["tags"] = tags
 
     response = client.create_memory(**params)
+
+    # Apply tags via tag_resource (not supported inline by create_memory)
+    if tags:
+        memory_arn = response.get("memory", {}).get("arn")
+        if memory_arn:
+            try:
+                client.tag_resource(resourceArn=memory_arn, tags=tags)
+            except Exception:
+                pass  # Best-effort; tags stored locally regardless
+
     return response
 
 

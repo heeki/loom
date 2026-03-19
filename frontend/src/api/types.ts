@@ -25,6 +25,15 @@ export interface AgentResponse {
   model_id: string | null;
   deployed_at: string | null;
   tags: Record<string, string>;
+  cost_summary: {
+    total_input_tokens: number;
+    total_output_tokens: number;
+    total_model_cost: number;
+    total_runtime_cost: number;
+    total_memory_cost: number;
+    total_cost: number;
+    total_invocations: number;
+  } | null;
 }
 
 export interface AgentRegisterRequest {
@@ -152,6 +161,7 @@ export interface InvocationResponse {
   id: number;
   session_id: string;
   invocation_id: string;
+  request_id: string | null;
   client_invoke_time: number | null;
   client_done_time: number | null;
   agent_start_time: number | null;
@@ -162,6 +172,21 @@ export interface InvocationResponse {
   prompt_text: string | null;
   thinking_text: string | null;
   response_text: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  estimated_cost: number | null;
+  compute_cost: number | null;
+  compute_cpu_cost: number | null;
+  compute_memory_cost: number | null;
+  idle_timeout_cost: number | null;
+  idle_cpu_cost: number | null;
+  idle_memory_cost: number | null;
+  memory_retrievals: number | null;
+  memory_events_sent: number | null;
+  memory_estimated_cost: number | null;
+  stm_cost: number | null;
+  ltm_cost: number | null;
+  cost_source: string | null;
   created_at: string | null;
 }
 
@@ -197,6 +222,17 @@ export interface LogStreamInfo {
 export interface LogStreamsResponse {
   log_group: string;
   streams: LogStreamInfo[];
+}
+
+export interface VendedLogSource {
+  key: string;
+  label: string;
+  log_group: string;
+  stream: string;
+}
+
+export interface VendedLogSourcesResponse {
+  sources: VendedLogSource[];
 }
 
 // Security types
@@ -347,6 +383,13 @@ export interface MemoryResponse {
   account_id: string;
   memory_execution_role_arn: string | null;
   encryption_key_arn: string | null;
+  cost_summary: {
+    total_memory_estimated_cost: number;
+    total_stm_cost: number;
+    total_ltm_cost: number;
+    total_retrievals: number;
+    total_events_sent: number;
+  } | null;
 }
 
 // SSE event types
@@ -365,12 +408,27 @@ export interface SSEChunk {
 export interface SSESessionEnd {
   session_id: string;
   invocation_id: string;
+  request_id: string | null;
   qualifier: string;
   client_invoke_time: number;
   client_done_time: number;
   client_duration_ms: number;
   cold_start_latency_ms: number | null;
   agent_start_time: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  estimated_cost: number | null;
+  compute_cost: number | null;
+  compute_cpu_cost: number | null;
+  compute_memory_cost: number | null;
+  idle_timeout_cost: number | null;
+  idle_cpu_cost: number | null;
+  idle_memory_cost: number | null;
+  memory_retrievals: number | null;
+  memory_events_sent: number | null;
+  memory_estimated_cost: number | null;
+  stm_cost: number | null;
+  ltm_cost: number | null;
 }
 
 export interface SSEError {
@@ -584,4 +642,111 @@ export interface A2aAccessUpdateRequest {
     access_level: "all_skills" | "selected_skills";
     allowed_skill_ids?: string[];
   }>;
+}
+
+// Pricing types
+export interface ModelPricing {
+  model_id: string;
+  display_name: string;
+  group: string;
+  max_tokens: number;
+  input_price_per_1k_tokens: number;
+  output_price_per_1k_tokens: number;
+  pricing_as_of: string;
+}
+
+// Cost dashboard types
+export interface AgentCostSummary {
+  agent_id: number;
+  agent_name: string | null;
+  model_id: string | null;
+  total_invocations: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_estimated_cost: number;
+  total_compute_cpu_cost: number;
+  total_compute_memory_cost: number;
+  total_idle_cpu_cost: number;
+  total_idle_memory_cost: number;
+  total_stm_cost: number;
+  total_ltm_cost: number;
+  avg_cost_per_invocation: number;
+}
+
+export interface CostDashboardResponse {
+  group: string | null;
+  days: number;
+  total_invocations: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_estimated_cost: number;
+  total_compute_cpu_cost: number;
+  total_compute_memory_cost: number;
+  total_idle_cpu_cost: number;
+  total_idle_memory_cost: number;
+  total_stm_cost: number;
+  total_ltm_cost: number;
+  agents: AgentCostSummary[];
+}
+
+export interface CostActualSession {
+  agent_name: string | null;
+  session_id: string | null;
+  event_count: number;
+  first_timestamp: string | null;
+  last_timestamp: string | null;
+  vcpu_hours: number;
+  memory_gb_hours: number;
+  cpu_cost: number;
+  memory_cost: number;
+  total_cost: number;
+}
+
+export interface CostActualAgent {
+  agent_id: number;
+  agent_name: string;
+  runtime_id: string;
+  log_group: string;
+  sessions: CostActualSession[];
+  total_cpu_cost: number;
+  total_memory_cost: number;
+  total_cost: number;
+}
+
+export interface CostActualMemorySession {
+  session_id: string;
+  log_events: number;
+  retrieve_records: number;
+  records_stored: number;
+  extractions: number;
+  consolidations: number;
+  errors: number;
+  ltm_retrieval_cost: number;
+  ltm_storage_cost: number;
+  total_cost: number;
+}
+
+export interface CostActualMemory {
+  memory_id: string;
+  memory_name: string;
+  log_group: string;
+  total_log_events: number;
+  retrieve_records: number;
+  records_stored: number;
+  extractions: number;
+  consolidations: number;
+  errors: number;
+  ltm_retrieval_cost: number;
+  ltm_storage_cost: number;
+  total_cost: number;
+  sessions: CostActualMemorySession[];
+}
+
+export interface CostActualsResponse {
+  group: string | null;
+  days: number;
+  io_wait_discount_percent: number;
+  agents: CostActualAgent[];
+  memory: CostActualMemory[];
+  summary: { total_events: number };
 }

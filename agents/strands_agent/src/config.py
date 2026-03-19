@@ -39,10 +39,20 @@ class A2AAgentConfig:
 
 
 @dataclass
+class MemoryResourceConfig:
+    """Configuration for a single memory resource."""
+
+    name: str
+    memory_id: str
+    arn: str = ""
+
+
+@dataclass
 class MemoryConfig:
     """Configuration for AgentCore Memory integration."""
 
     enabled: bool = False
+    resources: list[MemoryResourceConfig] = field(default_factory=list)
 
 
 @dataclass
@@ -111,7 +121,17 @@ def _parse_integrations(data: Optional[dict]) -> IntegrationsConfig:
     return IntegrationsConfig(
         mcp_servers=_parse_mcp_servers(data.get("mcp_servers", [])),
         a2a_agents=_parse_a2a_agents(data.get("a2a_agents", [])),
-        memory=MemoryConfig(enabled=data.get("memory", {}).get("enabled", False)),
+        memory=MemoryConfig(
+            enabled=data.get("memory", {}).get("enabled", False),
+            resources=[
+                MemoryResourceConfig(
+                    name=r.get("name", ""),
+                    memory_id=r.get("memory_id", ""),
+                    arn=r.get("arn", ""),
+                )
+                for r in data.get("memory", {}).get("resources", [])
+            ],
+        ),
     )
 
 

@@ -156,7 +156,15 @@ Agent-to-agent (A2A) communication uses the Strands SDK `A2AAgent` class. Each e
 
 ### AgentCore Memory
 
-When enabled, the agent uses Strands hooks to load and save conversational context via AgentCore Memory. The memory store must be pre-provisioned and its ID provided via `MEMORY_STORE_ID`.
+When enabled, the agent uses the `MemoryHook` (a Strands `HookProvider`) to load and save conversational context via AgentCore Memory. The memory store must be pre-provisioned and its ID provided via `MEMORY_STORE_ID`.
+
+**Lifecycle:**
+- **Before invocation:** Retrieves memory records via `retrieve_memory_records` using the last user message as the search query. Retrieved records are injected into `invocation_state["memory"]`.
+- **After invocation:** Creates events in the memory store for each message in the conversation result via `create_event`.
+
+**Cost telemetry:** The hook always emits a `LOOM_MEMORY_TELEMETRY: retrievals=N, events_sent=M` structured log line at INFO level after each invocation. The backend parses this to compute memory costs (`stm_cost = events_sent / 1000 * $0.25`, `ltm_cost = retrievals / 1000 * $0.50`).
+
+**Error handling:** `AccessDeniedException` and other errors are caught and logged at WARNING level without interrupting the agent invocation. If memory operations fail, the telemetry line still emits with zero counters.
 
 ### Observability (OTEL)
 

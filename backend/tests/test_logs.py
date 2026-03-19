@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import patch
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -18,6 +18,13 @@ class TestLogsRouter(unittest.TestCase):
     def setUpClass(cls):
         """Set up test database."""
         cls.engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+
+        @event.listens_for(cls.engine, "connect")
+        def _set_sqlite_pragma(dbapi_conn, connection_record):
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
         Base.metadata.create_all(bind=cls.engine)
         cls.TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=cls.engine)
 

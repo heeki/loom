@@ -8,7 +8,9 @@ from unittest.mock import MagicMock, patch
 from app.services.cloudwatch import (
     list_log_streams,
     get_log_events,
-    parse_agent_start_time
+    parse_agent_start_time,
+    parse_memory_telemetry,
+    parse_usage_telemetry,
 )
 
 
@@ -362,6 +364,133 @@ class TestParseAgentStartTime(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertAlmostEqual(result, 1708000001.0, places=1)
+
+
+class TestParseMemoryTelemetry(unittest.TestCase):
+    """Test suite for parse_memory_telemetry function."""
+
+    def test_parse_memory_telemetry_basic(self) -> None:
+        """Test parsing memory telemetry from a plain log message."""
+        events = [
+            {
+                "timestamp": 1708000001000,
+                "message": "2026-02-11 19:44:38 INFO src.integrations.memory LOOM_MEMORY_TELEMETRY: retrievals=5, events_sent=3",
+            }
+        ]
+        result = parse_memory_telemetry(events)
+        self.assertEqual(result["retrievals"], 5)
+        self.assertEqual(result["events_sent"], 3)
+
+    def test_parse_memory_telemetry_json_wrapped(self) -> None:
+        """Test parsing memory telemetry from a JSON-wrapped log message."""
+        events = [
+            {
+                "timestamp": 1708000001000,
+                "message": json.dumps({
+                    "message": "LOOM_MEMORY_TELEMETRY: retrievals=10, events_sent=7",
+                }),
+            }
+        ]
+        result = parse_memory_telemetry(events)
+        self.assertEqual(result["retrievals"], 10)
+        self.assertEqual(result["events_sent"], 7)
+
+    def test_parse_memory_telemetry_not_found(self) -> None:
+        """Test that defaults are returned when no telemetry line exists."""
+        events = [
+            {"timestamp": 1708000001000, "message": "Some other log message"},
+        ]
+        result = parse_memory_telemetry(events)
+        self.assertEqual(result["retrievals"], 0)
+        self.assertEqual(result["events_sent"], 0)
+
+    def test_parse_memory_telemetry_empty_events(self) -> None:
+        """Test with empty event list."""
+        result = parse_memory_telemetry([])
+        self.assertEqual(result["retrievals"], 0)
+        self.assertEqual(result["events_sent"], 0)
+
+    def test_parse_memory_telemetry_zero_values(self) -> None:
+        """Test parsing when counters are zero."""
+        events = [
+            {
+                "timestamp": 1708000001000,
+                "message": "LOOM_MEMORY_TELEMETRY: retrievals=0, events_sent=0",
+            }
+        ]
+        result = parse_memory_telemetry(events)
+        self.assertEqual(result["retrievals"], 0)
+        self.assertEqual(result["events_sent"], 0)
+
+    def test_parse_memory_telemetry_malformed(self) -> None:
+        """Test handling of malformed telemetry line."""
+        events = [
+            {
+                "timestamp": 1708000001000,
+                "message": "LOOM_MEMORY_TELEMETRY: garbled data",
+            }
+        ]
+        result = parse_memory_telemetry(events)
+        self.assertEqual(result["retrievals"], 0)
+        self.assertEqual(result["events_sent"], 0)
+
+
+class TestParseUsageTelemetry(unittest.TestCase):
+    """Test suite for parse_usage_telemetry function."""
+
+    def test_parse_usage_telemetry_basic(self) -> None:
+        """Test parsing vCPU and memory hours from USAGE_LOGS events."""
+        events = [
+            {
+                "timestamp": 1708000001000,
+                "message": json.dumps({
+                    "session.id": "sess-1",
+                    "agent.runtime.vcpu.hours.used": 0.000556,
+                    "agent.runtime.memory.gb_hours.used": 0.002222,
+                    "elapsed_time_seconds": 10,
+                }),
+            },
+            {
+                "timestamp": 1708000002000,
+                "message": json.dumps({
+                    "session.id": "sess-1",
+                    "agent.runtime.vcpu.hours.used": 0.000556,
+                    "agent.runtime.memory.gb_hours.used": 0.002222,
+                    "elapsed_time_seconds": 20,
+                }),
+            },
+        ]
+        result = parse_usage_telemetry(events)
+        self.assertAlmostEqual(result["vcpu_hours"], 0.001112, places=6)
+        self.assertAlmostEqual(result["memory_gb_hours"], 0.004444, places=6)
+        self.assertAlmostEqual(result["elapsed_seconds"], 20.0)
+
+    def test_parse_usage_telemetry_empty(self) -> None:
+        """Test with empty event list."""
+        result = parse_usage_telemetry([])
+        self.assertEqual(result["vcpu_hours"], 0.0)
+        self.assertEqual(result["memory_gb_hours"], 0.0)
+        self.assertEqual(result["elapsed_seconds"], 0.0)
+
+    def test_parse_usage_telemetry_non_json(self) -> None:
+        """Test that non-JSON messages are skipped."""
+        events = [
+            {"timestamp": 1708000001000, "message": "plain text log line"},
+        ]
+        result = parse_usage_telemetry(events)
+        self.assertEqual(result["vcpu_hours"], 0.0)
+
+    def test_parse_usage_telemetry_missing_fields(self) -> None:
+        """Test events with partial fields."""
+        events = [
+            {
+                "timestamp": 1708000001000,
+                "message": json.dumps({"agent.runtime.vcpu.hours.used": 0.001}),
+            },
+        ]
+        result = parse_usage_telemetry(events)
+        self.assertAlmostEqual(result["vcpu_hours"], 0.001)
+        self.assertEqual(result["memory_gb_hours"], 0.0)
 
 
 if __name__ == '__main__':

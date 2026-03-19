@@ -1,6 +1,6 @@
 # Loom Backend
 
-FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, tag policy management, and tag profile management.
+FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, paginated CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, tag policy management, tag profile management, cost estimation dashboard, and actual runtime cost retrieval from CloudWatch usage logs.
 
 ## Technology Stack
 
@@ -75,23 +75,25 @@ backend/
 │   │   ├── mcp.py           # McpServer, McpTool, McpServerAccess ORM models
 │   │   ├── a2a.py           # A2aAgent, A2aAgentSkill, A2aAgentAccess
 │   │   ├── tag_policy.py    # TagPolicy ORM model (configurable tag policies)
-│   │   └── tag_profile.py   # TagProfile ORM model (named tag presets)
+│   │   ├── tag_profile.py   # TagProfile ORM model (named tag presets)
+│   │   ├── site_setting.py    # SiteSetting ORM model (site-wide settings)
 │   ├── dependencies/
 │   │   └── auth.py          # Auth dependencies (get_current_user, require_scopes, UserInfo)
 │   ├── routers/
 │   │   ├── auth.py          # Auth config endpoint (GET /api/auth/config)
 │   │   ├── agents.py        # Agent CRUD + ARN parsing + log group derivation
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
-│   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
+│   │   ├── logs.py          # CloudWatch log browsing with pagination + session log retrieval + vended log sources (runtime/memory)
 │   │   ├── memories.py      # Memory resource CRUD + strategy mapping
 │   │   ├── a2a.py           # A2A agent CRUD, Agent Card, skills, access control
 │   │   ├── mcp.py           # MCP server CRUD, tool discovery, access control
 │   │   ├── security.py      # Security admin: roles, authorizers, credentials, permissions
 │   │   ├── settings.py      # Tag policy + tag profile CRUD (/api/settings/tags, /api/settings/tag-profiles)
+│   │   ├── costs.py          # Cost dashboard: estimates + runtime/memory actuals from CloudWatch
 │   │   └── utils.py         # Shared router utilities
 │   └── services/
 │       ├── agentcore.py     # boto3 wrapper: describe, list endpoints, invoke
-│       ├── cloudwatch.py    # boto3 wrapper: log streams, log events, start time parsing
+│       ├── cloudwatch.py    # CloudWatch log retrieval with pagination, session filtering, usage log parsing, memory log parsing
 │       ├── cognito.py       # Cognito OAuth2 token retrieval
 │       ├── credential.py    # AgentCore credential provider management
 │       ├── deployment.py    # Agent artifact build + runtime CRUD
@@ -103,7 +105,8 @@ backend/
 │       ├── memory.py        # boto3 wrapper: AgentCore Memory CRUD
 │       └── secrets.py       # Secrets Manager wrapper with caching
 ├── scripts/
-│   └── stream.py            # CLI streaming client (httpx-based)
+│   ├── stream.py            # CLI streaming client (httpx-based)
+│   └── debug_session_correlation.py  # Debug script to correlate session IDs across runtime and memory logs
 ├── tests/
 │   ├── test_agents_deploy.py
 │   ├── test_a2a.py          # A2A agent CRUD, Agent Card, skills, access
@@ -180,7 +183,11 @@ Groups related invocations. Uses `session_id` (UUID string) as the primary key �
 
 ### `invocations`
 
-Stores per-invocation timing measurements and status. Fields include `client_invoke_time`, `client_done_time`, `agent_start_time`, `cold_start_latency_ms`, `client_duration_ms`, and `status`. Prompt text, thinking text, and response text are stored per invocation.
+Stores per-invocation timing measurements, token usage, cost breakdowns, and status. Fields include `client_invoke_time`, `client_done_time`, `agent_start_time`, `cold_start_latency_ms`, `client_duration_ms`, `input_tokens`, `output_tokens`, `estimated_cost`, `compute_cpu_cost`, `compute_memory_cost`, `idle_cpu_cost`, `idle_memory_cost`, `stm_cost`, `ltm_cost`, `cost_source`, and `status`. Runtime costs are recomputed from `client_duration_ms` at view time using current pricing defaults. Token counts use a 4-character-per-token heuristic; model cost is computed from per-model pricing data.
+
+### `site_settings`
+
+Stores configurable site-wide settings. Currently includes `cpu_io_wait_discount` (default 75%) which is applied universally to runtime CPU cost calculations.
 
 ## API Endpoints
 
@@ -199,6 +206,7 @@ Stores per-invocation timing measurements and status. Fields include `client_inv
 | `GET` | `/api/agents/roles` | List IAM roles for AgentCore |
 | `GET` | `/api/agents/cognito-pools` | List Cognito user pools |
 | `GET` | `/api/agents/models` | List supported models (with display name and group) |
+| `GET` | `/api/agents/models/pricing` | List models with pricing metadata |
 | `GET` | `/api/agents/defaults` | Get configurable defaults (idle timeout, max lifetime) |
 
 ### Security Administration
@@ -239,6 +247,22 @@ Stores per-invocation timing measurements and status. Fields include `client_inv
 | `POST` | `/api/settings/tag-profiles` | Create a tag profile |
 | `PUT` | `/api/settings/tag-profiles/{profile_id}` | Update a tag profile |
 | `DELETE` | `/api/settings/tag-profiles/{profile_id}` | Delete a tag profile |
+
+### Cost Dashboard
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/dashboard/costs` | Aggregate estimated costs (group filter, time-range filter, per-agent breakdown) |
+| `POST` | `/api/dashboard/costs/actuals` | Pull actual costs from CloudWatch usage logs (runtime per-session breakdown) and APPLICATION_LOGS (memory per-resource breakdown) |
+
+Runtime costs are recomputed from `client_duration_ms` at view time using current pricing defaults (1 vCPU, 0.5 GB memory, $0.0895/vCPU-hour, $0.00945/GB-hour). The CPU I/O Wait Discount (configurable in Settings, default 75%) is applied universally to CPU costs across both estimates and actuals. Runtime actuals are filtered to only include sessions tracked in Loom. Memory actuals are parsed from vended `BedrockAgentCoreMemory_ApplicationLogs` — memory pipeline session IDs are internal to AgentCore and do not correlate with runtime session IDs.
+
+### Site Settings
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/settings/site` | List all site settings (includes defaults for unset keys) |
+| `PUT` | `/api/settings/site/{key}` | Create or update a site setting |
 
 ### Authentication
 
@@ -312,8 +336,9 @@ Agent list responses include a computed `active_session_count` field based on `L
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/agents/{agent_id}/logs/streams` | List available log streams |
-| `GET` | `/api/agents/{agent_id}/logs` | Get logs from latest (or specified) stream |
-| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/logs` | Get logs filtered to a session |
+| `GET` | `/api/agents/{agent_id}/logs` | Get logs from latest (or specified) stream with pagination |
+| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/logs` | Get all logs for a session (stream-name matching + filterPattern fallback, paginated) |
+| `GET` | `/api/agents/{agent_id}/logs/vended` | Get logs from a vended log source (runtime or memory APPLICATION_LOGS, runtime USAGE_LOGS) |
 
 ## Streaming Architecture
 
@@ -321,7 +346,7 @@ The boto3 `invoke_agent_runtime` call returns a synchronous `StreamingBody`. To 
 
 1. Each `next()` call on the chunk generator runs via `asyncio.to_thread()`.
 2. SSE events are flushed to the client in real-time as chunks arrive.
-3. After streaming completes, CloudWatch log retrieval also runs via `asyncio.to_thread()`.
+3. After streaming completes, CloudWatch log retrieval also runs via `asyncio.to_thread()`. Log retrieval now paginates via nextToken.
 
 ## Latency Measurement
 

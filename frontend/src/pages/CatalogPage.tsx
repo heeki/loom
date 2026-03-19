@@ -293,6 +293,7 @@ export function CatalogPage({
         <div>
           <h2 className="text-lg font-semibold">Platform Catalog</h2>
           <p className="text-sm text-muted-foreground">Browse and manage registered agents and resources.</p>
+          <p className="text-sm text-muted-foreground">Costs for agents and memory resources are <em>estimates</em>.</p>
         </div>
         <div className="flex rounded-md border text-sm shrink-0" role="tablist">
           <button

@@ -59,7 +59,8 @@ backend/
 │   │   ├── mcp.py           # MCP models: McpServer, McpTool, McpServerAccess
 │   │   ├── a2a.py           # A2A models: A2aAgent, A2aAgentSkill, A2aAgentAccess
 │   │   ├── tag_policy.py    # TagPolicy ORM model (configurable resource tagging)
-│   │   └── tag_profile.py   # TagProfile ORM model (named tag presets)
+│   │   ├── tag_profile.py   # TagProfile ORM model (named tag presets)
+│   │   ├── site_setting.py    # SiteSetting ORM model (configurable site-wide settings)
 │   ├── dependencies/
 │   │   ├── __init__.py
 │   │   └── auth.py          # Auth dependencies (get_current_user, require_scopes, UserInfo)
@@ -68,8 +69,9 @@ backend/
 │   │   ├── agents.py        # Agent CRUD + ARN parsing + log group derivation + tag resolution
 │   │   ├── a2a.py           # A2A agent CRUD, Agent Card, skills, access control
 │   │   ├── settings.py      # Settings endpoints (tag policy CRUD, tag profile CRUD)
+│   │   ├── costs.py          # Cost dashboard: estimated costs + actuals from CloudWatch usage logs
 │   │   ├── invocations.py   # SSE streaming invoke + session/invocation queries
-│   │   ├── logs.py          # CloudWatch log browsing + session log retrieval
+│   │   ├── logs.py          # CloudWatch log browsing with pagination + session log retrieval via stream-name matching
 │   │   ├── memories.py      # Memory resource CRUD + strategy mapping
 │   │   ├── mcp.py           # MCP server CRUD, tools, access control
 │   │   ├── security.py      # Security admin: roles, authorizers, credentials, permissions
@@ -343,6 +345,21 @@ Each session contains one or more invocations. Timing measurements and latency d
 | `agent_start_time` | REAL | Unix timestamp parsed from "Start time:" in CloudWatch logs |
 | `cold_start_latency_ms` | REAL | `(agent_start_time - client_invoke_time) * 1000` |
 | `client_duration_ms` | REAL | `(client_done_time - client_invoke_time) * 1000` |
+| `input_tokens` | INTEGER | Estimated input token count (4 chars/token heuristic) |
+| `output_tokens` | INTEGER | Estimated output token count (4 chars/token heuristic) |
+| `estimated_cost` | REAL | Estimated cost based on model pricing |
+| `compute_cost` | REAL | Deprecated; use compute_cpu_cost + compute_memory_cost |
+| `compute_cpu_cost` | REAL | Runtime CPU cost (recomputed at view time from client_duration_ms) |
+| `compute_memory_cost` | REAL | Runtime memory cost (recomputed at view time from client_duration_ms) |
+| `idle_timeout_cost` | REAL | Total idle timeout cost (memory only) |
+| `idle_cpu_cost` | REAL | Idle CPU cost (always 0; kept for schema compatibility) |
+| `idle_memory_cost` | REAL | Idle memory cost (recomputed from session gaps using current pricing) |
+| `memory_retrievals` | INTEGER | Number of memory retrievals |
+| `memory_events_sent` | INTEGER | Number of memory events sent |
+| `memory_estimated_cost` | REAL | Memory feature estimated cost |
+| `stm_cost` | REAL | Short-term memory cost |
+| `ltm_cost` | REAL | Long-term memory cost |
+| `cost_source` | TEXT | "estimated" (from invoke duration) or "usage_logs" (from CloudWatch) |
 | `status` | TEXT NOT NULL | `pending`, `streaming`, `complete`, `error` |
 | `error_message` | TEXT | Error detail if status is `error` |
 | `created_at` | DATETIME NOT NULL | Invocation creation timestamp |
@@ -356,6 +373,15 @@ Each session contains one or more invocations. Timing measurements and latency d
 **Design decisions:**
 - Prompt text, thinking text, and response text are stored per invocation (`prompt_text`, `thinking_text`, `response_text` columns on the `invocations` table).
 - The `Agent` model retains an integer auto-incrementing PK. The `arn` and `runtime_id` columns serve as natural identifiers when interacting with AWS.
+
+### `site_settings` table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | Internal ID |
+| `key` | TEXT UNIQUE NOT NULL | Setting key (e.g., `cpu_io_wait_discount`) |
+| `value` | TEXT NOT NULL | Setting value |
+| `updated_at` | DATETIME | Last update timestamp |
 
 ---
 
@@ -398,6 +424,7 @@ The `/api/auth/config` endpoint returns only the pool ID and region. The user cl
 | `GET` | `/api/agents/roles` | List IAM roles suitable for AgentCore. |
 | `GET` | `/api/agents/cognito-pools` | List Cognito user pools. |
 | `GET` | `/api/agents/models` | List supported foundation models (with display name and group). |
+| `GET` | `/api/agents/models/pricing` | List models with pricing metadata (input/output price per 1K tokens). |
 | `GET` | `/api/agents/defaults` | Get configurable defaults (idle timeout, max lifetime). |
 | `PUT` | `/api/agents/{agent_id}/config` | Update agent configuration entries. |
 | `GET` | `/api/agents/{agent_id}/config` | Get agent configuration entries. |
@@ -747,7 +774,7 @@ event: chunk
 data: {"text": "Hello! I am your agent."}
 
 event: session_end
-data: {"session_id": "uuid-...", "invocation_id": "uuid-...", "qualifier": "DEFAULT", "client_invoke_time": 1708000000.123, "client_done_time": 1708000002.456, "client_duration_ms": 2333.0, "cold_start_latency_ms": 500.0, "agent_start_time": 1708000000.623}
+data: {"session_id": "uuid-...", "invocation_id": "uuid-...", "qualifier": "DEFAULT", "client_invoke_time": 1708000000.123, "client_done_time": 1708000002.456, "client_duration_ms": 2333.0, "cold_start_latency_ms": 500.0, "agent_start_time": 1708000000.623, "input_tokens": 25, "output_tokens": 150, "estimated_cost": 0.001125}
 
 event: error
 data: {"message": "Invocation failed: ..."}
@@ -755,13 +782,50 @@ data: {"message": "Invocation failed: ..."}
 
 The `has_token` and `token_source` fields in `session_start` indicate whether an OAuth token was used for the invocation.
 
+### Cost Dashboard
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/dashboard/costs` | Aggregate estimated cost data across agents. Supports `group` (loom:group tag filter) and `days` (time range: 7, 30, 90, or 0 for all) query parameters. Non-super-admins are restricted to their own group. Returns per-agent cost breakdown with totals. Recomputes runtime costs from `client_duration_ms` at view time. |
+| `POST` | `/api/dashboard/costs/actuals` | Pull actual costs from CloudWatch usage logs (runtime) and APPLICATION_LOGS (memory). Returns per-agent, per-session runtime cost breakdown and per-memory-resource cost breakdown. Runtime actuals only include sessions tracked in Loom. Memory actuals are unfiltered (memory pipeline session IDs do not correlate with runtime session IDs). |
+
+**Token estimation:** AgentCore does not expose token counts. A heuristic of 4 characters per token is applied to both prompt and response text. Cost is computed as `(input_tokens / 1000 * input_price) + (output_tokens / 1000 * output_price)` using per-model pricing data from `SUPPORTED_MODELS`.
+
+**Model pricing:** Each entry in `SUPPORTED_MODELS` includes `input_price_per_1k_tokens`, `output_price_per_1k_tokens`, and `pricing_as_of` fields. `AGENTCORE_RUNTIME_PRICING` tracks CPU ($0.0895/vCPU-hour), Memory ($0.00945/GB-hour), default vCPU allocation (1), default memory allocation (0.5 GB), and default idle timeout (900 seconds).
+
+**View-time cost recomputation:** Runtime CPU and memory costs are recomputed from `client_duration_ms` at view time using current pricing defaults, so changing defaults retroactively affects all historical data. The `_apply_view_time_costs()` function recalculates both CPU and memory from duration, applying the I/O wait discount to CPU only. `_backfill_idle_costs()` always recomputes idle costs from session gaps to correct stale values from old defaults.
+
+**Cost estimation formulas:**
+- `Runtime CPU = invocation_duration_hours × 1 vCPU × $0.0895/vCPU·h × (1 − I/O wait%)`
+- `Runtime Memory = invocation_duration_hours × 0.5 GB × $0.00945/GB·h`
+- `Idle Memory = idle_seconds × 0.5 GB × $0.00945/GB·h ÷ 3600`
+
+**CPU I/O Wait Discount:** A single configurable site setting (`cpu_io_wait_discount`, default 75%) applied universally to runtime CPU costs across both estimates and actuals. Stored as integer percentage (0–99).
+
+**Actuals from CloudWatch usage logs:** The `POST /api/dashboard/costs/actuals` endpoint queries CloudWatch `BedrockAgentCoreRuntime_UsageLogs` streams for each runtime. Usage events (1-second granularity) are aggregated by `(agent_name, session_id)` from `attributes.agent.name` and `attributes.session.id`. Only sessions that exist in Loom's `invocation_sessions` table are included, filtering out external invocations. Timestamps are normalized from epoch milliseconds or ISO strings to UTC ISO 8601. Delivery of usage logs can be delayed up to 15 minutes.
+
+**Memory actuals from CloudWatch APPLICATION_LOGS:** For each memory resource, the endpoint queries the vended log group `/aws/vendedlogs/bedrock-agentcore/memory/APPLICATION_LOGS/{memory_id}` stream `BedrockAgentCoreMemory_ApplicationLogs`. Memory pipeline session IDs are internal to AgentCore and do NOT correlate with runtime session IDs — they represent asynchronous extraction/consolidation/storage pipeline runs. The `parse_memory_log_events()` function maps `body.log` messages to pricing operations: "Retrieving memories." → LTM retrievals ($0.50/1K), "Succeeded to upsert N records." → LTM records stored ($0.75/1K/month), extraction and consolidation events are tracked as counts. Per-session breakdowns include `log_events`, `retrieve_records`, `records_stored`, `extractions`, `consolidations`, and `errors`.
+
+**Agent cost summary:** `AgentResponse` includes a computed `cost_summary` field aggregating `total_input_tokens`, `total_output_tokens`, `total_model_cost`, `total_runtime_cost`, `total_memory_cost`, `total_cost`, and `total_invocations` across all invocations for the agent.
+
+### Site Settings
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/settings/site` | List all site settings (includes defaults for unset keys). |
+| `PUT` | `/api/settings/site/{key}` | Create or update a site setting. |
+
+Current site settings:
+- `cpu_io_wait_discount` (default: `75`) — CPU I/O wait discount percentage (0–99). Applied universally to runtime CPU costs.
+
 ### CloudWatch Logs
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/agents/{agent_id}/logs/streams` | List available CloudWatch log streams. |
-| `GET` | `/api/agents/{agent_id}/logs` | Retrieve recent logs from the latest (or specified) log stream. |
-| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/logs` | Retrieve logs filtered to a specific session. |
+| `GET` | `/api/agents/{agent_id}/logs/streams` | List available CloudWatch log streams. Also returns vended log sources (runtime APPLICATION_LOGS, runtime USAGE_LOGS, memory APPLICATION_LOGS) with display labels and last event timestamps. |
+| `GET` | `/api/agents/{agent_id}/logs` | Retrieve logs from the latest (or specified) log stream. Paginates via `nextToken` (limit 10000). |
+| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/logs` | Retrieve all logs for a session using stream-name matching with `nextToken` pagination (limit 10000). Falls back to `filterPattern` for shared streams. |
+| `GET` | `/api/agents/{agent_id}/logs/vended` | Retrieve logs from a vended log source (runtime or memory). Accepts `log_group` and `stream` query parameters. |
 
 ---
 
@@ -780,9 +844,14 @@ Wraps `boto3.client('bedrock-agentcore')` and `boto3.client('bedrock-agentcore-c
 Wraps `boto3.client('logs')`:
 
 - `list_log_streams(log_group: str, region: str) -> list[dict]` — lists streams ordered by last event time.
-- `get_stream_log_events(log_group: str, stream_name: str, region: str, ...) -> list[dict]` — retrieves events from a single log stream.
-- `get_log_events(log_group: str, session_id: str, region: str, ...) -> list[dict]` — retrieves events matching the session_id filter pattern across all streams.
+- `get_stream_log_events(log_group: str, stream_name: str, region: str, ...) -> list[dict]` — retrieves all events from a single log stream with `nextToken` pagination. Default limit 10000.
+- `get_log_events(log_group: str, session_id: str, region: str, ...) -> list[dict]` — two-strategy session log retrieval: (1) matches log streams whose name contains the session ID (e.g. `[runtime-logs-<session_id>]`) and fetches all events with pagination, (2) falls back to `filterPattern` search across all streams for shared streams like `ApplicationLogs`. Both strategies paginate via `nextToken` with limit 10000.
 - `parse_agent_start_time(log_events: list[dict]) -> float | None` — parses "Agent invoked - Start time:" pattern; falls back to earliest CloudWatch event timestamp.
+- `parse_memory_telemetry(log_events: list[dict]) -> dict[str, int]` — parses `LOOM_MEMORY_TELEMETRY` structured log line for memory cost tracking. Returns `retrievals` and `events_sent` counts.
+- `get_usage_log_events_by_time(runtime_id, region, start_time_ms, end_time_ms)` — queries CloudWatch `BedrockAgentCoreRuntime_UsageLogs` stream for usage events within a time range. Paginates via `nextToken`.
+- `parse_usage_events(raw_events)` — parses raw CloudWatch log events into structured usage records with vCPU hours, memory GB hours, agent name, session ID, and normalized timestamps.
+- `get_memory_log_events(memory_id, region, start_time_ms, end_time_ms)` — queries CloudWatch `BedrockAgentCoreMemory_ApplicationLogs` stream in the vended log group `/aws/vendedlogs/bedrock-agentcore/memory/APPLICATION_LOGS/{memory_id}`. Paginates via `nextToken`.
+- `parse_memory_log_events(raw_events)` — parses memory APPLICATION_LOG events by mapping `body.log` messages to operations: "Retrieving memories." → LTM retrievals, "Succeeded to upsert N records." → records stored, extraction/consolidation tracking. Returns total counts, per-session breakdowns, and computed costs.
 
 ### `services/deployment.py`
 
@@ -832,6 +901,7 @@ Core authentication and authorization module. Provides:
 | `memories.py` | `memory:read` | `memory:write` |
 | `security.py` | `security:read` | `security:write` |
 | `settings.py` | `settings:read` | `settings:write` |
+| `costs.py` | `catalog:read` | `catalog:read` |
 | `mcp.py` | `mcp:read` | `mcp:write` |
 | `a2a.py` | `a2a:read` | `a2a:write` |
 | `auth.py` | Public (no guard) | — |

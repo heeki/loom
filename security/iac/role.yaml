@@ -122,9 +122,13 @@ Resources:
               Statement:
                 - Effect: Allow
                   Action:
+                    - bedrock-agentcore:CreateEvent
                     - bedrock-agentcore:GetMemory
-                    - bedrock-agentcore:SearchMemory
-                    - bedrock-agentcore:IngestMemoryEvents
+                    - bedrock-agentcore:GetMemoryRecord
+                    - bedrock-agentcore:ListActors
+                    - bedrock-agentcore:ListMemoryRecords
+                    - bedrock-agentcore:ListSessions
+                    - bedrock-agentcore:RetrieveMemoryRecords
                   Resource: !Ref pMemoryArn
           - !Ref AWS::NoValue
 

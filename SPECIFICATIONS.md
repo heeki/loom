@@ -33,7 +33,10 @@ loom/
 │   └── strands_agent/          # Strands Agent blueprint
 │       ├── handler.py          # Agent handler / entry point (trace_invocation wrapped)
 │       ├── config.py           # Agent configuration
-│       ├── integrations.py     # Tool and service integrations
+│       ├── integrations/       # Tool and service integrations
+│       │   ├── mcp_client.py   # MCP tool client vending
+│       │   ├── a2a_client.py   # A2A agent client vending
+│       │   └── memory.py       # AgentCore Memory hooks (MemoryHook)
 │       └── telemetry.py        # OTEL setup, ADOT auto-instrumentation, TelemetryHook
 ├── backend/                    # Backend API (see backend/SPECIFICATIONS.md)
 │   ├── app/
@@ -58,6 +61,7 @@ loom/
 │   │   │   ├── auth.py
 │   │   │   ├── agents.py
 │   │   │   ├── a2a.py
+│   │   │   ├── costs.py
 │   │   │   ├── invocations.py
 │   │   │   ├── logs.py
 │   │   │   ├── memories.py
@@ -68,6 +72,7 @@ loom/
 │   │   └── services/
 │   │       ├── agentcore.py
 │   │       ├── a2a.py
+│   │       ├── cloudwatch.py    # CloudWatch log retrieval with pagination, session-filtered queries, and usage log parsing
 │   │       ├── mcp.py
 │   │       ├── memory.py
 │   │       ├── secrets.py
@@ -208,7 +213,7 @@ Model selectors in the UI are searchable by both display name and model ID, with
 ## 6. Implementation Phases
 
 ### Phase 1 — MVP (Initial Implementation) *(Complete)*
-- Backend: Agent registration, metadata retrieval, SSE invocation with real-time streaming, CloudWatch log retrieval (stream browsing + session-filtered), integrated cold-start latency calculation, SQLite persistence with session/invocation separation, session liveness tracking via idle timeout heuristic, active session count per agent.
+- Backend: Agent registration, metadata retrieval, SSE invocation with real-time streaming, CloudWatch log retrieval (stream browsing + session-filtered with pagination), integrated cold-start latency calculation, SQLite persistence with session/invocation separation, session liveness tracking via idle timeout heuristic, active session count per agent.
 - CLI: Streaming invocation client (`scripts/stream.py`) and comprehensive `makefile` targets for manual testing.
 - Frontend: Build tab (ARN registration), Test tab (invocation + streaming + latency display), Operate tab (basic dashboard), active session count display on agent cards, session live status indicators.
 - Refactored `tmp/latency/` into reusable service modules.
@@ -257,6 +262,7 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - `AGENT_OBSERVABILITY_ENABLED` is set to `true` at deploy time, which activates the `aws-opentelemetry-distro` export pipeline (X-Ray traces, CloudWatch logs/metrics).
 - Console script shebang fix: the build pipeline rewrites `opentelemetry-instrument` (and `opentelemetry-bootstrap`) scripts with a portable `#!/usr/bin/env python3` shebang so they execute correctly on the Linux-based AgentCore Runtime container.
 - Unit tests for telemetry setup idempotency, span creation, hook lifecycle, shebang fix, and noop operation.
+- **AgentCore Memory Integration:** `MemoryHook` is a Strands `HookProvider` that registers `BeforeInvocationEvent` and `AfterInvocationEvent` callbacks for automatic memory operations. Before invocation: retrieves memory records via `retrieve_memory_records` using the last user message as search query. After invocation: creates events in memory for each message in the conversation via `create_event`. Emits `LOOM_MEMORY_TELEMETRY: retrievals=N, events_sent=M` structured log line for cost tracking (always emitted, even when counters are 0). All operations logged at INFO level for visibility. Graceful degradation: AccessDeniedException and other errors are caught and logged without interrupting the agent invocation.
 
 ### Phase 6 — User Authentication *(Complete)*
 - Cognito-based user authentication with `USER_PASSWORD_AUTH` flow.
@@ -389,7 +395,32 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - JSON import/export: agent deploy form supports `a2a_agents` and `memories` arrays (names) in JSON configuration alongside `mcp_servers`.
 - 26 backend tests covering CRUD operations, Agent Card fetching, skill sync, card refresh, secret exclusion, OAuth2 validation, access rules, and cascade delete.
 
-### Phase 15 — Advanced Operations
+### Phase 15 — Token Usage Tracking and Cost Dashboard *(Complete)*
+- Backend schema: `input_tokens`, `output_tokens`, `estimated_cost`, `compute_cost`, `compute_cpu_cost`, `compute_memory_cost`, `idle_timeout_cost`, `idle_cpu_cost`, `idle_memory_cost`, `memory_retrievals`, `memory_events_sent`, `memory_estimated_cost`, `stm_cost`, `ltm_cost`, `cost_source` columns on the `invocations` table via SQLAlchemy migration (`_migrate_add_columns`).
+- Token estimation: 4 characters per token heuristic used since AgentCore doesn't expose token counts directly. Applied to both prompt and response text.
+- Cost calculation: `(input_tokens / 1000 * input_price_per_1k_tokens) + (output_tokens / 1000 * output_price_per_1k_tokens)` using per-model pricing data.
+- Model pricing metadata: `SUPPORTED_MODELS` extended with `input_price_per_1k_tokens`, `output_price_per_1k_tokens`, and `pricing_as_of` fields for all models (Anthropic and Amazon).
+- AgentCore Runtime pricing constant: `AGENTCORE_RUNTIME_PRICING` tracks CPU ($0.0895/vCPU-hour), Memory ($0.00945/GB-hour), default vCPU (1), default memory (0.5 GB), and default idle timeout (900 seconds).
+- View-time cost recomputation: Runtime CPU and memory costs are recomputed from `client_duration_ms` at view time using current pricing defaults (1 vCPU, 0.5 GB), so changing defaults retroactively affects all historical data. `_apply_view_time_costs()` applies the I/O wait discount to CPU costs. `_backfill_idle_costs()` always recomputes idle costs from session gaps to correct stale values.
+- CPU I/O Wait Discount: Single configurable site setting (`cpu_io_wait_discount`, default 75%) applied universally to runtime CPU costs across both estimates and actuals. Configurable on the Settings page. Stored as integer percentage (0-99).
+- Cost estimation formulas: `Runtime CPU = hours × 1 vCPU × $0.0895 × (1 − I/O wait%)`, `Runtime Mem = hours × 0.5 GB × $0.00945`, `Idle Mem = idle_seconds × 0.5 GB × $0.00945 / 3600`.
+- New endpoints: `GET /api/agents/models/pricing` returns models with pricing metadata; `GET /api/dashboard/costs` provides estimated cost aggregation with group filtering, time-range filtering (7d/30d/90d/all), and per-agent breakdown; `POST /api/dashboard/costs/actuals` pulls actual runtime and memory costs from CloudWatch logs.
+- CloudWatch log retrieval strategies: (1) stream-name matching for session-specific streams (fetches all events), (2) filterPattern fallback for shared streams. Both use nextToken pagination for complete data retrieval.
+- Vended log sources: log viewer dropdown includes runtime APPLICATION_LOGS, runtime USAGE_LOGS, and memory APPLICATION_LOGS as selectable vended log sources with display labels and last event timestamps. Stream timestamps respect the user's timezone preference.
+- Cost dashboard sections: **Estimated Costs** table with per-agent breakdown (Model Tokens, AgentCore Runtime CPU+Mem, AgentCore Memory STM+LTM, Per Invoke, Total) with inline sub-details. **Actual Costs** split into Runtime and Memory sub-sections. Runtime: collapsible agent groups with per-session detail rows, subtotals per agent, sortable at agent level. Memory: consolidated per-resource table with columns Log Events, Extractions, Consolidations, LTM Retrievals, Records Stored, Total. Actuals are cached in module-level state to persist across page navigation.
+- Runtime actuals session filtering: Only sessions tracked in Loom's `invocation_sessions` table are shown, filtering out external invocations against the same runtime.
+- Runtime actuals aggregation: CloudWatch usage log events (1-second granularity) are aggregated by `(agent_name, session_id)` tuple from `attributes.agent.name` and `attributes.session.id`. Timestamps normalized from epoch milliseconds or ISO strings to UTC ISO 8601. Delivery of usage logs can be delayed up to 15 minutes.
+- Memory actuals: Parsed from `BedrockAgentCoreMemory_ApplicationLogs` vended log group. Memory pipeline session IDs are internal to AgentCore and do NOT correlate with runtime session IDs — they represent asynchronous extraction/consolidation/storage pipeline runs. `parse_memory_log_events()` maps `body.log` messages to pricing operations.
+- Cost summary in responses: `AgentResponse` includes `cost_summary` field with `total_input_tokens`, `total_output_tokens`, `total_model_cost`, `total_runtime_cost`, `total_memory_cost`, `total_cost`, and `total_invocations`.
+- SSE streaming: `session_end` event includes token counts and estimated cost for immediate display after invocation completes.
+- Settings page: CPU I/O Wait Discount input with description and save-on-blur behavior.
+- Database integrity: `PRAGMA foreign_keys=ON` added to all test engines for proper SQLite FK enforcement. Explicit cascade delete for invocations before sessions to prevent FK constraint violations.
+- Frontend invocation metrics: InvocationTable expanded to 7 columns — Client Invoke, Agent Start, Cold Start, Duration, Input Tokens, Output Tokens, Est. Cost — all displayed in a single row.
+- Frontend agent cards: cost badge displayed when `total_estimated_cost > 0`. READY status badge hidden to reduce clutter. Memory cards hide ACTIVE status badge.
+- Frontend cost dashboard: new `CostDashboardPage` with time-range selector (7d/30d/90d/All), summary cards (Total Cost, Model Tokens, Runtime, Memory), estimated costs table with sortable columns and methodology formulas, actual costs section with separate Runtime (collapsible agent groups) and Memory (consolidated per-resource) sub-sections, Pull Actuals button with loading timer. Platform catalog page includes estimates disclaimer.
+- Costs sidebar item: new navigation entry (above Settings) visible to users with `catalog:read` scope.
+
+### Phase 16 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

@@ -10,9 +10,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from sqlalchemy import func
+
 from app.db import get_db
 from app.dependencies.auth import UserInfo, require_scopes
+from app.models.agent import Agent
+from app.models.invocation import Invocation
 from app.models.memory import Memory
+from app.models.session import InvocationSession
 from app.models.tag_policy import TagPolicy
 from app.services.memory import (
     create_memory as svc_create_memory,
@@ -83,14 +88,68 @@ class MemoryResponse(BaseModel):
     account_id: str
     memory_execution_role_arn: str | None = None
     encryption_key_arn: str | None = None
+    cost_summary: dict | None = None
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+def _memory_cost_summary(memory: Memory, db: Session) -> dict | None:
+    """Compute aggregated memory cost for a memory resource.
+
+    Finds agents whose config references this memory's ``memory_id`` and
+    sums ``memory_estimated_cost`` from their invocations.
+    """
+    if not memory.memory_id:
+        return None
+
+    # Find agents that reference this memory_id in their config
+    from app.models.config_entry import ConfigEntry
+    pattern = f'%"memory_id": "{memory.memory_id}"%'
+    agent_ids = [
+        row.agent_id for row in
+        db.query(ConfigEntry.agent_id).filter(
+            ConfigEntry.key == "AGENT_CONFIG_JSON",
+            ConfigEntry.value.like(pattern),
+        ).all()
+    ]
+
+    if not agent_ids:
+        return None
+
+    base_q = db.query(Invocation).join(
+        InvocationSession, Invocation.session_id == InvocationSession.session_id
+    ).filter(InvocationSession.agent_id.in_(agent_ids))
+
+    total_stm = base_q.with_entities(func.sum(Invocation.stm_cost)).scalar() or 0.0
+    total_ltm = base_q.with_entities(func.sum(Invocation.ltm_cost)).scalar() or 0.0
+    total_retrievals = base_q.with_entities(func.sum(Invocation.memory_retrievals)).scalar() or 0
+    total_events_sent = base_q.with_entities(func.sum(Invocation.memory_events_sent)).scalar() or 0
+
+    total_memory_cost = total_stm + total_ltm
+    if total_memory_cost == 0 and total_retrievals == 0 and total_events_sent == 0:
+        return None
+
+    return {
+        "total_memory_estimated_cost": round(total_memory_cost, 6),
+        "total_stm_cost": round(total_stm, 6),
+        "total_ltm_cost": round(total_ltm, 6),
+        "total_retrievals": total_retrievals,
+        "total_events_sent": total_events_sent,
+    }
+
+
+def _build_memory_response(memory: Memory, db: Session) -> MemoryResponse:
+    """Build a MemoryResponse with cost summary."""
+    resp = MemoryResponse(**memory.to_dict())
+    resp.cost_summary = _memory_cost_summary(memory, db)
+    return resp
+
+
 def _handle_aws_error(e: Exception) -> None:
     """Map AWS exceptions to HTTP errors."""
     error_name = type(e).__name__
+    logger.error("AWS error [%s]: %s", error_name, e)
     error_map = {
         "ValidationException": status.HTTP_400_BAD_REQUEST,
         "ConflictException": status.HTTP_409_CONFLICT,
@@ -242,7 +301,21 @@ def create_memory(
     db.commit()
     db.refresh(memory)
 
-    return MemoryResponse(**memory.to_dict())
+    # Enable APPLICATION_LOGS observability via vended log delivery
+    if memory_arn and memory_id:
+        try:
+            from app.services.observability import enable_memory_observability
+            obs_result = enable_memory_observability(
+                memory_arn=memory_arn,
+                memory_id=memory_id,
+                account_id=account_id,
+                region=region,
+            )
+            logger.info("Enabled observability for memory %s: %s", memory_id, obs_result)
+        except Exception as obs_err:
+            logger.warning("Failed to enable observability for memory %s: %s", memory_id, obs_err)
+
+    return _build_memory_response(memory, db)
 
 
 @router.post("/import", response_model=MemoryResponse, status_code=status.HTTP_201_CREATED)
@@ -333,7 +406,22 @@ def import_memory(
     db.commit()
     db.refresh(memory)
 
-    return MemoryResponse(**memory.to_dict())
+    # Enable APPLICATION_LOGS observability via vended log delivery
+    imported_memory_id = mem_data.get("id", request.memory_id)
+    if memory_arn and imported_memory_id:
+        try:
+            from app.services.observability import enable_memory_observability
+            obs_result = enable_memory_observability(
+                memory_arn=memory_arn,
+                memory_id=imported_memory_id,
+                account_id=account_id,
+                region=region,
+            )
+            logger.info("Enabled observability for imported memory %s: %s", imported_memory_id, obs_result)
+        except Exception as obs_err:
+            logger.warning("Failed to enable observability for imported memory %s: %s", imported_memory_id, obs_err)
+
+    return _build_memory_response(memory, db)
 
 
 @router.get("", response_model=list[MemoryResponse])
@@ -348,7 +436,7 @@ def list_memories(
     if "users" in user.groups and "super-admins" not in user.groups:
         memories = [m for m in memories if m.get_tags().get("loom:group") == "users"]
 
-    return [MemoryResponse(**m.to_dict()) for m in memories]
+    return [_build_memory_response(m, db) for m in memories]
 
 
 @router.get("/{memory_id}", response_model=MemoryResponse)
@@ -360,7 +448,7 @@ def get_memory(memory_id: int, user: UserInfo = Depends(require_scopes("memory:r
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Memory with id {memory_id} not found"
         )
-    return MemoryResponse(**memory.to_dict())
+    return _build_memory_response(memory, db)
 
 
 @router.post("/{memory_id}/refresh", response_model=MemoryResponse)
@@ -416,7 +504,7 @@ def refresh_memory(memory_id: int, user: UserInfo = Depends(require_scopes("memo
     db.commit()
     db.refresh(memory)
 
-    return MemoryResponse(**memory.to_dict())
+    return _build_memory_response(memory, db)
 
 
 @router.delete("/{memory_id}", response_model=MemoryResponse)
@@ -444,10 +532,17 @@ def delete_memory(
 
     # If not cleaning up AWS, just remove from DB
     if not cleanup_aws or not memory.memory_id or memory.status in ("FAILED",):
-        result = MemoryResponse(**memory.to_dict())
+        result = _build_memory_response(memory, db)
         db.delete(memory)
         db.commit()
         return result
+
+    # Clean up observability resources (best-effort)
+    try:
+        from app.services.observability import cleanup_memory_observability
+        cleanup_memory_observability(memory.memory_id, memory.region)
+    except Exception as obs_err:
+        logger.warning("Failed to cleanup observability for memory %s: %s", memory.memory_id, obs_err)
 
     # Initiate async deletion in AWS
     try:
@@ -456,7 +551,7 @@ def delete_memory(
         error_name = type(e).__name__
         if error_name == "ResourceNotFoundException":
             # Already gone from AWS — remove locally
-            result = MemoryResponse(**memory.to_dict())
+            result = _build_memory_response(memory, db)
             db.delete(memory)
             db.commit()
             return result
@@ -467,7 +562,7 @@ def delete_memory(
     memory.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(memory)
-    return MemoryResponse(**memory.to_dict())
+    return _build_memory_response(memory, db)
 
 
 @router.delete("/{memory_id}/purge", status_code=status.HTTP_204_NO_CONTENT)

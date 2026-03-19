@@ -1,6 +1,6 @@
 # Loom Frontend
 
-Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, resource tag management, and tag profile management.
+Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, resource tag management, tag profile management, cost estimation dashboard, and actual runtime cost analysis.
 
 ## Prerequisites
 
@@ -60,9 +60,10 @@ The sidebar provides access to persona-based workflows:
 | **Agents** | Bot | Deploy new agents or import existing ones |
 | **Memory** | Brain | Create and manage AgentCore Memory resources |
 | **Security Admin** | Shield | Manage IAM roles, authorizer configs, credentials, permission requests |
-| **Settings** | Settings | Manage tag profiles and configuration |
 | **MCP Servers** | Network | Register and manage MCP servers with OAuth2 auth, tool discovery, and access control |
 | **A2A Agents** | Users | Register and manage A2A agents with OAuth2 auth, Agent Card display, and access control |
+| **Costs** | DollarSign | Cost dashboard with estimated costs, actual runtime costs from CloudWatch, and cost settings |
+| **Settings** | Settings | Manage display preferences (theme, timezone) and cost estimation settings (CPU I/O wait discount) |
 
 The sidebar also includes a user indicator (when authenticated), admin View As dropdown (simulates specific users like demo-admin-1, demo-user-1 with their group-based scopes), live clock, and version badge. Theme and timezone are configured on the Settings page. Each listing page has a card/table view toggle; the selection persists per-page across persona switches.
 
@@ -124,7 +125,7 @@ src/
 │   ├── MemoryManagementPage.tsx # Memory resource management
 │   ├── McpServersPage.tsx      # MCP server management with tool/access tabs
 │   ├── A2aAgentsPage.tsx      # A2A agent management with card/access tabs
-│   ├── SettingsPage.tsx        # Tag profile management
+│   ├── SettingsPage.tsx        # Display preferences + cost estimation settings
 │   └── SessionDetailPage.tsx   # Session metadata, invocations, logs
 ├── lib/          # Shared utilities (cn(), format helpers, status mapping, error mapping)
 ├── App.tsx       # Root: auth gate + persona sidebar + navigation
@@ -147,12 +148,13 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 - `api/auth.ts` — Cognito auth API: `fetchAuthConfig`, `initiateAuth`, `respondToNewPasswordChallenge`, `refreshTokens`
 - `api/agents.ts` — Agent operations: list, get, register (with optional model_id), deploy, delete (with optional AWS cleanup), refresh, redeploy, fetchRoles, fetchCognitoPools, fetchModels, fetchDefaults
 - `api/invocations.ts` — Session queries + `invokeAgentStream()` SSE consumer (supports `credential_id`, includes auth header)
-- `api/logs.ts` — CloudWatch log queries
+- `api/logs.ts` — CloudWatch log queries with cache-busting refresh support
 - `api/memories.ts` — Memory resource operations: create, import, list, get, refresh, delete, purge
 - `api/security.ts` — Security admin operations: managed roles, authorizer configs, authorizer credentials, permission requests
 - `api/a2a.ts` — A2A agent operations: CRUD, test connection, card retrieval/refresh, skills, access rules
 - `api/mcp.ts` — MCP server operations: CRUD, test connection, tool discovery/refresh, access rule management
 - `api/settings.ts` — Tag policy and tag profile operations: list, create, update, delete
+- `api/costs.ts` — Cost dashboard API: `fetchCostDashboard` (estimated costs), `fetchCostActuals` (actual runtime + memory costs from CloudWatch logs), `fetchModelPricing`
 - `api/types.ts` — TypeScript interfaces including AgentResponse (with `model_id`, `tags`), SSESessionStart (with `has_token`, `token_source`), AuthorizerCredential, ManagedRole, PermissionRequestResponse, MemoryResponse (with `tags`), MemoryCreateRequest (with `tags`), MemoryStrategyRequest, McpServer, McpTool, McpServerAccess, TagPolicy, TagPolicyCreateRequest, TagPolicyUpdateRequest, TagProfile, TagProfileCreateRequest
 
 ### Hooks
@@ -160,7 +162,7 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 - `useAgents()` — Agent list with auto-fetch, CRUD actions, register (with optional modelId), async deletion polling (DELETING → 404 → purge)
 - `useSessions(agentId)` — Session list that re-fetches on agent change
 - `useInvoke(authorizerName?)` — Streaming state management with `AbortController`, supports credential_id and bearer_token, provides friendly error messages with authorizer-specific hints
-- `useLogs()` — On-demand session log fetching
+- `useLogs()` — On-demand session log fetching with `noCache` support for cache-busting refresh, vended log source management, stream log retrieval
 - `useA2aAgents()` — A2A agent list with auto-fetch, CRUD callbacks, toast notifications
 - `useMcpServers()` — MCP server list with auto-fetch, CRUD callbacks, toast notifications
 - `useDeployment()` — Agent config, credential providers, and integrations
@@ -182,6 +184,7 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 - **A2aAgentCardView** — Structured Agent Card display: capabilities, authentication schemes, input/output modes, and skills.
 - **A2aAccessControl** — Per-persona access control for A2A agent skills with all_skills/selected_skills modes.
 - **MemoryManagementPanel** — Create/import form with JSON import/export and strategy configuration (type, name, description, namespace), memory card/table list with status badges (CREATING/ACTIVE/FAILED/DELETING), refresh and delete actions with inline confirmation overlay.
+- **LogViewer** — Paginated CloudWatch log display (200 lines/page) with toggleable line numbers and timestamps, log stream selector with timezone-aware timestamps, vended log source selector (runtime APPLICATION_LOGS, runtime USAGE_LOGS, memory APPLICATION_LOGS), and cache-busting refresh support.
 
 ### Views
 
@@ -190,13 +193,14 @@ The `AuthContext` also provides scope-based authorization. User groups are extra
 | LoginPage | — | Cognito login + set new password |
 | CatalogPage | Platform Catalog | Agents (with multi-select tag filter bar), memory resources (with tag badges), MCP servers, A2A agents sections |
 | AgentDetailPage | Platform Catalog | Sessions, invoke, latency, streaming response, deployment details |
-| SessionDetailPage | Platform Catalog | Session metadata, invocation timing, CloudWatch logs |
+| SessionDetailPage | Platform Catalog | Session metadata, invocation timing, paginated CloudWatch logs with line numbers, stream selector (with timezone-aware timestamps), and vended log sources (runtime app/usage logs, memory app logs) |
 | AgentListPage | Agents | Deploy/Import form (with tag profile selector) + agent card/table grid with multi-select tag filters |
 | SecurityAdminPage | Security | Roles, authorizers, credentials, permissions |
 | MemoryManagementPage | Memory | Memory resource create/import form (with tag profile selector), card/table list with tag badges and multi-select tag filters |
 | McpServersPage | MCP Servers | MCP server CRUD, server detail with Tools and Access tabs, card/table views |
 | A2aAgentsPage | A2A Agents | A2A agent CRUD, Agent Card detail, Access control tabs |
-| SettingsPage | Settings | Tag profile CRUD (create, edit, delete named tag presets) |
+| CostDashboardPage | Costs | Estimated costs table (per-agent breakdown with methodology formulas), actual costs with Runtime (collapsible agent groups, per-session detail) and Memory (consolidated per-resource) sub-sections, summary cards, time-range selector, sortable columns |
+| SettingsPage | Settings | Display preferences (theme, timezone), cost estimation settings (CPU I/O wait discount) |
 
 ### Session Liveness
 
