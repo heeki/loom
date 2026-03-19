@@ -28,7 +28,8 @@ from app.models.authorizer_credential import AuthorizerCredential
 from app.services.agentcore import invoke_agent
 from app.services.cloudwatch import (
     get_log_events, get_usage_log_events,
-    parse_agent_start_time, parse_memory_telemetry, parse_usage_telemetry,
+    parse_agent_start_time, parse_agentcore_request_id,
+    parse_memory_telemetry, parse_usage_telemetry,
 )
 from app.services.cognito import get_cognito_token
 from app.services.latency import compute_client_duration, compute_cold_start
@@ -55,6 +56,7 @@ class InvocationResponse(BaseModel):
     id: int
     session_id: str
     invocation_id: str
+    request_id: str | None = None
     client_invoke_time: float | None
     client_done_time: float | None
     agent_start_time: float | None
@@ -99,13 +101,35 @@ def compute_live_status(session: InvocationSession, db: Session) -> str:
     Compute the live status of a session based on its status and timing data.
 
     Returns "pending", "streaming", "active", or "expired".
-    """
-    if session.status == "pending":
-        return "pending"
-    if session.status == "streaming":
-        return "streaming"
 
+    Sessions stuck in ``pending`` or ``streaming`` longer than the idle
+    timeout are automatically transitioned to ``error`` so they do not
+    remain in a stale state indefinitely.
+    """
     timeout_seconds = int(os.getenv("LOOM_SESSION_IDLE_TIMEOUT_SECONDS", "300"))
+
+    if session.status in ("pending", "streaming"):
+        # If the session has been pending/streaming longer than the idle
+        # timeout, it is stuck — transition to error.
+        if session.created_at:
+            age = (datetime.utcnow() - session.created_at).total_seconds()
+            if age > timeout_seconds:
+                logger.warning(
+                    "Session %s stuck in '%s' for %.0fs; marking as error",
+                    session.session_id, session.status, age,
+                )
+                session.status = "error"
+                # Also mark any pending/streaming invocations as error
+                stuck_invocations = db.query(Invocation).filter(
+                    Invocation.session_id == session.session_id,
+                    Invocation.status.in_(("pending", "streaming")),
+                ).all()
+                for inv in stuck_invocations:
+                    inv.status = "error"
+                    inv.error_message = "Session timed out in pending/streaming state"
+                db.commit()
+                return "expired"
+        return session.status
 
     max_done_time = db.query(func.max(Invocation.client_done_time)).filter(
         Invocation.session_id == session.session_id
@@ -121,6 +145,33 @@ def compute_live_status(session: InvocationSession, db: Session) -> str:
         if (datetime.utcnow() - session.created_at).total_seconds() < timeout_seconds:
             return "active"
     return "expired"
+
+
+def _get_io_discount(db: Session) -> float:
+    """Get the configured CPU I/O wait discount."""
+    from app.routers.settings import get_cpu_io_wait_discount
+    return get_cpu_io_wait_discount(db)
+
+
+def _apply_view_time_costs(inv_dict: dict, io_discount: float) -> dict:
+    """Recompute runtime costs at view time using current pricing defaults.
+
+    When client_duration_ms is available, CPU and memory costs are recomputed
+    from duration so that pricing constant changes affect all historical data.
+    Falls back to applying only the I/O wait discount on stored CPU cost.
+    """
+    from app.routers.agents import AGENTCORE_RUNTIME_PRICING
+    duration_ms = inv_dict.get("client_duration_ms")
+    if duration_ms is not None and duration_ms > 0:
+        hours = duration_ms / 1000 / 3600
+        raw_cpu = hours * AGENTCORE_RUNTIME_PRICING["default_vcpu"] * AGENTCORE_RUNTIME_PRICING["cpu_per_vcpu_hour"]
+        inv_dict["compute_cpu_cost"] = round(raw_cpu * (1.0 - io_discount), 6)
+        inv_dict["compute_memory_cost"] = round(hours * AGENTCORE_RUNTIME_PRICING["default_memory_gb"] * AGENTCORE_RUNTIME_PRICING["memory_per_gb_hour"], 6)
+    else:
+        raw = inv_dict.get("compute_cpu_cost")
+        if raw is not None:
+            inv_dict["compute_cpu_cost"] = round(raw * (1.0 - io_discount), 6)
+    return inv_dict
 
 
 def _backfill_idle_costs(session: InvocationSession, live_status: str, db: Session) -> None:
@@ -158,54 +209,51 @@ def _backfill_idle_costs(session: InvocationSession, live_status: str, db: Sessi
     # Scenario 2: gap between consecutive completed invocations
     for i in range(len(completed) - 1):
         current = completed[i]
-        if current.idle_memory_cost is not None:
-            continue  # Already computed
         next_inv = completed[i + 1]
         if next_inv.client_invoke_time:
             gap_seconds = next_inv.client_invoke_time - current.client_done_time
             if gap_seconds > 0:
                 idle_seconds = min(gap_seconds, idle_timeout_seconds)
-                current.idle_cpu_cost = 0.0
-                current.idle_memory_cost = round(idle_seconds * mem_rate, 6)
-                current.idle_timeout_cost = current.idle_memory_cost
-                changed = True
+                new_cost = round(idle_seconds * mem_rate, 6)
+                if current.idle_memory_cost != new_cost:
+                    current.idle_cpu_cost = 0.0
+                    current.idle_memory_cost = new_cost
+                    current.idle_timeout_cost = new_cost
+                    changed = True
 
     # Scenario 1: last completed invocation and session has expired
     last = completed[-1]
-    if last.idle_memory_cost is None and live_status == "expired":
-        last.idle_cpu_cost = 0.0
-        last.idle_memory_cost = round(idle_timeout_seconds * mem_rate, 6)
-        last.idle_timeout_cost = last.idle_memory_cost
-        changed = True
+    if live_status == "expired":
+        new_cost = round(idle_timeout_seconds * mem_rate, 6)
+        if last.idle_memory_cost != new_cost:
+            last.idle_cpu_cost = 0.0
+            last.idle_memory_cost = new_cost
+            last.idle_timeout_cost = new_cost
+            changed = True
 
     if changed:
         db.commit()
-        logger.info("Backfilled idle memory costs for session %s", session.session_id)
+        logger.info("Recomputed idle memory costs for session %s", session.session_id)
 
 
 def _estimate_compute_costs(
     duration_seconds: float,
-    db_session: Session | None = None,
 ) -> tuple[float, float, float]:
-    """Estimate CPU and memory costs from measured invocation duration.
+    """Estimate raw CPU and memory costs from measured invocation duration.
 
-    CPU cost is discounted by the configurable I/O wait discount (default 75%),
-    since agent CPU is mostly idle during I/O-bound model calls.
+    Uses the default resource allocation from AGENTCORE_RUNTIME_PRICING.
+    CPU cost is stored at full rate (no I/O wait discount).  The configurable
+    discount is applied at view time so changing the setting retroactively
+    affects all historical data.
 
     Returns (cpu_cost, memory_cost, total_cost) all rounded to 6 decimals.
     """
     from app.routers.agents import AGENTCORE_RUNTIME_PRICING
 
-    io_discount = 0.75
-    if db_session is not None:
-        from app.routers.settings import get_cpu_io_wait_discount
-        io_discount = get_cpu_io_wait_discount(db_session)
-
     hours = duration_seconds / 3600
     cpu_cost = round(
         hours * AGENTCORE_RUNTIME_PRICING["default_vcpu"]
-        * AGENTCORE_RUNTIME_PRICING["cpu_per_vcpu_hour"]
-        * (1.0 - io_discount), 6,
+        * AGENTCORE_RUNTIME_PRICING["cpu_per_vcpu_hour"], 6,
     )
     memory_cost = round(
         hours * AGENTCORE_RUNTIME_PRICING["default_memory_gb"]
@@ -283,10 +331,15 @@ def _finalize_invocation(
             limit=100,
             max_retries=6,
             retry_interval=5.0,
+            required_marker="LOOM_MEMORY_TELEMETRY",
         )
 
         if events:
             logger.info("[finalize] Found %d CloudWatch log events for session %s", len(events), session_id)
+
+            # Extract AgentCore request ID
+            agentcore_req_id = parse_agentcore_request_id(events)
+
             agent_start_time_val = parse_agent_start_time(events)
 
             mem_telemetry = parse_memory_telemetry(events)
@@ -297,6 +350,7 @@ def _finalize_invocation(
                 ltm_retrieval_cost = mem_telemetry["retrievals"] / 1000 * 0.50
                 memory_estimated_cost = round(stm_cost + ltm_retrieval_cost, 6)
         else:
+            agentcore_req_id = None
             logger.warning("[finalize] No CloudWatch log events found for session %s", session_id)
     except Exception as cw_err:
         logger.exception("[finalize] CloudWatch retrieval failed for session %s: %s", session_id, cw_err)
@@ -324,8 +378,7 @@ def _finalize_invocation(
                 6,
             )
 
-    # Compute cost: estimate from measured duration (will be updated by poller
-    # when actual USAGE_LOGS arrive).
+    # Compute cost: estimate from measured duration using default resource allocation.
     duration_seconds = client_done_time - client_invoke_time
     compute_cpu_cost, compute_memory_cost, compute_cost = _estimate_compute_costs(duration_seconds)
     cost_source = "estimated"
@@ -367,6 +420,8 @@ def _finalize_invocation(
             inv.memory_estimated_cost = memory_estimated_cost
             inv.stm_cost = stm_cost
             inv.ltm_cost = ltm_cost
+            if agentcore_req_id:
+                inv.request_id = agentcore_req_id
             inv.status = "complete"
         if sess:
             sess.status = "complete"
@@ -442,6 +497,7 @@ async def invoke_agent_stream(
     thinking_chunks: list[str] = []
     chunk_generator = None
     stream_drained = False
+    aws_request_id: str | None = None
 
     try:
         # Call invoke_agent service (returns a synchronous generator)
@@ -509,11 +565,20 @@ async def invoke_agent_stream(
                     limit=100,
                     max_retries=6,
                     retry_interval=5.0,
+                    required_marker="LOOM_MEMORY_TELEMETRY",
                 )
             )
 
             if events:
                 logger.info("Found %d CloudWatch log events for session %s", len(events), session_id)
+
+                # Extract AgentCore request ID for correlation
+                agentcore_req_id = parse_agentcore_request_id(events)
+                if agentcore_req_id:
+                    aws_request_id = agentcore_req_id
+                    invocation.request_id = agentcore_req_id
+                    logger.info("Parsed AgentCore request_id=%s for invocation %s", agentcore_req_id, invocation_id)
+
                 agent_start_time = parse_agent_start_time(events)
                 if agent_start_time is not None:
                     invocation.agent_start_time = agent_start_time
@@ -559,12 +624,9 @@ async def invoke_agent_stream(
                     (input_tokens / 1000 * input_price) + (output_tokens / 1000 * output_price), 6,
                 )
 
-        # Compute cost: estimate from measured duration (will be updated by poller
-        # when actual USAGE_LOGS arrive).
+        # Compute cost: estimate from measured duration using default resource allocation.
         duration_seconds = client_done_time - client_invoke_time
-        compute_cpu_cost, compute_memory_cost, compute_cost = _estimate_compute_costs(
-            duration_seconds, db,
-        )
+        compute_cpu_cost, compute_memory_cost, compute_cost = _estimate_compute_costs(duration_seconds)
         cost_source = "estimated"
         logger.info("Estimated compute cost from %.1fs duration: cpu=$%s mem=$%s total=$%s",
                      duration_seconds, compute_cpu_cost, compute_memory_cost, compute_cost)
@@ -596,6 +658,7 @@ async def invoke_agent_stream(
         yield format_sse_event("session_end", {
             "session_id": session_id,
             "invocation_id": invocation_id,
+            "request_id": aws_request_id,
             "qualifier": qualifier,
             "client_invoke_time": client_invoke_time,
             "client_done_time": client_done_time,
@@ -606,7 +669,7 @@ async def invoke_agent_stream(
             "output_tokens": output_tokens,
             "estimated_cost": estimated_cost,
             "compute_cost": compute_cost,
-            "compute_cpu_cost": compute_cpu_cost,
+            "compute_cpu_cost": round(compute_cpu_cost * (1.0 - _get_io_discount(db)), 6),
             "compute_memory_cost": compute_memory_cost,
             "memory_retrievals": invocation.memory_retrievals,
             "memory_events_sent": invocation.memory_events_sent,
@@ -895,11 +958,16 @@ def list_sessions(
         InvocationSession.agent_id == agent_id
     ).order_by(InvocationSession.created_at.desc()).all()
 
+    from app.routers.settings import get_cpu_io_wait_discount
+    io_discount = get_cpu_io_wait_discount(db)
+
     result = []
     for session in sessions:
         live_status = compute_live_status(session, db)
         _backfill_idle_costs(session, live_status, db)
-        result.append(SessionResponse(**session.to_dict(), live_status=live_status))
+        sdict = session.to_dict()
+        sdict["invocations"] = [_apply_view_time_costs(inv, io_discount) for inv in sdict.get("invocations", [])]
+        result.append(SessionResponse(**sdict, live_status=live_status))
     return result
 
 
@@ -924,7 +992,11 @@ def get_session(
 
     live_status = compute_live_status(session, db)
     _backfill_idle_costs(session, live_status, db)
-    return SessionResponse(**session.to_dict(), live_status=live_status)
+    from app.routers.settings import get_cpu_io_wait_discount
+    io_discount = get_cpu_io_wait_discount(db)
+    sdict = session.to_dict()
+    sdict["invocations"] = [_apply_view_time_costs(inv, io_discount) for inv in sdict.get("invocations", [])]
+    return SessionResponse(**sdict, live_status=live_status)
 
 
 @router.get("/{agent_id}/sessions/{session_id}/invocations/{invocation_id}", response_model=InvocationResponse)
@@ -960,4 +1032,6 @@ def get_invocation(
             detail=f"Invocation {invocation_id} not found in session {session_id}"
         )
 
-    return InvocationResponse(**invocation.to_dict())
+    from app.routers.settings import get_cpu_io_wait_discount
+    io_discount = get_cpu_io_wait_discount(db)
+    return InvocationResponse(**_apply_view_time_costs(invocation.to_dict(), io_discount))

@@ -70,8 +70,8 @@ SUPPORTED_MODELS = [
 AGENTCORE_RUNTIME_PRICING = {
     "cpu_per_vcpu_hour": 0.0895,
     "memory_per_gb_hour": 0.00945,
-    "default_vcpu": 2,
-    "default_memory_gb": 8,
+    "default_vcpu": 1,
+    "default_memory_gb": 0.5,
     "default_idle_timeout_seconds": 900,
     "pricing_as_of": "2025-06-01",
 }
@@ -264,23 +264,35 @@ def _agent_response(agent: Agent, db: Session) -> AgentResponse:
         if ac:
             auth_cfg["name"] = ac.name
 
-    # Compute cost summary from invocations
+    # Compute cost summary from invocations.
+    # Sum per-invocation pre-rounded values so totals match what the detail
+    # pages display (avoids rounding discrepancies from recomputing off
+    # aggregate duration).
     base_q = db.query(Invocation).join(
         InvocationSession, Invocation.session_id == InvocationSession.session_id
     ).filter(InvocationSession.agent_id == agent.id)
     total_input = base_q.with_entities(func.sum(Invocation.input_tokens)).scalar() or 0
     total_output = base_q.with_entities(func.sum(Invocation.output_tokens)).scalar() or 0
     total_est = base_q.with_entities(func.sum(Invocation.estimated_cost)).scalar() or 0.0
-    total_compute_cpu = base_q.with_entities(func.sum(Invocation.compute_cpu_cost)).scalar() or 0.0
-    total_compute_mem = base_q.with_entities(func.sum(Invocation.compute_memory_cost)).scalar() or 0.0
     total_idle_mem = base_q.with_entities(func.sum(Invocation.idle_memory_cost)).scalar() or 0.0
     total_stm = base_q.with_entities(func.sum(Invocation.stm_cost)).scalar() or 0.0
     total_ltm = base_q.with_entities(func.sum(Invocation.ltm_cost)).scalar() or 0.0
     inv_count = base_q.with_entities(func.count(Invocation.id)).scalar() or 0
 
-    rt_cpu = total_compute_cpu
-    rt_mem = total_compute_mem + total_idle_mem
-    rt_total = rt_cpu + rt_mem
+    # Recompute per-invocation runtime costs at view time (matching _apply_view_time_costs)
+    from app.routers.settings import get_cpu_io_wait_discount
+    io_discount = get_cpu_io_wait_discount(db)
+    invocations = base_q.all()
+    rt_cpu = 0.0
+    rt_mem_compute = 0.0
+    for inv in invocations:
+        dur = inv.client_duration_ms
+        if dur is not None and dur > 0:
+            hours = dur / 1000 / 3600
+            raw_cpu = hours * AGENTCORE_RUNTIME_PRICING["default_vcpu"] * AGENTCORE_RUNTIME_PRICING["cpu_per_vcpu_hour"]
+            rt_cpu += round(raw_cpu * (1.0 - io_discount), 6)
+            rt_mem_compute += round(hours * AGENTCORE_RUNTIME_PRICING["default_memory_gb"] * AGENTCORE_RUNTIME_PRICING["memory_per_gb_hour"], 6)
+    rt_total = rt_cpu + rt_mem_compute + total_idle_mem
     mem_total = total_stm + total_ltm
     grand_total = total_est + rt_total + mem_total
 

@@ -31,9 +31,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     Initializes the database on startup and performs cleanup on shutdown.
     """
-    import asyncio
-    from app.services.usage_poller import start_usage_poller
-
     logger.info("Initializing Loom backend...")
 
     # Initialize database (create tables if they don't exist)
@@ -44,13 +41,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.error(f"Failed to initialize database: {e}")
         raise
 
-    # Start background usage log poller
-    poller_task = asyncio.create_task(start_usage_poller())
-
     yield
 
     # Cleanup
-    poller_task.cancel()
     logger.info("Shutting down Loom backend...")
 
 

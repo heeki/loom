@@ -76,12 +76,12 @@ export function InvocationTable({ invocations, onSelectInvocation }: InvocationT
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead className="w-[36ch]">Invocation ID</TableHead>
+          <TableHead className="w-[36ch]">Request ID</TableHead>
           <TableHead>Status</TableHead>
-          <TableHead>Cold Start</TableHead>
-          <TableHead>Duration</TableHead>
-          <TableHead className="text-right">Input</TableHead>
-          <TableHead className="text-right">Output</TableHead>
+          <TableHead className="text-right">Cold Start</TableHead>
+          <TableHead className="text-right">Duration</TableHead>
+          <TableHead className="text-right">Tokens</TableHead>
+          <TableHead className="text-right">Model</TableHead>
           <TableHead className="text-right">Runtime</TableHead>
           <TableHead className="text-right">Memory</TableHead>
           <TableHead className="text-right">Total</TableHead>
@@ -96,22 +96,24 @@ export function InvocationTable({ invocations, onSelectInvocation }: InvocationT
             onClick={() => onSelectInvocation?.(inv.invocation_id)}
           >
             <TableCell className="font-mono text-xs">
-              {inv.invocation_id}
+              {inv.request_id ?? "—"}
             </TableCell>
             <TableCell>
               <Badge variant={statusVariant(inv.status)}>{inv.status}</Badge>
             </TableCell>
-            <TableCell className="font-mono text-xs">
+            <TableCell className="font-mono text-xs text-right">
               {formatMs(inv.cold_start_latency_ms)}
             </TableCell>
-            <TableCell className="font-mono text-xs">
+            <TableCell className="font-mono text-xs text-right">
               {formatMs(inv.client_duration_ms)}
             </TableCell>
             <TableCell className="font-mono text-xs text-right">
-              {formatTokens(inv.input_tokens)}
+              <span>{formatTokens(inv.input_tokens)}</span>
+              <span className="text-muted-foreground mx-0.5">/</span>
+              <span>{formatTokens(inv.output_tokens)}</span>
             </TableCell>
             <TableCell className="font-mono text-xs text-right">
-              {formatTokens(inv.output_tokens)}
+              {formatCost(inv.estimated_cost)}
             </TableCell>
             <TableCell className="font-mono text-xs text-right">
               {formatCost(invocationRuntime(inv))}

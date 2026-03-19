@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from app.db import get_db
 from app.dependencies.auth import UserInfo, require_scopes
 from app.models.agent import Agent
+from app.models.memory import Memory
 from app.routers.agents import derive_log_group
 
 from app.services.cloudwatch import get_log_events, get_stream_log_events, list_log_streams
@@ -247,4 +248,122 @@ def get_session_logs(
         log_group=log_group,
         log_stream="(filtered by session)",
         events=_format_events(events)
+    )
+
+
+# --------------------------------------------------------------------------
+# Vended log sources
+# --------------------------------------------------------------------------
+
+class VendedLogSource(BaseModel):
+    """A vended log source available for an agent."""
+    key: str
+    label: str
+    log_group: str
+    stream: str
+
+
+class VendedLogSourcesResponse(BaseModel):
+    """Response model listing available vended log sources."""
+    sources: List[VendedLogSource]
+
+
+def _resolve_agent(agent_id: int, db: Session) -> Agent:
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    return agent
+
+
+@router.get("/{agent_id}/logs/vended-sources", response_model=VendedLogSourcesResponse)
+def list_vended_log_sources(
+    agent_id: int,
+    user: UserInfo = Depends(require_scopes("agent:read")),
+    db: Session = Depends(get_db),
+) -> VendedLogSourcesResponse:
+    """List available vended log sources (runtime and memory) for an agent."""
+    agent = _resolve_agent(agent_id, db)
+
+    sources: list[VendedLogSource] = []
+
+    # Runtime vended logs
+    if agent.runtime_id:
+        sources.append(VendedLogSource(
+            key=f"vended:runtime:app:{agent.runtime_id}",
+            label="Runtime — Application Logs",
+            log_group=f"/aws/vendedlogs/bedrock-agentcore/runtimes/{agent.runtime_id}",
+            stream="BedrockAgentCoreRuntime_ApplicationLogs",
+        ))
+        sources.append(VendedLogSource(
+            key=f"vended:runtime:usage:{agent.runtime_id}",
+            label="Runtime — Usage Logs",
+            log_group=f"/aws/vendedlogs/bedrock-agentcore/runtimes/{agent.runtime_id}",
+            stream="BedrockAgentCoreRuntime_UsageLogs",
+        ))
+
+    # Memory vended logs — look up memory resources linked to this agent
+    from app.models.config_entry import ConfigEntry
+    config_entry = db.query(ConfigEntry).filter(
+        ConfigEntry.agent_id == agent_id,
+        ConfigEntry.key == "AGENT_CONFIG_JSON",
+    ).first()
+    if config_entry:
+        try:
+            cfg = json.loads(config_entry.value)
+            for res in cfg.get("integrations", {}).get("memory", {}).get("resources", []):
+                mid = res.get("memory_id")
+                if not mid:
+                    continue
+                mem = db.query(Memory).filter(Memory.memory_id == mid).first()
+                label = f"Memory — Application Logs ({mem.name})" if mem else f"Memory — Application Logs ({mid})"
+                sources.append(VendedLogSource(
+                    key=f"vended:memory:{mid}",
+                    label=label,
+                    log_group=f"/aws/vendedlogs/bedrock-agentcore/memory/APPLICATION_LOGS/{mid}",
+                    stream="BedrockAgentCoreMemory_ApplicationLogs",
+                ))
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    return VendedLogSourcesResponse(sources=sources)
+
+
+@router.get("/{agent_id}/logs/vended", response_model=LogResponse)
+def get_vended_logs(
+    agent_id: int,
+    log_group: str = Query(..., description="Vended log group name"),
+    stream: str = Query(..., description="Log stream name within the group"),
+    limit: int = Query(default=10000, ge=1, le=10000),
+    start_time: Optional[str] = Query(default=None),
+    end_time: Optional[str] = Query(default=None),
+    user: UserInfo = Depends(require_scopes("agent:read")),
+    db: Session = Depends(get_db),
+) -> LogResponse:
+    """Retrieve log events from a vended log group."""
+    agent = _resolve_agent(agent_id, db)
+
+    start_time_ms = iso_to_timestamp_ms(start_time) if start_time else None
+    end_time_ms = iso_to_timestamp_ms(end_time) if end_time else None
+
+    try:
+        events = get_stream_log_events(
+            log_group=log_group,
+            stream_name=stream,
+            region=agent.region,
+            start_time_ms=start_time_ms,
+            end_time_ms=end_time_ms,
+            limit=limit,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to retrieve vended logs: {str(e)}",
+        )
+
+    events = events[:limit]
+
+    return LogResponse(
+        log_group=log_group,
+        log_stream=stream,
+        events=_format_events(events),
     )

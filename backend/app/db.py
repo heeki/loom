@@ -89,6 +89,7 @@ def _migrate_add_columns(eng) -> None:
         ("invocations", "stm_cost", "REAL"),
         ("invocations", "ltm_cost", "REAL"),
         ("invocations", "cost_source", "VARCHAR"),
+        ("invocations", "request_id", "VARCHAR"),
     ]
 
     for table, column, col_type in migrations:

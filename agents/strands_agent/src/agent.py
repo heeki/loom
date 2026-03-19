@@ -66,9 +66,12 @@ def build_agent(config: AgentConfig, defer_mcp: bool = False) -> Agent:
 
     # Memory hooks (R8)
     if config.integrations.memory.enabled:
-        memory_hook = MemoryHook()
+        memory_store_id = None
+        if config.integrations.memory.resources:
+            memory_store_id = config.integrations.memory.resources[0].memory_id
+        memory_hook = MemoryHook(memory_store_id=memory_store_id)
         hooks.append(memory_hook)
-        logger.info("Enabled AgentCore Memory hook")
+        logger.info("Enabled AgentCore Memory hook (store_id=%s)", memory_store_id)
 
     try:
         agent = Agent(

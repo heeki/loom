@@ -20,20 +20,29 @@ import { useLogs } from "@/hooks/useLogs";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import type { SessionResponse, AgentResponse, LogStreamInfo } from "@/api/types";
+import type { TimezonePreference } from "@/contexts/TimezoneContext";
 
 const SESSION_LOGS_VALUE = "__session__";
 
 /**
- * Simplify a log stream name for display.
+ * Simplify a log stream name for display, optionally including a timestamp.
  * Input:  "YYYY/MM/DD/[runtime-logs-<session-id>]<uuid>"
- * Output: "<session-id> (YYYY/MM/DD)"
+ * Output: "<session-id> (YYYY/MM/DD HH:MM)"
  */
-function formatStreamName(name: string): string {
+function formatStreamName(name: string, lastEventTime?: number, tz?: TimezonePreference): string {
+  const timeSuffix = lastEventTime
+    ? new Date(lastEventTime).toLocaleString(undefined, {
+        timeZone: tz === "UTC" ? "UTC" : undefined,
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit",
+      })
+    : "";
+
   const match = name.match(/^(\d{4}\/\d{2}\/\d{2})\/\[runtime-logs-([^\]]+)\]/);
   if (match) {
-    return `${match[2]} (${match[1]})`;
+    return timeSuffix ? `${match[2]} (${timeSuffix})` : `${match[2]} (${match[1]})`;
   }
-  return name;
+  return timeSuffix ? `${name} (${timeSuffix})` : name;
 }
 
 function isOtelStream(name: string): boolean {
@@ -59,9 +68,11 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
     streams,
     streamsLoading,
     activeStream,
+    vendedSources,
     fetchSessionLogs,
     fetchLogStreams,
     fetchStreamLogs,
+    fetchVendedLogs,
   } = useLogs();
   const { timezone } = useTimezone();
   const [showTimestamp, setShowTimestamp] = useState(true);
@@ -70,12 +81,15 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
   const qualifier = session.qualifier || "DEFAULT";
 
   const refreshLogs = useCallback(() => {
-    if (activeStream) {
+    if (activeStream.startsWith("vended:")) {
+      const source = vendedSources.find((s) => s.key === activeStream);
+      if (source) void fetchVendedLogs(agent.id, source, true);
+    } else if (activeStream) {
       void fetchStreamLogs(agent.id, qualifier, activeStream, true);
     } else {
       void fetchSessionLogs(agent.id, session.session_id, qualifier, true);
     }
-  }, [agent.id, session.session_id, qualifier, activeStream, fetchSessionLogs, fetchStreamLogs]);
+  }, [agent.id, session.session_id, qualifier, activeStream, vendedSources, fetchSessionLogs, fetchStreamLogs, fetchVendedLogs]);
 
   // Fetch session logs and available streams on mount
   useEffect(() => {
@@ -86,6 +100,9 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
   const handleStreamChange = (value: string) => {
     if (value === SESSION_LOGS_VALUE) {
       void fetchSessionLogs(agent.id, session.session_id, qualifier);
+    } else if (value.startsWith("vended:")) {
+      const source = vendedSources.find((s) => s.key === value);
+      if (source) void fetchVendedLogs(agent.id, source);
     } else {
       void fetchStreamLogs(agent.id, qualifier, value);
     }
@@ -146,7 +163,7 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
           <div className="flex items-center gap-3">
             <h3 className="text-sm font-medium">Logs</h3>
             <Select value={selectedValue} onValueChange={handleStreamChange}>
-              <SelectTrigger size="sm" className="text-xs max-w-[340px]">
+              <SelectTrigger size="sm" className="text-xs max-w-[680px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -161,9 +178,22 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
                     <SelectSeparator />
                     <SelectGroup>
                       <SelectLabel>Log Streams</SelectLabel>
-                      {sortedStreams.map((stream) => (
-                        <SelectItem key={stream.name} value={stream.name}>
-                          <span className="font-mono">{formatStreamName(stream.name)}</span>
+                      {sortedStreams.map((s) => (
+                        <SelectItem key={s.name} value={s.name}>
+                          {formatStreamName(s.name, s.last_event_time, timezone)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </>
+                )}
+                {vendedSources.length > 0 && (
+                  <>
+                    <SelectSeparator />
+                    <SelectGroup>
+                      <SelectLabel>Vended Logs</SelectLabel>
+                      {vendedSources.map((src) => (
+                        <SelectItem key={src.key} value={src.key}>
+                          {src.label}
                         </SelectItem>
                       ))}
                     </SelectGroup>
@@ -206,9 +236,11 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
         </div>
         <Separator className="mb-4" />
         <div className="text-xs text-muted-foreground mb-2">
-          {activeStream
-            ? <>Showing all logs from stream: <span className="font-mono">{formatStreamName(activeStream)}</span></>
-            : <>Showing service-level logs matching session <span className="font-mono">{session.session_id}</span></>
+          {activeStream.startsWith("vended:")
+            ? <>Showing vended logs: {vendedSources.find((s) => s.key === activeStream)?.label ?? activeStream}</>
+            : activeStream
+              ? <>Showing stream: {formatStreamName(activeStream, undefined, timezone)}</>
+              : <>Showing service-level logs matching session <span className="font-mono">{session.session_id}</span></>
           }
         </div>
         <LogViewer logs={logs} loading={logsLoading} showTimestamp={showTimestamp} showLineNumbers={showLineNumbers} />

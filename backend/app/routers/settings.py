@@ -45,6 +45,8 @@ def get_cpu_io_wait_discount(db: Session) -> float:
         return 0.75
 
 
+
+
 class TagPolicyRequest(BaseModel):
     """Request body for creating/updating a tag policy."""
     key: str = Field(..., description="Tag key name")

@@ -161,6 +161,7 @@ export interface InvocationResponse {
   id: number;
   session_id: string;
   invocation_id: string;
+  request_id: string | null;
   client_invoke_time: number | null;
   client_done_time: number | null;
   agent_start_time: number | null;
@@ -221,6 +222,17 @@ export interface LogStreamInfo {
 export interface LogStreamsResponse {
   log_group: string;
   streams: LogStreamInfo[];
+}
+
+export interface VendedLogSource {
+  key: string;
+  label: string;
+  log_group: string;
+  stream: string;
+}
+
+export interface VendedLogSourcesResponse {
+  sources: VendedLogSource[];
 }
 
 // Security types
@@ -396,6 +408,7 @@ export interface SSEChunk {
 export interface SSESessionEnd {
   session_id: string;
   invocation_id: string;
+  request_id: string | null;
   qualifier: string;
   client_invoke_time: number;
   client_done_time: number;
@@ -674,4 +687,66 @@ export interface CostDashboardResponse {
   total_stm_cost: number;
   total_ltm_cost: number;
   agents: AgentCostSummary[];
+}
+
+export interface CostActualSession {
+  agent_name: string | null;
+  session_id: string | null;
+  event_count: number;
+  first_timestamp: string | null;
+  last_timestamp: string | null;
+  vcpu_hours: number;
+  memory_gb_hours: number;
+  cpu_cost: number;
+  memory_cost: number;
+  total_cost: number;
+}
+
+export interface CostActualAgent {
+  agent_id: number;
+  agent_name: string;
+  runtime_id: string;
+  log_group: string;
+  sessions: CostActualSession[];
+  total_cpu_cost: number;
+  total_memory_cost: number;
+  total_cost: number;
+}
+
+export interface CostActualMemorySession {
+  session_id: string;
+  log_events: number;
+  retrieve_records: number;
+  records_stored: number;
+  extractions: number;
+  consolidations: number;
+  errors: number;
+  ltm_retrieval_cost: number;
+  ltm_storage_cost: number;
+  total_cost: number;
+}
+
+export interface CostActualMemory {
+  memory_id: string;
+  memory_name: string;
+  log_group: string;
+  total_log_events: number;
+  retrieve_records: number;
+  records_stored: number;
+  extractions: number;
+  consolidations: number;
+  errors: number;
+  ltm_retrieval_cost: number;
+  ltm_storage_cost: number;
+  total_cost: number;
+  sessions: CostActualMemorySession[];
+}
+
+export interface CostActualsResponse {
+  group: string | null;
+  days: number;
+  io_wait_discount_percent: number;
+  agents: CostActualAgent[];
+  memory: CostActualMemory[];
+  summary: { total_events: number };
 }

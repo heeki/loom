@@ -127,7 +127,7 @@ export function SettingsPage() {
               )}
             </div>
             <p className="text-[10px] text-muted-foreground">
-              Assumed % of CPU time spent waiting on I/O, e.g., model API calls. Applied as a discount to estimated runtime CPU cost. Range: 0–99.
+              Assumed % of CPU time spent waiting on I/O (e.g., model API calls). Applied as a discount to runtime CPU cost across estimates and actuals. Range: 0–99.
             </p>
           </div>
         </div>

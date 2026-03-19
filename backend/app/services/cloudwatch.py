@@ -122,7 +122,8 @@ def get_log_events(
     start_time_ms: int | None = None,
     limit: int = 100,
     max_retries: int = 12,
-    retry_interval: float = 5.0
+    retry_interval: float = 5.0,
+    required_marker: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     Retrieve CloudWatch log events matching a session ID, with retry logic.
@@ -138,6 +139,8 @@ def get_log_events(
         limit: Maximum number of events to return (not strictly enforced due to pagination)
         max_retries: Maximum number of polling attempts
         retry_interval: Seconds to wait between retry attempts
+        required_marker: If set, keep retrying even when events are found until at
+            least one event message contains this substring, or retries are exhausted.
 
     Returns:
         List of log event dictionaries with keys:
@@ -231,7 +234,15 @@ def get_log_events(
                 logger.warning("[get_log_events] Strategy 2 error after %d events: %s", len(all_events), e)
 
         if all_events:
-            return all_events
+            if not required_marker:
+                return all_events
+            # Check if any event contains the required marker
+            if any(required_marker in e.get("message", "") for e in all_events):
+                return all_events
+            logger.info(
+                "[get_log_events] Found %d events but missing marker '%s'; retrying (%d/%d)",
+                len(all_events), required_marker, retry_count + 1, max_retries,
+            )
 
         retry_count += 1
         all_events = []
@@ -359,6 +370,34 @@ def parse_agent_start_time(log_events: list[dict[str, Any]]) -> float | None:
         logger.info("Used earliest CloudWatch event timestamp as agent_start_time fallback: %.3f", earliest_ts)
 
     return earliest_ts
+
+
+def parse_agentcore_request_id(log_events: list[dict[str, Any]]) -> str | None:
+    """Extract the AgentCore Request ID from agent application log events.
+
+    The AgentCore runtime injects a ``requestId`` field into the structured
+    JSON log lines emitted by the ``bedrock_agentcore.app`` logger.  This ID
+    is distinct from the ``ResponseMetadata.RequestId`` (API Gateway request
+    ID) and is the value users see in the CloudWatch console.
+
+    Args:
+        log_events: List of CloudWatch log event dictionaries.
+
+    Returns:
+        The AgentCore request ID string, or ``None`` if not found.
+    """
+    for event in log_events:
+        message = event.get("message", "")
+        if not message.startswith("{"):
+            continue
+        try:
+            data = json.loads(message)
+            req_id = data.get("requestId")
+            if req_id:
+                return req_id
+        except json.JSONDecodeError:
+            continue
+    return None
 
 
 def parse_memory_telemetry(log_events: list[dict[str, Any]]) -> dict[str, int]:
@@ -595,6 +634,11 @@ def parse_usage_events(log_events: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 USAGE_LOG_STREAM = "BedrockAgentCoreRuntime_UsageLogs"
 
+# Pricing for AgentCore Memory operations (per 1000)
+MEMORY_STM_PRICE_PER_1K = 0.25       # New events (short-term memory)
+MEMORY_LTM_RETRIEVAL_PRICE_PER_1K = 0.50  # Memory record retrievals (long-term memory)
+MEMORY_LTM_STORAGE_PRICE_PER_1K = 0.75    # Records stored per month (built-in strategies)
+
 
 def get_usage_log_events_by_time(
     runtime_id: str,
@@ -645,3 +689,180 @@ def get_usage_log_events_by_time(
     except Exception as e:
         logger.warning("Failed to query USAGE_LOGS for runtime %s: %s", runtime_id, e)
         return []
+
+
+def get_memory_log_events(
+    memory_id: str,
+    region: str,
+    start_time_ms: int,
+    end_time_ms: int | None = None,
+) -> list[dict[str, Any]]:
+    """Retrieve APPLICATION_LOGS for an AgentCore Memory resource.
+
+    Log group: ``/aws/vendedlogs/bedrock-agentcore/memory/APPLICATION_LOGS/{memory_id}``
+
+    Args:
+        memory_id: The AgentCore Memory resource ID.
+        region: AWS region name.
+        start_time_ms: Start time filter (ms since epoch).
+        end_time_ms: Optional end time filter (ms since epoch).
+
+    Returns:
+        List of raw CloudWatch log event dicts.
+    """
+    import boto3
+
+    log_group = f"/aws/vendedlogs/bedrock-agentcore/memory/APPLICATION_LOGS/{memory_id}"
+    client = boto3.client("logs", region_name=region)
+
+    try:
+        params: dict[str, Any] = {
+            "logGroupName": log_group,
+            "startTime": start_time_ms,
+            "limit": 10000,
+        }
+        if end_time_ms is not None:
+            params["endTime"] = end_time_ms
+
+        all_events: list[dict[str, Any]] = []
+        response = client.filter_log_events(**params)
+        all_events.extend(response.get("events", []))
+
+        while response.get("nextToken"):
+            params["nextToken"] = response["nextToken"]
+            response = client.filter_log_events(**params)
+            all_events.extend(response.get("events", []))
+
+        return all_events
+    except client.exceptions.ResourceNotFoundException:
+        logger.info("Memory log group not found for %s (not yet created)", memory_id)
+        return []
+    except Exception as e:
+        logger.warning("Failed to query memory logs for %s: %s", memory_id, e)
+        return []
+
+
+def parse_memory_log_events(
+    log_events: list[dict[str, Any]],
+    tracked_session_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    """Parse memory APPLICATION_LOGS to count operations and compute costs.
+
+    APPLICATION_LOGS are structured JSON with ``body.log`` describing the
+    pipeline step and ``body.requestId`` grouping events per API call.
+
+    These logs capture the LTM processing pipeline (extraction →
+    consolidation → storage) that runs asynchronously after STM events
+    are written via ``create_event``.  STM event counts are NOT in these
+    logs — they are tracked by the agent's MemoryHook telemetry in
+    runtime APPLICATION_LOGS.
+
+    Pricing mapping (from APPLICATION_LOGS only):
+
+      - ``"Retrieving memories."`` → LTM retrievals ($0.50 / 1K)
+      - ``"Succeeded to upsert N records."`` → LTM records stored ($0.75 / 1K / month, built-in)
+      - ``"Processing extraction input"`` → extraction pipeline steps (informational)
+      - ``"Processing consolidation input"`` → consolidation pipeline steps (informational)
+
+    Args:
+        log_events: Raw CloudWatch log event dicts.
+        tracked_session_ids: If provided, only count events whose
+            ``session_id`` is in this set.  Events without a
+            ``session_id`` are skipped when the filter is active.
+
+    Returns dict with counts and computed costs.
+    """
+    retrieve_records = 0
+    records_stored = 0
+    extractions = 0
+    consolidations = 0
+    errors = 0
+    matched_events = 0
+
+    # Per-session accumulators
+    session_agg: dict[str, dict[str, Any]] = {}
+
+    import re
+
+    for event in log_events:
+        message = event.get("message", "")
+        if not message.startswith("{"):
+            continue
+        try:
+            data = json.loads(message)
+        except json.JSONDecodeError:
+            continue
+
+        # Filter by tracked session IDs when provided
+        if tracked_session_ids is not None:
+            event_session_id = data.get("session_id", "")
+            if not event_session_id or event_session_id not in tracked_session_ids:
+                continue
+
+        matched_events += 1
+        body = data.get("body", {})
+        log_text = body.get("log", "")
+        sid = data.get("session_id", "unknown")
+
+        if sid not in session_agg:
+            session_agg[sid] = {
+                "session_id": sid,
+                "log_events": 0,
+                "retrieve_records": 0,
+                "records_stored": 0,
+                "extractions": 0,
+                "consolidations": 0,
+                "errors": 0,
+            }
+        sess = session_agg[sid]
+        sess["log_events"] += 1
+
+        # Classify by body.log message
+        if log_text == "Processing extraction input":
+            extractions += 1
+            sess["extractions"] += 1
+        elif log_text == "Processing consolidation input":
+            consolidations += 1
+            sess["consolidations"] += 1
+        elif log_text == "Retrieving memories.":
+            retrieve_records += 1
+            sess["retrieve_records"] += 1
+        elif log_text.startswith("Succeeded to upsert"):
+            m = re.search(r"upsert (\d+) records", log_text)
+            if m:
+                count = int(m.group(1))
+                records_stored += count
+                sess["records_stored"] += count
+
+        if body.get("isError"):
+            errors += 1
+            sess["errors"] += 1
+
+    ltm_retrieval_cost = round(retrieve_records / 1000 * MEMORY_LTM_RETRIEVAL_PRICE_PER_1K, 6)
+    ltm_storage_cost = round(records_stored / 1000 * MEMORY_LTM_STORAGE_PRICE_PER_1K, 6)
+
+    # Build per-session output with costs
+    sessions_out: list[dict[str, Any]] = []
+    for sess in session_agg.values():
+        s_retrieval_cost = round(sess["retrieve_records"] / 1000 * MEMORY_LTM_RETRIEVAL_PRICE_PER_1K, 6)
+        s_storage_cost = round(sess["records_stored"] / 1000 * MEMORY_LTM_STORAGE_PRICE_PER_1K, 6)
+        sessions_out.append({
+            **sess,
+            "ltm_retrieval_cost": s_retrieval_cost,
+            "ltm_storage_cost": s_storage_cost,
+            "total_cost": round(s_retrieval_cost + s_storage_cost, 6),
+        })
+    sessions_out.sort(key=lambda s: s["session_id"])
+
+    return {
+        "total_log_events": matched_events,
+        "retrieve_records": retrieve_records,
+        "records_stored": records_stored,
+        "extractions": extractions,
+        "consolidations": consolidations,
+        "errors": errors,
+        "ltm_retrieval_cost": ltm_retrieval_cost,
+        "ltm_storage_cost": ltm_storage_cost,
+        "total_cost": round(ltm_retrieval_cost + ltm_storage_cost, 6),
+        "sessions": sessions_out,
+    }

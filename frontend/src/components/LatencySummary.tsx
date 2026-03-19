@@ -63,7 +63,7 @@ export function LatencySummary({ sessionEnd }: LatencySummaryProps) {
             value={formatTokens(sessionEnd?.output_tokens)}
           />
           <MetricCell
-            label="Est. Cost"
+            label="Model Cost"
             value={formatCost(sessionEnd?.estimated_cost)}
           />
         </div>

@@ -149,6 +149,7 @@ def _build_memory_response(memory: Memory, db: Session) -> MemoryResponse:
 def _handle_aws_error(e: Exception) -> None:
     """Map AWS exceptions to HTTP errors."""
     error_name = type(e).__name__
+    logger.error("AWS error [%s]: %s", error_name, e)
     error_map = {
         "ValidationException": status.HTTP_400_BAD_REQUEST,
         "ConflictException": status.HTTP_409_CONFLICT,
@@ -300,6 +301,20 @@ def create_memory(
     db.commit()
     db.refresh(memory)
 
+    # Enable APPLICATION_LOGS observability via vended log delivery
+    if memory_arn and memory_id:
+        try:
+            from app.services.observability import enable_memory_observability
+            obs_result = enable_memory_observability(
+                memory_arn=memory_arn,
+                memory_id=memory_id,
+                account_id=account_id,
+                region=region,
+            )
+            logger.info("Enabled observability for memory %s: %s", memory_id, obs_result)
+        except Exception as obs_err:
+            logger.warning("Failed to enable observability for memory %s: %s", memory_id, obs_err)
+
     return _build_memory_response(memory, db)
 
 
@@ -390,6 +405,21 @@ def import_memory(
     db.add(memory)
     db.commit()
     db.refresh(memory)
+
+    # Enable APPLICATION_LOGS observability via vended log delivery
+    imported_memory_id = mem_data.get("id", request.memory_id)
+    if memory_arn and imported_memory_id:
+        try:
+            from app.services.observability import enable_memory_observability
+            obs_result = enable_memory_observability(
+                memory_arn=memory_arn,
+                memory_id=imported_memory_id,
+                account_id=account_id,
+                region=region,
+            )
+            logger.info("Enabled observability for imported memory %s: %s", imported_memory_id, obs_result)
+        except Exception as obs_err:
+            logger.warning("Failed to enable observability for imported memory %s: %s", imported_memory_id, obs_err)
 
     return _build_memory_response(memory, db)
 
@@ -506,6 +536,13 @@ def delete_memory(
         db.delete(memory)
         db.commit()
         return result
+
+    # Clean up observability resources (best-effort)
+    try:
+        from app.services.observability import cleanup_memory_observability
+        cleanup_memory_observability(memory.memory_id, memory.region)
+    except Exception as obs_err:
+        logger.warning("Failed to cleanup observability for memory %s: %s", memory.memory_id, obs_err)
 
     # Initiate async deletion in AWS
     try:

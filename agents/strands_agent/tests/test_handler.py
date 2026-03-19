@@ -25,7 +25,7 @@ class TestInvokeHandler(unittest.TestCase):
     def test_invoke_streams_events(self, mock_get_agent: MagicMock) -> None:
         mock_agent = MagicMock()
 
-        async def mock_stream(prompt):
+        async def mock_stream(prompt, **kwargs):
             for chunk in [{"data": "Hello "}, {"data": "world"}]:
                 yield chunk
 
@@ -41,7 +41,7 @@ class TestInvokeHandler(unittest.TestCase):
     def test_invoke_empty_prompt(self, mock_get_agent: MagicMock) -> None:
         mock_agent = MagicMock()
 
-        async def mock_stream(prompt):
+        async def mock_stream(prompt, **kwargs):
             return
             yield  # make it an async generator
 
@@ -58,7 +58,7 @@ class TestInvokeHandler(unittest.TestCase):
         mock_agent = MagicMock()
         captured_prompt = None
 
-        async def mock_stream(prompt):
+        async def mock_stream(prompt, **kwargs):
             nonlocal captured_prompt
             captured_prompt = prompt
             yield {"data": "ok"}
@@ -79,7 +79,7 @@ class TestInvokeHandler(unittest.TestCase):
     ) -> None:
         mock_agent = MagicMock()
 
-        async def mock_stream(prompt):
+        async def mock_stream(prompt, **kwargs):
             yield {"data": "ok"}
 
         mock_agent.stream_async = mock_stream

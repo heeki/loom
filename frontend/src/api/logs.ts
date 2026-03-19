@@ -1,5 +1,5 @@
 import { apiFetch } from "./client";
-import type { LogResponse, LogStreamsResponse } from "./types";
+import type { LogResponse, LogStreamsResponse, VendedLogSourcesResponse } from "./types";
 
 export function listLogStreams(
   agentId: number,
@@ -36,5 +36,30 @@ export function getSessionLogs(
   if (noCache) params.set("_t", String(Date.now()));
   return apiFetch<LogResponse>(
     `/api/agents/${agentId}/sessions/${sessionId}/logs?${params}`,
+  );
+}
+
+export function listVendedLogSources(
+  agentId: number,
+): Promise<VendedLogSourcesResponse> {
+  return apiFetch<VendedLogSourcesResponse>(
+    `/api/agents/${agentId}/logs/vended-sources`,
+  );
+}
+
+export function getVendedLogs(
+  agentId: number,
+  logGroup: string,
+  stream: string,
+  options?: { limit?: number; noCache?: boolean },
+): Promise<LogResponse> {
+  const params = new URLSearchParams({
+    log_group: logGroup,
+    stream,
+  });
+  if (options?.limit) params.set("limit", String(options.limit));
+  if (options?.noCache) params.set("_t", String(Date.now()));
+  return apiFetch<LogResponse>(
+    `/api/agents/${agentId}/logs/vended?${params}`,
   );
 }

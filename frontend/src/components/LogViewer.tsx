@@ -1,12 +1,26 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatLogTime } from "@/lib/format";
 import type { LogEvent } from "@/api/types";
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Search, X } from "lucide-react";
 
 const PAGE_SIZE = 200;
+
+function highlightMatch(text: string, term: string): React.ReactNode {
+  if (!term.trim()) return text;
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const parts = text.split(new RegExp(`(${escaped})`, "gi"));
+  return parts.map((part, i) =>
+    part.toLowerCase() === term.toLowerCase() ? (
+      <mark key={i} className="bg-yellow-200 dark:bg-yellow-800 rounded-sm px-0.5">{part}</mark>
+    ) : (
+      part
+    ),
+  );
+}
 
 interface LogViewerProps {
   logs: LogEvent[];
@@ -18,11 +32,21 @@ interface LogViewerProps {
 export function LogViewer({ logs, loading, showTimestamp = true, showLineNumbers = true }: LogViewerProps) {
   const { timezone } = useTimezone();
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
 
-  // Reset to page 1 when logs change
+  // Filter logs across all pages, preserving original line numbers
+  const filteredEntries = useMemo(() => {
+    const entries = logs.map((e, i) => ({ event: e, originalIndex: i + 1 }));
+    if (!search.trim()) return entries;
+    const term = search.toLowerCase();
+    return entries.filter((e) => e.event.message.toLowerCase().includes(term));
+  }, [logs, search]);
+  const filteredLogs = useMemo(() => filteredEntries.map((e) => e.event), [filteredEntries]);
+
+  // Reset to page 1 when logs or search change
   useEffect(() => {
     setPage(1);
-  }, [logs]);
+  }, [logs, search]);
 
   if (loading) {
     return (
@@ -38,17 +62,41 @@ export function LogViewer({ logs, loading, showTimestamp = true, showLineNumbers
     return <div className="text-sm text-muted-foreground py-4">No logs available</div>;
   }
 
-  const totalPages = Math.ceil(logs.length / PAGE_SIZE);
+  const totalPages = Math.ceil(filteredEntries.length / PAGE_SIZE);
   const start = (page - 1) * PAGE_SIZE;
-  const end = Math.min(start + PAGE_SIZE, logs.length);
-  const visibleLogs = logs.slice(start, end);
+  const end = Math.min(start + PAGE_SIZE, filteredEntries.length);
+  const visibleEntries = filteredEntries.slice(start, end);
 
   return (
     <div className="space-y-2">
+      <div className="relative">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+        <Input
+          placeholder="Filter logs (e.g. LOOM_MEMORY_TELEMETRY)"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-8 pl-8 pr-8 text-xs font-mono"
+        />
+        {search && (
+          <button
+            onClick={() => setSearch("")}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+
+      {search && (
+        <div className="text-xs text-muted-foreground">
+          {filteredLogs.length} of {logs.length} log lines match &ldquo;{search}&rdquo;
+        </div>
+      )}
+
       {totalPages > 1 && (
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>
-            Showing {start + 1}&ndash;{end} of {logs.length} log lines
+            Showing {start + 1}&ndash;{end} of {filteredEntries.length} log lines
           </span>
           <div className="flex items-center gap-1">
             <Button
@@ -95,24 +143,23 @@ export function LogViewer({ logs, loading, showTimestamp = true, showLineNumbers
       )}
 
       <div className="rounded border bg-input-bg p-3 font-mono text-xs leading-relaxed">
-        {visibleLogs.map((event, i) => {
-          const lineNum = start + i + 1;
-          return (
-            <div key={lineNum} className="flex gap-3 hover:bg-accent/30 py-0.5">
-              {showLineNumbers && (
-                <span className="shrink-0 text-muted-foreground text-right select-none" style={{ minWidth: `${String(logs.length).length + 0.5}ch` }}>
-                  {lineNum}
-                </span>
-              )}
-              {showTimestamp && (
-                <span className="shrink-0 text-muted-foreground">
-                  {formatLogTime(event.timestamp_iso, timezone)}
-                </span>
-              )}
-              <span className="whitespace-pre-wrap break-all">{event.message}</span>
-            </div>
-          );
-        })}
+        {visibleEntries.map(({ event, originalIndex }) => (
+          <div key={originalIndex} className="flex gap-3 hover:bg-accent/30 py-0.5">
+            {showLineNumbers && (
+              <span className="shrink-0 text-muted-foreground text-right select-none" style={{ minWidth: `${String(logs.length).length + 0.5}ch` }}>
+                {originalIndex}
+              </span>
+            )}
+            {showTimestamp && (
+              <span className="shrink-0 text-muted-foreground">
+                {formatLogTime(event.timestamp_iso, timezone)}
+              </span>
+            )}
+            <span className="whitespace-pre-wrap break-all">
+              {search.trim() ? highlightMatch(event.message, search) : event.message}
+            </span>
+          </div>
+        ))}
       </div>
 
       {totalPages > 1 && (
