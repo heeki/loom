@@ -420,7 +420,16 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Frontend cost dashboard: new `CostDashboardPage` with time-range selector (7d/30d/90d/All), summary cards (Total Cost, Model Tokens, Runtime, Memory), estimated costs table with sortable columns and methodology formulas, actual costs section with separate Runtime (collapsible agent groups) and Memory (consolidated per-resource) sub-sections, Pull Actuals button with loading timer. Platform catalog page includes estimates disclaimer.
 - Costs sidebar item: new navigation entry (above Settings) visible to users with `catalog:read` scope.
 
-### Phase 16 — Advanced Operations
+### Phase 16 — Trace Visualization *(Complete)*
+- Backend X-Ray service (`services/xray.py`): queries AWS X-Ray for trace summaries by `annotation.agent_invocation_id`, retrieves full trace data via `batch_get_traces`, and parses X-Ray segments/subsegments into a flat span list with parent-child relationships, timing, type classification (invocation/model/tool/other), and status.
+- Backend traces router (`routers/traces.py`): `GET /api/agents/{id}/sessions/{sid}/traces` lists traces for a session by querying X-Ray for each invocation ID within the session's time window. `GET /api/agents/{id}/traces/{tid}` returns full trace detail with all spans.
+- Frontend Logs/Traces tabbed layout on `SessionDetailPage` using shadcn Tabs. Logs tab preserves existing log viewer unchanged. Traces tab shows trace list (Trace ID, root span, start time, duration, span count, status, invocation ID) with lazy loading on first tab activation.
+- Interactive `TraceGraph` component: SVG-based waterfall/Gantt-style timeline. Spans rendered as colored bars (invocation=blue, model=green, tool=orange, error=red) with nesting depth indentation. Click to select (detail panel with span attributes), hover tooltip, click-drag zoom, collapse/expand parent spans. Summary metrics above graph: total duration, span count, model vs tool time breakdown.
+- Trace-to-invocation correlation via `agent.invocation_id` OTEL attribute (set in `telemetry.py`) mapped to X-Ray annotations.
+- `InvocationDetailPage` extended with Traces tab showing traces scoped to that invocation.
+- 10 backend tests covering trace router endpoints and X-Ray segment parsing.
+
+### Phase 17 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

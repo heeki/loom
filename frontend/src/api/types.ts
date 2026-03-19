@@ -235,6 +235,43 @@ export interface VendedLogSourcesResponse {
   sources: VendedLogSource[];
 }
 
+// Trace types
+export interface TraceSummary {
+  trace_id: string;
+  root_span_name: string;
+  start_time_iso: string;
+  duration_ms: number;
+  span_count: number;
+  status: string;
+  invocation_id: string | null;
+}
+
+export interface TraceListResponse {
+  traces: TraceSummary[];
+}
+
+export interface SpanDetail {
+  span_id: string;
+  parent_span_id: string | null;
+  name: string;
+  span_type: string;
+  start_time_iso: string;
+  end_time_iso: string;
+  duration_ms: number;
+  status: string;
+  attributes: Record<string, string>;
+}
+
+export interface TraceDetailResponse {
+  trace_id: string;
+  root_span_name: string;
+  start_time_iso: string;
+  duration_ms: number;
+  span_count: number;
+  status: string;
+  spans: SpanDetail[];
+}
+
 // Security types
 export interface ManagedRole {
   id: number;

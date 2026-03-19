@@ -827,6 +827,13 @@ Current site settings:
 | `GET` | `/api/agents/{agent_id}/sessions/{session_id}/logs` | Retrieve all logs for a session using stream-name matching with `nextToken` pagination (limit 10000). Falls back to `filterPattern` for shared streams. |
 | `GET` | `/api/agents/{agent_id}/logs/vended` | Retrieve logs from a vended log source (runtime or memory). Accepts `log_group` and `stream` query parameters. |
 
+### Traces (X-Ray)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/agents/{agent_id}/sessions/{session_id}/traces` | List traces for all invocations in a session. Queries X-Ray by `annotation.agent_invocation_id` for each invocation within the session's time window. Returns trace summaries with trace ID, root span name, duration, span count, status, and correlated invocation ID. |
+| `GET` | `/api/agents/{agent_id}/traces/{trace_id}` | Get full trace detail with all spans. Returns the trace ID, root span info, and a flat list of spans with parent-child relationships, timing, type classification, status, and attributes. |
+
 ---
 
 ## 7. Service Modules
@@ -852,6 +859,15 @@ Wraps `boto3.client('logs')`:
 - `parse_usage_events(raw_events)` — parses raw CloudWatch log events into structured usage records with vCPU hours, memory GB hours, agent name, session ID, and normalized timestamps.
 - `get_memory_log_events(memory_id, region, start_time_ms, end_time_ms)` — queries CloudWatch `BedrockAgentCoreMemory_ApplicationLogs` stream in the vended log group `/aws/vendedlogs/bedrock-agentcore/memory/APPLICATION_LOGS/{memory_id}`. Paginates via `nextToken`.
 - `parse_memory_log_events(raw_events)` — parses memory APPLICATION_LOG events by mapping `body.log` messages to operations: "Retrieving memories." → LTM retrievals, "Succeeded to upsert N records." → records stored, extraction/consolidation tracking. Returns total counts, per-session breakdowns, and computed costs.
+
+### `services/xray.py`
+
+Wraps `boto3.client('xray')`:
+
+- `get_trace_summaries(region, start_time, end_time, filter_expression)` — queries X-Ray trace summaries within a time window with optional filter expression. Paginates via NextToken.
+- `get_trace_summaries_for_invocations(region, invocation_ids, start_time, end_time)` — queries traces matching a list of invocation IDs using `annotation.agent_invocation_id` filter. Deduplicates by trace ID.
+- `batch_get_traces(region, trace_ids)` — retrieves full trace data via `batch_get_traces` (batches of 5). Returns segments with subsegments.
+- `parse_trace_to_spans(trace)` — flattens X-Ray segments/subsegments into a flat span list with parent-child references, timing, type classification (invocation/model/tool/other), status, and attributes.
 
 ### `services/deployment.py`
 

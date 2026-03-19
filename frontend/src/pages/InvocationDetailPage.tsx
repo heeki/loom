@@ -1,7 +1,13 @@
+import { useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp, formatMs } from "@/lib/format";
+import { TraceList } from "@/components/TraceList";
+import { TraceGraph } from "@/components/TraceGraph";
+import { useTraces } from "@/hooks/useTraces";
 import type { AgentResponse, SessionResponse, InvocationResponse } from "@/api/types";
 
 interface InvocationDetailPageProps {
@@ -44,8 +50,17 @@ function CostRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function InvocationDetailPage({ invocation }: InvocationDetailPageProps) {
+export function InvocationDetailPage({ agent, session, invocation }: InvocationDetailPageProps) {
   const { timezone } = useTimezone();
+  const {
+    traces,
+    tracesLoading,
+    selectedTrace,
+    traceDetailLoading,
+    fetchSessionTraces,
+    fetchTraceDetail,
+  } = useTraces();
+  const tracesFetchedRef = useRef(false);
 
   const rtCpu = invocation.compute_cpu_cost ?? 0;
   const rtMem = (invocation.compute_memory_cost ?? 0) + (invocation.idle_memory_cost ?? 0);
@@ -53,6 +68,22 @@ export function InvocationDetailPage({ invocation }: InvocationDetailPageProps) 
   const memTotal = (invocation.stm_cost ?? 0) + (invocation.ltm_cost ?? 0);
   const modelCost = invocation.estimated_cost ?? 0;
   const grandTotal = modelCost + rtTotal + memTotal;
+
+  // Filter traces to this invocation
+  const invocationTraces = traces.filter(
+    (t) => t.invocation_id === invocation.invocation_id,
+  );
+
+  const handleTabChange = (tab: string) => {
+    if (tab === "traces" && !tracesFetchedRef.current) {
+      tracesFetchedRef.current = true;
+      void fetchSessionTraces(agent.id, session.session_id);
+    }
+  };
+
+  const handleSelectTrace = (traceId: string) => {
+    void fetchTraceDetail(agent.id, traceId);
+  };
 
   return (
     <div className="space-y-6">
@@ -168,6 +199,25 @@ export function InvocationDetailPage({ invocation }: InvocationDetailPageProps) 
           </pre>
         </CardContent>
       </Card>
+
+      <Tabs defaultValue="traces" onValueChange={handleTabChange}>
+        <TabsList>
+          <TabsTrigger value="traces">Traces</TabsTrigger>
+        </TabsList>
+        <Separator className="my-2" />
+        <TabsContent value="traces" className="mt-0">
+          <TraceList
+            traces={invocationTraces}
+            loading={tracesLoading}
+            onSelectTrace={handleSelectTrace}
+          />
+          {selectedTrace && (
+            <div className="mt-4">
+              <TraceGraph trace={selectedTrace} loading={traceDetailLoading} />
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
