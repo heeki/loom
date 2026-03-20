@@ -22,8 +22,8 @@ GROUP_SCOPES: dict[str, list[str]] = {
         "a2a:read", "a2a:write", "invoke",
     ],
     "demo-admins": [
-        "catalog:read", "agent:read", "memory:read", "security:read",
-        "settings:read", "mcp:read", "a2a:read", "invoke",
+        "catalog:read", "agent:read", "agent:write", "memory:read", "memory:write",
+        "security:read", "settings:read", "mcp:read", "a2a:read", "invoke",
     ],
     "security-admins": ["security:read", "security:write", "settings:read"],
     "memory-admins": ["memory:read", "memory:write", "settings:read"],

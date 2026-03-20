@@ -41,22 +41,22 @@ class TestDeriveScopes(unittest.TestCase):
         scopes = derive_scopes(["nonexistent-group"])
         self.assertEqual(scopes, set())
 
-    def test_demo_admins_have_read_and_invoke_only(self) -> None:
-        """Demo admins should have read scopes and invoke, but no write scopes."""
+    def test_demo_admins_have_read_write_agent_memory_and_invoke(self) -> None:
+        """Demo admins should have agent:write, memory:write, read scopes, and invoke."""
         scopes = derive_scopes(["demo-admins"])
         # Assert read scopes are present
         self.assertIn("invoke", scopes)
         self.assertIn("catalog:read", scopes)
         self.assertIn("agent:read", scopes)
+        self.assertIn("agent:write", scopes)
         self.assertIn("memory:read", scopes)
+        self.assertIn("memory:write", scopes)
         self.assertIn("security:read", scopes)
         self.assertIn("settings:read", scopes)
         self.assertIn("mcp:read", scopes)
         self.assertIn("a2a:read", scopes)
-        # Assert write scopes are NOT present
+        # Assert other write scopes are NOT present
         self.assertNotIn("catalog:write", scopes)
-        self.assertNotIn("agent:write", scopes)
-        self.assertNotIn("memory:write", scopes)
         self.assertNotIn("security:write", scopes)
         self.assertNotIn("settings:write", scopes)
         self.assertNotIn("mcp:write", scopes)
@@ -160,25 +160,6 @@ class TestScopeEnforcement(unittest.TestCase):
         response = self.client.get("/api/memories")
         self.assertEqual(response.status_code, 200)
 
-    # -- Demo admins write restrictions --
-    def test_demo_admins_denied_on_agent_write(self) -> None:
-        """Demo admins should be denied on write endpoints (403)."""
-        self._override_user(["demo-admins"])
-        response = self.client.post("/api/agents", json={
-            "name": "test-agent",
-            "agent_type": "bedrock",
-            "model_id": "test-model",
-        })
-        self.assertEqual(response.status_code, 403)
-
-    def test_demo_admins_denied_on_memory_write(self) -> None:
-        """Demo admins should be denied on memory write endpoints."""
-        self._override_user(["demo-admins"])
-        response = self.client.post("/api/memories", json={
-            "name": "test-memory",
-            "backend": "pgvector",
-        })
-        self.assertEqual(response.status_code, 403)
 
     # -- Users group restrictions --
     def test_users_denied_on_write_endpoints(self) -> None:
