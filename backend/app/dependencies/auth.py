@@ -22,16 +22,15 @@ GROUP_SCOPES: dict[str, list[str]] = {
         "a2a:read", "a2a:write", "invoke",
     ],
     "demo-admins": [
-        "catalog:read", "agent:read", "memory:read", "security:read",
-        "settings:read", "mcp:read", "a2a:read",
-        "catalog:write", "agent:write", "memory:write", "security:write",
-        "settings:write", "mcp:write", "a2a:write", "invoke",
+        "catalog:read", "agent:read", "agent:write", "memory:read", "memory:write",
+        "security:read", "settings:read", "mcp:read", "a2a:read", "invoke",
     ],
-    "security-admins": ["security:read", "security:write"],
-    "memory-admins": ["memory:read", "memory:write"],
-    "mcp-admins": ["mcp:read", "mcp:write"],
-    "a2a-admins": ["a2a:read", "a2a:write"],
+    "security-admins": ["security:read", "security:write", "settings:read"],
+    "memory-admins": ["memory:read", "memory:write", "settings:read"],
+    "mcp-admins": ["mcp:read", "mcp:write", "settings:read"],
+    "a2a-admins": ["a2a:read", "a2a:write", "settings:read"],
     "users": ["invoke"],
+    "demo": ["catalog:read", "agent:read", "memory:read", "invoke"],
 }
 
 ALL_SCOPES: set[str] = {s for scopes in GROUP_SCOPES.values() for s in scopes}

@@ -16,6 +16,8 @@ interface AgentDetailPageProps {
   onSelectSession: (sessionId: string) => void;
   onSessionsRefresh: () => void;
   onRedeploy?: (id: number) => Promise<void>;
+  canInvoke?: boolean;
+  userGroups?: string[];
 }
 
 export function AgentDetailPage({
@@ -25,7 +27,22 @@ export function AgentDetailPage({
   onSelectSession,
   onSessionsRefresh,
   onRedeploy,
+  canInvoke = true,
+  userGroups = [],
 }: AgentDetailPageProps) {
+  // Check if user can invoke this specific agent based on group tags
+  const agentGroup = agent.tags?.["loom:group"] || "";
+  const isSuperAdmin = userGroups.includes("super-admins");
+
+  // Build allowed groups for this user (exclude 'users' from match unless explicitly in users group)
+  const allowedGroups = userGroups.filter(g => g !== "users");
+  if (userGroups.includes("users")) {
+    allowedGroups.push("users");
+  }
+
+  // Check if agent group matches any of the user's groups
+  const canInvokeThisAgent = isSuperAdmin || !agentGroup || allowedGroups.includes(agentGroup);
+  const effectiveCanInvoke = canInvoke && canInvokeThisAgent;
   const { streamedText, sessionStart, sessionEnd, isStreaming, error, rawError, invoke, cancel } =
     useInvoke(agent.id, agent.authorizer_config?.name ?? undefined);
 
@@ -48,16 +65,35 @@ export function AgentDetailPage({
       </section>
 
       {/* Invoke form */}
-      <InvokePanel
-        agentId={agent.id}
-        qualifiers={agent.available_qualifiers}
-        sessions={sessions}
-        isStreaming={isStreaming}
-        modelId={agent.model_id}
-        authorizerName={agent.authorizer_config?.name}
-        onInvoke={handleInvoke}
-        onCancel={cancel}
-      />
+      {effectiveCanInvoke ? (
+        <InvokePanel
+          agentId={agent.id}
+          qualifiers={agent.available_qualifiers}
+          sessions={sessions}
+          isStreaming={isStreaming}
+          modelId={agent.model_id}
+          authorizerName={agent.authorizer_config?.name}
+          onInvoke={handleInvoke}
+          onCancel={cancel}
+        />
+      ) : (
+        <Card className="border-muted-foreground/20">
+          <CardContent className="pt-6 pb-6 text-center text-sm text-muted-foreground">
+            <Key className="h-8 w-8 mx-auto mb-2 opacity-50" />
+            {!canInvoke ? (
+              <>
+                <p>You don't have permission to invoke agents.</p>
+                <p className="text-xs mt-1">Contact your administrator for the <code className="px-1 py-0.5 rounded bg-muted">invoke</code> scope.</p>
+              </>
+            ) : (
+              <>
+                <p>This agent is in the <code className="px-1 py-0.5 rounded bg-muted">{agentGroup}</code> group.</p>
+                <p className="text-xs mt-1">You can only invoke agents in your assigned groups.</p>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Latency summary — shown only after invocation completes */}
       {sessionEnd && <LatencySummary sessionEnd={sessionEnd} />}

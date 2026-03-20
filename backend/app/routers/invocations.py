@@ -746,6 +746,22 @@ async def invoke_agent_endpoint(
             detail=f"Qualifier '{request_body.qualifier}' not available. Available: {available_qualifiers}"
         )
 
+    # ---- Group-based invoke restriction ----
+    # super-admins can invoke any agent.
+    # Other users can only invoke agents tagged with their groups.
+    # Check this BEFORE creating any session/invocation records.
+    if "super-admins" not in user.groups:
+        agent_group = agent.get_tags().get("loom:group", "")
+        allowed_groups = [g for g in user.groups if g != "users"]
+        # users group members match agents tagged "users"
+        if "users" in user.groups:
+            allowed_groups.append("users")
+        if agent_group not in allowed_groups:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"You can only invoke agents within your group (agent group: {agent_group})",
+            )
+
     # Record client invoke time before session creation
     client_invoke_time = time.time()
 
@@ -790,21 +806,6 @@ async def invoke_agent_endpoint(
     db.add(invocation)
     db.commit()
     db.refresh(invocation)
-
-    # ---- Group-based invoke restriction ----
-    # super-admins can invoke any agent.
-    # demo-admins and users can only invoke agents tagged with their own group.
-    if "super-admins" not in user.groups:
-        agent_group = agent.get_tags().get("loom:group", "")
-        allowed_groups = [g for g in user.groups if g != "users"]
-        # users group members match agents tagged "users"
-        if "users" in user.groups:
-            allowed_groups.append("users")
-        if agent_group not in allowed_groups:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"You can only invoke agents within your group (agent group: {agent_group})",
-            )
 
     # ---- Resolve access token ----
     # Priority: manual token > credential_id (M2M) > user login token > agent config M2M

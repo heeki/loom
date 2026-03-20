@@ -114,12 +114,14 @@ export function AgentListPage({
     }
   };
 
-  const filteredAgents = agents.filter(agent => {
-    return Object.entries(tagFilters).every(([key, values]) => {
-      if (values.length === 0) return true;
-      return values.includes(agent.tags?.[key] ?? "");
-    });
-  });
+  const filteredAgents = agents
+    .filter(agent => {
+      return Object.entries(tagFilters).every(([key, values]) => {
+        if (values.length === 0) return true;
+        return values.includes(agent.tags?.[key] ?? "");
+      });
+    })
+    .filter(agent => !groupRestriction || agent.tags?.["loom:group"] === groupRestriction);
 
   const handleRegister = async (arn: string, modelId?: string) => {
     setSubmitting(true);

@@ -80,10 +80,34 @@ cognito.delete:
 # cognito user management
 cognito.set-passwords:
 	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username admin --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
-	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-admin-1 --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
-	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-admin-2 --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
 	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username security-admin --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
 	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username integration-admin --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
-	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-user-1 --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
-	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-user-2 --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-admin --password '$(P_COGNITO_DEMO_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-user --password '$(P_COGNITO_DEMO_PASSWORD)' --permanent
+
+cognito.get-client-id:
+	@aws cloudformation describe-stacks \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_COGNITO_STACK) \
+		--query 'Stacks[0].Outputs[?OutputKey==`oUserClientId`].OutputValue' \
+		--output text
+
+cognito.get-tokens:
+	@echo "Getting tokens for admin user..."
+	@CLIENT_ID=$$(aws cloudformation describe-stacks \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_COGNITO_STACK) \
+		--query 'Stacks[0].Outputs[?OutputKey==`oUserClientId`].OutputValue' \
+		--output text); \
+	echo "Using client ID: $$CLIENT_ID"; \
+	aws cognito-idp admin-initiate-auth \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--user-pool-id $(P_COGNITO_USER_POOL_ID) \
+		--client-id $$CLIENT_ID \
+		--auth-flow ADMIN_NO_SRP_AUTH \
+		--auth-parameters USERNAME=admin,PASSWORD='$(P_COGNITO_PERMANENT_PASSWORD)' \
+		--output json | jq -r '.AuthenticationResult | "=== Cognito Tokens ===\n\nIdToken:\n\(.IdToken)\n\nAccessToken:\n\(.AccessToken)\n\nRefreshToken:\n\(.RefreshToken)\n\nExpires in: \(.ExpiresIn) seconds"'
 

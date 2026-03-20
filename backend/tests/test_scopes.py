@@ -35,19 +35,32 @@ class TestDeriveScopes(unittest.TestCase):
 
     def test_multiple_groups_union(self) -> None:
         scopes = derive_scopes(["security-admins", "memory-admins"])
-        self.assertEqual(scopes, {"security:read", "security:write", "memory:read", "memory:write"})
+        self.assertEqual(scopes, {"security:read", "security:write", "memory:read", "memory:write", "settings:read"})
 
     def test_unknown_group_returns_empty(self) -> None:
         scopes = derive_scopes(["nonexistent-group"])
         self.assertEqual(scopes, set())
 
-    def test_demo_admins_have_all_scopes(self) -> None:
+    def test_demo_admins_have_read_write_agent_memory_and_invoke(self) -> None:
+        """Demo admins should have agent:write, memory:write, read scopes, and invoke."""
         scopes = derive_scopes(["demo-admins"])
+        # Assert read scopes are present
         self.assertIn("invoke", scopes)
         self.assertIn("catalog:read", scopes)
-        self.assertIn("catalog:write", scopes)
         self.assertIn("agent:read", scopes)
         self.assertIn("agent:write", scopes)
+        self.assertIn("memory:read", scopes)
+        self.assertIn("memory:write", scopes)
+        self.assertIn("security:read", scopes)
+        self.assertIn("settings:read", scopes)
+        self.assertIn("mcp:read", scopes)
+        self.assertIn("a2a:read", scopes)
+        # Assert other write scopes are NOT present
+        self.assertNotIn("catalog:write", scopes)
+        self.assertNotIn("security:write", scopes)
+        self.assertNotIn("settings:write", scopes)
+        self.assertNotIn("mcp:write", scopes)
+        self.assertNotIn("a2a:write", scopes)
 
     def test_group_scopes_consistency(self) -> None:
         """Every scope in ALL_SCOPES should appear in at least one group."""
@@ -115,7 +128,7 @@ class TestScopeEnforcement(unittest.TestCase):
 
     # -- Settings endpoints --
     def test_settings_tags_requires_settings_read(self) -> None:
-        self._override_user(["memory-admins"])  # no settings scope
+        self._override_user(["users"])  # users don't have settings scope
         response = self.client.get("/api/settings/tags")
         self.assertEqual(response.status_code, 403)
 
@@ -146,6 +159,25 @@ class TestScopeEnforcement(unittest.TestCase):
         self._override_user(["memory-admins"])
         response = self.client.get("/api/memories")
         self.assertEqual(response.status_code, 200)
+
+
+    # -- Users group restrictions --
+    def test_users_denied_on_write_endpoints(self) -> None:
+        """Users should be denied on all write endpoints."""
+        self._override_user(["users"])
+        # Test agent write
+        response = self.client.post("/api/agents", json={
+            "name": "test-agent",
+            "agent_type": "bedrock",
+            "model_id": "test-model",
+        })
+        self.assertEqual(response.status_code, 403)
+        # Test memory write
+        response = self.client.post("/api/memories", json={
+            "name": "test-memory",
+            "backend": "pgvector",
+        })
+        self.assertEqual(response.status_code, 403)
 
     # -- Auth config is public (no scope guard) --
     def test_auth_config_is_public(self) -> None:

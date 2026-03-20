@@ -12,6 +12,7 @@ import { ScrollText, Loader2, ChevronRight, ChevronDown } from "lucide-react";
 
 interface CostDashboardPageProps {
   readOnly?: boolean;
+  groupRestriction?: string;
 }
 
 function formatCost(cost: number): string {
@@ -78,7 +79,7 @@ const SORT_GETTERS: Record<string, (a: AgentCostSummary) => string | number> = {
 // Module-level cache so actuals survive component unmount/remount on navigation
 let _actualsCache: CostActualsResponse | null = null;
 
-export function CostDashboardPage({ readOnly: _readOnly }: CostDashboardPageProps) {
+export function CostDashboardPage({ readOnly: _readOnly, groupRestriction }: CostDashboardPageProps) {
   const { user: _user } = useAuth();
   const [data, setData] = useState<CostDashboardResponse | null>(null);
   const [days, setDays] = useState(30);
@@ -130,14 +131,14 @@ export function CostDashboardPage({ readOnly: _readOnly }: CostDashboardPageProp
   const loadCosts = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await fetchCostDashboard(days);
+      const result = await fetchCostDashboard(days, groupRestriction);
       setData(result);
     } catch {
       // ignore
     } finally {
       setLoading(false);
     }
-  }, [days]);
+  }, [days, groupRestriction]);
 
   const loadSettings = useCallback(async () => {
     try {
@@ -152,12 +153,17 @@ export function CostDashboardPage({ readOnly: _readOnly }: CostDashboardPageProp
   useEffect(() => { void loadCosts(); }, [loadCosts]);
   useEffect(() => { void loadSettings(); }, [loadSettings]);
 
+  // Clear actuals cache when groupRestriction changes
+  useEffect(() => {
+    setActuals(null);
+  }, [groupRestriction]);
+
   const pullActuals = async () => {
     setActualsLoading(true);
     setActualsElapsed(0);
     actualsTimerRef.current = setInterval(() => setActualsElapsed((t) => t + 1), 1000);
     try {
-      const result = await fetchCostActuals(days);
+      const result = await fetchCostActuals(days, groupRestriction);
       setActuals(result);
     } catch (e) {
       console.error("Failed to pull cost actuals:", e);
@@ -170,17 +176,19 @@ export function CostDashboardPage({ readOnly: _readOnly }: CostDashboardPageProp
     }
   };
 
+  // Backend filters by group, so use data directly
   const sortedAgents = data ? sortRows(data.agents, sortCol, sortDir, SORT_GETTERS) : [];
 
-  // Derived totals
-  const tModel = data ? data.total_estimated_cost : 0;
-  const tRtCpu = data ? data.total_compute_cpu_cost : 0;
-  const tRtMem = data ? data.total_compute_memory_cost + data.total_idle_memory_cost : 0;
+  // Derived totals - compute from all agents returned by backend
+  const tModel = data?.agents.reduce((sum, a) => sum + a.total_estimated_cost, 0) || 0;
+  const tRtCpu = data?.agents.reduce((sum, a) => sum + a.total_compute_cpu_cost, 0) || 0;
+  const tRtMem = data?.agents.reduce((sum, a) => sum + a.total_compute_memory_cost + a.total_idle_memory_cost, 0) || 0;
   const tRtTotal = tRtCpu + tRtMem;
-  const tStm = data ? data.total_stm_cost : 0;
-  const tLtm = data ? data.total_ltm_cost : 0;
+  const tStm = data?.agents.reduce((sum, a) => sum + a.total_stm_cost, 0) || 0;
+  const tLtm = data?.agents.reduce((sum, a) => sum + a.total_ltm_cost, 0) || 0;
   const tMemTotal = tStm + tLtm;
   const tGrand = tModel + tRtTotal + tMemTotal;
+  const tInvocations = data?.agents.reduce((sum, a) => sum + a.total_invocations, 0) || 0;
 
   return (
     <div className="space-y-6">
@@ -229,7 +237,7 @@ export function CostDashboardPage({ readOnly: _readOnly }: CostDashboardPageProp
                 <div className="text-xs text-muted-foreground">Model Tokens</div>
                 <div className="bg-white dark:bg-background rounded-md px-2 py-1 mt-1">
                   <div className="text-xl font-mono font-semibold">{formatCost(tModel)}</div>
-                  <div className="text-[10px] text-muted-foreground">{data.total_invocations.toLocaleString()} invocations</div>
+                  <div className="text-[10px] text-muted-foreground">{tInvocations.toLocaleString()} invocations</div>
                 </div>
               </CardContent>
             </Card>
@@ -365,7 +373,7 @@ export function CostDashboardPage({ readOnly: _readOnly }: CostDashboardPageProp
                       </p>
                     </CardHeader>
                     <CardContent>
-                      {actuals.agents.length === 0 ? (
+                      {actuals?.agents.length === 0 ? (
                         <p className="text-sm text-muted-foreground">No usage log data found for this period.</p>
                       ) : (
                         <div className="border rounded-md overflow-hidden">
@@ -446,7 +454,7 @@ export function CostDashboardPage({ readOnly: _readOnly }: CostDashboardPageProp
                       </p>
                     </CardHeader>
                     <CardContent>
-                      {!actuals.memory || actuals.memory.length === 0 ? (
+                      {!actuals?.memory || actuals.memory.length === 0 ? (
                         <p className="text-sm text-muted-foreground">No memory log data found for this period.</p>
                       ) : (
                         <div className="border rounded-md overflow-hidden">

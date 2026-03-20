@@ -899,7 +899,15 @@ AgentCore credential provider management:
 
 Core authentication and authorization module. Provides:
 
-- `GROUP_SCOPES: dict[str, list[str]]` — maps Cognito group names to scope lists. Must match the frontend `GROUP_SCOPES` exactly. Groups: `super-admins` (all 15 scopes), `demo-admins` (all read/write plus invoke), `security-admins`, `memory-admins`, `mcp-admins`, `a2a-admins`, `users` (invoke only).
+- `GROUP_SCOPES: dict[str, list[str]]` — maps Cognito group names to scope lists. Must match the frontend `GROUP_SCOPES` exactly. Groups:
+  - `super-admins`: all 15 scopes (read/write for all resources, invoke)
+  - `demo-admins`: `catalog:read`, `agent:read`, `agent:write`, `memory:read`, `memory:write`, `security:read`, `settings:read`, `mcp:read`, `a2a:read`, `invoke` (can create agents and memories, restricted to demo group)
+  - `demo`: `catalog:read`, `agent:read`, `memory:read`, `invoke` (read-only access to demo resources)
+  - `security-admins`: `security:read`, `security:write`, `settings:read`
+  - `memory-admins`: `memory:read`, `memory:write`, `settings:read`
+  - `mcp-admins`: `mcp:read`, `mcp:write`, `settings:read`
+  - `a2a-admins`: `a2a:read`, `a2a:write`, `settings:read`
+  - `users`: `invoke` only
 - `UserInfo` dataclass — `sub`, `username`, `groups`, `scopes` (derived from groups).
 - `get_current_user(request: Request) -> UserInfo` — validates JWT, extracts `cognito:groups`, derives scopes. In bypass mode (no `LOOM_COGNITO_USER_POOL_ID`), returns a super-admin with all scopes. Raises 401 on missing/invalid token.
 - `require_scopes(*required: str)` — factory returning a FastAPI dependency that checks the user has ALL required scopes. Raises 403 on missing scope. Used as `Depends(require_scopes("scope:name"))` on all guarded endpoints.
@@ -924,7 +932,11 @@ Core authentication and authorization module. Provides:
 | `a2a.py` | `a2a:read` | `a2a:write` |
 | `auth.py` | Public (no guard) | — |
 
-**Tag-based resource isolation (R5):** Users in the `users` group only see agents and memories tagged with `loom:group=users`. Demo-admins are restricted at the data layer: create/delete operations enforce that the resource's `loom:group` tag matches `demo-admins`.
+**Tag-based resource isolation:** Resources are filtered by the `loom:group` tag. Users can belong to multiple groups and see resources tagged with ANY of their groups (union semantics). Super-admins see all resources. Demo users (`demo-admins` and `demo-user`) are restricted to the `demo` group — they can only see and interact with resources tagged `loom:group=demo`. The `users` group has invoke-only access to resources tagged `loom:group=users`.
+
+**Multi-group filtering:** When a user belongs to multiple groups (excluding `super-admins`), the backend applies a union filter: a resource is visible if its `loom:group` tag matches any of the user's groups. This allows cross-team visibility when users have multiple group memberships.
+
+**View As mode:** Super-admins can switch to view the system as a different user persona (e.g., `demo-admin`, `demo-user`). The frontend sends a `group` parameter to backend endpoints, which filters resources as if the admin belonged to that group. This enables super-admins to validate permission models without switching accounts.
 
 ### `services/mcp.py`
 

@@ -55,6 +55,65 @@ AWS credentials use the standard boto3 credential chain (environment variables, 
 
 When `LOOM_COGNITO_USER_POOL_ID` is set, the backend validates user JWTs, derives scopes from `cognito:groups` via the `GROUP_SCOPES` mapping, and enforces per-endpoint scope requirements using `require_scopes()`. Returns 401 for missing/invalid tokens, 403 for insufficient scopes. When not set (bypass mode), all scopes are granted for local development. The user client ID is configured on the frontend side (via `VITE_COGNITO_USER_CLIENT_ID` in the frontend `.env` file), not the backend.
 
+## Authentication and Authorization
+
+### Scope Model
+
+The backend uses a fine-grained scope model for access control:
+
+| Scope | Description |
+|-------|-------------|
+| `catalog:read` | View agent and memory catalogs |
+| `catalog:write` | Modify catalog metadata |
+| `agent:read` | View agents, sessions, and invocations |
+| `agent:write` | Create, update, and delete agents |
+| `memory:read` | View memory resources |
+| `memory:write` | Create, update, and delete memory resources |
+| `security:read` | View roles, authorizers, and credentials |
+| `security:write` | Manage roles, authorizers, and credentials |
+| `settings:read` | View tag policies, tag profiles, and site settings |
+| `settings:write` | Manage tag policies, tag profiles, and site settings |
+| `mcp:read` | View MCP servers and tools |
+| `mcp:write` | Manage MCP servers and access rules |
+| `a2a:read` | View A2A agents and skills |
+| `a2a:write` | Manage A2A agents and access rules |
+| `invoke` | Invoke agents |
+
+### Group-to-Scope Mapping
+
+Scopes are derived from Cognito group membership via `GROUP_SCOPES`:
+
+- **super-admins**: All scopes (full access)
+- **demo-admins**: Can create and manage agents/memories within the demo group (`agent:write`, `memory:write`), plus read access to catalog, security, settings, MCP, and A2A. Can invoke agents.
+- **demo**: Read-only access to demo resources (`catalog:read`, `agent:read`, `memory:read`, `invoke`)
+- **security-admins**: Manage security resources (`security:read`, `security:write`, `settings:read`)
+- **memory-admins**: Manage memory resources (`memory:read`, `memory:write`, `settings:read`)
+- **mcp-admins**: Manage MCP servers (`mcp:read`, `mcp:write`, `settings:read`)
+- **a2a-admins**: Manage A2A agents (`a2a:read`, `a2a:write`, `settings:read`)
+- **users**: Invoke-only access (`invoke`)
+
+### Resource Filtering by Group Tag
+
+Resources (agents and memories) are tagged with `loom:group` at creation time. The backend filters resources based on user group membership:
+
+- **Super-admins**: See all resources (no filtering)
+- **Multi-group users**: See resources tagged with ANY of their groups (union filter)
+- **Demo users** (`demo-admins`, `demo-user`): Only see resources tagged `loom:group=demo`
+- **Users group**: Only see resources tagged `loom:group=users`
+
+### Demo User Architecture
+
+The system includes two demo user personas:
+
+1. **demo-admin**: Can create and manage agents/memories within the demo group. Has `agent:write` and `memory:write` scopes. Assigned to both `demo-admins` and `demo` groups.
+2. **demo-user**: Read-only access to demo resources. Can only invoke agents. Assigned to `demo` group only.
+
+Both demo users are restricted to the `demo` group namespace — they cannot see or interact with resources tagged for other groups.
+
+### View As Mode
+
+Super-admins can use "View As" mode to see the system from another user's perspective. The frontend passes a `group` query parameter to backend endpoints (e.g., `GET /api/agents?group=demo`, `GET /api/dashboard/costs?group=demo`). The backend applies group-based filtering as if the super-admin belonged to that group. This enables permission model validation without switching accounts.
+
 ## Project Structure
 
 ```
@@ -396,7 +455,7 @@ Invocations support multiple token sources with priority ordering:
 4. **Agent config token**: Falls back to the agent's stored authorizer config for M2M token retrieval.
 5. **SigV4 (no token)**: If no token is resolved, the request uses IAM SigV4 authentication.
 
-Group-based invoke restriction: `super-admins` can invoke any agent. `demo-admins` and `users` can only invoke agents within their `loom:group` tag. The backend automatically includes `LOOM_COGNITO_USER_CLIENT_ID` in agent authorizer `allowedClients` on deploy so user tokens are accepted.
+Group-based invoke restriction: `super-admins` can invoke any agent. Other users can only invoke agents whose `loom:group` tag matches one of their groups. For example, demo users can only invoke agents tagged `loom:group=demo`. The backend checks group-tag permission BEFORE creating the invocation session to prevent orphaned pending sessions. Returns 403 if the user's groups don't match the agent's tag. The backend automatically includes `LOOM_COGNITO_USER_CLIENT_ID` in agent authorizer `allowedClients` on deploy so user tokens are accepted.
 
 ## Makefile Targets
 
