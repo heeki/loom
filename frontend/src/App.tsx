@@ -144,13 +144,15 @@ function AppContent() {
     [viewAsUser, hasScope],
   );
 
-  // Compute group restriction for resource creation.
-  // super-admins: no restriction; demo-admins: locked to "demo-admins"; others: locked to first group name
+  // Compute group restriction for resource filtering.
+  // super-admins: no restriction; demo group: locked to "demo"; others: first non-users group
   const effectiveGroups = viewAsUser
     ? (USER_GROUPS[viewAsUser] ?? [])
     : (user?.groups ?? []);
   const groupRestriction = effectiveGroups.includes("super-admins")
     ? undefined
+    : effectiveGroups.includes("demo")
+    ? "demo"
     : effectiveGroups.find((g) => g !== "users");
 
   const { agents, loading, deleteStartTimes, fetchAgents, registerAgent, deployAgent, redeployAgent, refreshAgent, deleteAgent } = useAgents();
