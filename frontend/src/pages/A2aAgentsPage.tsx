@@ -340,12 +340,11 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
           <Table className="table-fixed">
             <TableHeader>
               <TableRow className="bg-card hover:bg-card">
-                <SortableTableHead column="name" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[25%]">Name</SortableTableHead>
-                <SortableTableHead column="url" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[30%]">URL</SortableTableHead>
+                <SortableTableHead column="name" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[18%]">Name</SortableTableHead>
+                <SortableTableHead column="url" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[46%]">URL</SortableTableHead>
                 <SortableTableHead column="version" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[10%]">Version</SortableTableHead>
-                <SortableTableHead column="provider" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[15%]">Provider</SortableTableHead>
                 <SortableTableHead column="auth" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[10%]">Auth</SortableTableHead>
-                <SortableTableHead column="created" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[10%]">Created</SortableTableHead>
+                <SortableTableHead column="created" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[16%]">Created</SortableTableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -353,7 +352,6 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
                 name: (a) => a.name,
                 url: (a) => a.base_url,
                 version: (a) => a.agent_version,
-                provider: (a) => a.provider_organization ?? "",
                 auth: (a) => a.auth_type,
                 created: (a) => a.created_at ?? "",
               }).map((agent) => (
@@ -365,7 +363,6 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
                   <TableCell className="font-medium text-sm">{agent.name}</TableCell>
                   <TableCell className="text-xs text-muted-foreground truncate">{agent.base_url}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{agent.agent_version}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{agent.provider_organization ?? "-"}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{agent.auth_type === "oauth2" ? "OAuth2" : "None"}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {formatTimestamp(agent.created_at, timezone)}

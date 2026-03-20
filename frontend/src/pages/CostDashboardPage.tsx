@@ -8,6 +8,7 @@ import { listSiteSettings } from "@/api/settings";
 import type { CostDashboardResponse, CostActualsResponse, AgentCostSummary, CostActualAgent } from "@/api/types";
 import type { SortDirection } from "@/components/SortableCardGrid";
 import { useAuth } from "@/contexts/AuthContext";
+import { trackAction } from "@/api/audit";
 import { ScrollText, Loader2, ChevronRight, ChevronDown } from "lucide-react";
 
 interface CostDashboardPageProps {
@@ -80,7 +81,7 @@ const SORT_GETTERS: Record<string, (a: AgentCostSummary) => string | number> = {
 let _actualsCache: CostActualsResponse | null = null;
 
 export function CostDashboardPage({ readOnly: _readOnly, groupRestriction }: CostDashboardPageProps) {
-  const { user: _user } = useAuth();
+  const { user, browserSessionId } = useAuth();
   const [data, setData] = useState<CostDashboardResponse | null>(null);
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(false);
@@ -159,6 +160,7 @@ export function CostDashboardPage({ readOnly: _readOnly, groupRestriction }: Cos
   }, [groupRestriction]);
 
   const pullActuals = async () => {
+    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "costs", "pull_actuals");
     setActualsLoading(true);
     setActualsElapsed(0);
     actualsTimerRef.current = setInterval(() => setActualsElapsed((t) => t + 1), 1000);

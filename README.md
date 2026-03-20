@@ -49,8 +49,9 @@ Loom is an enterprise-grade platform for building, deploying, and operating AI a
 ### Admin Dashboard
 - Platform usage analytics for super-admins: login tracking, user action tracking, and page navigation tracking
 - All audit events are scoped to a browser session UUID (generated at login, stored in React state) to distinguish shared accounts
-- Summary cards (total logins, active users, total actions, most active page) with time-range selector
-- Charts: logins over time, actions by category, page time distribution (recharts)
+- Global multi-select user filter that limits all summary cards, charts, and tab tables to selected users; stats are recomputed client-side from filtered data when active
+- Summary cards (total logins, total page views, total actions, total duration, most active page) with time-range selector
+- Charts: logins over time, actions over time, page views by page (recharts)
 - Per-session drill-down: interleaved timeline of logins, actions, and page views for any browser session
 - 27 instrumented action types across agent, memory, security, tagging, MCP, and A2A categories
 
@@ -58,6 +59,7 @@ Loom is an enterprise-grade platform for building, deploying, and operating AI a
 - OpenTelemetry observability with ADOT auto-instrumentation and OTEL trace visualization
 - Interactive waterfall timeline for inspecting per-span events from OTEL log records
 - Card/table view toggle on all listing pages
+- Estimated cost column in agent and memory table views; consistent 5-column layout for MCP and A2A tables
 - Drag-to-reorder cards with persistent ordering
 - JSON import/export on deploy and create forms
 - 10 color themes (5 light, 5 dark) and timezone-aware timestamps

@@ -24,6 +24,8 @@ import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import type { SessionResponse, AgentResponse, LogStreamInfo } from "@/api/types";
 import type { TimezonePreference } from "@/contexts/TimezoneContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { trackAction } from "@/api/audit";
 
 const SESSION_LOGS_VALUE = "__session__";
 
@@ -65,6 +67,7 @@ interface SessionDetailPageProps {
 }
 
 export function SessionDetailPage({ agent, session, onSelectInvocation }: SessionDetailPageProps) {
+  const { user, browserSessionId } = useAuth();
   const {
     logs,
     loading: logsLoading,
@@ -122,6 +125,7 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
   };
 
   const handleTabChange = (tab: string) => {
+    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "navigation", "tab_click", tab);
     if (tab === "traces" && !tracesFetchedRef.current) {
       tracesFetchedRef.current = true;
       void fetchSessionTraces(agent.id, session.session_id);
@@ -129,6 +133,7 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
   };
 
   const handleSelectTrace = (traceId: string) => {
+    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "navigation", "trace_detail", traceId);
     void fetchTraceDetail(agent.id, traceId);
   };
 
@@ -147,6 +152,12 @@ export function SessionDetailPage({ agent, session, onSelectInvocation }: Sessio
             <div className="font-mono text-sm">{session.session_id}</div>
           </div>
           <div className="flex gap-6 text-sm">
+            {session.user_id && (
+              <div>
+                <div className="text-xs text-muted-foreground">Invoked By</div>
+                <div className="text-sm mt-0.5 font-mono">{session.user_id}</div>
+              </div>
+            )}
             <div>
               <div className="text-xs text-muted-foreground">Qualifier</div>
               <Badge variant="outline" className="mt-0.5">{session.qualifier}</Badge>

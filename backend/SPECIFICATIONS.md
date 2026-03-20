@@ -1045,7 +1045,7 @@ Wraps `boto3.client('bedrock-agentcore-control')` for memory operations:
 Deployment runs asynchronously via FastAPI `BackgroundTasks` with progressive `deployment_status` updates:
 
 1. User submits a deploy form with agent configuration (model and IAM role are required).
-2. Backend creates the agent record with `deployment_status="initializing"` and returns immediately with HTTP 202.
+2. Backend creates the agent record with `deployment_status="initializing"`, immediately applies resolved tags to the DB record (so tag-based resource filtering is active from the first poll), and returns immediately with HTTP 202.
 3. Background task progresses through deployment phases:
    - **`creating_credentials`**: For each MCP server or A2A agent with OAuth2 auth, calls `create_oauth2_credential_provider` (vendor=`CustomOauth2`, using `discoveryUrl` from config) with exponential backoff retry. Stores credential provider names in `AGENT_CONFIG_JSON` under `integrations.mcp_servers[].auth.credential_provider_name` or `integrations.a2a_agents[].auth.credential_provider_name`. If credential provider creation fails after all retries, sets `deployment_status="credential_creation_failed"` and returns without deploying.
    - **`creating_role`**: Creates or validates the IAM execution role (if needed).

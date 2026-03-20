@@ -43,8 +43,9 @@ export interface AuditTimelineEvent {
 
 export interface AuditSummary {
   total_logins: number;
-  active_users: number;
+  total_duration: number;
   total_actions: number;
+  total_page_views: number;
   actions_by_category: Record<string, number>;
   page_views_by_page: Record<string, number>;
   logins_by_day: Array<{ date: string; count: number }>;
@@ -52,8 +53,8 @@ export interface AuditSummary {
 }
 
 interface QueryParams {
-  start_date?: string;
-  end_date?: string;
+  start?: string;
+  end?: string;
   user_id?: string;
   limit?: number;
   offset?: number;

@@ -29,6 +29,8 @@ interface TaggingPageProps {
 export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
   const { user, browserSessionId } = useAuth();
   const isSuperAdmin = userGroups.includes("g-admins-super");
+  const isAdminUser = userGroups.includes("t-admin");
+  const userGroup = userGroups.find((g) => g.startsWith("g-users-"))?.replace("g-users-", "");
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
   const [profiles, setProfiles] = useState<TagProfile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -594,13 +596,17 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
           </Card>
         )}
 
-        {profiles.length === 0 && !showProfileForm ? (
+        {(() => {
+          const visibleProfiles = !isAdminUser && userGroup
+            ? profiles.filter((p) => p.tags?.["loom:group"] === userGroup)
+            : profiles;
+          return visibleProfiles.length === 0 && !showProfileForm ? (
           <p className="text-sm text-muted-foreground py-8">
             No tag profiles yet. Create one to apply consistent tags across agents and memory resources.
           </p>
         ) : (
           <SortableCardGrid
-            items={profiles}
+            items={visibleProfiles}
             getId={(p) => p.id.toString()}
             getName={(p) => p.name}
             storageKey="tag-profiles"
@@ -677,7 +683,8 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
             );
             }}
           />
-        )}
+        );
+        })()}
       </div>
     </div>
   );

@@ -90,6 +90,7 @@ def _migrate_add_columns(eng) -> None:
         ("invocations", "ltm_cost", "REAL"),
         ("invocations", "cost_source", "VARCHAR"),
         ("invocations", "request_id", "VARCHAR"),
+        ("invocation_sessions", "user_id", "VARCHAR"),
     ]
 
     for table, column, col_type in migrations:
@@ -100,6 +101,42 @@ def _migrate_add_columns(eng) -> None:
             logger.info("Migrating: ALTER TABLE %s ADD COLUMN %s %s", table, column, col_type)
             with eng.begin() as conn:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
+
+
+def _backfill_session_users(eng) -> None:
+    """Best-effort backfill of user_id on invocation_sessions.
+
+    Matches sessions to users via audit_actions records where
+    action_type='session_detail' and resource_name=session_id.
+    Only updates rows where user_id is currently NULL.
+    """
+    insp = inspect(eng)
+    if not insp.has_table("invocation_sessions") or not insp.has_table("audit_actions"):
+        return
+    try:
+        with eng.begin() as conn:
+            conn.execute(text("""
+                UPDATE invocation_sessions
+                SET user_id = (
+                    SELECT a.user_id
+                    FROM audit_actions a
+                    WHERE a.action_category = 'navigation'
+                      AND a.action_type = 'session_detail'
+                      AND a.resource_name = invocation_sessions.session_id
+                    ORDER BY a.id ASC
+                    LIMIT 1
+                )
+                WHERE user_id IS NULL
+                  AND EXISTS (
+                    SELECT 1 FROM audit_actions a
+                    WHERE a.action_category = 'navigation'
+                      AND a.action_type = 'session_detail'
+                      AND a.resource_name = invocation_sessions.session_id
+                  )
+            """))
+            logger.info("Backfilled session user_id from audit_actions")
+    except Exception as e:
+        logger.warning("Session user backfill skipped: %s", e)
 
 
 def _seed_default_tags(eng) -> None:
@@ -129,6 +166,38 @@ def _seed_default_tags(eng) -> None:
         session.close()
 
 
+def _seed_demo_tag_profiles(eng) -> None:
+    """Seed tag profiles for demo-user-1 through demo-user-9."""
+    from app.models.tag_profile import TagProfile
+
+    session = sessionmaker(bind=eng)()
+    try:
+        # Remove any stale demo-admin-# profiles (not needed)
+        admin_profile_names = [f"demo-admin-{i}" for i in range(1, 10)]
+        session.query(TagProfile).filter(TagProfile.name.in_(admin_profile_names)).delete(synchronize_session="fetch")
+
+        for i in range(1, 10):
+            username = f"demo-user-{i}"
+            expected_tags = {
+                "loom:application": "demo",
+                "loom:group": "demo",
+                "loom:owner": username,
+            }
+            existing = session.query(TagProfile).filter(TagProfile.name == username).first()
+            if not existing:
+                profile = TagProfile(name=username)
+                profile.set_tags(expected_tags)
+                session.add(profile)
+            elif existing.get_tags() != expected_tags:
+                existing.set_tags(expected_tags)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 def init_db() -> None:
     """
     Initialize the database by creating all tables.
@@ -137,4 +206,6 @@ def init_db() -> None:
     """
     Base.metadata.create_all(bind=engine)
     _migrate_add_columns(engine)
+    _backfill_session_users(engine)
     _seed_default_tags(engine)
+    _seed_demo_tag_profiles(engine)

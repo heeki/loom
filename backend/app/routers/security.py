@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.dependencies.auth import UserInfo, require_scopes
+from app.dependencies.auth import UserInfo, get_current_user, require_scopes
 from app.models.managed_role import ManagedRole
 from app.models.authorizer_config import AuthorizerConfig
 from app.models.authorizer_credential import AuthorizerCredential
@@ -41,6 +41,14 @@ def _get_account_id() -> str:
     return os.getenv("AWS_ACCOUNT_ID", "")
 
 
+def _get_user_group(user: UserInfo) -> str | None:
+    """Extract the loom:group value from user's Cognito groups (e.g. 'demo' from 'g-users-demo')."""
+    for group in user.groups:
+        if group.startswith("g-users-"):
+            return group[len("g-users-"):]
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Pydantic request/response models
 # ---------------------------------------------------------------------------
@@ -50,6 +58,7 @@ class CreateRoleRequest(BaseModel):
     role_name: str | None = Field(None, description="New role name (wizard mode)")
     description: str = Field(default="", description="Role description")
     policy_document: dict = Field(default_factory=dict, description="IAM policy document (wizard mode)")
+    tags: dict[str, str] | None = Field(None, description="Tags to apply (merged with AWS IAM tags on import)")
 
 
 class UpdateRoleRequest(BaseModel):
@@ -120,7 +129,7 @@ def create_role(request: CreateRoleRequest, user: UserInfo = Depends(require_sco
             logger.warning("Could not fetch policy for %s: %s", role_name, e)
             policy_doc = {}
 
-        # Fetch tags from AWS IAM
+        # Fetch tags from AWS IAM, then merge with any provided tags (provided take precedence)
         tags: dict[str, str] = {}
         try:
             iam_client = boto3.client("iam", region_name=region)
@@ -129,6 +138,8 @@ def create_role(request: CreateRoleRequest, user: UserInfo = Depends(require_sco
                 tags[tag["Key"]] = tag["Value"]
         except Exception as e:
             logger.warning("Could not fetch tags for role %s: %s", role_name, e)
+        if request.tags:
+            tags.update(request.tags)
 
         role = ManagedRole(
             role_name=role_name,
@@ -172,9 +183,16 @@ def create_role(request: CreateRoleRequest, user: UserInfo = Depends(require_sco
 
 
 @router.get("/roles")
-def list_roles(user: UserInfo = Depends(require_scopes("security:read")), db: Session = Depends(get_db)) -> list[dict]:
-    """List all managed roles."""
-    roles = db.query(ManagedRole).order_by(ManagedRole.id).all()
+def list_roles(user: UserInfo = Depends(get_current_user), db: Session = Depends(get_db)) -> list[dict]:
+    """List managed roles. security:read returns all; agent:write returns group-filtered roles."""
+    if "security:read" in user.scopes:
+        roles = db.query(ManagedRole).order_by(ManagedRole.id).all()
+    elif "agent:write" in user.scopes:
+        user_group = _get_user_group(user)
+        all_roles = db.query(ManagedRole).order_by(ManagedRole.id).all()
+        roles = [r for r in all_roles if r.get_tags().get("loom:group") == user_group] if user_group else []
+    else:
+        raise HTTPException(status_code=403, detail="Missing required scope: security:read or agent:write")
     return [r.to_dict() for r in roles]
 
 
@@ -321,8 +339,10 @@ def create_authorizer(request: CreateAuthorizerRequest, user: UserInfo = Depends
 
 
 @router.get("/authorizers")
-def list_authorizers(user: UserInfo = Depends(require_scopes("security:read")), db: Session = Depends(get_db)) -> list[dict]:
-    """List all authorizer configurations."""
+def list_authorizers(user: UserInfo = Depends(get_current_user), db: Session = Depends(get_db)) -> list[dict]:
+    """List all authorizer configurations. Requires security:read or agent:write."""
+    if "security:read" not in user.scopes and "agent:write" not in user.scopes:
+        raise HTTPException(status_code=403, detail="Missing required scope: security:read or agent:write")
     auths = db.query(AuthorizerConfig).order_by(AuthorizerConfig.id).all()
     return [a.to_dict() for a in auths]
 

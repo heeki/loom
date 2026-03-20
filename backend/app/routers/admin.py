@@ -9,7 +9,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.dependencies.auth import UserInfo, require_scopes
+from app.dependencies.auth import UserInfo, get_current_user, require_scopes
 from app.models.audit import AuditLogin, AuditAction, AuditPageView
 
 logger = logging.getLogger(__name__)
@@ -90,7 +90,7 @@ def _parse_dt(value: str | None) -> datetime | None:
 @router.post("/audit/login", status_code=201)
 def create_audit_login(
     request: AuditLoginRequest,
-    user: UserInfo = Depends(require_scopes("security:read")),
+    user: UserInfo = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     """Record a user login event."""
@@ -115,7 +115,7 @@ def create_audit_login(
 def list_audit_logins(
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
-    user: UserInfo = Depends(require_scopes("security:read")),
+    user: UserInfo = Depends(require_scopes("admin:read")),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     """List audit login records with optional date filtering."""
@@ -142,7 +142,7 @@ def list_audit_logins(
 @router.post("/audit/action", status_code=201)
 def create_audit_action(
     request: AuditActionRequest,
-    user: UserInfo = Depends(require_scopes("security:read")),
+    user: UserInfo = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     """Record a user action event."""
@@ -173,7 +173,7 @@ def create_audit_action(
 def list_audit_actions(
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
-    user: UserInfo = Depends(require_scopes("security:read")),
+    user: UserInfo = Depends(require_scopes("admin:read")),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     """List audit action records with optional date filtering."""
@@ -203,7 +203,7 @@ def list_audit_actions(
 @router.post("/audit/pageview", status_code=201)
 def create_audit_pageview(
     request: AuditPageViewRequest,
-    user: UserInfo = Depends(require_scopes("security:read")),
+    user: UserInfo = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     """Record a page view event."""
@@ -231,7 +231,7 @@ def create_audit_pageview(
 def list_audit_pageviews(
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
-    user: UserInfo = Depends(require_scopes("security:read")),
+    user: UserInfo = Depends(require_scopes("admin:read")),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     """List audit page view records with optional date filtering."""
@@ -261,7 +261,7 @@ def list_audit_pageviews(
 def list_audit_sessions(
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
-    user: UserInfo = Depends(require_scopes("security:read")),
+    user: UserInfo = Depends(require_scopes("admin:read")),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     """List browser sessions with aggregated activity counts."""
@@ -308,7 +308,7 @@ def list_audit_sessions(
         results.append({
             "browser_session_id": bsid,
             "user_id": uid,
-            "first_login": _dt_to_iso(session_row.first_login),
+            "logged_in_at": _dt_to_iso(session_row.first_login),
             "last_activity_at": _dt_to_iso(last_activity),
             "action_count": action_count,
             "page_view_count": pv_count,
@@ -323,7 +323,7 @@ def list_audit_sessions(
 @router.get("/audit/sessions/{browser_session_id}/timeline")
 def get_session_timeline(
     browser_session_id: str,
-    user: UserInfo = Depends(require_scopes("security:read")),
+    user: UserInfo = Depends(require_scopes("admin:read")),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     """Get a chronological timeline of events for a browser session."""
@@ -334,10 +334,10 @@ def get_session_timeline(
     ).all()
     for l in logins:
         timeline.append({
-            "event_type": "login",
+            "type": "login",
             "timestamp": _dt_to_iso(l.logged_in_at),
             "user_id": l.user_id,
-            "details": {},
+            "detail": {},
         })
 
     actions = db.query(AuditAction).filter(
@@ -345,10 +345,10 @@ def get_session_timeline(
     ).all()
     for a in actions:
         timeline.append({
-            "event_type": "action",
+            "type": "action",
             "timestamp": _dt_to_iso(a.performed_at),
             "user_id": a.user_id,
-            "details": {
+            "detail": {
                 "action_category": a.action_category,
                 "action_type": a.action_type,
                 "resource_name": a.resource_name,
@@ -360,10 +360,10 @@ def get_session_timeline(
     ).all()
     for v in page_views:
         timeline.append({
-            "event_type": "page_view",
+            "type": "page_view",
             "timestamp": _dt_to_iso(v.entered_at),
             "user_id": v.user_id,
-            "details": {
+            "detail": {
                 "page_name": v.page_name,
                 "duration_seconds": v.duration_seconds,
             },
@@ -380,7 +380,7 @@ def get_session_timeline(
 def get_audit_summary(
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
-    user: UserInfo = Depends(require_scopes("security:read")),
+    user: UserInfo = Depends(require_scopes("admin:read")),
     db: Session = Depends(get_db),
 ) -> dict:
     """Get aggregated audit summary statistics."""
@@ -394,14 +394,6 @@ def get_audit_summary(
     if end_dt:
         login_q = login_q.filter(AuditLogin.logged_in_at <= end_dt)
     total_logins = login_q.count()
-
-    # Active users
-    active_users_q = db.query(func.count(func.distinct(AuditLogin.user_id)))
-    if start_dt:
-        active_users_q = active_users_q.filter(AuditLogin.logged_in_at >= start_dt)
-    if end_dt:
-        active_users_q = active_users_q.filter(AuditLogin.logged_in_at <= end_dt)
-    active_users = active_users_q.scalar() or 0
 
     # Total actions
     action_q = db.query(AuditAction)
@@ -434,10 +426,21 @@ def get_audit_summary(
     if end_dt:
         pv_q = pv_q.filter(AuditPageView.entered_at <= end_dt)
     pv_q = pv_q.group_by(AuditPageView.page_name)
-    page_views_by_page = {
-        row.page_name: {"count": row.count, "total_duration_seconds": row.total_duration}
-        for row in pv_q.all()
-    }
+    pv_rows = pv_q.all()
+    page_views_by_page = {row.page_name: row.count for row in pv_rows}
+
+    # Total page views and total duration
+    total_pv_q = db.query(
+        func.count(AuditPageView.id).label("total_page_views"),
+        func.coalesce(func.sum(AuditPageView.duration_seconds), 0).label("total_duration"),
+    )
+    if start_dt:
+        total_pv_q = total_pv_q.filter(AuditPageView.entered_at >= start_dt)
+    if end_dt:
+        total_pv_q = total_pv_q.filter(AuditPageView.entered_at <= end_dt)
+    total_pv_row = total_pv_q.one()
+    total_page_views = total_pv_row.total_page_views or 0
+    total_duration = int(total_pv_row.total_duration or 0)
 
     # Logins by day
     logins_by_day_q = db.query(
@@ -448,8 +451,8 @@ def get_audit_summary(
         logins_by_day_q = logins_by_day_q.filter(AuditLogin.logged_in_at >= start_dt)
     if end_dt:
         logins_by_day_q = logins_by_day_q.filter(AuditLogin.logged_in_at <= end_dt)
-    logins_by_day_q = logins_by_day_q.group_by(func.date(AuditLogin.logged_in_at))
-    logins_by_day = {str(row.day): row.count for row in logins_by_day_q.all()}
+    logins_by_day_q = logins_by_day_q.group_by(func.date(AuditLogin.logged_in_at)).order_by("day")
+    logins_by_day = [{"date": str(row.day), "count": row.count} for row in logins_by_day_q.all()]
 
     # Actions by day
     actions_by_day_q = db.query(
@@ -460,13 +463,14 @@ def get_audit_summary(
         actions_by_day_q = actions_by_day_q.filter(AuditAction.performed_at >= start_dt)
     if end_dt:
         actions_by_day_q = actions_by_day_q.filter(AuditAction.performed_at <= end_dt)
-    actions_by_day_q = actions_by_day_q.group_by(func.date(AuditAction.performed_at))
-    actions_by_day = {str(row.day): row.count for row in actions_by_day_q.all()}
+    actions_by_day_q = actions_by_day_q.group_by(func.date(AuditAction.performed_at)).order_by("day")
+    actions_by_day = [{"date": str(row.day), "count": row.count} for row in actions_by_day_q.all()]
 
     return {
         "total_logins": total_logins,
-        "active_users": active_users,
+        "total_duration": total_duration,
         "total_actions": total_actions,
+        "total_page_views": total_page_views,
         "actions_by_category": actions_by_category,
         "page_views_by_page": page_views_by_page,
         "logins_by_day": logins_by_day,

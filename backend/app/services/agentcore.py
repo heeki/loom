@@ -78,6 +78,7 @@ def invoke_agent(
     prompt: str,
     region: str,
     access_token: str | None = None,
+    actor_id: str | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """
     Invoke an AgentCore Runtime agent and stream the response.
@@ -106,7 +107,8 @@ def invoke_agent(
     from botocore import UNSIGNED
     from botocore.config import Config
 
-    payload_bytes = json.dumps({"prompt": prompt}).encode('utf-8')
+    payload: dict[str, Any] = {"prompt": prompt, "session_id": session_id, "actor_id": actor_id or "loom-agent"}
+    payload_bytes = json.dumps(payload).encode('utf-8')
 
     params: dict[str, Any] = {
         "agentRuntimeArn": arn,

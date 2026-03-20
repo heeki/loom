@@ -151,6 +151,7 @@ class MemoryHook:
 
             now = datetime.now(timezone.utc)
             session_id = event.invocation_state.get("session_id", "")
+            actor_id = event.invocation_state.get("actor_id") or _DEFAULT_ACTOR_ID
             for msg in new_messages:
                 role = msg.get("role", "OTHER").upper()
                 # Map Strands roles to AgentCore Memory roles
@@ -176,7 +177,7 @@ class MemoryHook:
 
                 create_kwargs: dict[str, Any] = {
                     "memoryId": self.memory_store_id,
-                    "actorId": _DEFAULT_ACTOR_ID,
+                    "actorId": actor_id,
                     "eventTimestamp": now,
                     "payload": [
                         {

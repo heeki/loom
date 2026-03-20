@@ -219,6 +219,14 @@ def create_memory(
                 detail="Demo admins can only create memory resources in the 'demo' group"
             )
 
+    # Enforce demo user restrictions: name must start with "demo_"
+    if "g-users-demo" in user.groups:
+        if not request.name.startswith("demo_"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Demo users must prefix memory names with 'demo_'",
+            )
+
     region = os.getenv("AWS_REGION", DEFAULT_REGION)
     account_id = os.getenv("AWS_ACCOUNT_ID", "")
 
@@ -231,10 +239,8 @@ def create_memory(
     for p in policies:
         if p.key in user_tags:
             resolved_tags[p.key] = user_tags[p.key]
-        elif p.default_value:
-            resolved_tags[p.key] = p.default_value
         elif p.required:
-            resolved_tags[p.key] = "missing"
+            resolved_tags[p.key] = p.default_value if p.default_value else "missing"
 
     # Transform strategies
     aws_strategies = None
@@ -393,11 +399,8 @@ def import_memory(
 
     policies = db.query(TagPolicy).all()
     for p in policies:
-        if p.key not in aws_tags:
-            if p.default_value:
-                aws_tags[p.key] = p.default_value
-            elif p.required:
-                aws_tags[p.key] = "missing"
+        if p.key not in aws_tags and p.required:
+            aws_tags[p.key] = p.default_value if p.default_value else "missing"
 
     if aws_tags:
         memory.set_tags(aws_tags)

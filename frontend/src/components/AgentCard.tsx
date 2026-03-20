@@ -173,8 +173,8 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
       </CardHeader>
       <CardContent className="space-y-3 text-xs text-muted-foreground">
         <div className="rounded border bg-input-bg p-3 space-y-0.5">
-          <div>Region: {agent.region}</div>
-          <div>Account: {agent.account_id}</div>
+          {agent.region && <div>Region: {agent.region}</div>}
+          {agent.account_id && <div>Account: {agent.account_id}</div>}
           {agent.network_mode && (
             <div>Network: {agent.network_mode}</div>
           )}

@@ -316,10 +316,10 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
           <Table className="table-fixed">
             <TableHeader>
               <TableRow className="bg-card hover:bg-card">
-                <SortableTableHead column="name" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[25%]">Name</SortableTableHead>
-                <SortableTableHead column="endpoint" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[32%]">Endpoint</SortableTableHead>
-                <SortableTableHead column="transport" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[15%]">Transport</SortableTableHead>
-                <SortableTableHead column="auth" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[12%]">Auth</SortableTableHead>
+                <SortableTableHead column="name" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[18%]">Name</SortableTableHead>
+                <SortableTableHead column="endpoint" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[46%]">Endpoint</SortableTableHead>
+                <SortableTableHead column="transport" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[10%]">Transport</SortableTableHead>
+                <SortableTableHead column="auth" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[10%]">Auth</SortableTableHead>
                 <SortableTableHead column="created" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[16%]">Created</SortableTableHead>
               </TableRow>
             </TableHeader>

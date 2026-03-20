@@ -102,13 +102,14 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
 
     prompt = payload.get("prompt", "")
     session_id = payload.get("session_id", "")
+    actor_id = payload.get("actor_id") or "loom-agent"
 
-    logger.info("Processing invocation session_id=%s", session_id)
+    logger.info("Processing invocation session_id=%s actor_id=%s", session_id, actor_id)
 
     with trace_invocation(invocation_id=session_id) as span:
         span.set_attribute("agent.session_id", session_id)
         try:
-            stream = agent.stream_async(prompt, invocation_state={"session_id": session_id})
+            stream = agent.stream_async(prompt, invocation_state={"session_id": session_id, "actor_id": actor_id})
             async for event in stream:
                 if isinstance(event, dict):
                     text = None

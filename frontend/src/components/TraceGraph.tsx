@@ -286,6 +286,7 @@ interface FlatEvent {
   span: TraceSpan;
   event: TraceEvent;
   globalIndex: number;
+  duration_ms: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -303,13 +304,20 @@ export function TraceGraph({ trace, loading }: TraceGraphProps) {
   const [hoveredSpanId, setHoveredSpanId] = useState<string | null>(null);
   const [expandedEvents, setExpandedEvents] = useState<Set<number>>(new Set());
 
-  // Build flat event list with global numbering
+  // Build flat event list with global numbering and per-event durations
   const allEvents: FlatEvent[] = useMemo(() => {
     const result: FlatEvent[] = [];
-    let idx = 0;
     for (const span of trace.spans) {
-      for (const ev of span.events) {
-        result.push({ span, event: ev, globalIndex: idx++ });
+      const spanEvts = [...span.events].sort((a, b) =>
+        a.observed_time_iso.localeCompare(b.observed_time_iso),
+      );
+      for (let i = 0; i < spanEvts.length; i++) {
+        const ev = spanEvts[i]!;
+        const curMs = new Date(ev.observed_time_iso).getTime();
+        const prevMs = i > 0
+          ? new Date(spanEvts[i - 1]!.observed_time_iso).getTime()
+          : new Date(span.start_time_iso).getTime();
+        result.push({ span, event: ev, globalIndex: 0, duration_ms: Math.max(0, curMs - prevMs) });
       }
     }
     // Sort all events by observed time
@@ -325,6 +333,11 @@ export function TraceGraph({ trace, loading }: TraceGraphProps) {
   const visibleEvents = selectedSpanId
     ? allEvents.filter((e) => e.span.span_id === selectedSpanId)
     : allEvents;
+
+  const maxEventDuration = useMemo(
+    () => visibleEvents.reduce((max, e) => Math.max(max, e.duration_ms), 0),
+    [visibleEvents],
+  );
 
   const toggleEvent = (idx: number) => {
     setExpandedEvents((prev) => {
@@ -433,6 +446,7 @@ export function TraceGraph({ trace, loading }: TraceGraphProps) {
             {visibleEvents.map((fe) => {
               const isExpanded = expandedEvents.has(fe.globalIndex);
               const summary = summarizeBody(fe.event.body);
+              const isSlowest = fe.duration_ms > 0 && fe.duration_ms === maxEventDuration;
               return (
                 <div key={fe.globalIndex} className="bg-card">
                   {/* Event header — always visible */}
@@ -453,6 +467,13 @@ export function TraceGraph({ trace, loading }: TraceGraphProps) {
                             Event {fe.globalIndex + 1}
                           </Badge>
                           <span className="text-xs text-foreground truncate">{summary}</span>
+                          <span className={`ml-auto shrink-0 text-[10px] font-mono px-1.5 py-0 rounded border ${
+                            isSlowest
+                              ? "bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700"
+                              : "bg-white dark:bg-zinc-900 text-muted-foreground border-border"
+                          }`}>
+                            {formatDuration(fe.duration_ms)}
+                          </span>
                         </div>
                         <div className="flex items-center gap-3 mt-0.5">
                           <span className="text-[10px] text-muted-foreground font-mono">

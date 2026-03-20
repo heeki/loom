@@ -89,9 +89,10 @@ interface AgentRegistrationFormProps {
   onDeploy?: (request: AgentDeployRequest) => Promise<void>;
   isLoading: boolean;
   groupRestriction?: string;
+  ownerRestriction?: string;
 }
 
-export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, groupRestriction }: AgentRegistrationFormProps) {
+export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, groupRestriction, ownerRestriction }: AgentRegistrationFormProps) {
 
   // Register state
   const [arn, setArn] = useState("");
@@ -276,6 +277,9 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
   const filteredMemories = groupRestriction
     ? memories.filter((m) => m.tags?.["loom:group"] === groupRestriction)
     : memories;
+  const filteredRoles = groupRestriction
+    ? managedRoles.filter((r) => r.tags?.["loom:group"] === groupRestriction)
+    : managedRoles;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -507,7 +511,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                 <section className="flex-1 min-w-0 space-y-2">
                   <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">IAM Role</h4>
                   <SearchableSelect
-                    options={managedRoles.map((r) => ({
+                    options={filteredRoles.map((r) => ({
                       value: r.id.toString(),
                       label: r.role_name,
                     }))}
@@ -626,7 +630,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                   />
                 </div>
                 {selectedAuthConfig && (
-                  <div className="rounded border p-3 bg-muted/30 text-xs space-y-1">
+                  <div className="rounded border bg-input-bg p-3 text-xs space-y-1">
                     <p><span className="text-muted-foreground">Type:</span> {selectedAuthConfig.authorizer_type}</p>
                     {selectedAuthConfig.pool_id && <p><span className="text-muted-foreground">Pool:</span> {selectedAuthConfig.pool_id}</p>}
                     {selectedAuthConfig.discovery_url && <p><span className="text-muted-foreground">Discovery URL:</span> {selectedAuthConfig.discovery_url}</p>}
@@ -678,7 +682,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
               </section>
 
               {/* Resource Tags */}
-              <ResourceTagFields onChange={setTagValues} profileId={selectedTagProfileId} groupRestriction={groupRestriction} />
+              <ResourceTagFields onChange={setTagValues} profileId={selectedTagProfileId} groupRestriction={groupRestriction} ownerRestriction={ownerRestriction} />
 
               {/* Integrations */}
               <section className="space-y-3">

@@ -319,11 +319,12 @@ Toggled via the "Add Memory" button. Contained in a `Card` with the following fi
 
 | Column | Width | Description |
 |--------|-------|-------------|
-| Name | 30% | Memory resource name (font-medium) |
-| Status | 12% | Badge with status variant + spinner for transitional states |
-| Strategies | 14% | Count of configured strategies |
-| Event Expiry | 14% | Duration in days (computed from seconds) |
-| Region | 14% | AWS region |
+| Name | 26% | Memory resource name (font-medium) |
+| Status | 10% | Badge with status variant + spinner for transitional states |
+| Cost | 12% | Estimated total memory cost (`~N.NNNN` or `—`) |
+| Strategies | 12% | Count of configured strategies |
+| Event Expiry | 12% | Duration in days (computed from seconds) |
+| Region | 12% | AWS region |
 | Registered | 16% | Timezone-aware timestamp |
 
 ### Status Badges
@@ -376,7 +377,7 @@ When no memory resources exist: centered muted text "No memory resources yet. Ad
 
 **Card view** (default): `SortableCardGrid` with drag-to-reorder (storage key `mcp-servers`), default alphabetical sort by name, and A-Z/Z-A sort toggle. Each card displays server name, status badge (`active`=default, `inactive`=secondary, `error`=destructive), endpoint URL, transport type badge, auth type badge, created timestamp. Delete with inline confirmation overlay (same pattern as AgentCard).
 
-**Table view**: Sortable columns — Name (25%), Endpoint (30%), Transport (12%), Status (10%), Auth (10%), Created (13%).
+**Table view**: Sortable columns — Name (18%), Endpoint (46%), Transport (10%), Auth (10%), Created (16%).
 
 ### Server Detail View
 
@@ -420,7 +421,7 @@ Create/edit form with:
 
 **Card view** (default): `SortableCardGrid` with drag-to-reorder (storage key `a2a-agents`), default alphabetical sort by name, and A-Z/Z-A sort toggle. Each card displays agent name, version badge, base URL, provider, auth type, created timestamp. Edit/Delete buttons with inline confirmation overlay.
 
-**Table view**: Sortable columns — Name (25%), URL (30%), Version (10%), Provider (15%), Auth (10%), Created (10%).
+**Table view**: Sortable columns — Name (18%), URL (46%), Version (10%), Auth (10%), Created (16%). No Provider or Status column; structure matches the MCP Servers table.
 
 ### Agent Detail View
 
@@ -537,7 +538,14 @@ ThemeContext manages theme state with localStorage persistence. Latte uses `:roo
 
 **Sort toggle control:** A standalone `SortButton` component (ArrowDownAZ/ArrowUpAZ icons) is placed inline with each section header, next to "Add" buttons. Sort direction is controlled by the parent component and persisted to localStorage per grid (keyed as `loom-sort-${storageKey}`). `SortableCardGrid` accepts `sortDirection` as a controlled prop. After applying a sort option, drag-to-reorder still works — once the user drags a card, the new order becomes the custom order, the sort direction is cleared via the `onSortDirectionChange(null)` callback, and the custom order is persisted. Exported helpers: `loadSortDirection()`, `saveSortDirection()`, `toggleSortDirection()`.
 
-**Table view column sorting:** Pages with table views (CatalogPage, AgentListPage, MemoryManagementPanel) use `SortableTableHead` for clickable column headers. Clicking a column header sorts by that column (ascending); clicking again reverses to descending. An arrow indicator (ArrowUp/ArrowDown) shows the active sort column and direction. The `sortRows()` helper provides generic multi-column sorting with support for both string and numeric values.
+**Table view column sorting:** Pages with table views (CatalogPage, AgentListPage, MemoryManagementPanel, McpServersPage, A2aAgentsPage) use `SortableTableHead` for clickable column headers. Clicking a column header sorts by that column (ascending); clicking again reverses to descending. An arrow indicator (ArrowUp/ArrowDown) shows the active sort column and direction. The `sortRows()` helper provides generic multi-column sorting with support for both string and numeric values.
+
+**Table column layout standards:**
+- **Agent tables** (AgentListPage, CatalogPage): Name 26%, Status 10%, Cost 12%, Protocol 12%, Network 12%, Region 12%, Registered 16%.
+- **Memory tables** (MemoryManagementPanel, CatalogPage): Name 26%, Status 10%, Cost 12%, Strategies 12%, Event Expiry 12%, Region 12%, Registered 16%.
+- **MCP Server tables** (McpServersPage, CatalogPage): Name 18%, Endpoint 46%, Transport 10%, Auth 10%, Created 16%.
+- **A2A Agent tables** (A2aAgentsPage, CatalogPage): Name 18%, URL 46%, Version 10%, Auth 10%, Created 16%. Matches MCP structure — no Provider or Status column.
+- All tables use `table-fixed` with the above widths summing to 100%. Delete/refresh operations are card-view only; no action columns in tables.
 
 **Applied to all card grids:** CatalogPage (agents, memories), AgentListPage (agents), MemoryManagementPanel (memories), TaggingPage (policies, profiles), RoleManagementPanel (roles, full-width single-column), AuthorizerManagementPanel (authorizers), PermissionRequestsPanel (permissions).
 
@@ -562,6 +570,7 @@ Cognito client secrets are password-masked in forms. Secrets are sent to the bac
 ### User Authentication
 - `AuthContext` provides login, logout, token refresh, user state, and scope-based authorization to the entire app.
 - Tokens (id, access, refresh) are stored in React state only — never in localStorage or cookies.
+- On logout, all `loom:invokePrompt:*` keys are cleared from `sessionStorage` so per-agent prompt drafts do not persist across user sessions.
 - The `AuthProvider` wraps the app at the top level (outside `TimezoneProvider`). If Cognito is not configured (empty pool ID from backend or missing `VITE_COGNITO_USER_CLIENT_ID`), authentication is bypassed and all scopes are granted.
 - The user client ID is configured via the `VITE_COGNITO_USER_CLIENT_ID` Vite environment variable (in `frontend/.env`), not fetched from the backend. The backend only provides the pool ID and region via `GET /api/auth/config`.
 - `LoginPage` renders when the user is not authenticated. It handles the `NEW_PASSWORD_REQUIRED` challenge for admin-created Cognito users.
@@ -661,6 +670,8 @@ The invoke panel's credential dropdown includes a "Manual token" sentinel value.
 - **LatencySummary** renamed to "Invocation Metrics": single-row layout with 7 metrics — Client Invoke, Agent Start, Cold Start, Duration, Input Tokens, Output Tokens, Est. Cost.
 - **InvocationTable**: 3 additional columns — Input Tokens, Output Tokens, Est. Cost with formatting helpers.
 - **AgentCard**: READY status badge hidden; cost badge shown when `total_estimated_cost > 0`.
+- **Agent table view**: Includes an Estimated Cost column (12%) showing the agent's total estimated cost from `cost_summary.total_cost`. Formatted as `~N.NNNNNN` for costs below $0.01 or `~N.NNNN` otherwise. Shows `—` (U+2014) when no cost data is available.
+- **Memory table view**: Includes an Estimated Cost column (12%) showing `cost_summary.total_memory_estimated_cost`. Same formatting as agent cost column.
 - **MemoryCard**: ACTIVE status badge hidden for visual cleanliness.
 - **CostDashboardPage**: Three-section cost dashboard:
   - **Summary cards**: Total Cost (Model + Runtime + Memory), Model Tokens (with invocation count), Runtime (CPU + Mem breakdown), Memory (STM + LTM breakdown).
@@ -704,14 +715,14 @@ The invoke panel's credential dropdown includes a "Manual token" sentinel value.
 | `a2a` | `add_agent`, `delete_agent`, `test_connection`, `update_permissions` |
 
 **Dashboard layout (`AdminDashboardPage.tsx`):**
+- **Global user filter:** Multi-select dropdown in the header (labeled "Users:") listing all unique user IDs from the loaded data. Selecting users filters all summary cards, charts, and tab tables to only that subset. When no users are selected ("All users"), the full unfiltered data is shown. When a filter is active, summary stats are recomputed client-side from the filtered sessions, actions, and page views (rather than relying on the API summary, which is unfiltered). Pagination page counters reset when the filter changes.
 - Time range selector: Today / Last 7 days / Last 30 days / All time.
-- Summary cards (4): Total Logins, Active Users, Total Actions, Most Active Page.
-- Charts (recharts, 3): Logins Over Time (bar chart, daily), Actions by Category (bar chart), Page Views (bar chart by page name).
-- Tabs (4): Sessions, Logins, Actions, Page Views.
-  - **Sessions:** Table of aggregated browser sessions (session ID truncated, user, login time, action count, page view count, last activity). Clicking a row shows a modal with the full interleaved event timeline.
-  - **Logins:** Table with user ID filter.
-  - **Actions:** Table with category and action type filters.
-  - **Page Views:** Table with page name filter.
+- Summary cards (5): Total Logins, Total Page Views, Total Actions, Total Duration, Most Active Page. Stats reflect the active user filter when set.
+- Charts (recharts, 3): Logins Over Time (bar chart, daily), Actions Over Time (bar chart, daily), Page Views by page name (horizontal bar chart). Chart data reflects the active user filter.
+- Tabs (3): Sessions, Actions, Page Views.
+  - **Sessions:** Table of aggregated browser sessions (session ID, user, login time, last activity, page view count, action count, duration). Clicking a row shows the full interleaved event timeline (logins, actions, page views). Filtered by the global user filter.
+  - **Actions:** Table with category and action type filters. Filtered by the global user filter.
+  - **Page Views:** Table with page name filter. Filtered by the global user filter.
 
 ---
 

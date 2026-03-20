@@ -100,6 +100,10 @@ Resources:
           ScopeDescription: Read A2A agents
         - ScopeName: a2a:write
           ScopeDescription: Write A2A agents
+        - ScopeName: admin:read
+          ScopeDescription: View admin dashboard and audit data
+        - ScopeName: admin:write
+          ScopeDescription: Manage admin dashboard settings
 
   # Type Groups (defines UI view)
   TypeAdminGroup:
@@ -191,14 +195,86 @@ Resources:
         - Name: email
           Value: admin@heeki.cloud
 
-  DemoAdminUser:
+  DemoAdmin1User:
     Type: AWS::Cognito::UserPoolUser
     Properties:
       UserPoolId: !Ref CognitoUserPool
-      Username: demo-admin
+      Username: demo-admin-1
       UserAttributes:
         - Name: email
-          Value: demo-admin@heeki.cloud
+          Value: demo-admin-1@heeki.cloud
+
+  DemoAdmin2User:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: demo-admin-2
+      UserAttributes:
+        - Name: email
+          Value: demo-admin-2@heeki.cloud
+
+  DemoAdmin3User:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: demo-admin-3
+      UserAttributes:
+        - Name: email
+          Value: demo-admin-3@heeki.cloud
+
+  DemoAdmin4User:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: demo-admin-4
+      UserAttributes:
+        - Name: email
+          Value: demo-admin-4@heeki.cloud
+
+  DemoAdmin5User:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: demo-admin-5
+      UserAttributes:
+        - Name: email
+          Value: demo-admin-5@heeki.cloud
+
+  DemoAdmin6User:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: demo-admin-6
+      UserAttributes:
+        - Name: email
+          Value: demo-admin-6@heeki.cloud
+
+  DemoAdmin7User:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: demo-admin-7
+      UserAttributes:
+        - Name: email
+          Value: demo-admin-7@heeki.cloud
+
+  DemoAdmin8User:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: demo-admin-8
+      UserAttributes:
+        - Name: email
+          Value: demo-admin-8@heeki.cloud
+
+  DemoAdmin9User:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: demo-admin-9
+      UserAttributes:
+        - Name: email
+          Value: demo-admin-9@heeki.cloud
 
   SecurityAdminUser:
     Type: AWS::Cognito::UserPoolUser
@@ -218,14 +294,86 @@ Resources:
         - Name: email
           Value: integration-admin@heeki.cloud
 
-  DemoUserUser:
+  DemoUser1User:
     Type: AWS::Cognito::UserPoolUser
     Properties:
       UserPoolId: !Ref CognitoUserPool
-      Username: demo-user
+      Username: demo-user-1
       UserAttributes:
         - Name: email
-          Value: demo-user@heeki.cloud
+          Value: demo-user-1@heeki.cloud
+
+  DemoUser2User:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: demo-user-2
+      UserAttributes:
+        - Name: email
+          Value: demo-user-2@heeki.cloud
+
+  DemoUser3User:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: demo-user-3
+      UserAttributes:
+        - Name: email
+          Value: demo-user-3@heeki.cloud
+
+  DemoUser4User:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: demo-user-4
+      UserAttributes:
+        - Name: email
+          Value: demo-user-4@heeki.cloud
+
+  DemoUser5User:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: demo-user-5
+      UserAttributes:
+        - Name: email
+          Value: demo-user-5@heeki.cloud
+
+  DemoUser6User:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: demo-user-6
+      UserAttributes:
+        - Name: email
+          Value: demo-user-6@heeki.cloud
+
+  DemoUser7User:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: demo-user-7
+      UserAttributes:
+        - Name: email
+          Value: demo-user-7@heeki.cloud
+
+  DemoUser8User:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: demo-user-8
+      UserAttributes:
+        - Name: email
+          Value: demo-user-8@heeki.cloud
+
+  DemoUser9User:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: demo-user-9
+      UserAttributes:
+        - Name: email
+          Value: demo-user-9@heeki.cloud
 
   # User-to-group assignments
   # Admin user: t-admin + g-admins-super
@@ -243,19 +391,131 @@ Resources:
       Username: !Ref AdminUser
       GroupName: !Ref GroupAdminsSuperGroup
 
-  # Demo-admin user: t-admin + g-admins-demo
-  DemoAdminToTypeAdmin:
+  # Demo-admin-1 through demo-admin-9: t-admin + g-admins-demo
+  DemoAdmin1ToTypeAdmin:
     Type: AWS::Cognito::UserPoolUserToGroupAttachment
     Properties:
       UserPoolId: !Ref CognitoUserPool
-      Username: !Ref DemoAdminUser
+      Username: !Ref DemoAdmin1User
       GroupName: !Ref TypeAdminGroup
 
-  DemoAdminToGroupAdminsDemo:
+  DemoAdmin1ToGroupAdminsDemo:
     Type: AWS::Cognito::UserPoolUserToGroupAttachment
     Properties:
       UserPoolId: !Ref CognitoUserPool
-      Username: !Ref DemoAdminUser
+      Username: !Ref DemoAdmin1User
+      GroupName: !Ref GroupAdminsDemoGroup
+
+  DemoAdmin2ToTypeAdmin:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoAdmin2User
+      GroupName: !Ref TypeAdminGroup
+
+  DemoAdmin2ToGroupAdminsDemo:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoAdmin2User
+      GroupName: !Ref GroupAdminsDemoGroup
+
+  DemoAdmin3ToTypeAdmin:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoAdmin3User
+      GroupName: !Ref TypeAdminGroup
+
+  DemoAdmin3ToGroupAdminsDemo:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoAdmin3User
+      GroupName: !Ref GroupAdminsDemoGroup
+
+  DemoAdmin4ToTypeAdmin:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoAdmin4User
+      GroupName: !Ref TypeAdminGroup
+
+  DemoAdmin4ToGroupAdminsDemo:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoAdmin4User
+      GroupName: !Ref GroupAdminsDemoGroup
+
+  DemoAdmin5ToTypeAdmin:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoAdmin5User
+      GroupName: !Ref TypeAdminGroup
+
+  DemoAdmin5ToGroupAdminsDemo:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoAdmin5User
+      GroupName: !Ref GroupAdminsDemoGroup
+
+  DemoAdmin6ToTypeAdmin:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoAdmin6User
+      GroupName: !Ref TypeAdminGroup
+
+  DemoAdmin6ToGroupAdminsDemo:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoAdmin6User
+      GroupName: !Ref GroupAdminsDemoGroup
+
+  DemoAdmin7ToTypeAdmin:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoAdmin7User
+      GroupName: !Ref TypeAdminGroup
+
+  DemoAdmin7ToGroupAdminsDemo:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoAdmin7User
+      GroupName: !Ref GroupAdminsDemoGroup
+
+  DemoAdmin8ToTypeAdmin:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoAdmin8User
+      GroupName: !Ref TypeAdminGroup
+
+  DemoAdmin8ToGroupAdminsDemo:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoAdmin8User
+      GroupName: !Ref GroupAdminsDemoGroup
+
+  DemoAdmin9ToTypeAdmin:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoAdmin9User
+      GroupName: !Ref TypeAdminGroup
+
+  DemoAdmin9ToGroupAdminsDemo:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoAdmin9User
       GroupName: !Ref GroupAdminsDemoGroup
 
   # Security-admin user: t-admin + g-admins-security
@@ -302,19 +562,131 @@ Resources:
       Username: !Ref IntegrationAdminUser
       GroupName: !Ref GroupAdminsA2aGroup
 
-  # Demo-user: t-user + g-users-demo
-  DemoUserToTypeUser:
+  # Demo-user-1 through demo-user-9: t-user + g-users-demo
+  DemoUser1ToTypeUser:
     Type: AWS::Cognito::UserPoolUserToGroupAttachment
     Properties:
       UserPoolId: !Ref CognitoUserPool
-      Username: !Ref DemoUserUser
+      Username: !Ref DemoUser1User
       GroupName: !Ref TypeUserGroup
 
-  DemoUserToGroupUsersDemo:
+  DemoUser1ToGroupUsersDemo:
     Type: AWS::Cognito::UserPoolUserToGroupAttachment
     Properties:
       UserPoolId: !Ref CognitoUserPool
-      Username: !Ref DemoUserUser
+      Username: !Ref DemoUser1User
+      GroupName: !Ref GroupUsersDemoGroup
+
+  DemoUser2ToTypeUser:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoUser2User
+      GroupName: !Ref TypeUserGroup
+
+  DemoUser2ToGroupUsersDemo:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoUser2User
+      GroupName: !Ref GroupUsersDemoGroup
+
+  DemoUser3ToTypeUser:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoUser3User
+      GroupName: !Ref TypeUserGroup
+
+  DemoUser3ToGroupUsersDemo:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoUser3User
+      GroupName: !Ref GroupUsersDemoGroup
+
+  DemoUser4ToTypeUser:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoUser4User
+      GroupName: !Ref TypeUserGroup
+
+  DemoUser4ToGroupUsersDemo:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoUser4User
+      GroupName: !Ref GroupUsersDemoGroup
+
+  DemoUser5ToTypeUser:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoUser5User
+      GroupName: !Ref TypeUserGroup
+
+  DemoUser5ToGroupUsersDemo:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoUser5User
+      GroupName: !Ref GroupUsersDemoGroup
+
+  DemoUser6ToTypeUser:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoUser6User
+      GroupName: !Ref TypeUserGroup
+
+  DemoUser6ToGroupUsersDemo:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoUser6User
+      GroupName: !Ref GroupUsersDemoGroup
+
+  DemoUser7ToTypeUser:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoUser7User
+      GroupName: !Ref TypeUserGroup
+
+  DemoUser7ToGroupUsersDemo:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoUser7User
+      GroupName: !Ref GroupUsersDemoGroup
+
+  DemoUser8ToTypeUser:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoUser8User
+      GroupName: !Ref TypeUserGroup
+
+  DemoUser8ToGroupUsersDemo:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoUser8User
+      GroupName: !Ref GroupUsersDemoGroup
+
+  DemoUser9ToTypeUser:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoUser9User
+      GroupName: !Ref TypeUserGroup
+
+  DemoUser9ToGroupUsersDemo:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoUser9User
       GroupName: !Ref GroupUsersDemoGroup
 
   # Machine-to-machine client (client_credentials flow, access token only)
@@ -372,6 +744,8 @@ Resources:
         - !Sub "${pResourceServerIdentifier}/mcp:write"
         - !Sub "${pResourceServerIdentifier}/a2a:read"
         - !Sub "${pResourceServerIdentifier}/a2a:write"
+        - !Sub "${pResourceServerIdentifier}/admin:read"
+        - !Sub "${pResourceServerIdentifier}/admin:write"
       CallbackURLs: !Ref pCallbackUrls
       SupportedIdentityProviders:
         - COGNITO

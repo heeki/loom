@@ -129,7 +129,7 @@ src/
 │   ├── A2aAgentsPage.tsx      # A2A agent management with card/access tabs
 │   ├── SettingsPage.tsx        # Display preferences + cost estimation settings
 │   ├── SessionDetailPage.tsx   # Session metadata, invocations, logs
-│   └── AdminDashboardPage.tsx  # Admin-only: summary cards, charts, Sessions/Logins/Actions/Page Views tabs
+│   └── AdminDashboardPage.tsx  # Admin-only: global user filter, summary cards, charts, Sessions/Actions/Page Views tabs
 ├── lib/          # Shared utilities (cn(), format helpers, status mapping, error mapping)
 ├── App.tsx       # Root: auth gate + persona sidebar + navigation
 └── main.tsx      # Entry point
@@ -211,7 +211,7 @@ The `AuthContext` also provides scope-based authorization using a two-dimensiona
 | A2aAgentsPage | A2A Agents | A2A agent CRUD, Agent Card detail, Access control tabs |
 | CostDashboardPage | Costs | Estimated costs table (per-agent breakdown with methodology formulas), actual costs with Runtime (collapsible agent groups, per-session detail) and Memory (consolidated per-resource) sub-sections, summary cards, time-range selector, sortable columns |
 | SettingsPage | Settings | Display preferences (theme, timezone), cost estimation settings (CPU I/O wait discount) |
-| AdminDashboardPage | Admin | Summary cards (total logins, active users, total actions, most active page), recharts bar charts (logins over time, actions by category, page views), tabbed tables: Sessions (with timeline drill-down), Logins, Actions, Page Views |
+| AdminDashboardPage | Admin | Global multi-select user filter; summary cards (total logins, page views, actions, duration, most active page); recharts bar charts (logins over time, actions over time, page views by page); tabbed tables: Sessions (with timeline drill-down), Actions (category/type filters), Page Views (page filter); all data filtered by selected users when filter is active |
 
 ### Session Liveness
 

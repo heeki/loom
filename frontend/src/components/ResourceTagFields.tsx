@@ -18,9 +18,12 @@ interface ResourceTagFieldsProps {
   /** When set, only profiles whose loom:group matches this value are shown,
    *  and the resolved loom:group tag is forced to this value. */
   groupRestriction?: string;
+  /** When set, only the profile whose loom:owner matches this value is shown,
+   *  it is auto-selected, and the dropdown is replaced with a read-only display. */
+  ownerRestriction?: string;
 }
 
-export function ResourceTagFields({ onChange, profileId: controlledProfileId, groupRestriction }: ResourceTagFieldsProps) {
+export function ResourceTagFields({ onChange, profileId: controlledProfileId, groupRestriction, ownerRestriction }: ResourceTagFieldsProps) {
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
   const [profiles, setProfiles] = useState<TagProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string>(() => {
@@ -44,10 +47,19 @@ export function ResourceTagFields({ onChange, profileId: controlledProfileId, gr
     void settingsApi.listTagProfiles().then(setProfiles).catch(() => {});
   }, []);
 
-  // Filter profiles when group restriction is active
-  const availableProfiles = groupRestriction
-    ? profiles.filter((p) => p.tags["loom:group"] === groupRestriction)
-    : profiles;
+  // Filter profiles: first by group, then by owner if restricted
+  const availableProfiles = profiles
+    .filter((p) => !groupRestriction || p.tags["loom:group"] === groupRestriction)
+    .filter((p) => !ownerRestriction || p.tags["loom:owner"] === ownerRestriction);
+
+  // Auto-select the sole profile when owner is restricted
+  useEffect(() => {
+    if (ownerRestriction && availableProfiles.length === 1 && !selectedProfileId) {
+      const id = availableProfiles[0]!.id.toString();
+      setSelectedProfileId(id);
+      sessionStorage.setItem(SESSION_KEY, id);
+    }
+  }, [ownerRestriction, availableProfiles, selectedProfileId]);
 
   // Resolve tags when profile or policies change
   useEffect(() => {
@@ -65,9 +77,12 @@ export function ResourceTagFields({ onChange, profileId: controlledProfileId, gr
       }
     }
 
-    // Force loom:group when restriction is active
+    // Force loom:group and loom:owner when restrictions are active
     if (groupRestriction) {
       resolved["loom:group"] = groupRestriction;
+    }
+    if (ownerRestriction) {
+      resolved["loom:owner"] = ownerRestriction;
     }
 
     onChange(resolved);
@@ -95,18 +110,24 @@ export function ResourceTagFields({ onChange, profileId: controlledProfileId, gr
       <div className="flex items-end gap-3">
         <div className="w-1/3 min-w-0 space-y-1">
           <label className="text-xs text-muted-foreground">Tag Profile</label>
-          <Select value={selectedProfileId || ""} onValueChange={handleProfileChange}>
-            <SelectTrigger className="w-full text-sm">
-              <SelectValue placeholder="Select a tag profile..." />
-            </SelectTrigger>
-            <SelectContent>
-              {availableProfiles.map((p) => (
-                <SelectItem key={p.id} value={p.id.toString()}>
-                  {p.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {ownerRestriction && selectedProfile ? (
+            <div className="flex h-9 items-center rounded-md border border-input bg-muted px-3 text-sm text-muted-foreground">
+              {selectedProfile.name}
+            </div>
+          ) : (
+            <Select value={selectedProfileId || ""} onValueChange={handleProfileChange}>
+              <SelectTrigger className="w-full text-sm">
+                <SelectValue placeholder="Select a tag profile..." />
+              </SelectTrigger>
+              <SelectContent>
+                {availableProfiles.map((p) => (
+                  <SelectItem key={p.id} value={p.id.toString()}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
         {selectedProfile && tagPolicies.length > 0 && (
           <div className="flex flex-wrap gap-1.5 pb-1">

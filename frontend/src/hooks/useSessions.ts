@@ -6,11 +6,26 @@ export function useSessions(agentId: number | null) {
   const [sessions, setSessions] = useState<SessionResponse[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const fetchSessions = useCallback(async () => {
+  // Clear and re-fetch when agentId changes. The cancelled flag prevents a
+  // stale in-flight request from a previous agentId from overwriting state.
+  useEffect(() => {
     if (agentId === null) {
       setSessions([]);
+      setLoading(false);
       return;
     }
+    let cancelled = false;
+    setSessions([]);
+    setLoading(true);
+    listSessions(agentId)
+      .then((data) => { if (!cancelled) setSessions(data); })
+      .catch(() => { if (!cancelled) setSessions([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [agentId]);
+
+  const refetch = useCallback(async () => {
+    if (agentId === null) return;
     setLoading(true);
     try {
       const data = await listSessions(agentId);
@@ -22,12 +37,5 @@ export function useSessions(agentId: number | null) {
     }
   }, [agentId]);
 
-  // Clear stale sessions immediately when the agent changes,
-  // before the new fetch completes.
-  useEffect(() => {
-    setSessions([]);
-    void fetchSessions();
-  }, [fetchSessions]);
-
-  return { sessions, loading, refetch: fetchSessions };
+  return { sessions, loading, refetch };
 }

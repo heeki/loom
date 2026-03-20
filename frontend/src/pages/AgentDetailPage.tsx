@@ -74,6 +74,7 @@ export function AgentDetailPage({
           sessions={sessions}
           onSelectSession={onSelectSession}
           loading={sessionsLoading}
+          currentUserId={user?.username ?? user?.sub}
         />
       </section>
 
@@ -86,6 +87,7 @@ export function AgentDetailPage({
           isStreaming={isStreaming}
           modelId={agent.model_id}
           authorizerName={agent.authorizer_config?.name}
+          currentUserId={user?.username ?? user?.sub}
           onInvoke={handleInvoke}
           onCancel={cancel}
         />

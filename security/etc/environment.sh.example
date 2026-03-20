@@ -41,3 +41,13 @@ COGNITO_OUTPUT=iac/cognito_output.yaml
 # Cognito user management (update after cognito stack deployment)
 P_COGNITO_USER_POOL_ID=<your-cognito-user-pool-id>
 P_COGNITO_PERMANENT_PASSWORD=<your-secure-password>
+# demo-user-N and demo-admin-N share the same password (set per pair 1-9)
+P_COGNITO_DEMO_USER_1_PASSWORD=<unique-password-for-demo-1>
+P_COGNITO_DEMO_USER_2_PASSWORD=<unique-password-for-demo-2>
+P_COGNITO_DEMO_USER_3_PASSWORD=<unique-password-for-demo-3>
+P_COGNITO_DEMO_USER_4_PASSWORD=<unique-password-for-demo-4>
+P_COGNITO_DEMO_USER_5_PASSWORD=<unique-password-for-demo-5>
+P_COGNITO_DEMO_USER_6_PASSWORD=<unique-password-for-demo-6>
+P_COGNITO_DEMO_USER_7_PASSWORD=<unique-password-for-demo-7>
+P_COGNITO_DEMO_USER_8_PASSWORD=<unique-password-for-demo-8>
+P_COGNITO_DEMO_USER_9_PASSWORD=<unique-password-for-demo-9>

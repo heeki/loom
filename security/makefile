@@ -82,8 +82,24 @@ cognito.set-passwords:
 	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username admin --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
 	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username security-admin --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
 	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username integration-admin --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
-	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-admin --password '$(P_COGNITO_DEMO_PASSWORD)' --permanent
-	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-user --password '$(P_COGNITO_DEMO_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-user-1 --password '$(P_COGNITO_DEMO_USER_1_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-admin-1 --password '$(P_COGNITO_DEMO_USER_1_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-user-2 --password '$(P_COGNITO_DEMO_USER_2_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-admin-2 --password '$(P_COGNITO_DEMO_USER_2_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-user-3 --password '$(P_COGNITO_DEMO_USER_3_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-admin-3 --password '$(P_COGNITO_DEMO_USER_3_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-user-4 --password '$(P_COGNITO_DEMO_USER_4_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-admin-4 --password '$(P_COGNITO_DEMO_USER_4_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-user-5 --password '$(P_COGNITO_DEMO_USER_5_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-admin-5 --password '$(P_COGNITO_DEMO_USER_5_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-user-6 --password '$(P_COGNITO_DEMO_USER_6_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-admin-6 --password '$(P_COGNITO_DEMO_USER_6_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-user-7 --password '$(P_COGNITO_DEMO_USER_7_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-admin-7 --password '$(P_COGNITO_DEMO_USER_7_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-user-8 --password '$(P_COGNITO_DEMO_USER_8_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-admin-8 --password '$(P_COGNITO_DEMO_USER_8_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-user-9 --password '$(P_COGNITO_DEMO_USER_9_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(P_COGNITO_USER_POOL_ID) --username demo-admin-9 --password '$(P_COGNITO_DEMO_USER_9_PASSWORD)' --permanent
 
 cognito.get-client-id:
 	@aws cloudformation describe-stacks \

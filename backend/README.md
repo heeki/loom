@@ -1,6 +1,6 @@
 # Loom Backend
 
-FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, paginated CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, tag policy management, tag profile management, cost estimation dashboard, actual runtime cost retrieval from CloudWatch usage logs, and admin audit tracking (login events, user actions, page views, per-session aggregation).
+FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, paginated CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, tag policy management, tag profile management, cost estimation dashboard, actual runtime cost retrieval from CloudWatch usage logs, and admin audit tracking (login events, user actions, page views, per-session aggregation). Agent deploy applies resolved tags to the DB record immediately on creation so tag-based resource filtering (e.g., demo user group restrictions) is effective from CREATING status.
 
 ## Technology Stack
 

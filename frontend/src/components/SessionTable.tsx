@@ -18,6 +18,7 @@ interface SessionTableProps {
   sessions: SessionResponse[];
   onSelectSession: (sessionId: string) => void;
   loading: boolean;
+  currentUserId?: string;
 }
 
 type SortDir = "asc" | "desc";
@@ -38,7 +39,7 @@ function statusVariant(status: string): "default" | "secondary" | "destructive" 
   }
 }
 
-export function SessionTable({ sessions, onSelectSession, loading }: SessionTableProps) {
+export function SessionTable({ sessions, onSelectSession, loading, currentUserId }: SessionTableProps) {
   const { timezone } = useTimezone();
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -71,6 +72,7 @@ export function SessionTable({ sessions, onSelectSession, loading }: SessionTabl
       <TableHeader>
         <TableRow>
           <TableHead className="w-[36ch]">Session ID</TableHead>
+          <TableHead>Invoked By</TableHead>
           <TableHead>Qualifier</TableHead>
           <TableHead>Status</TableHead>
           <TableHead>Invocations</TableHead>
@@ -95,6 +97,15 @@ export function SessionTable({ sessions, onSelectSession, loading }: SessionTabl
           >
             <TableCell className="font-mono text-xs">
               {session.session_id}
+            </TableCell>
+            <TableCell className="text-xs">
+              {session.user_id ? (
+                <span className={currentUserId && session.user_id !== currentUserId ? "text-muted-foreground" : ""}>
+                  {session.user_id}
+                </span>
+              ) : (
+                <span className="text-muted-foreground">—</span>
+              )}
             </TableCell>
             <TableCell>
               <Badge variant="outline">{session.qualifier}</Badge>
