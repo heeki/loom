@@ -28,6 +28,8 @@ import { statusVariant } from "@/lib/status";
 import { listMemories, createMemory, importMemory, refreshMemory, deleteMemory, purgeMemory } from "@/api/memories";
 import { listTagPolicies, listTagProfiles } from "@/api/settings";
 import { ApiError } from "@/api/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { trackAction } from "@/api/audit";
 import type { MemoryResponse, MemoryStrategyRequest, TagPolicy, TagProfile } from "@/api/types";
 import { MemoryCard } from "./MemoryCard";
 import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "./SortableCardGrid";
@@ -94,6 +96,7 @@ interface MemoryManagementPanelProps {
 
 export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, userGroups = [] }: MemoryManagementPanelProps) {
   const { timezone } = useTimezone();
+  const { user, browserSessionId } = useAuth();
   const [memories, setMemories] = useState<MemoryResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -257,6 +260,7 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, us
             }))
           : undefined;
 
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'memory', 'create', formName.trim());
       const created = await createMemory({
         name: formName.trim(),
         description: formDescription.trim() || undefined,
@@ -282,6 +286,7 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, us
     if (!importMemoryId.trim()) return;
     setSubmitting(true);
     try {
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'memory', 'import', importMemoryId.trim());
       await importMemory(importMemoryId.trim());
       resetForm();
       setShowAddForm(false);
@@ -310,6 +315,8 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, us
   const handleDelete = async (id: number, deleteInAws: boolean) => {
     setSubmitting(true);
     try {
+      const memName = memories.find(m => m.id === id)?.name ?? String(id);
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'memory', 'delete', memName);
       const updated = await deleteMemory(id, deleteInAws);
       if (updated.status === "DELETING") {
         // Async deletion — update local state so polling picks it up

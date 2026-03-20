@@ -14,6 +14,7 @@ from app.models.tag_policy import TagPolicy
 from app.models.tag_profile import TagProfile
 from app.models.mcp import McpServer, McpTool, McpServerAccess
 from app.models.site_setting import SiteSetting
+from app.models.audit import AuditLogin, AuditAction, AuditPageView
 
 __all__ = [
     "Agent", "InvocationSession", "Invocation", "ConfigEntry",
@@ -21,4 +22,5 @@ __all__ = [
     "ManagedRole", "AuthorizerConfig", "PermissionRequest",
     "AuthorizerCredential", "Memory", "TagPolicy", "TagProfile",
     "McpServer", "McpTool", "McpServerAccess", "SiteSetting",
+    "AuditLogin", "AuditAction", "AuditPageView",
 ]

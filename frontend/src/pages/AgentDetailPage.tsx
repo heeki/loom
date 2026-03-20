@@ -7,6 +7,8 @@ import { LatencySummary } from "@/components/LatencySummary";
 import { SessionTable } from "@/components/SessionTable";
 import { DeploymentPanel } from "@/components/DeploymentPanel";
 import { useInvoke } from "@/hooks/useInvoke";
+import { useAuth } from "@/contexts/AuthContext";
+import { trackAction } from "@/api/audit";
 import type { AgentResponse, SessionResponse } from "@/api/types";
 
 interface AgentDetailPageProps {
@@ -52,10 +54,12 @@ export function AgentDetailPage({
   // Check if agent group matches any of the user's allowed groups
   const canInvokeThisAgent = isSuperAdmin || !agentGroup || allowedGroups.includes(agentGroup);
   const effectiveCanInvoke = canInvoke && canInvokeThisAgent;
+  const { user, browserSessionId } = useAuth();
   const { streamedText, sessionStart, sessionEnd, isStreaming, error, rawError, invoke, cancel } =
     useInvoke(agent.id, agent.authorizer_config?.name ?? undefined);
 
   const handleInvoke = async (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string) => {
+    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'agent', 'invoke', agent.name ?? agent.runtime_id ?? String(agent.id));
     await invoke(prompt, qualifier, sessionId, credentialId, bearerToken);
     onSessionsRefresh();
   };

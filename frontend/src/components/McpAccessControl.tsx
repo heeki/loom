@@ -3,6 +3,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { trackAction } from "@/api/audit";
 import { getServerAccess, updateServerAccess, getServerTools } from "@/api/mcp";
 import { listAgents } from "@/api/agents";
 import type { McpServerAccess, McpTool, AgentResponse } from "@/api/types";
@@ -20,6 +22,7 @@ interface AccessRule {
 }
 
 export function McpAccessControl({ serverId, readOnly }: McpAccessControlProps) {
+  const { user, browserSessionId } = useAuth();
   const [agents, setAgents] = useState<AgentResponse[]>([]);
   const [tools, setTools] = useState<McpTool[]>([]);
   const [rules, setRules] = useState<AccessRule[]>([]);
@@ -83,6 +86,7 @@ export function McpAccessControl({ serverId, readOnly }: McpAccessControlProps) 
   const handleSave = async () => {
     setSaving(true);
     try {
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'mcp', 'update_permissions', String(serverId));
       const enabledRules = rules.filter((r) => r.enabled);
       await updateServerAccess(serverId, {
         rules: enabledRules.map((r) => ({

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -32,9 +32,11 @@ import { CostDashboardPage } from "@/pages/CostDashboardPage";
 import type { SessionResponse, InvocationResponse } from "@/api/types";
 import { AuthProvider, useAuth, type Scope } from "@/contexts/AuthContext";
 import { LoginPage } from "@/pages/LoginPage";
-import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings, Eye, Tags, DollarSign } from "lucide-react";
+import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings, Eye, Tags, DollarSign, BarChart3 } from "lucide-react";
+import { AdminDashboardPage } from "./pages/AdminDashboardPage";
+import { recordPageView, sendBeaconPageView, trackAction } from "./api/audit";
 
-type Persona = "catalog" | "security" | "builder" | "memory" | "tagging" | "settings" | "mcp" | "a2a" | "costs";
+type Persona = "catalog" | "security" | "builder" | "memory" | "tagging" | "settings" | "mcp" | "a2a" | "costs" | "admin";
 
 const GROUP_SCOPES: Record<string, Scope[]> = {
   // Type groups (for UI routing - don't grant scopes directly)
@@ -149,7 +151,7 @@ function SidebarItem({
 }
 
 function AppContent() {
-  const { isAuthenticated, isLoading, user, logout, hasScope } = useAuth();
+  const { isAuthenticated, isLoading, user, logout, hasScope, browserSessionId } = useAuth();
   const { theme } = useTheme();
 
   // Determine default persona based on user's scopes
@@ -175,6 +177,31 @@ function AppContent() {
       setActivePersona(getDefaultPersona());
     }
   }, [isAuthenticated, user, getDefaultPersona]);
+
+  // Page view tracking
+  const pageEntryRef = useRef<{ persona: string; enteredAt: string } | null>(null);
+  useEffect(() => {
+    const userId = user?.username || user?.sub;
+    if (pageEntryRef.current && userId && browserSessionId) {
+      const prev = pageEntryRef.current;
+      const duration = (Date.now() - new Date(prev.enteredAt).getTime()) / 1000;
+      recordPageView(userId, browserSessionId, prev.persona, prev.enteredAt, duration).catch(() => {});
+    }
+    pageEntryRef.current = { persona: activePersona, enteredAt: new Date().toISOString() };
+  }, [activePersona, user, browserSessionId]);
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const userId = user?.username || user?.sub;
+      if (pageEntryRef.current && userId && browserSessionId) {
+        const prev = pageEntryRef.current;
+        const duration = (Date.now() - new Date(prev.enteredAt).getTime()) / 1000;
+        sendBeaconPageView(userId, browserSessionId, prev.persona, prev.enteredAt, duration);
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [user, browserSessionId]);
 
   const isAdmin = user?.groups?.includes("t-admin") ?? false;
 
@@ -281,6 +308,8 @@ function AppContent() {
 
   const handleDelete = async (id: number, cleanupAws: boolean) => {
     try {
+      const agentName = agents.find(a => a.id === id)?.name ?? String(id);
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'agent', 'delete', agentName);
       await deleteAgent(id, cleanupAws);
       // If the deleted agent was selected, clear all drill-down state
       if (selectedAgentId === id) {
@@ -418,6 +447,14 @@ function AppContent() {
               onClick={() => setActivePersona("costs")}
             />
           )}
+          {isAdmin && (
+            <SidebarItem
+              icon={BarChart3}
+              label="Admin"
+              active={activePersona === "admin"}
+              onClick={() => setActivePersona("admin")}
+            />
+          )}
           {effectiveHasScope("settings:read") && (
             <SidebarItem
               icon={Settings}
@@ -534,7 +571,11 @@ function AppContent() {
                   sessionsLoading={sessionsLoading}
                   onSelectSession={setSelectedSessionId}
                   onSessionsRefresh={() => void refetchSessions()}
-                  onRedeploy={async (id) => { await redeployAgent(id); }}
+                  onRedeploy={async (id) => {
+                    const agentName = agents.find(a => a.id === id)?.name ?? String(id);
+                    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'agent', 'redeploy', agentName);
+                    await redeployAgent(id);
+                  }}
                   canInvoke={effectiveHasScope("invoke")}
                   userGroups={viewAsUser ? (USER_GROUPS[viewAsUser] ?? []) : (user?.groups ?? [])}
                 />
@@ -591,6 +632,7 @@ function AppContent() {
               groupRestriction={groupRestriction}
             />
           )}
+          {activePersona === "admin" && <AdminDashboardPage />}
         </main>
       </div>
 

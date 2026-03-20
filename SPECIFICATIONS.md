@@ -22,6 +22,7 @@ The frontend is organized around persona-based workflows, accessible via a sideb
 - **Settings** — Manage display preferences (theme, timezone). Accessible to all scopes.
 - **MCP Servers** — Register and manage MCP servers, view available tools, and control persona access.
 - **A2A Agents** — Register and manage A2A (Agent-to-Agent) protocol integrations, view Agent Cards, and control persona access to skills.
+- **Admin Dashboard** — Platform usage analytics for super-admins. Tracks user logins, user actions, and page navigation at the browser session level. Includes summary cards, charts, and per-session drill-down.
 
 ---
 
@@ -54,7 +55,8 @@ loom/
 │   │   │   ├── memory.py
 │   │   │   ├── mcp.py
 │   │   │   ├── a2a.py
-│   │   │   └── tag_profile.py
+│   │   │   ├── tag_profile.py
+│   │   │   └── audit.py
 │   │   ├── dependencies/
 │   │   │   └── auth.py
 │   │   ├── routers/
@@ -69,6 +71,7 @@ loom/
 │   │   │   ├── security.py
 │   │   │   ├── settings.py
 │   │   │   ├── traces.py
+│   │   │   ├── admin.py
 │   │   │   └── utils.py
 │   │   └── services/
 │   │       ├── agentcore.py
@@ -179,7 +182,7 @@ The frontend enforces scope-based access control derived from Cognito group memb
 
 | Group | Scopes | Sidebar Access | Write Access |
 |-------|--------|----------------|--------------|
-| `g-admins-super` | All 19 scopes | All pages | All actions |
+| `g-admins-super` | All 19 scopes | All pages (including Admin Dashboard) | All actions |
 | `g-admins-demo` | catalog:read, agent:read, agent:write, memory:read, memory:write, security:read, settings:read, tagging:read, costs:read, costs:write, mcp:read, a2a:read, invoke | All admin pages | Read/write restricted to demo group resources only |
 | `g-admins-security` | security:read, security:write, settings:read, tagging:read, tagging:write | Security, Settings, Tagging | Security + tag policy/profile management |
 | `g-admins-memory` | memory:read, memory:write, settings:read, tagging:read, tagging:write | Memory, Settings, Tagging | Memory + tag policy/profile management |

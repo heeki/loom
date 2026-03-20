@@ -12,6 +12,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { trackAction } from "@/api/audit";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { useA2aAgents } from "@/hooks/useA2aAgents";
@@ -30,6 +32,7 @@ interface A2aAgentsPageProps {
 
 export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgentsPageProps) {
   const { timezone } = useTimezone();
+  const { user, browserSessionId } = useAuth();
   const { agents, loading, createAgent, updateAgent, deleteAgent, refreshCard } = useA2aAgents();
   const [showAddForm, setShowAddForm] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
@@ -55,6 +58,7 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
 
   const handleCreate = async (data: A2aAgentCreateRequest) => {
     try {
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'a2a', 'add_agent', data.name);
       await createAgent(data);
       setShowAddForm(false);
     } catch (e) {
@@ -74,6 +78,8 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
 
   const handleDelete = async (id: number) => {
     try {
+      const agentName = agents.find(a => a.id === id)?.name ?? String(id);
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'a2a', 'delete_agent', agentName);
       await deleteAgent(id);
       setConfirmingDeleteId(null);
       if (selectedAgentId === id) setSelectedAgentId(null);
@@ -84,6 +90,7 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
 
   const handleRefresh = async () => {
     if (!selectedAgent) return;
+    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'a2a', 'test_connection', selectedAgent.name);
     setRefreshing(true);
     try {
       await refreshCard(selectedAgent.id);

@@ -11,6 +11,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { trackAction } from "@/api/audit";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { useMcpServers } from "@/hooks/useMcpServers";
@@ -29,6 +31,7 @@ interface McpServersPageProps {
 
 export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServersPageProps) {
   const { timezone } = useTimezone();
+  const { user, browserSessionId } = useAuth();
   const { servers, loading, createServer, updateServer, deleteServer } = useMcpServers();
   const [showAddForm, setShowAddForm] = useState(false);
   const [selectedServerId, setSelectedServerId] = useState<number | null>(null);
@@ -53,6 +56,7 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
 
   const handleCreate = async (data: McpServerCreateRequest) => {
     try {
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'mcp', 'add_server', data.name);
       await createServer(data);
       setShowAddForm(false);
     } catch (e) {
@@ -72,6 +76,8 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
 
   const handleDelete = async (id: number) => {
     try {
+      const serverName = servers.find(s => s.id === id)?.name ?? String(id);
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'mcp', 'delete_server', serverName);
       await deleteServer(id);
       setConfirmingDeleteId(null);
       if (selectedServerId === id) setSelectedServerId(null);

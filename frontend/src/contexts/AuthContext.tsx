@@ -17,6 +17,7 @@ import {
   type CognitoAuthResult,
 } from "@/api/auth";
 import { setAuthToken, setOnUnauthorized } from "@/api/client";
+import { recordLogin } from "@/api/audit";
 
 interface CognitoUser {
   sub: string;
@@ -102,6 +103,7 @@ interface AuthContextValue {
     newPassword: string,
   ) => Promise<void>;
   logout: () => void;
+  browserSessionId: string | null;
 }
 
 const ALL_SCOPES = new Set<Scope>([
@@ -123,6 +125,7 @@ const AuthContext = createContext<AuthContextValue>({
   login: async () => ({}),
   completeNewPassword: async () => {},
   logout: () => {},
+  browserSessionId: null,
 });
 
 function decodeJwtPayload(token: string): Record<string, unknown> {
@@ -138,6 +141,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<CognitoUser | null>(null);
   const [config, setConfig] = useState<AuthConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [browserSessionId, setBrowserSessionId] = useState<string | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tokensRef = useRef<AuthTokens | null>(null);
   tokensRef.current = tokens;
@@ -271,6 +275,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser({ sub: "unknown" });
         }
 
+        // Generate browser session ID and record login
+        const sessionId = crypto.randomUUID();
+        setBrowserSessionId(sessionId);
+        try {
+          const claims = decodeJwtPayload(newTokens.idToken);
+          const username = (claims["cognito:username"] as string) || (claims.sub as string);
+          recordLogin(username, sessionId).catch(() => {});
+        } catch {
+          // ignore
+        }
+
         scheduleRefresh(newTokens.accessToken, newTokens.refreshToken);
       }
     },
@@ -311,6 +326,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setTokens(null);
     setUser(null);
     setAuthToken(null);
+    setBrowserSessionId(null);
     if (refreshTimerRef.current) {
       clearTimeout(refreshTimerRef.current);
     }
@@ -353,6 +369,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         completeNewPassword,
         logout,
+        browserSessionId,
       }}
     >
       {children}

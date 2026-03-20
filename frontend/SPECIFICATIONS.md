@@ -34,9 +34,10 @@ frontend/
 │   │   ├── security.ts         # Security admin: roles, authorizers, credentials, permissions
 │   │   ├── settings.ts        # Settings API: tag policy + tag profile CRUD
 │   │   ├── costs.ts           # Cost dashboard (estimated + actuals) + model pricing API
-│   │   └── traces.ts          # Trace API: `getSessionTraces`, `getTraceDetail`
+│   │   ├── traces.ts          # Trace API: `getSessionTraces`, `getTraceDetail`
+│   │   └── audit.ts           # Admin audit API: recordLogin, recordAction, recordPageView, fetchLogins, fetchActions, fetchPageViews, fetchSessions, fetchSessionTimeline, fetchAuditSummary, trackAction (fire-and-forget)
 │   ├── contexts/
-│   │   ├── AuthContext.tsx      # Cognito auth provider (login, logout, token refresh)
+│   │   ├── AuthContext.tsx      # Cognito auth provider (login, logout, token refresh, browserSessionId generation and login audit)
 │   │   ├── TimezoneContext.tsx  # Timezone preference provider + hook
 │   │   └── ThemeContext.tsx     # Theme provider with 10 themes, localStorage persistence
 │   ├── hooks/
@@ -86,6 +87,7 @@ frontend/
 │   │   ├── TaggingPage.tsx         # Tagging persona: tag policy + tag profile CRUD
 │   │   ├── SettingsPage.tsx        # Settings persona: display preferences + cost estimation settings
 │   │   ├── CostDashboardPage.tsx  # Cost dashboard with time-range selector and per-agent breakdown
+│   │   ├── AdminDashboardPage.tsx # Admin-only dashboard: summary cards, charts, Sessions/Logins/Actions/Page Views tabs
 │   │   ├── SessionDetailPage.tsx  # Session metadata, invocations, tabbed Logs/Traces view
 │   │   └── InvocationDetailPage.tsx  # Invocation details, cost breakdown, Traces tab
 │   ├── lib/
@@ -125,6 +127,7 @@ The app uses a persona-based single-page architecture with a sidebar for workflo
 | MCP Servers | Network | Register and manage MCP servers, tools, and access control | `mcp:read` or `mcp:write` | |
 | A2A Agents | Users | Register and manage A2A agents, view Agent Cards, and control access | `a2a:read` or `a2a:write` | |
 | Costs | DollarSign | Cost dashboard with estimated costs, actual runtime costs from CloudWatch, and cost estimation settings | `catalog:read` | |
+| Admin Dashboard | BarChart3 | Platform usage analytics: login tracking, action tracking, page navigation, per-session drill-down, summary cards and charts | `isAdmin` (super-admins only) | |
 
 Sidebar items are conditionally rendered based on the user's scopes derived from their Cognito group membership. When auth is not configured, all items are visible.
 
@@ -672,7 +675,47 @@ The invoke panel's credential dropdown includes a "Manual token" sentinel value.
 
 ---
 
-## 12. Future Work
+## 12. Admin Dashboard
+
+**Purpose:** Platform usage analytics for super-admins. Accessible only via `isAdmin` check — the sidebar item is hidden for non-admin users.
+
+**Auth context additions:**
+- `browserSessionId: string | null` — UUID generated at login via `crypto.randomUUID()`, stored in React state (not localStorage). Resets on page refresh or re-login to distinguish usage sessions.
+- On login: `recordLogin(username, browserSessionId)` is called fire-and-forget via `audit.ts`.
+- On logout: `browserSessionId` is cleared to `null`.
+
+**Page view tracking (`App.tsx`):**
+- A `pageEntryRef` records `{persona, enteredAt}` for the currently active persona.
+- When `activePersona` changes, the previous page's duration is computed and `recordPageView` is called fire-and-forget.
+- A `beforeunload` listener uses `navigator.sendBeacon` to POST the final page view when the tab is closed.
+
+**Action tracking (`audit.ts` → `trackAction`):**
+- `trackAction(userId, browserSessionId, category, type, resourceName?)` — fire-and-forget wrapper around `recordAction`.
+- Called at the point of submission (before the API call, not on success) in all page and component handlers.
+- Categories and actions instrumented:
+
+| Category | Actions |
+|----------|---------|
+| `agent` | `deploy`, `import`, `invoke`, `redeploy`, `delete` |
+| `memory` | `create`, `import`, `delete` |
+| `security` | `add_role`, `delete_role`, `add_authorizer`, `add_credential`, `delete_authorizer`, `approve_request`, `deny_request` |
+| `tagging` | `add_tag`, `edit_tag`, `delete_tag`, `add_profile`, `edit_profile`, `delete_profile` |
+| `mcp` | `add_server`, `delete_server`, `test_connection`, `invoke_tool`, `update_permissions` |
+| `a2a` | `add_agent`, `delete_agent`, `test_connection`, `update_permissions` |
+
+**Dashboard layout (`AdminDashboardPage.tsx`):**
+- Time range selector: Today / Last 7 days / Last 30 days / All time.
+- Summary cards (4): Total Logins, Active Users, Total Actions, Most Active Page.
+- Charts (recharts, 3): Logins Over Time (bar chart, daily), Actions by Category (bar chart), Page Views (bar chart by page name).
+- Tabs (4): Sessions, Logins, Actions, Page Views.
+  - **Sessions:** Table of aggregated browser sessions (session ID truncated, user, login time, action count, page view count, last activity). Clicking a row shows a modal with the full interleaved event timeline.
+  - **Logins:** Table with user ID filter.
+  - **Actions:** Table with category and action type filters.
+  - **Page Views:** Table with page name filter.
+
+---
+
+## 13. Future Work
 
 - **Markdown rendering** for agent responses
 - **VPC network mode** support

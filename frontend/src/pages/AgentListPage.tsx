@@ -18,6 +18,8 @@ import { AgentCard } from "@/components/AgentCard";
 import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "@/components/SortableCardGrid";
 import { SortableTableHead, sortRows } from "@/components/SortableTableHead";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { trackAction } from "@/api/audit";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { statusVariant } from "@/lib/status";
@@ -58,6 +60,7 @@ export function AgentListPage({
   userGroups = [],
 }: AgentListPageProps) {
   const { timezone } = useTimezone();
+  const { user, browserSessionId } = useAuth();
   const [submitting, setSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState<BuilderTab>("deploy");
   const [showAddForm, setShowAddForm] = useState(false);
@@ -128,6 +131,7 @@ export function AgentListPage({
   const handleRegister = async (arn: string, modelId?: string) => {
     setSubmitting(true);
     try {
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'agent', 'import', arn);
       await onRegister(arn, modelId);
       setShowAddForm(false);
       toast.success("Agent registered");
@@ -140,6 +144,7 @@ export function AgentListPage({
 
   const handleDeploy = async (request: AgentDeployRequest) => {
     if (!onDeploy) return;
+    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'agent', 'deploy', request.name);
 
     // Immediately collapse form and start polling
     setDeployingName(request.name);

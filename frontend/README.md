@@ -1,6 +1,6 @@
 # Loom Frontend
 
-Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, resource tag management, tag profile management, cost estimation dashboard, and actual runtime cost analysis.
+Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, resource tag management, tag profile management, cost estimation dashboard, actual runtime cost analysis, and an admin dashboard with platform usage analytics.
 
 ## Prerequisites
 
@@ -64,6 +64,7 @@ The sidebar provides access to persona-based workflows:
 | **A2A Agents** | Users | Register and manage A2A agents with OAuth2 auth, Agent Card display, and access control |
 | **Costs** | DollarSign | Cost dashboard with estimated costs, actual runtime costs from CloudWatch, and cost settings |
 | **Settings** | Settings | Manage display preferences (theme, timezone) and cost estimation settings (CPU I/O wait discount) |
+| **Admin Dashboard** | BarChart3 | Platform usage analytics: login tracking, action tracking, page navigation, per-session drill-down (super-admins only) |
 
 The sidebar also includes a user indicator (when authenticated), admin View As dropdown (simulates specific users like demo-admin-1, demo-user-1 with their group-based scopes), live clock, and version badge. Theme and timezone are configured on the Settings page. Each listing page has a card/table view toggle; the selection persists per-page across persona switches.
 
@@ -90,6 +91,7 @@ src/
 │   ├── memories.ts    # Memory resource CRUD + refresh
 │   ├── security.ts    # Roles, authorizers, credentials, permissions
 │   ├── settings.ts    # Tag policy CRUD operations
+│   ├── audit.ts       # Admin audit API: login/action/pageview recording, session/summary queries, trackAction utility
 │   └── types.ts       # TypeScript interfaces mirroring backend models
 ├── contexts/     # React contexts (auth, timezone preference)
 │   ├── ThemeContext.tsx   # Theme provider with 10 themes and localStorage persistence
@@ -126,7 +128,8 @@ src/
 │   ├── McpServersPage.tsx      # MCP server management with tool/access tabs
 │   ├── A2aAgentsPage.tsx      # A2A agent management with card/access tabs
 │   ├── SettingsPage.tsx        # Display preferences + cost estimation settings
-│   └── SessionDetailPage.tsx   # Session metadata, invocations, logs
+│   ├── SessionDetailPage.tsx   # Session metadata, invocations, logs
+│   └── AdminDashboardPage.tsx  # Admin-only: summary cards, charts, Sessions/Logins/Actions/Page Views tabs
 ├── lib/          # Shared utilities (cn(), format helpers, status mapping, error mapping)
 ├── App.tsx       # Root: auth gate + persona sidebar + navigation
 └── main.tsx      # Entry point
@@ -139,6 +142,8 @@ When Cognito is configured, users must sign in before accessing the app. Configu
 - **Frontend:** `VITE_COGNITO_USER_CLIENT_ID` in `frontend/.env`
 
 The login page handles the `USER_PASSWORD_AUTH` flow and `NEW_PASSWORD_REQUIRED` challenge. Tokens are stored in memory only (not persisted across page reloads). The access token is automatically attached to all API requests. The `.env` file is the standard Vite mechanism for environment variables — any variable prefixed with `VITE_` is exposed via `import.meta.env`.
+
+The `AuthContext` also generates a `browserSessionId` (UUID via `crypto.randomUUID()`) on login, stored in React state only (resets on page refresh). This is used for audit tracking — all login, action, and page view events include this session ID so that multiple users sharing the same Cognito account can be distinguished by session. A `recordLogin` event is fired automatically on successful authentication.
 
 The `AuthContext` also provides scope-based authorization using a two-dimensional group architecture. User groups are extracted from the `cognito:groups` claim in the ID token and mapped to 19 scopes via `GROUP_SCOPES` (matching the backend mapping exactly). Type groups (`t-admin`, `t-user`) determine UI layout; resource groups (`g-admins-*`, `g-users-*`) determine access. Key groups: `g-admins-super` (all scopes), `g-admins-demo` (read-only to all pages + write to demo resources), `g-admins-security`, `g-admins-memory`, `g-admins-mcp`, `g-admins-a2a`, `g-users-demo/test/strategics` (invoke + group-filtered read). Sidebar items are conditionally rendered based on scopes, and write operations are disabled via a `readOnly` prop for users without the corresponding `*:write` scope. When auth is not configured, all scopes are granted.
 
@@ -206,6 +211,7 @@ The `AuthContext` also provides scope-based authorization using a two-dimensiona
 | A2aAgentsPage | A2A Agents | A2A agent CRUD, Agent Card detail, Access control tabs |
 | CostDashboardPage | Costs | Estimated costs table (per-agent breakdown with methodology formulas), actual costs with Runtime (collapsible agent groups, per-session detail) and Memory (consolidated per-resource) sub-sections, summary cards, time-range selector, sortable columns |
 | SettingsPage | Settings | Display preferences (theme, timezone), cost estimation settings (CPU I/O wait discount) |
+| AdminDashboardPage | Admin | Summary cards (total logins, active users, total actions, most active page), recharts bar charts (logins over time, actions by category, page views), tabbed tables: Sessions (with timeline drill-down), Logins, Actions, Page Views |
 
 ### Session Liveness
 

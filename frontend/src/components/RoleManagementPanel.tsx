@@ -9,8 +9,11 @@ import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, s
 import { useManagedRoles } from "@/hooks/useSecurity";
 import { ChevronDown, ChevronRight, Trash2, Plus } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { trackAction } from "@/api/audit";
 
 export function RoleManagementPanel({ readOnly }: { readOnly?: boolean }) {
+  const { user, browserSessionId } = useAuth();
   const { roles, loading, error, createRole, deleteRole } = useManagedRoles();
   const [showAddForm, setShowAddForm] = useState(false);
   const [importArn, setImportArn] = useState("");
@@ -23,6 +26,7 @@ export function RoleManagementPanel({ readOnly }: { readOnly?: boolean }) {
     if (!importArn.trim()) return;
     setSubmitting(true);
     try {
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'security', 'add_role', importArn.trim());
       await createRole({ mode: "import", role_arn: importArn.trim() });
       setImportArn("");
       setShowAddForm(false);
@@ -37,6 +41,8 @@ export function RoleManagementPanel({ readOnly }: { readOnly?: boolean }) {
   const handleDelete = async (id: number) => {
     setSubmitting(true);
     try {
+      const roleName = roles.find(r => r.id === id)?.role_name ?? String(id);
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'security', 'delete_role', roleName);
       await deleteRole(id);
       setConfirmDeleteId(null);
       toast.success("Role deleted");

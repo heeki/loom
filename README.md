@@ -46,6 +46,14 @@ Loom is an enterprise-grade platform for building, deploying, and operating AI a
 - Cost badges on agent cards, token/cost columns in invocation tables
 - Model pricing metadata for all supported Anthropic and Amazon models
 
+### Admin Dashboard
+- Platform usage analytics for super-admins: login tracking, user action tracking, and page navigation tracking
+- All audit events are scoped to a browser session UUID (generated at login, stored in React state) to distinguish shared accounts
+- Summary cards (total logins, active users, total actions, most active page) with time-range selector
+- Charts: logins over time, actions by category, page time distribution (recharts)
+- Per-session drill-down: interleaved timeline of logins, actions, and page views for any browser session
+- 27 instrumented action types across agent, memory, security, tagging, MCP, and A2A categories
+
 ### Observability and UX
 - OpenTelemetry observability with ADOT auto-instrumentation and OTEL trace visualization
 - Interactive waterfall timeline for inspecting per-span events from OTEL log records
@@ -182,4 +190,4 @@ npm run dev     # Start Vite dev server on LOOM_FRONTEND_PORT
 - **Backend:** FastAPI with SQLAlchemy (SQLite), boto3 for AWS, SSE streaming via `StreamingResponse`
 - **Frontend:** React 18, TypeScript, Vite, shadcn/ui, Tailwind CSS v4
 - **Auth:** Cognito User Pool with group-based scopes; frontend enforces sidebar visibility and write permissions
-- **Navigation:** Platform Catalog, Agents, Memory, Security Admin, MCP Servers, A2A Agents, Tagging, Costs, Settings
+- **Navigation:** Platform Catalog, Agents, Memory, Security Admin, MCP Servers, A2A Agents, Tagging, Costs, Settings, Admin Dashboard (super-admins only)
