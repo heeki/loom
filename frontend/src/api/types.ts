@@ -34,6 +34,9 @@ export interface AgentResponse {
     total_cost: number;
     total_invocations: number;
   } | null;
+  memory_names: string[];
+  mcp_names: string[];
+  a2a_names: string[];
 }
 
 export interface AgentRegisterRequest {

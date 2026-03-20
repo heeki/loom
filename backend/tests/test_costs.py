@@ -17,7 +17,7 @@ class TestCostDashboard(unittest.TestCase):
         """Cost dashboard returns expected fields including memory cost."""
         with patch("app.dependencies.auth.get_current_user") as mock_user:
             mock_user.return_value = type("UserInfo", (), {
-                "sub": "test", "username": "admin", "groups": ["super-admins"],
+                "sub": "test", "username": "admin", "groups": ["t-admin", "g-admins-super"],
                 "scopes": ["catalog:read"],
             })()
             response = client.get("/api/dashboard/costs?days=30")
@@ -39,7 +39,7 @@ class TestCostDashboard(unittest.TestCase):
         """Models pricing endpoint returns pricing data."""
         with patch("app.dependencies.auth.get_current_user") as mock_user:
             mock_user.return_value = type("UserInfo", (), {
-                "sub": "test", "username": "admin", "groups": ["super-admins"],
+                "sub": "test", "username": "admin", "groups": ["t-admin", "g-admins-super"],
                 "scopes": ["agent:read"],
             })()
             response = client.get("/api/agents/models/pricing")

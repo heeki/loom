@@ -162,9 +162,12 @@ Detailed specifications for each component are maintained in their respective di
 The Cognito User Pool is managed via CloudFormation (`security/iac/cognito.yaml`) and includes:
 
 - **Password policy:** Minimum 12 characters, uppercase, lowercase, numbers required; symbols not required.
-- **Resource server scopes:** `invoke`, `catalog:read`, `catalog:write`, `agent:read`, `agent:write`, `memory:read`, `memory:write`, `security:read`, `security:write`, `settings:read`, `settings:write`, `mcp:read`, `mcp:write`, `a2a:read`, `a2a:write`.
-- **Groups:** `super-admins`, `demo-admins`, `security-admins`, `memory-admins`, `mcp-admins`, `a2a-admins`, `users`. Group scopes: super-admins (all 15 scopes including invoke), demo-admins (all read/write scopes plus invoke), security-admins (security:read/write), memory-admins (memory:read/write), mcp-admins (mcp:read/write), a2a-admins (a2a:read/write), users (invoke only).
-- **Users:** `admin` (super-admins), `demo-admin-1`/`demo-admin-2` (demo-admins), `security-admin` (security-admins), `integration-admin` (memory-admins + mcp-admins + a2a-admins), `demo-user-1`/`demo-user-2` (users) — each assigned via `UserPoolUserToGroupAttachment`.
+- **Resource server scopes (19 total):** `invoke`, `catalog:read`, `catalog:write`, `agent:read`, `agent:write`, `memory:read`, `memory:write`, `security:read`, `security:write`, `settings:read`, `settings:write`, `tagging:read`, `tagging:write`, `costs:read`, `costs:write`, `mcp:read`, `mcp:write`, `a2a:read`, `a2a:write`.
+- **Two-dimensional group architecture:**
+  - **Type groups** (UI view): `t-admin` (admin UI with all pages), `t-user` (user UI with Catalog, Agents, Memory, Costs only)
+  - **Admin groups** (t-admin users, single group): `g-admins-super` (all scopes), `g-admins-demo` (read-only to all pages + read/write to demo group resources + costs:write), `g-admins-security` (security:read/write, settings:read, tagging:read/write), `g-admins-memory` (memory:read/write, settings:read, tagging:read/write), `g-admins-mcp` (mcp:read/write, settings:read, tagging:read/write), `g-admins-a2a` (a2a:read/write, settings:read, tagging:read/write)
+  - **User groups** (t-user users, can have multiple): `g-users-demo`, `g-users-test`, `g-users-strategics` (each grants: catalog:read, agent:read, memory:read, costs:read, costs:write, invoke)
+- **Users:** `admin` (t-admin + g-admins-super), `demo-admin` (t-admin + g-admins-demo), `security-admin` (t-admin + g-admins-security), `integration-admin` (t-admin + g-admins-memory + g-admins-mcp + g-admins-a2a), `demo-user` (t-user + g-users-demo) — each assigned to both type and group via `UserPoolUserToGroupAttachment`.
 - **Clients:**
   - **M2MClient** — `client_credentials` flow with secret, scoped to `invoke`.
   - **UserClient** — `USER_PASSWORD_AUTH` + `REFRESH_TOKEN_AUTH` flows without secret, scoped to all custom scopes plus `openid`, `email`, `profile`.
@@ -176,16 +179,18 @@ The frontend enforces scope-based access control derived from Cognito group memb
 
 | Group | Scopes | Sidebar Access | Write Access |
 |-------|--------|----------------|--------------|
-| `super-admins` | All 15 scopes including `invoke` | All pages | All actions |
-| `demo-admins` | All read/write scopes plus `invoke` | All admin pages | All admin actions (tag-scoped data) |
-| `security-admins` | security:read, security:write | Security | Security actions |
-| `memory-admins` | memory:read, memory:write | Memory | Memory actions |
-| `mcp-admins` | mcp:read, mcp:write | MCP Servers | MCP actions |
-| `a2a-admins` | a2a:read, a2a:write | A2A Agents | A2A actions |
-| `users` | invoke | Agent invocation only | Invoke only (tag-filtered resources) |
+| `g-admins-super` | All 19 scopes | All pages | All actions |
+| `g-admins-demo` | catalog:read, agent:read, agent:write, memory:read, memory:write, security:read, settings:read, tagging:read, costs:read, costs:write, mcp:read, a2a:read, invoke | All admin pages | Read/write restricted to demo group resources only |
+| `g-admins-security` | security:read, security:write, settings:read, tagging:read, tagging:write | Security, Settings, Tagging | Security + tag policy/profile management |
+| `g-admins-memory` | memory:read, memory:write, settings:read, tagging:read, tagging:write | Memory, Settings, Tagging | Memory + tag policy/profile management |
+| `g-admins-mcp` | mcp:read, mcp:write, settings:read, tagging:read, tagging:write | MCP Servers, Settings, Tagging | MCP + tag policy/profile management |
+| `g-admins-a2a` | a2a:read, a2a:write, settings:read, tagging:read, tagging:write | A2A Agents, Settings, Tagging | A2A + tag policy/profile management |
+| `g-users-*` | catalog:read, agent:read, memory:read, costs:read, costs:write, invoke | Catalog, Agents, Memory, Costs | No write access; costs:write for cost settings only |
 
-- **Sidebar visibility:** Each sidebar item is shown only when the user has the corresponding `*:read` or `*:write` scope. The Platform Catalog is always visible.
-- **Write protection:** Components receive a `readOnly` prop that disables or hides add, edit, and delete buttons when the user lacks `*:write` scopes.
+- **Sidebar visibility:** Each sidebar item is shown only when the user has the corresponding `*:read` or `*:write` scope. The Platform Catalog is always visible. Type groups determine the overall UI view (t-admin sees all admin pages, t-user sees only Catalog/Agents/Memory/Costs).
+- **Write protection:** Components receive a `readOnly` prop that disables or hides add, edit, and delete buttons when the user lacks `*:write` scopes. Demo-admins see delete buttons only for resources tagged with `loom:group=demo`.
+- **Resource filtering:** Admins (t-admin) see all resources including untagged. Users (t-user) see only resources matching their group tags (union semantics for multiple groups).
+- **Tag profile management:** Only super-admins can edit/delete custom tag policies. Demo-admins can only edit/delete tag profiles with `loom:group=demo`.
 - **Bypass mode:** When authentication is not configured (no Cognito pool ID or client ID), all scopes are granted and all features are accessible.
 
 ---
@@ -325,22 +330,30 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Settings page simplified to display preferences only (theme + timezone).
 
 ### Phase 10 — Fine-Grained Permissions Scoping *(Complete)*
-- Expanded scope model from 7 scopes to 15: `invoke`, `catalog:read/write`, `agent:read/write`, `memory:read/write`, `security:read/write`, `settings:read/write`, `mcp:read/write`, `a2a:read/write`.
-- Restructured Cognito groups from 5 to 7: `super-admins`, `demo-admins`, `security-admins`, `memory-admins`, `mcp-admins`, `a2a-admins`, `users`.
-- Updated user-to-group assignments: `admin` → super-admins, `demo-admin-1`/`demo-admin-2` → demo-admins, `security-admin` → security-admins, `integration-admin` → memory-admins + mcp-admins + a2a-admins, `demo-user-1`/`demo-user-2` → users.
+- Two-dimensional group architecture: Type groups (`t-admin`, `t-user`) define UI view; Group membership (`g-admins-*`, `g-users-*`) grants scopes. Users belong to both a type group and one or more resource groups.
+- Expanded scope model from 15 to 19 scopes: added `tagging:read/write` for tag policy/profile management, `costs:read/write` for cost dashboard access. Total scopes: `invoke`, `catalog:read/write`, `agent:read/write`, `memory:read/write`, `security:read/write`, `settings:read/write`, `tagging:read/write`, `costs:read/write`, `mcp:read/write`, `a2a:read/write`.
+- Updated Cognito group structure:
+  - Type groups: `t-admin` (admin UI), `t-user` (user UI)
+  - Admin groups: `g-admins-super` (all scopes), `g-admins-demo` (read-only to all + write to demo resources + costs:write), `g-admins-security`, `g-admins-memory`, `g-admins-mcp`, `g-admins-a2a`
+  - User groups: `g-users-demo`, `g-users-test`, `g-users-strategics` (each grants catalog:read, agent:read, memory:read, costs:read, costs:write, invoke)
+- Updated user assignments: `admin` → t-admin + g-admins-super, `demo-admin` → t-admin + g-admins-demo, `security-admin` → t-admin + g-admins-security, `integration-admin` → t-admin + g-admins-memory + g-admins-mcp + g-admins-a2a, `demo-user` → t-user + g-users-demo
 - Backend OAuth2 enforcement: every router endpoint guarded by `require_scopes()` dependency with OpenAPI scope annotations via `Security()`. `get_current_user` validates JWT, extracts `cognito:groups`, and derives scopes via `GROUP_SCOPES` mapping. Returns 401 for missing/invalid tokens, 403 for insufficient scopes.
-- Group-based invoke restriction: `super-admins` can invoke any agent; `demo-admins` and `users` can only invoke agents whose `loom:group` tag matches their own group.
+- Group-based invoke restriction: `g-admins-super` can invoke any agent; other admins and users can only invoke agents whose `loom:group` tag matches their group (strips `g-admins-` or `g-users-` prefix for comparison).
+- Resource filtering: Admins (t-admin) see all resources including untagged. Users (t-user) see only resources matching their group tags (union semantics for multiple groups).
+- Demo-admin write restrictions: `g-admins-demo` users can only create/delete agents and memory resources tagged with `loom:group=demo`. Delete buttons hidden on cards for resources outside their group.
+- Tag policy management: `list_tag_policies()` and `list_tag_profiles()` require authentication but no specific scope (needed for card display). Only `g-admins-super` can edit/delete custom tag policies. Demo-admins can edit/delete tag profiles only with `loom:group=demo`.
 - Token forwarding for agent invocation: user's login token is forwarded to OAuth-protected agents (shared Cognito pool). Token priority: manual bearer token > M2M credential > user login token > agent config M2M > SigV4 (no token).
 - Auto-include user app client ID (`LOOM_COGNITO_USER_CLIENT_ID`) in agent authorizer `allowedClients` on deploy, so user login tokens are accepted by the agent runtime.
 - Credential dropdown shows context-aware options: OAuth agents show user's token (default), M2M credentials, and manual token; non-OAuth agents show "No credentials (SigV4)" only.
 - Auto-select newly created session in the session dropdown after an invocation.
 - Automatic 401 token refresh: `apiFetch` intercepts 401 responses, refreshes the Cognito access token, and retries the request transparently.
 - Re-fetch agent list after authentication to prevent empty state on hard refresh.
-- Frontend `AuthContext` and `App.tsx` updated with matching `GROUP_SCOPES` mapping. View As selector changed from group-based to user-based (admin, demo-admin-1, demo-admin-2, etc.) for more realistic role simulation.
-- Group restriction on `ResourceTagFields` and `MemoryManagementPanel`: demo-admins only see tag profiles matching their group, and `loom:group` tag is forced to their group value.
+- Frontend `AuthContext` and `App.tsx` updated with matching `GROUP_SCOPES` mapping. View As selector changed from group-based to user-based (admin, demo-admin, security-admin, etc.) for more realistic role simulation.
+- Default page on login: users are routed to their first accessible page based on available scopes (e.g., security-admin → Security page, demo-user → Catalog page).
+- Group restriction on `ResourceTagFields`: demo-admins only see tag profiles matching their group, and `loom:group` tag is forced to their group value. Tag profile selector: "None" option removed, users must select a profile.
 - Sidebar overflow fix: sidebar and main content use proper scroll containment.
 - Bypass mode preserved: when `LOOM_COGNITO_USER_POOL_ID` is not set, all scopes are granted (local development).
-- 16 new scope enforcement tests + 2 pre-existing test fixes.
+- Comprehensive test updates for new group structure in `test_scopes.py` and `test_costs.py`.
 
 ### Phase 11 — JSON Import/Export and Agent Deletion Polling *(Complete)*
 - Shared `JsonConfigSection` component for collapsible JSON import/export on forms. Encapsulates toggle, textarea, and Apply/Export/Cancel buttons.

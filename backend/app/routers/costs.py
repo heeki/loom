@@ -43,7 +43,7 @@ _ZERO_COSTS: dict[str, Any] = {
 def get_cost_dashboard(
     group: str | None = Query(None, description="Filter by loom:group tag"),
     days: int = Query(30, description="Number of days to aggregate (0 = all time)"),
-    user: UserInfo = Depends(require_scopes("catalog:read")),
+    user: UserInfo = Depends(require_scopes("costs:read")),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Aggregate cost data across agents, optionally filtered by group tag."""
@@ -51,18 +51,18 @@ def get_cost_dashboard(
     agents = db.query(Agent).all()
 
     # Filter by group parameter (for View As) or user's groups
+    # - Admins (t-admin): See ALL resources including untagged (unless group param is set for View As)
+    # - Users (t-user): See only resources tagged with their groups (g-users-* → strip prefix)
     if group:
-        # Explicit group filter (used by super-admins for View As)
+        # Explicit group filter (used by admins for View As)
         agents = [a for a in agents if a.get_tags().get("loom:group") == group]
-    elif "super-admins" not in user.groups:
-        # Non-super-admins see agents matching their groups
-        allowed_groups = [g for g in user.groups if g != "users"]
-        if "users" in user.groups and not allowed_groups:
-            allowed_groups = ["users"]
-
-        agents = [a for a in agents if a.get_tags().get("loom:group") in allowed_groups]
-        # Use first non-users group for display purposes
-        group = allowed_groups[0] if allowed_groups else "users"
+    elif "t-admin" not in user.groups:
+        # User view: filter by group tags (strip "g-users-" prefix)
+        user_groups = [g for g in user.groups if g.startswith("g-users-")]
+        allowed_tags = [g.replace("g-users-", "", 1) for g in user_groups]
+        agents = [a for a in agents if a.get_tags().get("loom:group") in allowed_tags]
+        # Use first group tag for display purposes
+        group = allowed_tags[0] if allowed_tags else None
 
     agent_ids = [a.id for a in agents]
 
@@ -100,29 +100,33 @@ def get_cost_dashboard(
         q = inv_query.filter(InvocationSession.agent_id == agent.id)
 
         inv_count = q.count()
+
+        # Include agents even if they have zero invocations (show $0 costs)
         if inv_count == 0:
-            continue
+            input_sum = output_sum = 0
+            est_cost = duration_ms_sum = idle_cpu = idle_mem = stm = ltm = 0.0
+            rt_cpu = compute_mem = rt_mem = rt_total = mem_total = grand_total = 0.0
+        else:
+            input_sum = q.with_entities(func.sum(Invocation.input_tokens)).scalar() or 0
+            output_sum = q.with_entities(func.sum(Invocation.output_tokens)).scalar() or 0
+            est_cost = q.with_entities(func.sum(Invocation.estimated_cost)).scalar() or 0.0
+            duration_ms_sum = q.with_entities(func.sum(Invocation.client_duration_ms)).scalar() or 0.0
+            idle_cpu = q.with_entities(func.sum(Invocation.idle_cpu_cost)).scalar() or 0.0
+            idle_mem = q.with_entities(func.sum(Invocation.idle_memory_cost)).scalar() or 0.0
+            stm = q.with_entities(func.sum(Invocation.stm_cost)).scalar() or 0.0
+            ltm = q.with_entities(func.sum(Invocation.ltm_cost)).scalar() or 0.0
 
-        input_sum = q.with_entities(func.sum(Invocation.input_tokens)).scalar() or 0
-        output_sum = q.with_entities(func.sum(Invocation.output_tokens)).scalar() or 0
-        est_cost = q.with_entities(func.sum(Invocation.estimated_cost)).scalar() or 0.0
-        duration_ms_sum = q.with_entities(func.sum(Invocation.client_duration_ms)).scalar() or 0.0
-        idle_cpu = q.with_entities(func.sum(Invocation.idle_cpu_cost)).scalar() or 0.0
-        idle_mem = q.with_entities(func.sum(Invocation.idle_memory_cost)).scalar() or 0.0
-        stm = q.with_entities(func.sum(Invocation.stm_cost)).scalar() or 0.0
-        ltm = q.with_entities(func.sum(Invocation.ltm_cost)).scalar() or 0.0
+            # Recompute CPU and memory from duration using current pricing defaults
+            total_hours = duration_ms_sum / 1000 / 3600
+            compute_cpu = total_hours * AGENTCORE_RUNTIME_PRICING["default_vcpu"] * AGENTCORE_RUNTIME_PRICING["cpu_per_vcpu_hour"]
+            compute_mem = total_hours * AGENTCORE_RUNTIME_PRICING["default_memory_gb"] * AGENTCORE_RUNTIME_PRICING["memory_per_gb_hour"]
 
-        # Recompute CPU and memory from duration using current pricing defaults
-        total_hours = duration_ms_sum / 1000 / 3600
-        compute_cpu = total_hours * AGENTCORE_RUNTIME_PRICING["default_vcpu"] * AGENTCORE_RUNTIME_PRICING["cpu_per_vcpu_hour"]
-        compute_mem = total_hours * AGENTCORE_RUNTIME_PRICING["default_memory_gb"] * AGENTCORE_RUNTIME_PRICING["memory_per_gb_hour"]
-
-        # Derived totals — apply I/O wait discount to CPU; idle is memory only
-        rt_cpu = compute_cpu * cpu_factor
-        rt_mem = compute_mem + idle_mem
-        rt_total = rt_cpu + rt_mem
-        mem_total = stm + ltm
-        grand_total = est_cost + rt_total + mem_total
+            # Derived totals — apply I/O wait discount to CPU; idle is memory only
+            rt_cpu = compute_cpu * cpu_factor
+            rt_mem = compute_mem + idle_mem
+            rt_total = rt_cpu + rt_mem
+            mem_total = stm + ltm
+            grand_total = est_cost + rt_total + mem_total
 
         entry: dict[str, Any] = {
             "agent_id": agent.id,
@@ -191,7 +195,7 @@ def get_cost_dashboard(
 def pull_cost_actuals(
     group: str | None = Query(None, description="Filter by loom:group tag"),
     days: int = Query(30, description="Number of days to query (0 = all time)"),
-    user: UserInfo = Depends(require_scopes("catalog:read")),
+    user: UserInfo = Depends(require_scopes("costs:read")),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Pull all usage log events from CloudWatch for agents in scope.
@@ -206,18 +210,18 @@ def pull_cost_actuals(
     agents = db.query(Agent).all()
 
     # Filter by group parameter (for View As) or user's groups
+    # - Admins (t-admin): See ALL resources including untagged (unless group param is set for View As)
+    # - Users (t-user): See only resources tagged with their groups (g-users-* → strip prefix)
     if group:
-        # Explicit group filter (used by super-admins for View As)
+        # Explicit group filter (used by admins for View As)
         agents = [a for a in agents if a.get_tags().get("loom:group") == group]
-    elif "super-admins" not in user.groups:
-        # Non-super-admins see agents matching their groups
-        allowed_groups = [g for g in user.groups if g != "users"]
-        if "users" in user.groups and not allowed_groups:
-            allowed_groups = ["users"]
-
-        agents = [a for a in agents if a.get_tags().get("loom:group") in allowed_groups]
-        # Use first non-users group for display purposes
-        group = allowed_groups[0] if allowed_groups else "users"
+    elif "t-admin" not in user.groups:
+        # User view: filter by group tags (strip "g-users-" prefix)
+        user_groups = [g for g in user.groups if g.startswith("g-users-")]
+        allowed_tags = [g.replace("g-users-", "", 1) for g in user_groups]
+        agents = [a for a in agents if a.get_tags().get("loom:group") in allowed_tags]
+        # Use first group tag for display purposes
+        group = allowed_tags[0] if allowed_tags else None
 
     if not agents:
         return {"group": group, "days": days, "agents": [], "summary": {"total_events": 0}}
@@ -375,14 +379,13 @@ def pull_cost_actuals(
 
     # Filter memories by group parameter (for View As) or user's groups (same logic as agents)
     if group:
-        # Explicit group filter (used by super-admins for View As)
+        # Explicit group filter (used by admins for View As)
         all_memories = [m for m in all_memories if m.get_tags().get("loom:group") == group]
-    elif "super-admins" not in user.groups:
-        # Non-super-admins see memories matching their groups
-        allowed_groups = [g for g in user.groups if g != "users"]
-        if "users" in user.groups and not allowed_groups:
-            allowed_groups = ["users"]
-        all_memories = [m for m in all_memories if m.get_tags().get("loom:group") in allowed_groups]
+    elif "t-admin" not in user.groups:
+        # User view: filter by group tags (strip "g-users-" prefix)
+        user_groups = [g for g in user.groups if g.startswith("g-users-")]
+        allowed_tags = [g.replace("g-users-", "", 1) for g in user_groups]
+        all_memories = [m for m in all_memories if m.get_tags().get("loom:group") in allowed_tags]
 
     for mem in all_memories:
         if mem.memory_id:

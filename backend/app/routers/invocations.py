@@ -747,16 +747,23 @@ async def invoke_agent_endpoint(
         )
 
     # ---- Group-based invoke restriction ----
-    # super-admins can invoke any agent.
-    # Other users can only invoke agents tagged with their groups.
+    # Super-admins (g-admins-super) can invoke any agent.
+    # Other admins (g-admins-demo, etc.) can only invoke agents in their specific group.
+    # Users (t-user) can only invoke agents tagged with their groups (g-users-* → strip prefix).
     # Check this BEFORE creating any session/invocation records.
-    if "super-admins" not in user.groups:
+    if "g-admins-super" not in user.groups:
         agent_group = agent.get_tags().get("loom:group", "")
-        allowed_groups = [g for g in user.groups if g != "users"]
-        # users group members match agents tagged "users"
-        if "users" in user.groups:
-            allowed_groups.append("users")
-        if agent_group not in allowed_groups:
+
+        if "t-admin" in user.groups:
+            # Non-super admins: check against their g-admins-* group
+            admin_groups = [g for g in user.groups if g.startswith("g-admins-")]
+            allowed_tags = [g.replace("g-admins-", "", 1) for g in admin_groups]
+        else:
+            # Users: extract allowed tags from g-users-* groups
+            user_groups = [g for g in user.groups if g.startswith("g-users-")]
+            allowed_tags = [g.replace("g-users-", "", 1) for g in user_groups]
+
+        if agent_group not in allowed_tags:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"You can only invoke agents within your group (agent group: {agent_group})",

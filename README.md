@@ -31,7 +31,7 @@ Loom is an enterprise-grade platform for building, deploying, and operating AI a
 
 ### Security and Access Control
 - Cognito user authentication with automatic token refresh
-- Group-based scope authorization (15 scopes across 7 groups)
+- Two-dimensional group-based authorization: Type groups (t-admin, t-user) for UI view and Resource groups (g-admins-*, g-users-*) for access control (19 scopes total)
 - IAM role, authorizer, and credential management
 - Admin user view switching to preview scoped experiences
 
@@ -142,17 +142,22 @@ make cognito                   # Deploy Cognito User Pool, groups, scopes, and c
 make cognito.set-passwords     # Set permanent passwords for demo users
 ```
 
-**Cognito groups and scopes:**
+**Cognito groups and scopes (two-dimensional architecture):**
 
-| Group | Scopes |
-|-------|--------|
-| `super-admins` | All 15 scopes (invoke, catalog:r/w, agent:r/w, memory:r/w, security:r/w, settings:r/w, mcp:r/w, a2a:r/w) |
-| `demo-admins` | All read/write scopes plus invoke |
-| `security-admins` | security:read, security:write |
-| `memory-admins` | memory:read, memory:write |
-| `mcp-admins` | mcp:read, mcp:write |
-| `a2a-admins` | a2a:read, a2a:write |
-| `users` | invoke |
+**Type Groups** (determine UI view):
+- `t-admin` — Admin UI with full navigation
+- `t-user` — User UI with limited navigation
+
+**Resource Groups** (determine access to resources):
+- `g-admins-super` — All 19 scopes (catalog:r/w, agent:r/w, memory:r/w, security:r/w, settings:r/w, tagging:r/w, costs:r/w, mcp:r/w, a2a:r/w, invoke)
+- `g-admins-demo` — Read-only to all pages + read/write to demo group resources + costs:write
+- `g-admins-security` — security:read/write, settings:read
+- `g-admins-memory` — memory:read/write, settings:read
+- `g-admins-mcp` — mcp:read/write, settings:read
+- `g-admins-a2a` — a2a:read/write, settings:read
+- `g-users-demo`, `g-users-test`, `g-users-strategics` — invoke + read access to resources in their group
+
+Users are assigned both a type group and one or more resource groups. Resource filtering uses `loom:group` tag matching.
 
 ### Step 3: Start the Backend
 

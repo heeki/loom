@@ -1,14 +1,7 @@
-import { useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp, formatMs } from "@/lib/format";
-import { TraceList } from "@/components/TraceList";
-import { TraceGraph } from "@/components/TraceGraph";
-import { useTraces } from "@/hooks/useTraces";
 import type { AgentResponse, SessionResponse, InvocationResponse } from "@/api/types";
 
 interface InvocationDetailPageProps {
@@ -53,16 +46,6 @@ function CostRow({ label, value }: { label: string; value: string }) {
 
 export function InvocationDetailPage({ agent, session, invocation }: InvocationDetailPageProps) {
   const { timezone } = useTimezone();
-  const {
-    traces,
-    tracesLoading,
-    selectedTrace,
-    traceDetailLoading,
-    fetchSessionTraces,
-    fetchTraceDetail,
-    setSelectedTrace,
-  } = useTraces();
-  const tracesFetchedRef = useRef(false);
 
   const rtCpu = invocation.compute_cpu_cost ?? 0;
   const rtMem = (invocation.compute_memory_cost ?? 0) + (invocation.idle_memory_cost ?? 0);
@@ -70,17 +53,6 @@ export function InvocationDetailPage({ agent, session, invocation }: InvocationD
   const memTotal = (invocation.stm_cost ?? 0) + (invocation.ltm_cost ?? 0);
   const modelCost = invocation.estimated_cost ?? 0;
   const grandTotal = modelCost + rtTotal + memTotal;
-
-  const handleTabChange = (tab: string) => {
-    if (tab === "traces" && !tracesFetchedRef.current) {
-      tracesFetchedRef.current = true;
-      void fetchSessionTraces(agent.id, session.session_id);
-    }
-  };
-
-  const handleSelectTrace = (traceId: string) => {
-    void fetchTraceDetail(agent.id, traceId);
-  };
 
   return (
     <div className="space-y-6">
@@ -196,34 +168,6 @@ export function InvocationDetailPage({ agent, session, invocation }: InvocationD
           </pre>
         </CardContent>
       </Card>
-
-      <Tabs defaultValue="traces" onValueChange={handleTabChange}>
-        <TabsList>
-          <TabsTrigger value="traces">Traces</TabsTrigger>
-        </TabsList>
-        <Separator className="my-2" />
-        <TabsContent value="traces" className="mt-0">
-          {selectedTrace ? (
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <h4 className="text-sm font-medium">
-                  Trace: <span className="font-mono">{selectedTrace.trace_id}</span>
-                </h4>
-                <Button variant="ghost" size="sm" onClick={() => setSelectedTrace(null)}>
-                  Back to list
-                </Button>
-              </div>
-              <TraceGraph trace={selectedTrace} loading={traceDetailLoading} />
-            </div>
-          ) : (
-            <TraceList
-              traces={traces}
-              loading={tracesLoading}
-              onSelectTrace={handleSelectTrace}
-            />
-          )}
-        </TabsContent>
-      </Tabs>
     </div>
   );
 }

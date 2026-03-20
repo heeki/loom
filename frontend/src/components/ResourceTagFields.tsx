@@ -74,10 +74,9 @@ export function ResourceTagFields({ onChange, profileId: controlledProfileId, gr
   }, [selectedProfileId, availableProfiles, tagPolicies, groupRestriction]);
 
   const handleProfileChange = (value: string) => {
-    const id = value === "__none__" ? "" : value;
-    setSelectedProfileId(id);
-    if (id) {
-      sessionStorage.setItem(SESSION_KEY, id);
+    setSelectedProfileId(value);
+    if (value) {
+      sessionStorage.setItem(SESSION_KEY, value);
     } else {
       sessionStorage.removeItem(SESSION_KEY);
     }
@@ -96,12 +95,11 @@ export function ResourceTagFields({ onChange, profileId: controlledProfileId, gr
       <div className="flex items-end gap-3">
         <div className="w-1/3 min-w-0 space-y-1">
           <label className="text-xs text-muted-foreground">Tag Profile</label>
-          <Select value={selectedProfileId || "__none__"} onValueChange={handleProfileChange}>
+          <Select value={selectedProfileId || ""} onValueChange={handleProfileChange}>
             <SelectTrigger className="w-full text-sm">
               <SelectValue placeholder="Select a tag profile..." />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="__none__">None</SelectItem>
               {availableProfiles.map((p) => (
                 <SelectItem key={p.id} value={p.id.toString()}>
                   {p.name}

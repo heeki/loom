@@ -21,9 +21,11 @@ import type { TagPolicy, TagProfile } from "@/api/types";
 
 interface TaggingPageProps {
   readOnly?: boolean;
+  userGroups?: string[];
 }
 
-export function TaggingPage({ readOnly }: TaggingPageProps) {
+export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
+  const isSuperAdmin = userGroups.includes("g-admins-super");
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
   const [profiles, setProfiles] = useState<TagProfile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -388,7 +390,7 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
                   <CardHeader className="gap-1 pb-2">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-medium truncate min-w-0">{policy.key}</span>
-                      {!readOnly && (
+                      {!readOnly && isSuperAdmin && (
                         <div className="flex items-center gap-1 shrink-0">
                           <button
                             type="button"
@@ -595,33 +597,38 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
             sortDirection={profileSortDir}
             onSortDirectionChange={(d) => { if (d) { setProfileSortDir(d); saveSortDirection("tag-profiles", d); } }}
             className="grid gap-2 md:grid-cols-2 lg:grid-cols-3"
-            renderItem={(profile) => (
-              <Card className="relative py-3 gap-1">
-                <CardHeader className="gap-1 pb-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium truncate min-w-0">{profile.name}</span>
-                    {!readOnly && (
-                      <div className="flex items-center gap-1 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => startEditProfile(profile)}
-                          className="text-muted-foreground/50 hover:text-foreground transition-colors"
-                          title="Edit"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeleteProfileId(profile.id)}
-                          className="text-muted-foreground/50 hover:text-destructive transition-colors"
-                          title="Delete"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </CardHeader>
+            renderItem={(profile) => {
+              const profileGroup = profile.tags?.["loom:group"] || "";
+              const isDemoAdmin = userGroups.includes("g-admins-demo") && !isSuperAdmin;
+              const canEditProfile = !readOnly && (isSuperAdmin || (isDemoAdmin && profileGroup === "demo"));
+
+              return (
+                <Card className="relative py-3 gap-1">
+                  <CardHeader className="gap-1 pb-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium truncate min-w-0">{profile.name}</span>
+                      {canEditProfile && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => startEditProfile(profile)}
+                            className="text-muted-foreground/50 hover:text-foreground transition-colors"
+                            title="Edit"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteProfileId(profile.id)}
+                            className="text-muted-foreground/50 hover:text-destructive transition-colors"
+                            title="Delete"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </CardHeader>
                 <CardContent className="space-y-1.5">
                   <div className="flex flex-wrap gap-1">
                     {Object.entries(profile.tags).map(([key, value]) => (
@@ -657,7 +664,8 @@ export function TaggingPage({ readOnly }: TaggingPageProps) {
                   )}
                 </CardContent>
               </Card>
-            )}
+            );
+            }}
           />
         )}
       </div>

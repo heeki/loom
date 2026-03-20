@@ -84,6 +84,14 @@ Resources:
           ScopeDescription: Read settings
         - ScopeName: settings:write
           ScopeDescription: Write settings
+        - ScopeName: tagging:read
+          ScopeDescription: View tag policies and profiles
+        - ScopeName: tagging:write
+          ScopeDescription: Manage tag policies and profiles
+        - ScopeName: costs:read
+          ScopeDescription: View cost data
+        - ScopeName: costs:write
+          ScopeDescription: Manage cost settings
         - ScopeName: mcp:read
           ScopeDescription: Read MCP servers
         - ScopeName: mcp:write
@@ -93,61 +101,84 @@ Resources:
         - ScopeName: a2a:write
           ScopeDescription: Write A2A agents
 
-  # Groups
-  SuperAdminsGroup:
+  # Type Groups (defines UI view)
+  TypeAdminGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
-      GroupName: super-admins
-      Description: Full access to all resources
+      GroupName: t-admin
+      Description: Admin UI view
       UserPoolId: !Ref CognitoUserPool
 
-  DemoAdminsGroup:
+  TypeUserGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
-      GroupName: demo-admins
-      Description: Read-only access across all pages; write only to demo-admins tagged resources
+      GroupName: t-user
+      Description: User UI view (restricted to Catalog, Agents, Memory, Costs)
       UserPoolId: !Ref CognitoUserPool
 
-  SecurityAdminsGroup:
+  # Admin Groups (t-admin users - single group only)
+  GroupAdminsSuperGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
-      GroupName: security-admins
+      GroupName: g-admins-super
+      Description: Full read/write access to all resources
+      UserPoolId: !Ref CognitoUserPool
+
+  GroupAdminsDemoGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: g-admins-demo
+      Description: Read-only across all pages; read/write for demo group resources
+      UserPoolId: !Ref CognitoUserPool
+
+  GroupAdminsSecurityGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: g-admins-security
       Description: Manage security configurations
       UserPoolId: !Ref CognitoUserPool
 
-  MemoryAdminsGroup:
+  GroupAdminsMemoryGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
-      GroupName: memory-admins
+      GroupName: g-admins-memory
       Description: Manage memory resources
       UserPoolId: !Ref CognitoUserPool
 
-  McpAdminsGroup:
+  GroupAdminsMcpGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
-      GroupName: mcp-admins
+      GroupName: g-admins-mcp
       Description: Manage MCP servers
       UserPoolId: !Ref CognitoUserPool
 
-  A2aAdminsGroup:
+  GroupAdminsA2aGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
-      GroupName: a2a-admins
+      GroupName: g-admins-a2a
       Description: Manage A2A agents
       UserPoolId: !Ref CognitoUserPool
 
-  UsersGroup:
+  # User Groups (t-user users - can have multiple)
+  GroupUsersDemoGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
-      GroupName: users
-      Description: End-user invoke-only access
+      GroupName: g-users-demo
+      Description: Access to demo group resources
       UserPoolId: !Ref CognitoUserPool
 
-  DemoGroup:
+  GroupUsersTestGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
-      GroupName: demo
-      Description: Demo group for shared demo resources
+      GroupName: g-users-test
+      Description: Access to test group resources
+      UserPoolId: !Ref CognitoUserPool
+
+  GroupUsersStrategicsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: g-users-strategics
+      Description: Access to strategics group resources
       UserPoolId: !Ref CognitoUserPool
 
   # Users
@@ -197,68 +228,94 @@ Resources:
           Value: demo-user@heeki.cloud
 
   # User-to-group assignments
-  AdminToSuperAdmins:
+  # Admin user: t-admin + g-admins-super
+  AdminToTypeAdmin:
     Type: AWS::Cognito::UserPoolUserToGroupAttachment
     Properties:
       UserPoolId: !Ref CognitoUserPool
       Username: !Ref AdminUser
-      GroupName: !Ref SuperAdminsGroup
+      GroupName: !Ref TypeAdminGroup
 
-  DemoAdminToDemoAdmins:
+  AdminToGroupAdminsSuper:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref AdminUser
+      GroupName: !Ref GroupAdminsSuperGroup
+
+  # Demo-admin user: t-admin + g-admins-demo
+  DemoAdminToTypeAdmin:
     Type: AWS::Cognito::UserPoolUserToGroupAttachment
     Properties:
       UserPoolId: !Ref CognitoUserPool
       Username: !Ref DemoAdminUser
-      GroupName: !Ref DemoAdminsGroup
+      GroupName: !Ref TypeAdminGroup
 
-  SecurityAdminToSecurityAdmins:
+  DemoAdminToGroupAdminsDemo:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref DemoAdminUser
+      GroupName: !Ref GroupAdminsDemoGroup
+
+  # Security-admin user: t-admin + g-admins-security
+  SecurityAdminToTypeAdmin:
     Type: AWS::Cognito::UserPoolUserToGroupAttachment
     Properties:
       UserPoolId: !Ref CognitoUserPool
       Username: !Ref SecurityAdminUser
-      GroupName: !Ref SecurityAdminsGroup
+      GroupName: !Ref TypeAdminGroup
 
-  IntegrationAdminToMemoryAdmins:
+  SecurityAdminToGroupAdminsSecurity:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref SecurityAdminUser
+      GroupName: !Ref GroupAdminsSecurityGroup
+
+  # Integration-admin user: t-admin + g-admins-memory + g-admins-mcp + g-admins-a2a
+  IntegrationAdminToTypeAdmin:
     Type: AWS::Cognito::UserPoolUserToGroupAttachment
     Properties:
       UserPoolId: !Ref CognitoUserPool
       Username: !Ref IntegrationAdminUser
-      GroupName: !Ref MemoryAdminsGroup
+      GroupName: !Ref TypeAdminGroup
 
-  IntegrationAdminToMcpAdmins:
+  IntegrationAdminToGroupAdminsMemory:
     Type: AWS::Cognito::UserPoolUserToGroupAttachment
     Properties:
       UserPoolId: !Ref CognitoUserPool
       Username: !Ref IntegrationAdminUser
-      GroupName: !Ref McpAdminsGroup
+      GroupName: !Ref GroupAdminsMemoryGroup
 
-  IntegrationAdminToA2aAdmins:
+  IntegrationAdminToGroupAdminsMcp:
     Type: AWS::Cognito::UserPoolUserToGroupAttachment
     Properties:
       UserPoolId: !Ref CognitoUserPool
       Username: !Ref IntegrationAdminUser
-      GroupName: !Ref A2aAdminsGroup
+      GroupName: !Ref GroupAdminsMcpGroup
 
-  DemoUserToUsers:
+  IntegrationAdminToGroupAdminsA2a:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref IntegrationAdminUser
+      GroupName: !Ref GroupAdminsA2aGroup
+
+  # Demo-user: t-user + g-users-demo
+  DemoUserToTypeUser:
     Type: AWS::Cognito::UserPoolUserToGroupAttachment
     Properties:
       UserPoolId: !Ref CognitoUserPool
       Username: !Ref DemoUserUser
-      GroupName: !Ref UsersGroup
+      GroupName: !Ref TypeUserGroup
 
-  DemoAdminToDemo:
-    Type: AWS::Cognito::UserPoolUserToGroupAttachment
-    Properties:
-      UserPoolId: !Ref CognitoUserPool
-      Username: !Ref DemoAdminUser
-      GroupName: !Ref DemoGroup
-
-  DemoUserToDemo:
+  DemoUserToGroupUsersDemo:
     Type: AWS::Cognito::UserPoolUserToGroupAttachment
     Properties:
       UserPoolId: !Ref CognitoUserPool
       Username: !Ref DemoUserUser
-      GroupName: !Ref DemoGroup
+      GroupName: !Ref GroupUsersDemoGroup
 
   # Machine-to-machine client (client_credentials flow, access token only)
   M2MClient:
@@ -307,6 +364,10 @@ Resources:
         - !Sub "${pResourceServerIdentifier}/security:write"
         - !Sub "${pResourceServerIdentifier}/settings:read"
         - !Sub "${pResourceServerIdentifier}/settings:write"
+        - !Sub "${pResourceServerIdentifier}/tagging:read"
+        - !Sub "${pResourceServerIdentifier}/tagging:write"
+        - !Sub "${pResourceServerIdentifier}/costs:read"
+        - !Sub "${pResourceServerIdentifier}/costs:write"
         - !Sub "${pResourceServerIdentifier}/mcp:read"
         - !Sub "${pResourceServerIdentifier}/mcp:write"
         - !Sub "${pResourceServerIdentifier}/a2a:read"

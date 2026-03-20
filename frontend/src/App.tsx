@@ -37,30 +37,51 @@ import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings, E
 type Persona = "catalog" | "security" | "builder" | "memory" | "tagging" | "settings" | "mcp" | "a2a" | "costs";
 
 const GROUP_SCOPES: Record<string, Scope[]> = {
-  "super-admins": [
+  // Type groups (for UI routing - don't grant scopes directly)
+  "t-admin": [],
+  "t-user": [],
+
+  // Admin groups (t-admin users - single group only)
+  "g-admins-super": [
     "catalog:read", "catalog:write", "agent:read", "agent:write",
     "memory:read", "memory:write", "security:read", "security:write",
-    "settings:read", "settings:write", "mcp:read", "mcp:write",
-    "a2a:read", "a2a:write", "invoke",
+    "settings:read", "settings:write", "tagging:read", "tagging:write",
+    "costs:read", "costs:write",
+    "mcp:read", "mcp:write", "a2a:read", "a2a:write", "invoke",
   ],
-  "demo-admins": [
+  "g-admins-demo": [
     "catalog:read", "agent:read", "agent:write", "memory:read", "memory:write",
-    "security:read", "settings:read", "mcp:read", "a2a:read", "invoke",
+    "security:read", "settings:read", "tagging:read", "costs:read", "costs:write",
+    "mcp:read", "a2a:read", "invoke",
   ],
-  "security-admins": ["security:read", "security:write", "settings:read"],
-  "memory-admins": ["memory:read", "memory:write", "settings:read"],
-  "mcp-admins": ["mcp:read", "mcp:write", "settings:read"],
-  "a2a-admins": ["a2a:read", "a2a:write", "settings:read"],
-  "users": ["invoke"],
-  "demo": ["catalog:read", "agent:read", "memory:read", "invoke"],
+  "g-admins-security": [
+    "security:read", "security:write", "settings:read", "tagging:read", "tagging:write",
+  ],
+  "g-admins-memory": [
+    "memory:read", "memory:write", "settings:read", "tagging:read", "tagging:write",
+  ],
+  "g-admins-mcp": [
+    "mcp:read", "mcp:write", "settings:read", "tagging:read", "tagging:write",
+  ],
+  "g-admins-a2a": [
+    "a2a:read", "a2a:write", "settings:read", "tagging:read", "tagging:write",
+  ],
+
+  // User groups (t-user users - can have multiple)
+  "g-users-demo": ["catalog:read", "agent:read", "memory:read", "costs:read", "costs:write", "invoke"],
+  "g-users-test": ["catalog:read", "agent:read", "memory:read", "costs:read", "costs:write", "invoke"],
+  "g-users-strategics": ["catalog:read", "agent:read", "memory:read", "costs:read", "costs:write", "invoke"],
 };
 
 const USER_GROUPS: Record<string, string[]> = {
-  "admin": ["super-admins"],
-  "demo-admin": ["demo-admins", "demo"],
-  "security-admin": ["security-admins"],
-  "integration-admin": ["memory-admins", "mcp-admins", "a2a-admins"],
-  "demo-user": ["users", "demo"],
+  "admin": ["t-admin", "g-admins-super"],
+  "demo-admin": ["t-admin", "g-admins-demo"],
+  "security-admin": ["t-admin", "g-admins-security"],
+  "memory-admin": ["t-admin", "g-admins-memory"],
+  "mcp-admin": ["t-admin", "g-admins-mcp"],
+  "a2a-admin": ["t-admin", "g-admins-a2a"],
+  "demo-user": ["t-user", "g-users-demo"],
+  "test-user": ["t-user", "g-users-test"],
 };
 
 const VIEW_AS_USERS = Object.keys(USER_GROUPS);
@@ -130,10 +151,32 @@ function SidebarItem({
 function AppContent() {
   const { isAuthenticated, isLoading, user, logout, hasScope } = useAuth();
   const { theme } = useTheme();
-  const [activePersona, setActivePersona] = useState<Persona>("catalog");
+
+  // Determine default persona based on user's scopes
+  const getDefaultPersona = useCallback((): Persona => {
+    if (hasScope("catalog:read")) return "catalog";
+    if (hasScope("security:read") || hasScope("security:write")) return "security";
+    if (hasScope("memory:read") || hasScope("memory:write")) return "memory";
+    if (hasScope("agent:read") || hasScope("agent:write")) return "builder";
+    if (hasScope("costs:read")) return "costs";
+    if (hasScope("tagging:read")) return "tagging";
+    if (hasScope("mcp:read") || hasScope("mcp:write")) return "mcp";
+    if (hasScope("a2a:read") || hasScope("a2a:write")) return "a2a";
+    if (hasScope("settings:read")) return "settings";
+    return "catalog"; // fallback
+  }, [hasScope]);
+
+  const [activePersona, setActivePersona] = useState<Persona>(getDefaultPersona());
   const [viewAsUser, setViewAsUser] = useState<string | null>(null);
 
-  const isAdmin = user?.groups?.includes("super-admins") ?? false;
+  // Update activePersona when user changes
+  useEffect(() => {
+    if (isAuthenticated) {
+      setActivePersona(getDefaultPersona());
+    }
+  }, [isAuthenticated, user, getDefaultPersona]);
+
+  const isAdmin = user?.groups?.includes("t-admin") ?? false;
 
   const effectiveHasScope = useCallback(
     (scope: Scope) => {
@@ -145,15 +188,14 @@ function AppContent() {
   );
 
   // Compute group restriction for resource filtering.
-  // super-admins: no restriction; demo group: locked to "demo"; others: first non-users group
+  // Admins (t-admin): no restriction (see all resources including untagged)
+  // Users (t-user): extract group tag from first g-users-* group
   const effectiveGroups = viewAsUser
     ? (USER_GROUPS[viewAsUser] ?? [])
     : (user?.groups ?? []);
-  const groupRestriction = effectiveGroups.includes("super-admins")
+  const groupRestriction = effectiveGroups.includes("t-admin")
     ? undefined
-    : effectiveGroups.includes("demo")
-    ? "demo"
-    : effectiveGroups.find((g) => g !== "users");
+    : effectiveGroups.find((g) => g.startsWith("g-users-"))?.replace("g-users-", "");
 
   const { agents, loading, deleteStartTimes, fetchAgents, registerAgent, deployAgent, redeployAgent, refreshAgent, deleteAgent } = useAgents();
 
@@ -481,6 +523,7 @@ function AppContent() {
                   canViewMcp={effectiveHasScope("mcp:read")}
                   canViewA2a={effectiveHasScope("a2a:read")}
                   groupRestriction={groupRestriction}
+                  userGroups={viewAsUser ? (USER_GROUPS[viewAsUser] ?? []) : (user?.groups ?? [])}
                 />
               )}
 
@@ -532,12 +575,13 @@ function AppContent() {
               readOnly={!effectiveHasScope("agent:write")}
               groupRestriction={groupRestriction}
               deleteStartTimes={deleteStartTimes}
+              userGroups={viewAsUser ? (USER_GROUPS[viewAsUser] ?? []) : (user?.groups ?? [])}
             />
           )}
 
           {activePersona === "security" && <SecurityAdminPage readOnly={!effectiveHasScope("security:write")} />}
-          {activePersona === "memory" && <MemoryManagementPage viewMode={memoryViewMode} onViewModeChange={setMemoryViewMode} readOnly={!effectiveHasScope("memory:write")} groupRestriction={groupRestriction} />}
-          {activePersona === "tagging" && <TaggingPage readOnly={!(effectiveHasScope("agent:write") || effectiveHasScope("security:write") || effectiveHasScope("memory:write"))} />}
+          {activePersona === "memory" && <MemoryManagementPage viewMode={memoryViewMode} onViewModeChange={setMemoryViewMode} readOnly={!effectiveHasScope("memory:write")} groupRestriction={groupRestriction} userGroups={viewAsUser ? (USER_GROUPS[viewAsUser] ?? []) : (user?.groups ?? [])} />}
+          {activePersona === "tagging" && <TaggingPage readOnly={!effectiveHasScope("tagging:write")} userGroups={user?.groups || []} />}
           {activePersona === "mcp" && <McpServersPage viewMode={mcpViewMode} onViewModeChange={setMcpViewMode} readOnly={!effectiveHasScope("mcp:write")} />}
           {activePersona === "a2a" && <A2aAgentsPage viewMode={a2aViewMode} onViewModeChange={setA2aViewMode} readOnly={!effectiveHasScope("a2a:write")} />}
           {activePersona === "settings" && <SettingsPage />}

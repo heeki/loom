@@ -14,23 +14,47 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Group-to-scope mapping (must match frontend GROUP_SCOPES)
 # ---------------------------------------------------------------------------
+# Users belong to two dimensions:
+# - Type (t-*): Defines UI view (t-admin or t-user). Type groups grant no scopes.
+# - Group (g-*): Defines page visibility and resource access. Groups grant scopes.
+#
+# Admin users (t-admin): Must have exactly ONE g-admins-* group
+# User users (t-user): Must have at least ONE g-users-* group (can have multiple)
 GROUP_SCOPES: dict[str, list[str]] = {
-    "super-admins": [
+    # Type groups (for UI routing - don't grant scopes directly)
+    "t-admin": [],
+    "t-user": [],
+
+    # Admin groups (t-admin users - single group only)
+    "g-admins-super": [
         "catalog:read", "catalog:write", "agent:read", "agent:write",
         "memory:read", "memory:write", "security:read", "security:write",
-        "settings:read", "settings:write", "mcp:read", "mcp:write",
-        "a2a:read", "a2a:write", "invoke",
+        "settings:read", "settings:write", "tagging:read", "tagging:write",
+        "costs:read", "costs:write",
+        "mcp:read", "mcp:write", "a2a:read", "a2a:write", "invoke",
     ],
-    "demo-admins": [
+    "g-admins-demo": [
         "catalog:read", "agent:read", "agent:write", "memory:read", "memory:write",
-        "security:read", "settings:read", "mcp:read", "a2a:read", "invoke",
+        "security:read", "settings:read", "tagging:read", "costs:read", "costs:write",
+        "mcp:read", "a2a:read", "invoke",
     ],
-    "security-admins": ["security:read", "security:write", "settings:read"],
-    "memory-admins": ["memory:read", "memory:write", "settings:read"],
-    "mcp-admins": ["mcp:read", "mcp:write", "settings:read"],
-    "a2a-admins": ["a2a:read", "a2a:write", "settings:read"],
-    "users": ["invoke"],
-    "demo": ["catalog:read", "agent:read", "memory:read", "invoke"],
+    "g-admins-security": [
+        "security:read", "security:write", "settings:read", "tagging:read", "tagging:write",
+    ],
+    "g-admins-memory": [
+        "memory:read", "memory:write", "settings:read", "tagging:read", "tagging:write",
+    ],
+    "g-admins-mcp": [
+        "mcp:read", "mcp:write", "settings:read", "tagging:read", "tagging:write",
+    ],
+    "g-admins-a2a": [
+        "a2a:read", "a2a:write", "settings:read", "tagging:read", "tagging:write",
+    ],
+
+    # User groups (t-user users - can have multiple)
+    "g-users-demo": ["catalog:read", "agent:read", "memory:read", "costs:read", "costs:write", "invoke"],
+    "g-users-test": ["catalog:read", "agent:read", "memory:read", "costs:read", "costs:write", "invoke"],
+    "g-users-strategics": ["catalog:read", "agent:read", "memory:read", "costs:read", "costs:write", "invoke"],
 }
 
 ALL_SCOPES: set[str] = {s for scopes in GROUP_SCOPES.values() for s in scopes}
@@ -52,6 +76,10 @@ oauth2_scheme = OAuth2AuthorizationCodeBearer(
         "security:write": "Write security",
         "settings:read": "Read settings",
         "settings:write": "Write settings",
+        "tagging:read": "View tag policies and profiles",
+        "tagging:write": "Manage tag policies and profiles",
+        "costs:read": "View cost data",
+        "costs:write": "Manage cost settings",
         "mcp:read": "Read MCP",
         "mcp:write": "Write MCP",
         "a2a:read": "Read A2A",
@@ -106,7 +134,7 @@ def get_current_user(request: Request) -> UserInfo:
         return UserInfo(
             sub="local",
             username="local-dev",
-            groups=["super-admins"],
+            groups=["t-admin", "g-admins-super"],
             scopes=ALL_SCOPES.copy(),
         )
 

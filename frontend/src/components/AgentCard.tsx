@@ -16,6 +16,7 @@ interface AgentCardProps {
   readOnly?: boolean;
   showOnCardKeys?: string[];
   deleteStartTime?: number;
+  userGroups?: string[];
 }
 
 const DEPLOY_IN_PROGRESS = new Set([
@@ -54,7 +55,7 @@ function existsInAgentCore(agent: AgentResponse): boolean {
   return !!agent.runtime_id;
 }
 
-export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, showOnCardKeys, deleteStartTime }: AgentCardProps) {
+export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, showOnCardKeys, deleteStartTime, userGroups = [] }: AgentCardProps) {
   const { timezone } = useTimezone();
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [cleanupAws, setCleanupAws] = useState(false);
@@ -64,6 +65,12 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
 
   const creating = isTransitional(agent);
   const label = phaseLabel(agent);
+
+  // Check if user can delete this resource
+  const isSuperAdmin = userGroups.includes("g-admins-super");
+  const isDemoAdmin = userGroups.includes("g-admins-demo") && !isSuperAdmin;
+  const resourceGroup = agent.tags?.["loom:group"] || "";
+  const canDelete = !readOnly && (!isDemoAdmin || resourceGroup === "demo");
 
   useEffect(() => {
     if (creating) {
@@ -136,7 +143,7 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
                 <RefreshCw className="h-3.5 w-3.5" />
               )}
             </button>
-            {!readOnly && (
+            {canDelete && (
               <button
                 type="button"
                 onClick={(e) => {
@@ -188,6 +195,36 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
             if (ac.name) return ac.name;
             return "external";
           })()}</div>
+          {agent.memory_names && agent.memory_names.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              <span>Memory:</span>
+              {agent.memory_names.map((name, idx) => (
+                <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0">
+                  {name}
+                </Badge>
+              ))}
+            </div>
+          )}
+          {agent.mcp_names && agent.mcp_names.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              <span>MCP:</span>
+              {agent.mcp_names.map((name, idx) => (
+                <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0">
+                  {name}
+                </Badge>
+              ))}
+            </div>
+          )}
+          {agent.a2a_names && agent.a2a_names.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              <span>A2A:</span>
+              {agent.a2a_names.map((name, idx) => (
+                <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0">
+                  {name}
+                </Badge>
+              ))}
+            </div>
+          )}
           {agent.registered_at && (
             <div>Registered: {formatTimestamp(agent.registered_at, timezone)}</div>
           )}

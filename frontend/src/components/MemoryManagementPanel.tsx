@@ -89,9 +89,10 @@ interface MemoryManagementPanelProps {
   viewMode: "cards" | "table";
   readOnly?: boolean;
   groupRestriction?: string;
+  userGroups?: string[];
 }
 
-export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: MemoryManagementPanelProps) {
+export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, userGroups = [] }: MemoryManagementPanelProps) {
   const { timezone } = useTimezone();
   const [memories, setMemories] = useState<MemoryResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -824,6 +825,7 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
                   readOnly={readOnly}
                   showOnCardKeys={effectiveShowOnCardKeys}
                   deleteStartTime={deleteStartTimes[mem.id]}
+                  userGroups={userGroups}
                 />
               )}
             />

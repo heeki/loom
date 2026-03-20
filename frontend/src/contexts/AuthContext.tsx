@@ -32,27 +32,47 @@ export type Scope =
   | "memory:read" | "memory:write"
   | "security:read" | "security:write"
   | "settings:read" | "settings:write"
+  | "tagging:read" | "tagging:write"
+  | "costs:read" | "costs:write"
   | "mcp:read" | "mcp:write"
   | "a2a:read" | "a2a:write"
   | "invoke";
 
 const GROUP_SCOPES: Record<string, Scope[]> = {
-  "super-admins": [
+  // Type groups (for UI routing - don't grant scopes directly)
+  "t-admin": [],
+  "t-user": [],
+
+  // Admin groups (t-admin users - single group only)
+  "g-admins-super": [
     "catalog:read", "catalog:write", "agent:read", "agent:write",
     "memory:read", "memory:write", "security:read", "security:write",
-    "settings:read", "settings:write", "mcp:read", "mcp:write",
-    "a2a:read", "a2a:write", "invoke",
+    "settings:read", "settings:write", "tagging:read", "tagging:write",
+    "costs:read", "costs:write",
+    "mcp:read", "mcp:write", "a2a:read", "a2a:write", "invoke",
   ],
-  "demo-admins": [
+  "g-admins-demo": [
     "catalog:read", "agent:read", "agent:write", "memory:read", "memory:write",
-    "security:read", "settings:read", "mcp:read", "a2a:read", "invoke",
+    "security:read", "settings:read", "tagging:read", "costs:read", "costs:write",
+    "mcp:read", "a2a:read", "invoke",
   ],
-  "security-admins": ["security:read", "security:write", "settings:read"],
-  "memory-admins": ["memory:read", "memory:write", "settings:read"],
-  "mcp-admins": ["mcp:read", "mcp:write", "settings:read"],
-  "a2a-admins": ["a2a:read", "a2a:write", "settings:read"],
-  "users": ["invoke"],
-  "demo": ["catalog:read", "agent:read", "memory:read", "invoke"],
+  "g-admins-security": [
+    "security:read", "security:write", "settings:read", "tagging:read", "tagging:write",
+  ],
+  "g-admins-memory": [
+    "memory:read", "memory:write", "settings:read", "tagging:read", "tagging:write",
+  ],
+  "g-admins-mcp": [
+    "mcp:read", "mcp:write", "settings:read", "tagging:read", "tagging:write",
+  ],
+  "g-admins-a2a": [
+    "a2a:read", "a2a:write", "settings:read", "tagging:read", "tagging:write",
+  ],
+
+  // User groups (t-user users - can have multiple)
+  "g-users-demo": ["catalog:read", "agent:read", "memory:read", "costs:read", "costs:write", "invoke"],
+  "g-users-test": ["catalog:read", "agent:read", "memory:read", "costs:read", "costs:write", "invoke"],
+  "g-users-strategics": ["catalog:read", "agent:read", "memory:read", "costs:read", "costs:write", "invoke"],
 };
 
 function deriveScopes(groups: string[]): Set<Scope> {
@@ -87,8 +107,9 @@ interface AuthContextValue {
 const ALL_SCOPES = new Set<Scope>([
   "catalog:read", "catalog:write", "agent:read", "agent:write",
   "memory:read", "memory:write", "security:read", "security:write",
-  "settings:read", "settings:write", "mcp:read", "mcp:write",
-  "a2a:read", "a2a:write", "invoke",
+  "settings:read", "settings:write", "tagging:read", "tagging:write",
+  "costs:read", "costs:write",
+  "mcp:read", "mcp:write", "a2a:read", "a2a:write", "invoke",
 ]);
 const EMPTY_SCOPES = new Set<Scope>();
 

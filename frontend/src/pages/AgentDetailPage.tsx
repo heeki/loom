@@ -32,15 +32,24 @@ export function AgentDetailPage({
 }: AgentDetailPageProps) {
   // Check if user can invoke this specific agent based on group tags
   const agentGroup = agent.tags?.["loom:group"] || "";
-  const isSuperAdmin = userGroups.includes("super-admins");
+  const isSuperAdmin = userGroups.includes("g-admins-super");
+  const isAdmin = userGroups.includes("t-admin");
 
-  // Build allowed groups for this user (exclude 'users' from match unless explicitly in users group)
-  const allowedGroups = userGroups.filter(g => g !== "users");
-  if (userGroups.includes("users")) {
-    allowedGroups.push("users");
+  // Build allowed groups by stripping prefixes from group names
+  let allowedGroups: string[] = [];
+  if (isAdmin && !isSuperAdmin) {
+    // Non-super admins: strip "g-admins-" prefix
+    allowedGroups = userGroups
+      .filter(g => g.startsWith("g-admins-"))
+      .map(g => g.replace("g-admins-", ""));
+  } else if (!isAdmin) {
+    // Users: strip "g-users-" prefix
+    allowedGroups = userGroups
+      .filter(g => g.startsWith("g-users-"))
+      .map(g => g.replace("g-users-", ""));
   }
 
-  // Check if agent group matches any of the user's groups
+  // Check if agent group matches any of the user's allowed groups
   const canInvokeThisAgent = isSuperAdmin || !agentGroup || allowedGroups.includes(agentGroup);
   const effectiveCanInvoke = canInvoke && canInvokeThisAgent;
   const { streamedText, sessionStart, sessionEnd, isStreaming, error, rawError, invoke, cancel } =

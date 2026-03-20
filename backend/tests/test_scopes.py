@@ -26,25 +26,26 @@ class TestDeriveScopes(unittest.TestCase):
     """Test derive_scopes function."""
 
     def test_super_admins_get_all_scopes(self) -> None:
-        scopes = derive_scopes(["super-admins"])
+        scopes = derive_scopes(["t-admin", "g-admins-super"])
         self.assertEqual(scopes, ALL_SCOPES)
 
     def test_users_group_only_has_invoke(self) -> None:
-        scopes = derive_scopes(["users"])
-        self.assertEqual(scopes, {"invoke"})
+        scopes = derive_scopes(["t-user", "g-users-demo"])
+        self.assertEqual(scopes, {"catalog:read", "agent:read", "memory:read", "invoke"})
 
     def test_multiple_groups_union(self) -> None:
-        scopes = derive_scopes(["security-admins", "memory-admins"])
-        self.assertEqual(scopes, {"security:read", "security:write", "memory:read", "memory:write", "settings:read"})
+        scopes = derive_scopes(["t-admin", "g-admins-security", "g-admins-memory"])
+        expected = {"security:read", "security:write", "memory:read", "memory:write", "settings:read", "tagging:read", "tagging:write"}
+        self.assertEqual(scopes, expected)
 
     def test_unknown_group_returns_empty(self) -> None:
         scopes = derive_scopes(["nonexistent-group"])
         self.assertEqual(scopes, set())
 
     def test_demo_admins_have_read_write_agent_memory_and_invoke(self) -> None:
-        """Demo admins should have agent:write, memory:write, read scopes, and invoke."""
-        scopes = derive_scopes(["demo-admins"])
-        # Assert read scopes are present
+        """Demo admins should have agent:write, memory:write, costs:write, all read scopes, and invoke."""
+        scopes = derive_scopes(["t-admin", "g-admins-demo"])
+        # Assert all read scopes are present
         self.assertIn("invoke", scopes)
         self.assertIn("catalog:read", scopes)
         self.assertIn("agent:read", scopes)
@@ -53,12 +54,16 @@ class TestDeriveScopes(unittest.TestCase):
         self.assertIn("memory:write", scopes)
         self.assertIn("security:read", scopes)
         self.assertIn("settings:read", scopes)
+        self.assertIn("tagging:read", scopes)
+        self.assertIn("costs:read", scopes)
+        self.assertIn("costs:write", scopes)
         self.assertIn("mcp:read", scopes)
         self.assertIn("a2a:read", scopes)
         # Assert other write scopes are NOT present
         self.assertNotIn("catalog:write", scopes)
         self.assertNotIn("security:write", scopes)
         self.assertNotIn("settings:write", scopes)
+        self.assertNotIn("tagging:write", scopes)
         self.assertNotIn("mcp:write", scopes)
         self.assertNotIn("a2a:write", scopes)
 
@@ -117,46 +122,46 @@ class TestScopeEnforcement(unittest.TestCase):
 
     # -- Agents endpoints --
     def test_agents_list_requires_agent_read(self) -> None:
-        self._override_user(["users"])  # users only have invoke
+        self._override_user(["t-admin", "g-admins-security"])  # security-admins don't have agent:read
         response = self.client.get("/api/agents")
         self.assertEqual(response.status_code, 403)
 
     def test_agents_list_allowed_with_agent_read(self) -> None:
-        self._override_user(["demo-admins"])
+        self._override_user(["t-admin", "g-admins-demo"])
         response = self.client.get("/api/agents")
         self.assertEqual(response.status_code, 200)
 
     # -- Settings endpoints --
-    def test_settings_tags_requires_settings_read(self) -> None:
-        self._override_user(["users"])  # users don't have settings scope
+    def test_settings_tags_requires_tagging_read(self) -> None:
+        self._override_user(["t-user", "g-users-demo"])  # users don't have tagging scope
         response = self.client.get("/api/settings/tags")
         self.assertEqual(response.status_code, 403)
 
-    def test_settings_tags_allowed_with_settings_read(self) -> None:
-        self._override_user(["super-admins"])
+    def test_settings_tags_allowed_with_tagging_read(self) -> None:
+        self._override_user(["t-admin", "g-admins-super"])
         response = self.client.get("/api/settings/tags")
         self.assertEqual(response.status_code, 200)
 
     # -- Security endpoints --
     def test_security_requires_security_read(self) -> None:
-        self._override_user(["users"])
+        self._override_user(["t-user", "g-users-demo"])
         response = self.client.get("/api/security/roles")
         self.assertEqual(response.status_code, 403)
 
     def test_security_allowed_with_security_read(self) -> None:
-        self._override_user(["security-admins"])
+        self._override_user(["t-admin", "g-admins-security"])
         response = self.client.get("/api/security/roles")
         # May return 200 or 500 depending on AWS config, but NOT 403
         self.assertNotEqual(response.status_code, 403)
 
     # -- Memory endpoints --
     def test_memories_requires_memory_read(self) -> None:
-        self._override_user(["security-admins"])  # no memory scope
+        self._override_user(["t-admin", "g-admins-security"])  # no memory scope
         response = self.client.get("/api/memories")
         self.assertEqual(response.status_code, 403)
 
     def test_memories_allowed_with_memory_read(self) -> None:
-        self._override_user(["memory-admins"])
+        self._override_user(["t-admin", "g-admins-memory"])
         response = self.client.get("/api/memories")
         self.assertEqual(response.status_code, 200)
 
@@ -164,7 +169,7 @@ class TestScopeEnforcement(unittest.TestCase):
     # -- Users group restrictions --
     def test_users_denied_on_write_endpoints(self) -> None:
         """Users should be denied on all write endpoints."""
-        self._override_user(["users"])
+        self._override_user(["t-user", "g-users-demo"])
         # Test agent write
         response = self.client.post("/api/agents", json={
             "name": "test-agent",

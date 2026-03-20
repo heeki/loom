@@ -18,6 +18,7 @@ interface MemoryCardProps {
   readOnly?: boolean;
   showOnCardKeys?: string[];
   deleteStartTime?: number;
+  userGroups?: string[];
 }
 
 function isTransitional(status: string): boolean {
@@ -34,12 +35,19 @@ export function MemoryCard({
   readOnly,
   showOnCardKeys,
   deleteStartTime,
+  userGroups = [],
 }: MemoryCardProps) {
   const { timezone } = useTimezone();
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [cleanupAws, setCleanupAws] = useState(false);
 
   const transitional = isTransitional(memory.status);
+
+  // Check if user can delete this resource
+  const isSuperAdmin = userGroups.includes("g-admins-super");
+  const isDemoAdmin = userGroups.includes("g-admins-demo") && !isSuperAdmin;
+  const resourceGroup = memory.tags?.["loom:group"] || "";
+  const canDelete = !readOnly && (!isDemoAdmin || resourceGroup === "demo");
 
   // For DELETING, use the recorded start time from when the user clicked delete.
   // For CREATING, use created_at as a reasonable proxy.
@@ -94,7 +102,7 @@ export function MemoryCard({
                 <RefreshCw className="h-3.5 w-3.5" />
               )}
             </button>
-            {!readOnly && (
+            {canDelete && (
               <button
                 type="button"
                 onClick={() => setConfirmingRemove(true)}

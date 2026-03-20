@@ -173,6 +173,9 @@ class AgentResponse(BaseModel):
     last_refreshed_at: str | None
     active_session_count: int
     cost_summary: dict | None = None
+    memory_names: list[str] = []
+    mcp_names: list[str] = []
+    a2a_names: list[str] = []
 
 
 class ConfigEntryResponse(BaseModel):
@@ -247,10 +250,42 @@ def compute_active_session_count(agent_id: int, db: Session) -> int:
 def _agent_response(agent: Agent, db: Session) -> AgentResponse:
     """Build an AgentResponse from an Agent ORM object."""
     model_id = None
+    memory_names: list[str] = []
+    mcp_names: list[str] = []
+    a2a_names: list[str] = []
+
     for entry in agent.config_entries:
         if entry.key == "AGENT_CONFIG_JSON":
             try:
-                model_id = json.loads(entry.value).get("model_id")
+                config = json.loads(entry.value)
+                model_id = config.get("model_id")
+
+                # Extract integration names from config
+                integrations = config.get("integrations", {})
+
+                # Memory resources
+                memory_resources = integrations.get("memory", {}).get("resources", [])
+                for mem_res in memory_resources:
+                    mem_id = mem_res.get("memory_id")
+                    if mem_id:
+                        mem_record = db.query(Memory).filter(Memory.memory_id == mem_id).first()
+                        if mem_record:
+                            memory_names.append(mem_record.name)
+
+                # MCP servers
+                mcp_servers = integrations.get("mcp_servers", [])
+                for mcp_server in mcp_servers:
+                    mcp_name = mcp_server.get("name")
+                    if mcp_name:
+                        mcp_names.append(mcp_name)
+
+                # A2A agents
+                a2a_agents = integrations.get("a2a_agents", [])
+                for a2a_agent in a2a_agents:
+                    a2a_name = a2a_agent.get("name")
+                    if a2a_name:
+                        a2a_names.append(a2a_name)
+
             except (json.JSONDecodeError, TypeError):
                 pass
             break
@@ -299,7 +334,10 @@ def _agent_response(agent: Agent, db: Session) -> AgentResponse:
     result = AgentResponse(
         **agent_dict,
         model_id=model_id,
-        active_session_count=compute_active_session_count(agent.id, db)
+        active_session_count=compute_active_session_count(agent.id, db),
+        memory_names=memory_names,
+        mcp_names=mcp_names,
+        a2a_names=a2a_names
     )
     if inv_count > 0 and grand_total > 0:
         result.cost_summary = {
@@ -414,6 +452,15 @@ def create_agent(
     db: Session = Depends(get_db),
 ) -> AgentResponse:
     """Create a new agent via registration (existing ARN) or deployment (new runtime)."""
+    # Enforce demo-admin group restriction
+    if "g-admins-demo" in user.groups and "g-admins-super" not in user.groups:
+        agent_group = (request.tags or {}).get("loom:group", "")
+        if agent_group != "demo":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Demo admins can only create agents in the 'demo' group"
+            )
+
     if request.source == "register":
         return _register_agent(request, db)
     elif request.source == "deploy":
@@ -1066,14 +1113,14 @@ def list_agents(
     """List all registered agents."""
     agents = db.query(Agent).order_by(Agent.registered_at.desc()).all()
 
-    # Tag-based filtering: non-super-admins see agents matching their groups
-    if "super-admins" not in user.groups:
-        # Build allowed groups list (exclude "users" unless it's the only group)
-        allowed_groups = [g for g in user.groups if g != "users"]
-        if "users" in user.groups and not allowed_groups:
-            allowed_groups = ["users"]
-
-        agents = [a for a in agents if a.get_tags().get("loom:group") in allowed_groups]
+    # Tag-based filtering:
+    # - Admins (t-admin): See ALL resources including untagged
+    # - Users (t-user): See only resources tagged with their groups (g-users-* → strip prefix)
+    if "t-admin" not in user.groups:
+        # User view: filter by group tags (strip "g-users-" prefix)
+        user_groups = [g for g in user.groups if g.startswith("g-users-")]
+        allowed_tags = [g.replace("g-users-", "", 1) for g in user_groups]
+        agents = [a for a in agents if a.get_tags().get("loom:group") in allowed_tags]
 
     return [_agent_response(agent, db) for agent in agents]
 
@@ -1159,6 +1206,15 @@ def delete_agent(
         cleanup_aws: If True, also delete the runtime, endpoint, and IAM role from AWS.
     """
     agent = get_agent_or_404(agent_id, db)
+
+    # Enforce demo-admin group restriction
+    if "g-admins-demo" in user.groups and "g-admins-super" not in user.groups:
+        agent_group = agent.get_tags().get("loom:group", "")
+        if agent_group != "demo":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Demo admins can only delete agents in the 'demo' group"
+            )
 
     # Extract credential provider names from agent config for cleanup
     config_map = {e.key: e.value for e in agent.config_entries}

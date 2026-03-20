@@ -39,6 +39,7 @@ interface AgentListPageProps {
   readOnly?: boolean;
   groupRestriction?: string;
   deleteStartTimes?: Record<number, number>;
+  userGroups?: string[];
 }
 
 export function AgentListPage({
@@ -54,6 +55,7 @@ export function AgentListPage({
   readOnly,
   groupRestriction,
   deleteStartTimes,
+  userGroups = [],
 }: AgentListPageProps) {
   const { timezone } = useTimezone();
   const [submitting, setSubmitting] = useState(false);
@@ -370,6 +372,7 @@ export function AgentListPage({
                     readOnly={readOnly}
                     showOnCardKeys={effectiveShowOnCardKeys}
                     deleteStartTime={deleteStartTimes?.[agent.id]}
+                    userGroups={userGroups}
                   />
                 )}
               />

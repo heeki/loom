@@ -210,6 +210,15 @@ def create_memory(
     db: Session = Depends(get_db),
 ) -> MemoryResponse:
     """Create a new memory resource."""
+    # Enforce demo-admin group restriction
+    if "g-admins-demo" in user.groups and "g-admins-super" not in user.groups:
+        memory_group = (request.tags or {}).get("loom:group", "")
+        if memory_group != "demo":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Demo admins can only create memory resources in the 'demo' group"
+            )
+
     region = os.getenv("AWS_REGION", DEFAULT_REGION)
     account_id = os.getenv("AWS_ACCOUNT_ID", "")
 
@@ -423,14 +432,14 @@ def list_memories(
     """List all memory resources."""
     memories = db.query(Memory).order_by(Memory.created_at.desc()).all()
 
-    # Tag-based filtering: non-super-admins see memories matching their groups
-    if "super-admins" not in user.groups:
-        # Build allowed groups list (exclude "users" unless it's the only group)
-        allowed_groups = [g for g in user.groups if g != "users"]
-        if "users" in user.groups and not allowed_groups:
-            allowed_groups = ["users"]
-
-        memories = [m for m in memories if m.get_tags().get("loom:group") in allowed_groups]
+    # Tag-based filtering:
+    # - Admins (t-admin): See ALL resources including untagged
+    # - Users (t-user): See only resources tagged with their groups (g-users-* → strip prefix)
+    if "t-admin" not in user.groups:
+        # User view: filter by group tags (strip "g-users-" prefix)
+        user_groups = [g for g in user.groups if g.startswith("g-users-")]
+        allowed_tags = [g.replace("g-users-", "", 1) for g in user_groups]
+        memories = [m for m in memories if m.get_tags().get("loom:group") in allowed_tags]
 
     return [_build_memory_response(m, db) for m in memories]
 
@@ -517,6 +526,15 @@ def delete_memory(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Memory with id {memory_id} not found"
         )
+
+    # Enforce demo-admin group restriction
+    if "g-admins-demo" in user.groups and "g-admins-super" not in user.groups:
+        memory_group = memory.get_tags().get("loom:group", "")
+        if memory_group != "demo":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Demo admins can only delete memory resources in the 'demo' group"
+            )
 
     # If not cleaning up AWS, just remove from DB
     if not cleanup_aws or not memory.memory_id or memory.status in ("FAILED",):

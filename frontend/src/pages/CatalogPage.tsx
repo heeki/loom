@@ -43,6 +43,7 @@ interface CatalogPageProps {
   canViewMcp?: boolean;
   canViewA2a?: boolean;
   groupRestriction?: string;
+  userGroups?: string[];
 }
 
 export function CatalogPage({
@@ -60,6 +61,7 @@ export function CatalogPage({
   canViewMcp = true,
   canViewA2a = true,
   groupRestriction,
+  userGroups = [],
 }: CatalogPageProps) {
   const { timezone } = useTimezone();
   // Tag filter state
@@ -489,6 +491,7 @@ export function CatalogPage({
                     readOnly={readOnly}
                     showOnCardKeys={effectiveShowOnCardKeys}
                     deleteStartTime={agentDeleteStartTimes?.[agent.id]}
+                    userGroups={userGroups}
                   />
                 )}
               />
@@ -587,6 +590,7 @@ export function CatalogPage({
                 readOnly={readOnly}
                 showOnCardKeys={effectiveShowOnCardKeys}
                 deleteStartTime={deleteStartTimes[mem.id]}
+                userGroups={userGroups}
               />
             )}
           />

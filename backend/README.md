@@ -71,44 +71,54 @@ The backend uses a fine-grained scope model for access control:
 | `memory:write` | Create, update, and delete memory resources |
 | `security:read` | View roles, authorizers, and credentials |
 | `security:write` | Manage roles, authorizers, and credentials |
-| `settings:read` | View tag policies, tag profiles, and site settings |
-| `settings:write` | Manage tag policies, tag profiles, and site settings |
+| `settings:read` | View site settings |
+| `settings:write` | Manage site settings |
+| `tagging:read` | View tag policies and profiles |
+| `tagging:write` | Manage tag policies and profiles |
+| `costs:read` | View cost dashboard and estimates |
+| `costs:write` | Manage cost settings and pull actuals |
 | `mcp:read` | View MCP servers and tools |
 | `mcp:write` | Manage MCP servers and access rules |
 | `a2a:read` | View A2A agents and skills |
 | `a2a:write` | Manage A2A agents and access rules |
 | `invoke` | Invoke agents |
 
-### Group-to-Scope Mapping
+### Group-to-Scope Mapping (Two-Dimensional Architecture)
 
-Scopes are derived from Cognito group membership via `GROUP_SCOPES`:
+Scopes are derived from Cognito group membership via `GROUP_SCOPES`. The system uses two dimensions:
 
-- **super-admins**: All scopes (full access)
-- **demo-admins**: Can create and manage agents/memories within the demo group (`agent:write`, `memory:write`), plus read access to catalog, security, settings, MCP, and A2A. Can invoke agents.
-- **demo**: Read-only access to demo resources (`catalog:read`, `agent:read`, `memory:read`, `invoke`)
-- **security-admins**: Manage security resources (`security:read`, `security:write`, `settings:read`)
-- **memory-admins**: Manage memory resources (`memory:read`, `memory:write`, `settings:read`)
-- **mcp-admins**: Manage MCP servers (`mcp:read`, `mcp:write`, `settings:read`)
-- **a2a-admins**: Manage A2A agents (`a2a:read`, `a2a:write`, `settings:read`)
-- **users**: Invoke-only access (`invoke`)
+**Type Groups** (UI view):
+- `t-admin` — No scopes directly, but determines UI layout
+- `t-user` — No scopes directly, but determines UI layout
+
+**Resource Groups** (access control):
+- `g-admins-super` — All 19 scopes (catalog:r/w, agent:r/w, memory:r/w, security:r/w, settings:r/w, tagging:r/w, costs:r/w, mcp:r/w, a2a:r/w, invoke)
+- `g-admins-demo` — Read-only to all pages (`catalog:read`, `agent:read`, `memory:read`, `security:read`, `settings:read`, `tagging:read`, `costs:read`, `mcp:read`, `a2a:read`) + write to demo resources (`agent:write`, `memory:write`, `costs:write`) + `invoke`
+- `g-admins-security` — `security:read`, `security:write`, `settings:read`
+- `g-admins-memory` — `memory:read`, `memory:write`, `settings:read`
+- `g-admins-mcp` — `mcp:read`, `mcp:write`, `settings:read`
+- `g-admins-a2a` — `a2a:read`, `a2a:write`, `settings:read`
+- `g-users-demo`, `g-users-test`, `g-users-strategics` — `invoke` + read access to resources tagged with matching group
 
 ### Resource Filtering by Group Tag
 
-Resources (agents and memories) are tagged with `loom:group` at creation time. The backend filters resources based on user group membership:
+Resources (agents and memories) are tagged with `loom:group` at creation time. The backend filters resources based on resource group membership:
 
-- **Super-admins**: See all resources (no filtering)
+- **g-admins-super**: See all resources including untagged (no filtering)
+- **Other g-admins-* groups**: See all resources including untagged (admins have visibility across groups)
+- **g-users-* groups**: Only see resources where `loom:group` matches their group (e.g., `g-users-demo` sees only `loom:group=demo`)
 - **Multi-group users**: See resources tagged with ANY of their groups (union filter)
-- **Demo users** (`demo-admins`, `demo-user`): Only see resources tagged `loom:group=demo`
-- **Users group**: Only see resources tagged `loom:group=users`
+
+Demo-admin write restrictions: `g-admins-demo` can only create/delete resources with `loom:group=demo`
 
 ### Demo User Architecture
 
-The system includes two demo user personas:
+The system includes demo user personas with different access levels:
 
-1. **demo-admin**: Can create and manage agents/memories within the demo group. Has `agent:write` and `memory:write` scopes. Assigned to both `demo-admins` and `demo` groups.
-2. **demo-user**: Read-only access to demo resources. Can only invoke agents. Assigned to `demo` group only.
+1. **demo-admin** (Type: `t-admin`, Groups: `g-admins-demo`): Can create and manage agents/memories within the demo group only. Has read access to all pages and write access to demo resources. Restricted by backend validation to `loom:group=demo` on create/delete operations.
+2. **demo-user** (Type: `t-user`, Groups: `g-users-demo`): Read-only access to demo resources. Can only invoke agents. Filtered to see only `loom:group=demo` resources.
 
-Both demo users are restricted to the `demo` group namespace — they cannot see or interact with resources tagged for other groups.
+Demo users cannot see or interact with resources tagged for other groups (e.g., test, strategics).
 
 ### View As Mode
 
