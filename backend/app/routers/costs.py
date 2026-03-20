@@ -47,20 +47,23 @@ def get_cost_dashboard(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Aggregate cost data across agents, optionally filtered by group tag."""
-    # Non-super-admins can only see their own group
-    if "super-admins" not in user.groups and group is None:
-        for g in user.groups:
-            if g != "users":
-                group = g
-                break
-        else:
-            group = "users"
-
     # Build agent query
-    agent_query = db.query(Agent)
+    agents = db.query(Agent).all()
+
+    # Filter by group parameter (for View As) or user's groups
     if group:
-        agent_query = agent_query.filter(Agent.tags.like(f'%"loom:group": "{group}"%'))
-    agents = agent_query.all()
+        # Explicit group filter (used by super-admins for View As)
+        agents = [a for a in agents if a.get_tags().get("loom:group") == group]
+    elif "super-admins" not in user.groups:
+        # Non-super-admins see agents matching their groups
+        allowed_groups = [g for g in user.groups if g != "users"]
+        if "users" in user.groups and not allowed_groups:
+            allowed_groups = ["users"]
+
+        agents = [a for a in agents if a.get_tags().get("loom:group") in allowed_groups]
+        # Use first non-users group for display purposes
+        group = allowed_groups[0] if allowed_groups else "users"
+
     agent_ids = [a.id for a in agents]
 
     if not agent_ids:
@@ -199,20 +202,22 @@ def pull_cost_actuals(
 
     Does NOT update stored costs — this is a read-only view.
     """
-    # Resolve group restriction (same logic as get_cost_dashboard)
-    if "super-admins" not in user.groups and group is None:
-        for g in user.groups:
-            if g != "users":
-                group = g
-                break
-        else:
-            group = "users"
-
     # Find agents in scope
-    agent_query = db.query(Agent)
+    agents = db.query(Agent).all()
+
+    # Filter by group parameter (for View As) or user's groups
     if group:
-        agent_query = agent_query.filter(Agent.tags.like(f'%"loom:group": "{group}"%'))
-    agents = agent_query.all()
+        # Explicit group filter (used by super-admins for View As)
+        agents = [a for a in agents if a.get_tags().get("loom:group") == group]
+    elif "super-admins" not in user.groups:
+        # Non-super-admins see agents matching their groups
+        allowed_groups = [g for g in user.groups if g != "users"]
+        if "users" in user.groups and not allowed_groups:
+            allowed_groups = ["users"]
+
+        agents = [a for a in agents if a.get_tags().get("loom:group") in allowed_groups]
+        # Use first non-users group for display purposes
+        group = allowed_groups[0] if allowed_groups else "users"
 
     if not agents:
         return {"group": group, "days": days, "agents": [], "summary": {"total_events": 0}}
@@ -365,8 +370,20 @@ def pull_cost_actuals(
         except (json.JSONDecodeError, TypeError):
             pass
 
-    # Also include all Memory records in the DB (covers imported memories)
+    # Also include all Memory records in the DB (covers imported memories), filtered by group
     all_memories = db.query(Memory).filter(Memory.memory_id.isnot(None)).all()
+
+    # Filter memories by group parameter (for View As) or user's groups (same logic as agents)
+    if group:
+        # Explicit group filter (used by super-admins for View As)
+        all_memories = [m for m in all_memories if m.get_tags().get("loom:group") == group]
+    elif "super-admins" not in user.groups:
+        # Non-super-admins see memories matching their groups
+        allowed_groups = [g for g in user.groups if g != "users"]
+        if "users" in user.groups and not allowed_groups:
+            allowed_groups = ["users"]
+        all_memories = [m for m in all_memories if m.get_tags().get("loom:group") in allowed_groups]
+
     for mem in all_memories:
         if mem.memory_id:
             memory_to_agent_ids.setdefault(mem.memory_id, set())

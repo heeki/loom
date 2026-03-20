@@ -414,15 +414,6 @@ def create_agent(
     db: Session = Depends(get_db),
 ) -> AgentResponse:
     """Create a new agent via registration (existing ARN) or deployment (new runtime)."""
-    # demo-admins can only create resources tagged with loom:group=demo-admins
-    if "demo-admins" in user.groups and "super-admins" not in user.groups:
-        tags = request.tags or {}
-        if tags.get("loom:group") and tags["loom:group"] != "demo-admins":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="demo-admins can only create resources tagged with loom:group=demo-admins",
-            )
-
     if request.source == "register":
         return _register_agent(request, db)
     elif request.source == "deploy":
@@ -1075,9 +1066,14 @@ def list_agents(
     """List all registered agents."""
     agents = db.query(Agent).order_by(Agent.registered_at.desc()).all()
 
-    # Tag-based filtering: users group can only see agents tagged with loom:group=users
-    if "users" in user.groups and "super-admins" not in user.groups:
-        agents = [a for a in agents if a.get_tags().get("loom:group") == "users"]
+    # Tag-based filtering: non-super-admins see agents matching their groups
+    if "super-admins" not in user.groups:
+        # Build allowed groups list (exclude "users" unless it's the only group)
+        allowed_groups = [g for g in user.groups if g != "users"]
+        if "users" in user.groups and not allowed_groups:
+            allowed_groups = ["users"]
+
+        agents = [a for a in agents if a.get_tags().get("loom:group") in allowed_groups]
 
     return [_agent_response(agent, db) for agent in agents]
 
@@ -1163,14 +1159,6 @@ def delete_agent(
         cleanup_aws: If True, also delete the runtime, endpoint, and IAM role from AWS.
     """
     agent = get_agent_or_404(agent_id, db)
-
-    # demo-admins can only delete resources tagged with loom:group=demo-admins
-    if "demo-admins" in user.groups and "super-admins" not in user.groups:
-        if agent.get_tags().get("loom:group") != "demo-admins":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Cannot modify resources outside your group",
-            )
 
     # Extract credential provider names from agent config for cleanup
     config_map = {e.key: e.value for e in agent.config_entries}

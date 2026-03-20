@@ -38,6 +38,11 @@ interface CatalogPageProps {
   onDelete: (id: number, cleanupAws: boolean) => void;
   readOnly?: boolean;
   agentDeleteStartTimes?: Record<number, number>;
+  canViewAgents?: boolean;
+  canViewMemories?: boolean;
+  canViewMcp?: boolean;
+  canViewA2a?: boolean;
+  groupRestriction?: string;
 }
 
 export function CatalogPage({
@@ -50,6 +55,11 @@ export function CatalogPage({
   onDelete,
   readOnly,
   agentDeleteStartTimes,
+  canViewAgents = true,
+  canViewMemories = true,
+  canViewMcp = true,
+  canViewA2a = true,
+  groupRestriction,
 }: CatalogPageProps) {
   const { timezone } = useTimezone();
   // Tag filter state
@@ -59,8 +69,11 @@ export function CatalogPage({
   });
 
   useEffect(() => {
-    void listTagPolicies().then(setTagPolicies).catch(() => {});
-  }, []);
+    // Only fetch tag policies if user can view any section
+    if (canViewAgents || canViewMemories || canViewMcp || canViewA2a) {
+      void listTagPolicies().then(setTagPolicies).catch(() => {});
+    }
+  }, [canViewAgents, canViewMemories, canViewMcp, canViewA2a]);
 
   const showOnCardPolicies = tagPolicies.filter(tp => tp.show_on_card);
   const showOnCardKeys = showOnCardPolicies.map(tp => tp.key);
@@ -134,13 +147,19 @@ export function CatalogPage({
     }
   };
 
-  const filteredAgents = agents.filter(agent => matchesFilters(agent.tags));
+  const filteredAgents = agents
+    .filter(agent => matchesFilters(agent.tags))
+    .filter(agent => !groupRestriction || agent.tags?.["loom:group"] === groupRestriction);
 
   // MCP server data
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpLoading, setMcpLoading] = useState(true);
 
   const fetchMcpData = useCallback(async () => {
+    if (!canViewMcp) {
+      setMcpLoading(false);
+      return;
+    }
     try {
       const data = await listMcpServers();
       setMcpServers(data);
@@ -149,7 +168,7 @@ export function CatalogPage({
     } finally {
       setMcpLoading(false);
     }
-  }, []);
+  }, [canViewMcp]);
 
   useEffect(() => {
     void fetchMcpData();
@@ -160,6 +179,10 @@ export function CatalogPage({
   const [a2aLoading, setA2aLoading] = useState(true);
 
   const fetchA2aData = useCallback(async () => {
+    if (!canViewA2a) {
+      setA2aLoading(false);
+      return;
+    }
     try {
       const data = await listA2aAgents();
       setA2aAgents(data);
@@ -168,7 +191,7 @@ export function CatalogPage({
     } finally {
       setA2aLoading(false);
     }
-  }, []);
+  }, [canViewA2a]);
 
   useEffect(() => {
     void fetchA2aData();
@@ -180,7 +203,9 @@ export function CatalogPage({
   const [submitting, setSubmitting] = useState(false);
   const [refreshingId, setRefreshingId] = useState<number | null>(null);
   const [deleteStartTimes, setDeleteStartTimes] = useState<Record<number, number>>({});
-  const filteredMemories = memories.filter(mem => matchesFilters(mem.tags));
+  const filteredMemories = memories
+    .filter(mem => matchesFilters(mem.tags))
+    .filter(mem => !groupRestriction || mem.tags?.["loom:group"] === groupRestriction);
 
   // Elapsed timer for transitional states
   const [now, setNow] = useState(Date.now());
@@ -190,6 +215,10 @@ export function CatalogPage({
   memoriesRef.current = memories;
 
   const fetchMemoryData = useCallback(async () => {
+    if (!canViewMemories) {
+      setMemoriesLoading(false);
+      return;
+    }
     try {
       const data = await listMemories();
       setMemories(data);
@@ -198,7 +227,7 @@ export function CatalogPage({
     } finally {
       setMemoriesLoading(false);
     }
-  }, []);
+  }, [canViewMemories]);
 
   useEffect(() => {
     void fetchMemoryData();
@@ -422,6 +451,7 @@ export function CatalogPage({
       )}
 
       {/* Agents Section */}
+      {canViewAgents && (
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium">Agents</h3>
@@ -516,8 +546,10 @@ export function CatalogPage({
           </>
         )}
       </section>
+      )}
 
       {/* Memory Resources Section */}
+      {canViewMemories && (
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium">Memory Resources</h3>
@@ -531,7 +563,7 @@ export function CatalogPage({
             ))}
           </div>
         ) : filteredMemories.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-8">
+          <p className="text-sm text-muted-foreground text-center py-8">
             {memories.length === 0
               ? "No memory resources. Use the Memory page to create or import one."
               : "No memory resources match the selected filters."}
@@ -604,8 +636,10 @@ export function CatalogPage({
           </div>
         )}
       </section>
+      )}
 
       {/* MCP Servers Section */}
+      {canViewMcp && (
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium">MCP Servers</h3>
@@ -619,7 +653,7 @@ export function CatalogPage({
             ))}
           </div>
         ) : mcpServers.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-8">
+          <p className="text-sm text-muted-foreground py-8 text-center">
             No MCP servers registered. Use the MCP Servers page to register one.
           </p>
         ) : viewMode === "cards" ? (
@@ -685,8 +719,10 @@ export function CatalogPage({
           </div>
         )}
       </section>
+      )}
 
       {/* A2A Agents Section */}
+      {canViewA2a && (
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium">A2A Agents</h3>
@@ -700,7 +736,7 @@ export function CatalogPage({
             ))}
           </div>
         ) : a2aAgents.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-8">
+          <p className="text-sm text-muted-foreground py-8 text-center">
             No A2A agents registered. Use the A2A Agents page to register one.
           </p>
         ) : viewMode === "cards" ? (
@@ -784,6 +820,7 @@ export function CatalogPage({
           </div>
         )}
       </section>
+      )}
     </div>
   );
 }

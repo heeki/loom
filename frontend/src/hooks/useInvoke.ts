@@ -133,6 +133,11 @@ export function useInvoke(agentId: number, authorizerName?: string) {
 
   useEffect(() => {
     // Sync immediately in case state changed while unmounted
+    const current = _get(agentId);
+    // Clear error when switching to a new agent
+    if (current.error) {
+      _update(agentId, { error: null, rawError: null });
+    }
     setSnapshot(_get(agentId));
     return _subscribe(agentId, () => setSnapshot({ ..._get(agentId) }));
   }, [agentId]);

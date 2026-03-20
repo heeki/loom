@@ -371,12 +371,14 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction }: 
     }
   };
 
-  const filteredMemories = memories.filter(mem => {
-    return Object.entries(tagFilters).every(([key, values]) => {
-      if (values.length === 0) return true;
-      return values.includes(mem.tags?.[key] ?? "");
-    });
-  });
+  const filteredMemories = memories
+    .filter(mem => {
+      return Object.entries(tagFilters).every(([key, values]) => {
+        if (values.length === 0) return true;
+        return values.includes(mem.tags?.[key] ?? "");
+      });
+    })
+    .filter(mem => !groupRestriction || mem.tags?.["loom:group"] === groupRestriction);
 
   const isTransitional = (status: string) => status === "CREATING" || status === "DELETING";
 

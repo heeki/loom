@@ -45,25 +45,22 @@ const GROUP_SCOPES: Record<string, Scope[]> = {
   ],
   "demo-admins": [
     "catalog:read", "agent:read", "memory:read", "security:read",
-    "settings:read", "mcp:read", "a2a:read",
-    "catalog:write", "agent:write", "memory:write", "security:write",
-    "settings:write", "mcp:write", "a2a:write", "invoke",
+    "settings:read", "mcp:read", "a2a:read", "invoke",
   ],
-  "security-admins": ["security:read", "security:write"],
-  "memory-admins": ["memory:read", "memory:write"],
-  "mcp-admins": ["mcp:read", "mcp:write"],
-  "a2a-admins": ["a2a:read", "a2a:write"],
+  "security-admins": ["security:read", "security:write", "settings:read"],
+  "memory-admins": ["memory:read", "memory:write", "settings:read"],
+  "mcp-admins": ["mcp:read", "mcp:write", "settings:read"],
+  "a2a-admins": ["a2a:read", "a2a:write", "settings:read"],
   "users": ["invoke"],
+  "demo": ["catalog:read", "agent:read", "memory:read", "invoke"],
 };
 
 const USER_GROUPS: Record<string, string[]> = {
   "admin": ["super-admins"],
-  "demo-admin-1": ["demo-admins"],
-  "demo-admin-2": ["demo-admins"],
+  "demo-admin": ["demo-admins", "demo"],
   "security-admin": ["security-admins"],
   "integration-admin": ["memory-admins", "mcp-admins", "a2a-admins"],
-  "demo-user-1": ["users"],
-  "demo-user-2": ["users"],
+  "demo-user": ["users", "demo"],
 };
 
 const VIEW_AS_USERS = Object.keys(USER_GROUPS);
@@ -313,12 +310,14 @@ function AppContent() {
           />
         </div>
         <nav className="flex-1 p-2 space-y-1">
-          <SidebarItem
-            icon={BookOpen}
-            label="Catalog"
-            active={activePersona === "catalog"}
-            onClick={() => setActivePersona("catalog")}
-          />
+          {effectiveHasScope("catalog:read") && (
+            <SidebarItem
+              icon={BookOpen}
+              label="Catalog"
+              active={activePersona === "catalog"}
+              onClick={() => setActivePersona("catalog")}
+            />
+          )}
           {(effectiveHasScope("agent:read") || effectiveHasScope("agent:write")) && (
             <SidebarItem
               icon={Bot}
@@ -343,12 +342,6 @@ function AppContent() {
               onClick={() => setActivePersona("security")}
             />
           )}
-          <SidebarItem
-            icon={Tags}
-            label="Tagging"
-            active={activePersona === "tagging"}
-            onClick={() => setActivePersona("tagging")}
-          />
           {(effectiveHasScope("mcp:read") || effectiveHasScope("mcp:write")) && (
             <SidebarItem
               icon={Network}
@@ -365,6 +358,14 @@ function AppContent() {
               onClick={() => setActivePersona("a2a")}
             />
           )}
+          {(effectiveHasScope("agent:write") || effectiveHasScope("security:write") || effectiveHasScope("memory:write")) && (
+            <SidebarItem
+              icon={Tags}
+              label="Tagging"
+              active={activePersona === "tagging"}
+              onClick={() => setActivePersona("tagging")}
+            />
+          )}
           {effectiveHasScope("catalog:read") && (
             <SidebarItem
               icon={DollarSign}
@@ -373,12 +374,14 @@ function AppContent() {
               onClick={() => setActivePersona("costs")}
             />
           )}
-          <SidebarItem
-            icon={Settings}
-            label="Settings"
-            active={activePersona === "settings"}
-            onClick={() => setActivePersona("settings")}
-          />
+          {effectiveHasScope("settings:read") && (
+            <SidebarItem
+              icon={Settings}
+              label="Settings"
+              active={activePersona === "settings"}
+              onClick={() => setActivePersona("settings")}
+            />
+          )}
         </nav>
         <div className="p-2 border-t space-y-1">
           {user && (
@@ -471,6 +474,11 @@ function AppContent() {
                   onDelete={handleDelete}
                   readOnly={!effectiveHasScope("agent:write")}
                   agentDeleteStartTimes={deleteStartTimes}
+                  canViewAgents={effectiveHasScope("agent:read")}
+                  canViewMemories={effectiveHasScope("memory:read")}
+                  canViewMcp={effectiveHasScope("mcp:read")}
+                  canViewA2a={effectiveHasScope("a2a:read")}
+                  groupRestriction={groupRestriction}
                 />
               )}
 
@@ -482,6 +490,8 @@ function AppContent() {
                   onSelectSession={setSelectedSessionId}
                   onSessionsRefresh={() => void refetchSessions()}
                   onRedeploy={async (id) => { await redeployAgent(id); }}
+                  canInvoke={effectiveHasScope("invoke")}
+                  userGroups={viewAsUser ? (USER_GROUPS[viewAsUser] ?? []) : (user?.groups ?? [])}
                 />
               )}
 
@@ -530,7 +540,10 @@ function AppContent() {
           {activePersona === "a2a" && <A2aAgentsPage viewMode={a2aViewMode} onViewModeChange={setA2aViewMode} readOnly={!effectiveHasScope("a2a:write")} />}
           {activePersona === "settings" && <SettingsPage />}
           {activePersona === "costs" && (
-            <CostDashboardPage readOnly={!effectiveHasScope("catalog:write")} />
+            <CostDashboardPage
+              readOnly={!effectiveHasScope("catalog:write")}
+              groupRestriction={groupRestriction}
+            />
           )}
         </main>
       </div>

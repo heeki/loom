@@ -210,15 +210,6 @@ def create_memory(
     db: Session = Depends(get_db),
 ) -> MemoryResponse:
     """Create a new memory resource."""
-    # demo-admins can only create resources tagged with loom:group=demo-admins
-    if "demo-admins" in user.groups and "super-admins" not in user.groups:
-        tags = request.tags or {}
-        if tags.get("loom:group") and tags["loom:group"] != "demo-admins":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="demo-admins can only create resources tagged with loom:group=demo-admins",
-            )
-
     region = os.getenv("AWS_REGION", DEFAULT_REGION)
     account_id = os.getenv("AWS_ACCOUNT_ID", "")
 
@@ -432,9 +423,14 @@ def list_memories(
     """List all memory resources."""
     memories = db.query(Memory).order_by(Memory.created_at.desc()).all()
 
-    # Tag-based filtering: users group can only see memories tagged with loom:group=users
-    if "users" in user.groups and "super-admins" not in user.groups:
-        memories = [m for m in memories if m.get_tags().get("loom:group") == "users"]
+    # Tag-based filtering: non-super-admins see memories matching their groups
+    if "super-admins" not in user.groups:
+        # Build allowed groups list (exclude "users" unless it's the only group)
+        allowed_groups = [g for g in user.groups if g != "users"]
+        if "users" in user.groups and not allowed_groups:
+            allowed_groups = ["users"]
+
+        memories = [m for m in memories if m.get_tags().get("loom:group") in allowed_groups]
 
     return [_build_memory_response(m, db) for m in memories]
 
@@ -521,14 +517,6 @@ def delete_memory(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Memory with id {memory_id} not found"
         )
-
-    # demo-admins can only delete resources tagged with loom:group=demo-admins
-    if "demo-admins" in user.groups and "super-admins" not in user.groups:
-        if memory.get_tags().get("loom:group") != "demo-admins":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Cannot modify resources outside your group",
-            )
 
     # If not cleaning up AWS, just remove from DB
     if not cleanup_aws or not memory.memory_id or memory.status in ("FAILED",):
