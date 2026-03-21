@@ -3,6 +3,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { trackAction } from "@/api/audit";
 import { getAgentAccess, updateAgentAccess, getAgentSkills } from "@/api/a2a";
 import { listAgents } from "@/api/agents";
 import type { A2aAgentAccess, A2aAgentSkill, AgentResponse } from "@/api/types";
@@ -20,6 +22,7 @@ interface AccessRule {
 }
 
 export function A2aAccessControl({ agentId, readOnly }: A2aAccessControlProps) {
+  const { user, browserSessionId } = useAuth();
   const [agents, setAgents] = useState<AgentResponse[]>([]);
   const [skills, setSkills] = useState<A2aAgentSkill[]>([]);
   const [rules, setRules] = useState<AccessRule[]>([]);
@@ -83,6 +86,7 @@ export function A2aAccessControl({ agentId, readOnly }: A2aAccessControlProps) {
   const handleSave = async () => {
     setSaving(true);
     try {
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'a2a', 'update_permissions', String(agentId));
       const enabledRules = rules.filter((r) => r.enabled);
       await updateAgentAccess(agentId, {
         rules: enabledRules.map((r) => ({

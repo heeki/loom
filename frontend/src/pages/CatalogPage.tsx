@@ -500,11 +500,12 @@ export function CatalogPage({
                 <Table className="table-fixed">
                   <TableHeader>
                     <TableRow className="bg-card hover:bg-card">
-                      <SortableTableHead column="name" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[30%]">Name</SortableTableHead>
-                      <SortableTableHead column="status" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Status</SortableTableHead>
-                      <SortableTableHead column="protocol" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[14%]">Protocol</SortableTableHead>
-                      <SortableTableHead column="network" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[14%]">Network</SortableTableHead>
-                      <SortableTableHead column="region" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[14%]">Region</SortableTableHead>
+                      <SortableTableHead column="name" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[26%]">Name</SortableTableHead>
+                      <SortableTableHead column="status" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[10%]">Status</SortableTableHead>
+                      <SortableTableHead column="cost" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Cost</SortableTableHead>
+                      <SortableTableHead column="protocol" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Protocol</SortableTableHead>
+                      <SortableTableHead column="network" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Network</SortableTableHead>
+                      <SortableTableHead column="region" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Region</SortableTableHead>
                       <SortableTableHead column="registered" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[16%]">Registered</SortableTableHead>
                     </TableRow>
                   </TableHeader>
@@ -512,6 +513,7 @@ export function CatalogPage({
                     {sortRows(filteredAgents, agentTableCol, agentTableDir, {
                       name: (a) => a.name ?? a.runtime_id ?? "",
                       status: (a) => a.status ?? "",
+                      cost: (a) => a.cost_summary?.total_cost ?? 0,
                       protocol: (a) => a.protocol ?? "",
                       network: (a) => a.network_mode ?? "",
                       region: (a) => a.region ?? "",
@@ -529,6 +531,13 @@ export function CatalogPage({
                           <Badge variant={statusVariant(agent.status)} className="text-[10px] px-1.5 py-0">
                             {agent.status ?? "unknown"}
                           </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {agent.cost_summary && agent.cost_summary.total_cost > 0
+                            ? (agent.cost_summary.total_cost < 0.01
+                                ? `~$${agent.cost_summary.total_cost.toFixed(6)}`
+                                : `~$${agent.cost_summary.total_cost.toFixed(4)}`)
+                            : "\u2014"}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {agent.protocol ?? "\u2014"}
@@ -599,11 +608,12 @@ export function CatalogPage({
             <Table className="table-fixed">
               <TableHeader>
                 <TableRow className="bg-card hover:bg-card">
-                  <SortableTableHead column="name" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[30%]">Name</SortableTableHead>
-                  <SortableTableHead column="status" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[12%]">Status</SortableTableHead>
-                  <SortableTableHead column="strategies" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[14%]">Strategies</SortableTableHead>
-                  <SortableTableHead column="expiry" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[14%]">Event Expiry</SortableTableHead>
-                  <SortableTableHead column="region" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[14%]">Region</SortableTableHead>
+                  <SortableTableHead column="name" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[26%]">Name</SortableTableHead>
+                  <SortableTableHead column="status" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[10%]">Status</SortableTableHead>
+                  <SortableTableHead column="cost" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[12%]">Cost</SortableTableHead>
+                  <SortableTableHead column="strategies" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[12%]">Strategies</SortableTableHead>
+                  <SortableTableHead column="expiry" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[12%]">Event Expiry</SortableTableHead>
+                  <SortableTableHead column="region" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[12%]">Region</SortableTableHead>
                   <SortableTableHead column="registered" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[16%]">Registered</SortableTableHead>
                 </TableRow>
               </TableHeader>
@@ -611,6 +621,7 @@ export function CatalogPage({
                 {sortRows(filteredMemories, memoryTableCol, memoryTableDir, {
                   name: (m) => m.name,
                   status: (m) => m.status,
+                  cost: (m) => m.cost_summary?.total_memory_estimated_cost ?? 0,
                   strategies: (m) => Array.isArray(m.strategies_config) ? m.strategies_config.length : Array.isArray(m.strategies_response) ? m.strategies_response.length : 0,
                   expiry: (m) => m.event_expiry_duration,
                   region: (m) => m.region ?? "",
@@ -622,6 +633,13 @@ export function CatalogPage({
                       <Badge variant={statusVariant(mem.status)} className="text-[10px] px-1.5 py-0">
                         {mem.status}
                       </Badge>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {mem.cost_summary && mem.cost_summary.total_memory_estimated_cost > 0
+                        ? (mem.cost_summary.total_memory_estimated_cost < 0.01
+                            ? `~$${mem.cost_summary.total_memory_estimated_cost.toFixed(6)}`
+                            : `~$${mem.cost_summary.total_memory_estimated_cost.toFixed(4)}`)
+                        : "\u2014"}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {Array.isArray(mem.strategies_config) ? mem.strategies_config.length : Array.isArray(mem.strategies_response) ? mem.strategies_response.length : 0}
@@ -693,10 +711,10 @@ export function CatalogPage({
             <Table className="table-fixed">
               <TableHeader>
                 <TableRow className="bg-card hover:bg-card">
-                  <SortableTableHead column="name" activeColumn={mcpTableCol} direction={mcpTableDir} onSort={handleMcpTableSort} className="w-[25%]">Name</SortableTableHead>
-                  <SortableTableHead column="endpoint" activeColumn={mcpTableCol} direction={mcpTableDir} onSort={handleMcpTableSort} className="w-[32%]">Endpoint</SortableTableHead>
-                  <SortableTableHead column="transport" activeColumn={mcpTableCol} direction={mcpTableDir} onSort={handleMcpTableSort} className="w-[15%]">Transport</SortableTableHead>
-                  <SortableTableHead column="auth" activeColumn={mcpTableCol} direction={mcpTableDir} onSort={handleMcpTableSort} className="w-[12%]">Auth</SortableTableHead>
+                  <SortableTableHead column="name" activeColumn={mcpTableCol} direction={mcpTableDir} onSort={handleMcpTableSort} className="w-[18%]">Name</SortableTableHead>
+                  <SortableTableHead column="endpoint" activeColumn={mcpTableCol} direction={mcpTableDir} onSort={handleMcpTableSort} className="w-[46%]">Endpoint</SortableTableHead>
+                  <SortableTableHead column="transport" activeColumn={mcpTableCol} direction={mcpTableDir} onSort={handleMcpTableSort} className="w-[10%]">Transport</SortableTableHead>
+                  <SortableTableHead column="auth" activeColumn={mcpTableCol} direction={mcpTableDir} onSort={handleMcpTableSort} className="w-[10%]">Auth</SortableTableHead>
                   <SortableTableHead column="created" activeColumn={mcpTableCol} direction={mcpTableDir} onSort={handleMcpTableSort} className="w-[16%]">Created</SortableTableHead>
                 </TableRow>
               </TableHeader>
@@ -787,11 +805,10 @@ export function CatalogPage({
             <Table className="table-fixed">
               <TableHeader>
                 <TableRow className="bg-card hover:bg-card">
-                  <SortableTableHead column="name" activeColumn={a2aTableCol} direction={a2aTableDir} onSort={handleA2aTableSort} className="w-[25%]">Name</SortableTableHead>
-                  <SortableTableHead column="url" activeColumn={a2aTableCol} direction={a2aTableDir} onSort={handleA2aTableSort} className="w-[32%]">Base URL</SortableTableHead>
-                  <SortableTableHead column="version" activeColumn={a2aTableCol} direction={a2aTableDir} onSort={handleA2aTableSort} className="w-[12%]">Version</SortableTableHead>
-                  <SortableTableHead column="auth" activeColumn={a2aTableCol} direction={a2aTableDir} onSort={handleA2aTableSort} className="w-[12%]">Auth</SortableTableHead>
-                  <SortableTableHead column="status" activeColumn={a2aTableCol} direction={a2aTableDir} onSort={handleA2aTableSort} className="w-[10%]">Status</SortableTableHead>
+                  <SortableTableHead column="name" activeColumn={a2aTableCol} direction={a2aTableDir} onSort={handleA2aTableSort} className="w-[18%]">Name</SortableTableHead>
+                  <SortableTableHead column="url" activeColumn={a2aTableCol} direction={a2aTableDir} onSort={handleA2aTableSort} className="w-[46%]">Base URL</SortableTableHead>
+                  <SortableTableHead column="version" activeColumn={a2aTableCol} direction={a2aTableDir} onSort={handleA2aTableSort} className="w-[10%]">Version</SortableTableHead>
+                  <SortableTableHead column="auth" activeColumn={a2aTableCol} direction={a2aTableDir} onSort={handleA2aTableSort} className="w-[10%]">Auth</SortableTableHead>
                   <SortableTableHead column="created" activeColumn={a2aTableCol} direction={a2aTableDir} onSort={handleA2aTableSort} className="w-[16%]">Created</SortableTableHead>
                 </TableRow>
               </TableHeader>
@@ -801,7 +818,6 @@ export function CatalogPage({
                   url: (a) => a.base_url,
                   version: (a) => a.agent_version,
                   auth: (a) => a.auth_type,
-                  status: (a) => a.status,
                   created: (a) => a.created_at ?? "",
                 }).map((agent) => (
                   <TableRow key={agent.id} className="bg-input-bg hover:bg-input-bg/80">
@@ -809,11 +825,6 @@ export function CatalogPage({
                     <TableCell className="text-xs text-muted-foreground truncate">{agent.base_url}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{agent.agent_version}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{agent.auth_type === "oauth2" ? "OAuth2" : "None"}</TableCell>
-                    <TableCell>
-                      <Badge variant={statusVariant(agent.status)} className="text-[10px] px-1.5 py-0">
-                        {agent.status}
-                      </Badge>
-                    </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {formatTimestamp(agent.created_at, timezone)}
                     </TableCell>

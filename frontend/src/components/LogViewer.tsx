@@ -7,7 +7,14 @@ import { formatLogTime } from "@/lib/format";
 import type { LogEvent } from "@/api/types";
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Search, X } from "lucide-react";
 
-const PAGE_SIZE = 200;
+const PAGE_SIZE = 100;
+
+function getPageNumbers(current: number, total: number): (number | null)[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  if (current <= 4) return [1, 2, 3, 4, 5, null, total];
+  if (current >= total - 3) return [1, null, total - 4, total - 3, total - 2, total - 1, total];
+  return [1, null, current - 1, current, current + 1, null, total];
+}
 
 function highlightMatch(text: string, term: string): React.ReactNode {
   if (!term.trim()) return text;
@@ -93,49 +100,29 @@ export function LogViewer({ logs, loading, showTimestamp = true, showLineNumbers
         </div>
       )}
 
-      {totalPages > 1 && (
+      {filteredEntries.length > 0 && (
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>
             Showing {start + 1}&ndash;{end} of {filteredEntries.length} log lines
           </span>
           <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              disabled={page === 1}
-              onClick={() => setPage(1)}
-            >
+            <Button variant="ghost" size="icon" className="h-6 w-6" disabled={page === 1} onClick={() => setPage(1)}>
               <ChevronsLeft className="h-3.5 w-3.5" />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              disabled={page === 1}
-              onClick={() => setPage((p) => p - 1)}
-            >
+            <Button variant="ghost" size="icon" className="h-6 w-6" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
               <ChevronLeft className="h-3.5 w-3.5" />
             </Button>
-            <span className="px-2">
-              Page {page} of {totalPages}
-            </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              disabled={page === totalPages}
-              onClick={() => setPage((p) => p + 1)}
-            >
+            {getPageNumbers(page, totalPages).map((n, i) =>
+              n === null ? (
+                <span key={`e-${i}`} className="px-0.5">…</span>
+              ) : (
+                <Button key={n} variant={n === page ? "default" : "ghost"} size="icon" className="h-6 w-6 text-xs" onClick={() => setPage(n)}>{n}</Button>
+              )
+            )}
+            <Button variant="ghost" size="icon" className="h-6 w-6" disabled={page === totalPages} onClick={() => setPage((p) => p + 1)}>
               <ChevronRight className="h-3.5 w-3.5" />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              disabled={page === totalPages}
-              onClick={() => setPage(totalPages)}
-            >
+            <Button variant="ghost" size="icon" className="h-6 w-6" disabled={page === totalPages} onClick={() => setPage(totalPages)}>
               <ChevronsRight className="h-3.5 w-3.5" />
             </Button>
           </div>
@@ -162,46 +149,26 @@ export function LogViewer({ logs, loading, showTimestamp = true, showLineNumbers
         ))}
       </div>
 
-      {totalPages > 1 && (
+      {filteredEntries.length > 0 && (
         <div className="flex items-center justify-end text-xs text-muted-foreground">
           <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              disabled={page === 1}
-              onClick={() => setPage(1)}
-            >
+            <Button variant="ghost" size="icon" className="h-6 w-6" disabled={page === 1} onClick={() => setPage(1)}>
               <ChevronsLeft className="h-3.5 w-3.5" />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              disabled={page === 1}
-              onClick={() => setPage((p) => p - 1)}
-            >
+            <Button variant="ghost" size="icon" className="h-6 w-6" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
               <ChevronLeft className="h-3.5 w-3.5" />
             </Button>
-            <span className="px-2">
-              Page {page} of {totalPages}
-            </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              disabled={page === totalPages}
-              onClick={() => setPage((p) => p + 1)}
-            >
+            {getPageNumbers(page, totalPages).map((n, i) =>
+              n === null ? (
+                <span key={`e-${i}`} className="px-0.5">…</span>
+              ) : (
+                <Button key={n} variant={n === page ? "default" : "ghost"} size="icon" className="h-6 w-6 text-xs" onClick={() => setPage(n)}>{n}</Button>
+              )
+            )}
+            <Button variant="ghost" size="icon" className="h-6 w-6" disabled={page === totalPages} onClick={() => setPage((p) => p + 1)}>
               <ChevronRight className="h-3.5 w-3.5" />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              disabled={page === totalPages}
-              onClick={() => setPage(totalPages)}
-            >
+            <Button variant="ghost" size="icon" className="h-6 w-6" disabled={page === totalPages} onClick={() => setPage(totalPages)}>
               <ChevronsRight className="h-3.5 w-3.5" />
             </Button>
           </div>

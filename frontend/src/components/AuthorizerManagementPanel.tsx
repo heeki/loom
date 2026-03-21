@@ -17,6 +17,8 @@ import { listCognitoPools, listAuthorizerCredentials, createAuthorizerCredential
 import { Badge } from "@/components/ui/badge";
 import { Pencil, Trash2, Plus, ChevronDown, ChevronRight, Key } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { trackAction } from "@/api/audit";
 import type { CognitoPool, AuthorizerCredential } from "@/api/types";
 
 function TagInput({
@@ -79,6 +81,7 @@ function TagInput({
 }
 
 export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) {
+  const { user, browserSessionId } = useAuth();
   const { configs, loading, error, createConfig, updateConfig, deleteConfig } = useAuthorizerConfigs();
   const [showAddForm, setShowAddForm] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -113,6 +116,7 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
     if (!credLabel.trim() || !credClientId.trim()) return;
     setCredSubmitting(true);
     try {
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'security', 'add_credential', credLabel.trim());
       await createAuthorizerCredential(authId, {
         label: credLabel.trim(),
         client_id: credClientId.trim(),
@@ -191,6 +195,7 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
     if (!formName.trim()) return;
     setSubmitting(true);
     try {
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'security', 'add_authorizer', formName.trim());
       await createConfig({
         name: formName.trim(),
         authorizer_type: formType,
@@ -245,6 +250,8 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
   const handleDelete = async (id: number) => {
     setSubmitting(true);
     try {
+      const authName = configs.find(c => c.id === id)?.name ?? String(id);
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'security', 'delete_authorizer', authName);
       await deleteConfig(id);
       setConfirmDeleteId(null);
       setCredentials((prev) => {

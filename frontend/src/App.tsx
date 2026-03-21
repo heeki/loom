@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import {
 import { ThemeProvider, useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { useAgents } from "@/hooks/useAgents";
 import { useSessions } from "@/hooks/useSessions";
+import { clearInvokeState } from "@/hooks/useInvoke";
 import { getSession, getInvocation } from "@/api/invocations";
 import { CatalogPage } from "@/pages/CatalogPage";
 import { AgentListPage } from "@/pages/AgentListPage";
@@ -32,9 +33,11 @@ import { CostDashboardPage } from "@/pages/CostDashboardPage";
 import type { SessionResponse, InvocationResponse } from "@/api/types";
 import { AuthProvider, useAuth, type Scope } from "@/contexts/AuthContext";
 import { LoginPage } from "@/pages/LoginPage";
-import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings, Eye, Tags, DollarSign } from "lucide-react";
+import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings, Eye, Tags, DollarSign, BarChart3 } from "lucide-react";
+import { AdminDashboardPage } from "./pages/AdminDashboardPage";
+import { recordPageView, sendBeaconPageView, trackAction } from "./api/audit";
 
-type Persona = "catalog" | "security" | "builder" | "memory" | "tagging" | "settings" | "mcp" | "a2a" | "costs";
+type Persona = "catalog" | "security" | "builder" | "memory" | "tagging" | "settings" | "mcp" | "a2a" | "costs" | "admin";
 
 const GROUP_SCOPES: Record<string, Scope[]> = {
   // Type groups (for UI routing - don't grant scopes directly)
@@ -48,29 +51,30 @@ const GROUP_SCOPES: Record<string, Scope[]> = {
     "settings:read", "settings:write", "tagging:read", "tagging:write",
     "costs:read", "costs:write",
     "mcp:read", "mcp:write", "a2a:read", "a2a:write", "invoke",
+    "admin:read", "admin:write",
   ],
   "g-admins-demo": [
     "catalog:read", "agent:read", "agent:write", "memory:read", "memory:write",
-    "security:read", "settings:read", "tagging:read", "costs:read", "costs:write",
+    "security:read", "settings:read", "settings:write", "tagging:read", "costs:read", "costs:write",
     "mcp:read", "a2a:read", "invoke",
   ],
   "g-admins-security": [
-    "security:read", "security:write", "settings:read", "tagging:read", "tagging:write",
+    "security:read", "security:write", "settings:read", "settings:write", "tagging:read",
   ],
   "g-admins-memory": [
-    "memory:read", "memory:write", "settings:read", "tagging:read", "tagging:write",
+    "memory:read", "memory:write", "settings:read", "settings:write", "tagging:read",
   ],
   "g-admins-mcp": [
-    "mcp:read", "mcp:write", "settings:read", "tagging:read", "tagging:write",
+    "mcp:read", "mcp:write", "settings:read", "settings:write", "tagging:read",
   ],
   "g-admins-a2a": [
-    "a2a:read", "a2a:write", "settings:read", "tagging:read", "tagging:write",
+    "a2a:read", "a2a:write", "settings:read", "settings:write", "tagging:read",
   ],
 
   // User groups (t-user users - can have multiple)
-  "g-users-demo": ["catalog:read", "agent:read", "memory:read", "costs:read", "costs:write", "invoke"],
-  "g-users-test": ["catalog:read", "agent:read", "memory:read", "costs:read", "costs:write", "invoke"],
-  "g-users-strategics": ["catalog:read", "agent:read", "memory:read", "costs:read", "costs:write", "invoke"],
+  "g-users-demo": ["catalog:read", "agent:read", "agent:write", "memory:read", "memory:write", "costs:read", "costs:write", "mcp:read", "a2a:read", "invoke"],
+  "g-users-test": ["catalog:read", "agent:read", "agent:write", "memory:read", "memory:write", "costs:read", "costs:write", "mcp:read", "a2a:read", "invoke"],
+  "g-users-strategics": ["catalog:read", "agent:read", "agent:write", "memory:read", "memory:write", "costs:read", "costs:write", "mcp:read", "a2a:read", "invoke"],
 };
 
 const USER_GROUPS: Record<string, string[]> = {
@@ -80,7 +84,15 @@ const USER_GROUPS: Record<string, string[]> = {
   "memory-admin": ["t-admin", "g-admins-memory"],
   "mcp-admin": ["t-admin", "g-admins-mcp"],
   "a2a-admin": ["t-admin", "g-admins-a2a"],
-  "demo-user": ["t-user", "g-users-demo"],
+  "demo-user-1": ["t-user", "g-users-demo"],
+  "demo-user-2": ["t-user", "g-users-demo"],
+  "demo-user-3": ["t-user", "g-users-demo"],
+  "demo-user-4": ["t-user", "g-users-demo"],
+  "demo-user-5": ["t-user", "g-users-demo"],
+  "demo-user-6": ["t-user", "g-users-demo"],
+  "demo-user-7": ["t-user", "g-users-demo"],
+  "demo-user-8": ["t-user", "g-users-demo"],
+  "demo-user-9": ["t-user", "g-users-demo"],
   "test-user": ["t-user", "g-users-test"],
 };
 
@@ -149,7 +161,7 @@ function SidebarItem({
 }
 
 function AppContent() {
-  const { isAuthenticated, isLoading, user, logout, hasScope } = useAuth();
+  const { isAuthenticated, isLoading, user, logout, hasScope, browserSessionId } = useAuth();
   const { theme } = useTheme();
 
   // Determine default persona based on user's scopes
@@ -169,12 +181,43 @@ function AppContent() {
   const [activePersona, setActivePersona] = useState<Persona>(getDefaultPersona());
   const [viewAsUser, setViewAsUser] = useState<string | null>(null);
 
-  // Update activePersona when user changes
+  // Reset all navigation state when user logs in
   useEffect(() => {
     if (isAuthenticated) {
       setActivePersona(getDefaultPersona());
+      setSelectedAgentId(null);
+      setSelectedSessionId(null);
+      setSessionDetail(null);
+      setSelectedInvocationId(null);
+      setInvocationDetail(null);
+      setViewAsUser(null);
     }
-  }, [isAuthenticated, user, getDefaultPersona]);
+  }, [isAuthenticated, getDefaultPersona]);
+
+  // Page view tracking
+  const pageEntryRef = useRef<{ persona: string; enteredAt: string } | null>(null);
+  useEffect(() => {
+    const userId = user?.username || user?.sub;
+    if (pageEntryRef.current && userId && browserSessionId) {
+      const prev = pageEntryRef.current;
+      const duration = Math.round((Date.now() - new Date(prev.enteredAt).getTime()) / 1000);
+      recordPageView(userId, browserSessionId, prev.persona, prev.enteredAt, duration).catch(() => {});
+    }
+    pageEntryRef.current = { persona: activePersona, enteredAt: new Date().toISOString() };
+  }, [activePersona, user, browserSessionId]);
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const userId = user?.username || user?.sub;
+      if (pageEntryRef.current && userId && browserSessionId) {
+        const prev = pageEntryRef.current;
+        const duration = Math.round((Date.now() - new Date(prev.enteredAt).getTime()) / 1000);
+        sendBeaconPageView(userId, browserSessionId, prev.persona, prev.enteredAt, duration);
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [user, browserSessionId]);
 
   const isAdmin = user?.groups?.includes("t-admin") ?? false;
 
@@ -196,6 +239,16 @@ function AppContent() {
   const groupRestriction = effectiveGroups.includes("t-admin")
     ? undefined
     : effectiveGroups.find((g) => g.startsWith("g-users-"))?.replace("g-users-", "");
+
+  // For non-admin users, restrict tag profile selection to their own profile.
+  // For demo-admin-N users, map to the corresponding demo-user-N profile.
+  const _username = user?.username ?? user?.sub ?? "";
+  const _demoAdminMatch = _username.match(/^demo-admin-(\d+)$/);
+  const ownerRestriction = !isAdmin
+    ? _username
+    : _demoAdminMatch
+      ? `demo-user-${_demoAdminMatch[1]}`
+      : undefined;
 
   const { agents, loading, deleteStartTimes, fetchAgents, registerAgent, deployAgent, redeployAgent, refreshAgent, deleteAgent } = useAgents();
 
@@ -272,6 +325,8 @@ function AppContent() {
 
 
   const handleSelectAgent = (id: number) => {
+    const agentName = agents.find((a) => a.id === id)?.name ?? String(id);
+    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "navigation", "agent_detail", agentName);
     setSelectedAgentId(id);
     setSelectedSessionId(null);
     setSessionDetail(null);
@@ -279,9 +334,25 @@ function AppContent() {
     setInvocationDetail(null);
   };
 
+  const handleSelectSession = (sessionId: string) => {
+    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "navigation", "session_detail", sessionId);
+    setSelectedSessionId(sessionId);
+  };
+
+  const handleSelectInvocation = (invocationId: string) => {
+    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "navigation", "invocation_detail", invocationId);
+    setSelectedInvocationId(invocationId);
+  };
+
   const handleDelete = async (id: number, cleanupAws: boolean) => {
     try {
+      const agentName = agents.find(a => a.id === id)?.name ?? String(id);
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'agent', 'delete', agentName);
       await deleteAgent(id, cleanupAws);
+      // Clear cached invoke state and prompt for this agent so they don't
+      // bleed into a new agent that might reuse the same DB id.
+      clearInvokeState(id);
+      sessionStorage.removeItem(`loom:invokePrompt:${id}`);
       // If the deleted agent was selected, clear all drill-down state
       if (selectedAgentId === id) {
         setSelectedAgentId(null);
@@ -418,6 +489,14 @@ function AppContent() {
               onClick={() => setActivePersona("costs")}
             />
           )}
+          {effectiveHasScope("admin:read") && (
+            <SidebarItem
+              icon={BarChart3}
+              label="Admin"
+              active={activePersona === "admin"}
+              onClick={() => setActivePersona("admin")}
+            />
+          )}
           {effectiveHasScope("settings:read") && (
             <SidebarItem
               icon={Settings}
@@ -438,7 +517,10 @@ function AppContent() {
               </div>
               <button
                 type="button"
-                onClick={logout}
+                onClick={() => {
+                  if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "auth", "logout");
+                  logout();
+                }}
                 className="text-muted-foreground hover:text-foreground transition-colors"
                 title="Sign out"
               >
@@ -453,7 +535,7 @@ function AppContent() {
                   <Eye className="h-3 w-3 shrink-0" />
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="max-h-[80vh]">
                   {VIEW_AS_USERS.map((u) => (
                     <SelectItem key={u} value={u}>{u}</SelectItem>
                   ))}
@@ -532,9 +614,13 @@ function AppContent() {
                   agent={selectedAgent}
                   sessions={sessions}
                   sessionsLoading={sessionsLoading}
-                  onSelectSession={setSelectedSessionId}
+                  onSelectSession={handleSelectSession}
                   onSessionsRefresh={() => void refetchSessions()}
-                  onRedeploy={async (id) => { await redeployAgent(id); }}
+                  onRedeploy={async (id) => {
+                    const agentName = agents.find(a => a.id === id)?.name ?? String(id);
+                    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'agent', 'redeploy', agentName);
+                    await redeployAgent(id);
+                  }}
                   canInvoke={effectiveHasScope("invoke")}
                   userGroups={viewAsUser ? (USER_GROUPS[viewAsUser] ?? []) : (user?.groups ?? [])}
                 />
@@ -544,7 +630,7 @@ function AppContent() {
                 <SessionDetailPage
                   agent={selectedAgent}
                   session={sessionDetail}
-                  onSelectInvocation={setSelectedInvocationId}
+                  onSelectInvocation={handleSelectInvocation}
                 />
               )}
 
@@ -574,13 +660,14 @@ function AppContent() {
               onDelete={handleDelete}
               readOnly={!effectiveHasScope("agent:write")}
               groupRestriction={groupRestriction}
+              ownerRestriction={ownerRestriction}
               deleteStartTimes={deleteStartTimes}
               userGroups={viewAsUser ? (USER_GROUPS[viewAsUser] ?? []) : (user?.groups ?? [])}
             />
           )}
 
           {activePersona === "security" && <SecurityAdminPage readOnly={!effectiveHasScope("security:write")} />}
-          {activePersona === "memory" && <MemoryManagementPage viewMode={memoryViewMode} onViewModeChange={setMemoryViewMode} readOnly={!effectiveHasScope("memory:write")} groupRestriction={groupRestriction} userGroups={viewAsUser ? (USER_GROUPS[viewAsUser] ?? []) : (user?.groups ?? [])} />}
+          {activePersona === "memory" && <MemoryManagementPage viewMode={memoryViewMode} onViewModeChange={setMemoryViewMode} readOnly={!effectiveHasScope("memory:write")} groupRestriction={groupRestriction} ownerRestriction={ownerRestriction} userGroups={viewAsUser ? (USER_GROUPS[viewAsUser] ?? []) : (user?.groups ?? [])} />}
           {activePersona === "tagging" && <TaggingPage readOnly={!effectiveHasScope("tagging:write")} userGroups={user?.groups || []} />}
           {activePersona === "mcp" && <McpServersPage viewMode={mcpViewMode} onViewModeChange={setMcpViewMode} readOnly={!effectiveHasScope("mcp:write")} />}
           {activePersona === "a2a" && <A2aAgentsPage viewMode={a2aViewMode} onViewModeChange={setA2aViewMode} readOnly={!effectiveHasScope("a2a:write")} />}
@@ -591,6 +678,7 @@ function AppContent() {
               groupRestriction={groupRestriction}
             />
           )}
+          {activePersona === "admin" && <AdminDashboardPage />}
         </main>
       </div>
 

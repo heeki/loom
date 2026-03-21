@@ -18,6 +18,8 @@ import { AgentCard } from "@/components/AgentCard";
 import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "@/components/SortableCardGrid";
 import { SortableTableHead, sortRows } from "@/components/SortableTableHead";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { trackAction } from "@/api/audit";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { statusVariant } from "@/lib/status";
@@ -38,6 +40,7 @@ interface AgentListPageProps {
   onDelete: (id: number, cleanupAws: boolean) => void;
   readOnly?: boolean;
   groupRestriction?: string;
+  ownerRestriction?: string;
   deleteStartTimes?: Record<number, number>;
   userGroups?: string[];
 }
@@ -54,10 +57,12 @@ export function AgentListPage({
   onDelete,
   readOnly,
   groupRestriction,
+  ownerRestriction,
   deleteStartTimes,
   userGroups = [],
 }: AgentListPageProps) {
   const { timezone } = useTimezone();
+  const { user, browserSessionId } = useAuth();
   const [submitting, setSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState<BuilderTab>("deploy");
   const [showAddForm, setShowAddForm] = useState(false);
@@ -65,23 +70,10 @@ export function AgentListPage({
   const [tagFilters, setTagFilters] = useState<Record<string, string[]>>(() => {
     try { return JSON.parse(localStorage.getItem("loom:tagFilters:agents") || "{}") as Record<string, string[]>; } catch { return {}; }
   });
-  const [deployingName, setDeployingName] = useState<string | null>(null);
 
   useEffect(() => {
     void listTagPolicies().then(setTagPolicies).catch(() => {});
   }, []);
-
-  // Clear deployingName once the real agents list contains it and it's no longer transitional
-  useEffect(() => {
-    if (deployingName) {
-      const real = agents.find((a) => a.name === deployingName);
-      const inProgress = new Set(["initializing", "creating_credentials", "creating_role", "building_artifact", "deploying"]);
-      if (real && real.status !== "CREATING" && real.endpoint_status !== "CREATING" && !inProgress.has(real.deployment_status ?? "")) {
-        setDeployingName(null);
-      }
-    }
-  }, [agents, deployingName]);
-
 
 
   const showOnCardPolicies = tagPolicies.filter(tp => tp.show_on_card);
@@ -128,6 +120,7 @@ export function AgentListPage({
   const handleRegister = async (arn: string, modelId?: string) => {
     setSubmitting(true);
     try {
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'agent', 'import', arn);
       await onRegister(arn, modelId);
       setShowAddForm(false);
       toast.success("Agent registered");
@@ -140,17 +133,14 @@ export function AgentListPage({
 
   const handleDeploy = async (request: AgentDeployRequest) => {
     if (!onDeploy) return;
-
-    // Immediately collapse form and start polling
-    setDeployingName(request.name);
+    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'agent', 'deploy', request.name);
     setShowAddForm(false);
-    toast.success("Agent deployment started");
-
-    // Fire deploy in the background
-    void onDeploy(request).catch((e) => {
+    try {
+      await onDeploy(request);
+      toast.success("Agent deployment started");
+    } catch (e) {
       toast.error(e instanceof Error ? e.message : "Deployment failed");
-      setDeployingName(null);
-    });
+    }
   };
 
   return (
@@ -236,6 +226,7 @@ export function AgentListPage({
                 onDeploy={onDeploy ? handleDeploy : undefined}
                 isLoading={submitting}
                 groupRestriction={groupRestriction}
+                ownerRestriction={ownerRestriction}
               />
             </CardContent>
           </Card>
@@ -347,7 +338,7 @@ export function AgentListPage({
               <Skeleton key={i} className="h-48" />
             ))}
           </div>
-        ) : filteredAgents.length === 0 && !deployingName ? (
+        ) : filteredAgents.length === 0 ? (
           <p className="text-sm text-muted-foreground py-8">
             {agents.length === 0
               ? "No agents yet. Add one above."
@@ -381,11 +372,12 @@ export function AgentListPage({
                 <Table className="table-fixed">
                   <TableHeader>
                     <TableRow className="bg-card hover:bg-card">
-                      <SortableTableHead column="name" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[30%]">Name</SortableTableHead>
-                      <SortableTableHead column="status" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Status</SortableTableHead>
-                      <SortableTableHead column="protocol" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[14%]">Protocol</SortableTableHead>
-                      <SortableTableHead column="network" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[14%]">Network</SortableTableHead>
-                      <SortableTableHead column="region" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[14%]">Region</SortableTableHead>
+                      <SortableTableHead column="name" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[26%]">Name</SortableTableHead>
+                      <SortableTableHead column="status" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[10%]">Status</SortableTableHead>
+                      <SortableTableHead column="cost" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Cost</SortableTableHead>
+                      <SortableTableHead column="protocol" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Protocol</SortableTableHead>
+                      <SortableTableHead column="network" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Network</SortableTableHead>
+                      <SortableTableHead column="region" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Region</SortableTableHead>
                       <SortableTableHead column="registered" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[16%]">Registered</SortableTableHead>
                     </TableRow>
                   </TableHeader>
@@ -393,6 +385,7 @@ export function AgentListPage({
                     {sortRows(filteredAgents, agentTableCol, agentTableDir, {
                       name: (a) => a.name ?? a.runtime_id ?? "",
                       status: (a) => a.status ?? "",
+                      cost: (a) => a.cost_summary?.total_cost ?? 0,
                       protocol: (a) => a.protocol ?? "",
                       network: (a) => a.network_mode ?? "",
                       region: (a) => a.region ?? "",
@@ -410,6 +403,13 @@ export function AgentListPage({
                           <Badge variant={statusVariant(agent.status)} className="text-[10px] px-1.5 py-0">
                             {agent.status ?? "unknown"}
                           </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {agent.cost_summary && agent.cost_summary.total_cost > 0
+                            ? (agent.cost_summary.total_cost < 0.01
+                                ? `~$${agent.cost_summary.total_cost.toFixed(6)}`
+                                : `~$${agent.cost_summary.total_cost.toFixed(4)}`)
+                            : "\u2014"}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {agent.protocol ?? "\u2014"}

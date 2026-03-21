@@ -72,6 +72,15 @@ export interface AgentDeployRequest {
   tags?: Record<string, string>;
 }
 
+export interface AgentDeployMeta {
+  protocol: string;
+  network_mode: string;
+  authorizer_config: { type?: string; name?: string } | null;
+  memory_names: string[];
+  mcp_names: string[];
+  a2a_names: string[];
+}
+
 export interface IamRole {
   role_name: string;
   role_arn: string;
@@ -200,6 +209,7 @@ export interface SessionResponse {
   status: string;
   live_status: string;
   created_at: string | null;
+  user_id: string | null;
   invocations: InvocationResponse[];
 }
 
@@ -311,6 +321,7 @@ export interface ManagedRoleCreateRequest {
   role_name?: string;
   description?: string;
   policy_document?: PolicyDocument;
+  tags?: Record<string, string>;
 }
 
 export interface ManagedRoleUpdateRequest {

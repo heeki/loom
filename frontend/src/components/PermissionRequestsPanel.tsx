@@ -13,8 +13,11 @@ import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, s
 import { usePermissionRequests } from "@/hooks/useSecurity";
 import { CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { trackAction } from "@/api/audit";
 
 export function PermissionRequestsPanel({ readOnly }: { readOnly?: boolean }) {
+  const { user, browserSessionId } = useAuth();
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
   const { requests, loading, error, reviewRequest } = usePermissionRequests(statusFilter);
   const [denyingId, setDenyingId] = useState<number | null>(null);
@@ -25,6 +28,7 @@ export function PermissionRequestsPanel({ readOnly }: { readOnly?: boolean }) {
   const handleApprove = async (id: number) => {
     setSubmitting(true);
     try {
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'security', 'approve_request', String(id));
       await reviewRequest(id, { status: "approved" });
       toast.success("Request approved");
     } catch (e) {
@@ -37,6 +41,7 @@ export function PermissionRequestsPanel({ readOnly }: { readOnly?: boolean }) {
   const handleDeny = async (id: number) => {
     setSubmitting(true);
     try {
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'security', 'deny_request', String(id));
       await reviewRequest(id, { status: "denied", reviewer_notes: reviewerNotes || undefined });
       setDenyingId(null);
       setReviewerNotes("");

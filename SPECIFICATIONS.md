@@ -22,6 +22,7 @@ The frontend is organized around persona-based workflows, accessible via a sideb
 - **Settings** — Manage display preferences (theme, timezone). Accessible to all scopes.
 - **MCP Servers** — Register and manage MCP servers, view available tools, and control persona access.
 - **A2A Agents** — Register and manage A2A (Agent-to-Agent) protocol integrations, view Agent Cards, and control persona access to skills.
+- **Admin Dashboard** — Platform usage analytics for super-admins. Tracks user logins, user actions, and page navigation at the browser session level. Includes summary cards, charts, and per-session drill-down.
 
 ---
 
@@ -54,7 +55,8 @@ loom/
 │   │   │   ├── memory.py
 │   │   │   ├── mcp.py
 │   │   │   ├── a2a.py
-│   │   │   └── tag_profile.py
+│   │   │   ├── tag_profile.py
+│   │   │   └── audit.py
 │   │   ├── dependencies/
 │   │   │   └── auth.py
 │   │   ├── routers/
@@ -69,6 +71,7 @@ loom/
 │   │   │   ├── security.py
 │   │   │   ├── settings.py
 │   │   │   ├── traces.py
+│   │   │   ├── admin.py
 │   │   │   └── utils.py
 │   │   └── services/
 │   │       ├── agentcore.py
@@ -179,7 +182,7 @@ The frontend enforces scope-based access control derived from Cognito group memb
 
 | Group | Scopes | Sidebar Access | Write Access |
 |-------|--------|----------------|--------------|
-| `g-admins-super` | All 19 scopes | All pages | All actions |
+| `g-admins-super` | All 19 scopes | All pages (including Admin Dashboard) | All actions |
 | `g-admins-demo` | catalog:read, agent:read, agent:write, memory:read, memory:write, security:read, settings:read, tagging:read, costs:read, costs:write, mcp:read, a2a:read, invoke | All admin pages | Read/write restricted to demo group resources only |
 | `g-admins-security` | security:read, security:write, settings:read, tagging:read, tagging:write | Security, Settings, Tagging | Security + tag policy/profile management |
 | `g-admins-memory` | memory:read, memory:write, settings:read, tagging:read, tagging:write | Memory, Settings, Tagging | Memory + tag policy/profile management |
@@ -443,7 +446,14 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - `InvocationDetailPage` extended with Traces tab showing traces scoped to that session.
 - 12 backend tests covering trace router endpoints (7) and OTEL log parsing (5), including string body handling and input/output splitting.
 
-### Phase 17 — Advanced Operations
+### Phase 17 — Admin Dashboard and UX Enhancements *(Complete)*
+- **Admin Dashboard global user filter:** Multi-select dropdown in the dashboard header allowing super-admins to selectively include/exclude specific users from all reporting. When a filter is active, summary cards (Total Logins, Total Page Views, Total Actions, Total Duration, Most Active Page), charts (Logins Over Time, Actions Over Time, Page Views), and all tab tables (Sessions, Actions, Page Views) are recomputed client-side from the filtered data. When no users are selected, all data is shown as before.
+- **Table column consistency:** Agent and memory tables updated to reduce Status column to 10% and add an Estimated Cost column at 12%. MCP Server and A2A Agent tables aligned to a consistent 5-column structure: Name (18%), Endpoint/URL (46%), Transport/Version (10%), Auth (10%), Created (16%). A2A tables removed the Provider and Status columns to match the MCP structure. All column widths sum to 100% across Catalog, standalone MCP Servers, and A2A Agents pages.
+- **Tag visibility at CREATING status:** Agent tags are now applied to the DB record immediately after initial record creation (before the background deployment task begins). This ensures tag-based resource filtering (e.g., demo users filtered by `loom:group`) can see agents from the moment they appear in CREATING status.
+- **Logout sessionStorage cleanup:** On logout, all `loom:invokePrompt:*` keys are cleared from `sessionStorage` so per-agent prompt drafts do not persist across sessions.
+- **Deploy flow:** Reverted to fire-and-forget pattern where the form collapses immediately and the real agent card appears once the DB record is created. Removed the ephemeral pending-card approach in favor of the direct DB-record polling flow.
+
+### Phase 18 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

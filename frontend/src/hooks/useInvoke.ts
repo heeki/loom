@@ -121,6 +121,13 @@ function _cancel(agentId: number) {
   _update(agentId, { isStreaming: false });
 }
 
+export function clearInvokeState(agentId: number) {
+  _controllers.get(agentId)?.abort();
+  _state.delete(agentId);
+  _controllers.delete(agentId);
+  _listeners.delete(agentId);
+}
+
 // ---------------------------------------------------------------------------
 // React hook — subscribes to the module-level store for a given agentId.
 // The stream runs independently of component lifecycle.

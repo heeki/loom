@@ -1,30 +1,46 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PolicyViewer } from "@/components/PolicyViewer";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "@/components/SortableCardGrid";
 import { useManagedRoles } from "@/hooks/useSecurity";
 import { ChevronDown, ChevronRight, Trash2, Plus } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { trackAction } from "@/api/audit";
+import * as settingsApi from "@/api/settings";
+import type { TagProfile } from "@/api/types";
 
 export function RoleManagementPanel({ readOnly }: { readOnly?: boolean }) {
+  const { user, browserSessionId } = useAuth();
   const { roles, loading, error, createRole, deleteRole } = useManagedRoles();
   const [showAddForm, setShowAddForm] = useState(false);
   const [importArn, setImportArn] = useState("");
+  const [tagProfiles, setTagProfiles] = useState<TagProfile[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState<string>("");
   const [expandedRoleId, setExpandedRoleId] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [sortDir, setSortDir] = useState<SortDirection>(() => loadSortDirection("security-roles"));
 
+  useEffect(() => {
+    void settingsApi.listTagProfiles().then(setTagProfiles).catch(() => {});
+  }, []);
+
   const handleCreate = async () => {
-    if (!importArn.trim()) return;
+    if (!importArn.trim() || !selectedProfileId) return;
     setSubmitting(true);
     try {
-      await createRole({ mode: "import", role_arn: importArn.trim() });
+      const profile = tagProfiles.find((p) => p.id.toString() === selectedProfileId);
+      const tags = profile?.tags ?? {};
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'security', 'add_role', importArn.trim());
+      await createRole({ mode: "import", role_arn: importArn.trim(), tags });
       setImportArn("");
+      setSelectedProfileId("");
       setShowAddForm(false);
       toast.success("Role added");
     } catch (e) {
@@ -37,6 +53,8 @@ export function RoleManagementPanel({ readOnly }: { readOnly?: boolean }) {
   const handleDelete = async (id: number) => {
     setSubmitting(true);
     try {
+      const roleName = roles.find(r => r.id === id)?.role_name ?? String(id);
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'security', 'delete_role', roleName);
       await deleteRole(id);
       setConfirmDeleteId(null);
       toast.success("Role deleted");
@@ -85,7 +103,15 @@ export function RoleManagementPanel({ readOnly }: { readOnly?: boolean }) {
                 onChange={(e) => setImportArn(e.target.value)}
                 className="flex-1"
               />
-              <Button size="sm" onClick={handleCreate} disabled={submitting || !importArn.trim()}>
+              <div className="w-48 shrink-0">
+                <SearchableSelect
+                  options={tagProfiles.map((p) => ({ value: p.id.toString(), label: p.name }))}
+                  value={selectedProfileId}
+                  onValueChange={setSelectedProfileId}
+                  placeholder="Tag profile (required)"
+                />
+              </div>
+              <Button size="sm" onClick={handleCreate} disabled={submitting || !importArn.trim() || !selectedProfileId}>
                 {submitting ? "Importing..." : "Import"}
               </Button>
             </div>

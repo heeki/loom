@@ -375,10 +375,11 @@ def _resolve_tags(
     for p in policies:
         if p.key in user_tags:
             resolved[p.key] = user_tags[p.key]
-        elif p.default_value:
-            resolved[p.key] = p.default_value
         elif p.required:
-            missing.append(p.key)
+            if p.default_value:
+                resolved[p.key] = p.default_value
+            else:
+                missing.append(p.key)
 
     if missing:
         raise HTTPException(
@@ -459,6 +460,15 @@ def create_agent(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Demo admins can only create agents in the 'demo' group"
+            )
+
+    # Enforce demo user restrictions: name must start with "demo_"
+    if "g-users-demo" in user.groups:
+        name = request.name or ""
+        if not name.startswith("demo_"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Demo users must prefix agent names with 'demo_'",
             )
 
     if request.source == "register":
@@ -560,11 +570,8 @@ def _register_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
     # Enforce tag policies: add missing required tags with value "missing"
     policies = db.query(TagPolicy).all()
     for p in policies:
-        if p.key not in aws_tags:
-            if p.default_value:
-                aws_tags[p.key] = p.default_value
-            elif p.required:
-                aws_tags[p.key] = "missing"
+        if p.key not in aws_tags and p.required:
+            aws_tags[p.key] = p.default_value if p.default_value else "missing"
 
     if aws_tags:
         agent.set_tags(aws_tags)
@@ -722,6 +729,13 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
     db.add(agent)
     db.commit()
     db.refresh(agent)
+
+    # Apply resolved tags immediately so tag-based filtering (e.g. demo user
+    # group restriction) sees the agent as soon as it enters CREATING status.
+    if resolved_tags:
+        agent.set_tags(resolved_tags)
+        db.commit()
+        db.refresh(agent)
 
     agent_id = agent.id
     response_data = AgentResponse(**agent.to_dict(), active_session_count=0)

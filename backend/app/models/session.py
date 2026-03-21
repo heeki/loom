@@ -18,6 +18,7 @@ class InvocationSession(Base):
     qualifier = Column(String, nullable=False)
     status = Column(String, nullable=False, default="pending")  # pending, streaming, complete, error
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    user_id = Column(String, nullable=True, index=True)
 
     # Relationships
     agent = relationship("Agent", back_populates="sessions")
@@ -31,5 +32,6 @@ class InvocationSession(Base):
             "qualifier": self.qualifier,
             "status": self.status,
             "created_at": (self.created_at.isoformat() + "Z") if self.created_at else None,
+            "user_id": self.user_id,
             "invocations": [inv.to_dict() for inv in self.invocations] if self.invocations else [],
         }

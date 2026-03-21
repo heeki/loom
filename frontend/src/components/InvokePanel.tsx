@@ -26,11 +26,12 @@ interface InvokePanelProps {
   isStreaming: boolean;
   modelId?: string | null;
   authorizerName?: string;
+  currentUserId?: string;
   onInvoke: (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string) => void;
   onCancel: () => void;
 }
 
-export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelId, authorizerName, onInvoke, onCancel }: InvokePanelProps) {
+export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelId, authorizerName, currentUserId, onInvoke, onCancel }: InvokePanelProps) {
   const promptKey = `loom:invokePrompt:${agentId}`;
   const [prompt, setPrompt] = useState(() => sessionStorage.getItem(promptKey) ?? "");
 
@@ -69,20 +70,52 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
     return () => { cancelled = true; };
   }, []);
 
-  // Filter sessions that match the selected qualifier and are not expired
+  // Filter sessions that match the selected qualifier, are not expired,
+  // and belong to the current user (or have no owner recorded yet)
   const matchingSessions = sessions.filter(
-    (s) => s.qualifier === qualifier && s.live_status !== "expired"
+    (s) => s.qualifier === qualifier &&
+      s.live_status !== "expired" &&
+      (!s.user_id || !currentUserId || s.user_id === currentUserId)
   );
 
-  // Auto-select the newest session after an invocation creates one
-  const prevSessionIdsRef = useRef<Set<string>>(new Set(matchingSessions.map((s) => s.session_id)));
+  // Track the baseline session IDs so we can detect genuinely new ones
+  const prevSessionIdsRef = useRef<Set<string>>(new Set<string>());
+  // True until the first session batch for this agent has been seen
+  const initialLoadDoneRef = useRef(false);
+
+  // Reset state when the agent changes
   useEffect(() => {
+    setSelectedSession(NEW_SESSION);
+    prevSessionIdsRef.current = new Set();
+    initialLoadDoneRef.current = false;
+  }, [agentId]);
+
+  // Auto-select only a genuinely new session (created by an invocation), not
+  // sessions that were already there when the component first rendered.
+  useEffect(() => {
+    if (!initialLoadDoneRef.current) {
+      // First batch: populate the baseline without triggering auto-select
+      prevSessionIdsRef.current = new Set(matchingSessions.map((s) => s.session_id));
+      initialLoadDoneRef.current = true;
+      return;
+    }
     const prevIds = prevSessionIdsRef.current;
     const newSession = matchingSessions.find((s) => !prevIds.has(s.session_id));
     if (newSession && selectedSession === NEW_SESSION) {
       setSelectedSession(newSession.session_id);
     }
     prevSessionIdsRef.current = new Set(matchingSessions.map((s) => s.session_id));
+  }, [matchingSessions, selectedSession]);
+
+  // If the currently selected session expires and is filtered out, reset to NEW_SESSION
+  useEffect(() => {
+    if (
+      selectedSession !== NEW_SESSION &&
+      matchingSessions.length > 0 &&
+      !matchingSessions.some((s) => s.session_id === selectedSession)
+    ) {
+      setSelectedSession(NEW_SESSION);
+    }
   }, [matchingSessions, selectedSession]);
 
   const handleSubmit = (e: React.FormEvent) => {

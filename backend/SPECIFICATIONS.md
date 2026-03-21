@@ -61,6 +61,7 @@ backend/
 │   │   ├── tag_policy.py    # TagPolicy ORM model (configurable resource tagging)
 │   │   ├── tag_profile.py   # TagProfile ORM model (named tag presets)
 │   │   ├── site_setting.py    # SiteSetting ORM model (configurable site-wide settings)
+│   │   └── audit.py         # Audit ORM models: AuditLogin, AuditAction, AuditPageView
 │   ├── dependencies/
 │   │   ├── __init__.py
 │   │   └── auth.py          # Auth dependencies (get_current_user, require_scopes, UserInfo)
@@ -76,6 +77,7 @@ backend/
 │   │   ├── memories.py      # Memory resource CRUD + strategy mapping
 │   │   ├── mcp.py           # MCP server CRUD, tools, access control
 │   │   ├── security.py      # Security admin: roles, authorizers, credentials, permissions
+│   │   ├── admin.py         # Admin audit API: login/action/pageview tracking, session aggregation, summary
 │   │   └── utils.py         # Shared router utilities (get_agent_or_404)
 │   └── services/
 │       ├── agentcore.py     # Bedrock AgentCore API wrapper
@@ -108,7 +110,8 @@ backend/
 │   ├── test_mcp.py          # MCP server CRUD, tools, access control tests
 │   ├── test_scopes.py       # Scope enforcement and GROUP_SCOPES mapping tests
 │   ├── test_tags.py         # Tag policy, tag profile, and tag enforcement tests
-│   └── test_traces.py       # Trace router + OTEL parsing tests (12 tests)
+│   ├── test_traces.py       # Trace router + OTEL parsing tests (12 tests)
+│   └── test_admin_audit.py  # Admin audit router tests (14 tests: login, action, pageview, sessions, summary)
 ├── etc/
 │   └── environment.sh.example  # Example environment configuration template
 ├── makefile
@@ -385,6 +388,38 @@ Each session contains one or more invocations. Timing measurements and latency d
 | `key` | TEXT UNIQUE NOT NULL | Setting key (e.g., `cpu_io_wait_discount`) |
 | `value` | TEXT NOT NULL | Setting value |
 | `updated_at` | DATETIME | Last update timestamp |
+
+### `audit_login` table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | Internal ID |
+| `user_id` | TEXT NOT NULL | Cognito username (e.g. `admin`, `demo-user`) |
+| `browser_session_id` | TEXT NOT NULL | Client-generated UUID identifying a unique browser session |
+| `logged_in_at` | DATETIME NOT NULL | UTC timestamp of login (server default) |
+
+### `audit_action` table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | Internal ID |
+| `user_id` | TEXT NOT NULL | Cognito username |
+| `browser_session_id` | TEXT NOT NULL | Browser session UUID |
+| `action_category` | TEXT NOT NULL | Resource category: `agent`, `memory`, `security`, `tagging`, `mcp`, `a2a` |
+| `action_type` | TEXT NOT NULL | Action name: `deploy`, `invoke`, `import`, `create`, `edit`, `delete`, `add_role`, `approve_request`, `deny_request`, `test_connection`, `invoke_tool`, `update_permissions`, etc. |
+| `resource_name` | TEXT | Name or identifier of the affected resource (nullable) |
+| `performed_at` | DATETIME NOT NULL | UTC timestamp of the action (server default) |
+
+### `audit_page_view` table
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK AUTOINCREMENT | Internal ID |
+| `user_id` | TEXT NOT NULL | Cognito username |
+| `browser_session_id` | TEXT NOT NULL | Browser session UUID |
+| `page_name` | TEXT NOT NULL | Persona/page visited: `catalog`, `agents`, `memory`, `security`, `tagging`, `mcp`, `a2a`, `costs`, `settings`, `admin` |
+| `entered_at` | DATETIME NOT NULL | UTC timestamp when the user navigated to this page |
+| `duration_seconds` | INTEGER | Time spent on the page in seconds (nullable; null if tab was closed without navigating away) |
 
 ---
 
@@ -837,6 +872,22 @@ Current site settings:
 | `GET` | `/api/agents/{agent_id}/sessions/{session_id}/traces` | List traces for a session. Fetches all OTEL log records from the `otel-rt-logs` CloudWatch stream (single fetch, no filter), then filters by `session.id` attribute in Python. Returns trace summaries with trace ID, start/end time ISO, duration, span count, and event count. |
 | `GET` | `/api/agents/{agent_id}/traces/{trace_id}` | Get full trace detail. Fetches OTEL log records filtered by trace ID. Returns the trace ID and a list of spans, each with span ID, scopes, start/end times, duration, and a list of events (observed time, severity, scope, body). Bodies with both `input` and `output` keys are split into separate events. |
 
+### Admin Audit
+
+All endpoints require `security:read` scope (super-admins and demo-admins only).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/admin/audit/login` | Record a user login event. Body: `{user_id, browser_session_id}`. |
+| `GET` | `/api/admin/audit/logins` | List login events. Query params: `user_id`, `start_date`, `end_date`, `limit` (default 100), `offset` (default 0). |
+| `POST` | `/api/admin/audit/action` | Record a user action event. Body: `{user_id, browser_session_id, action_category, action_type, resource_name?}`. |
+| `GET` | `/api/admin/audit/actions` | List action events. Query params: `user_id`, `browser_session_id`, `action_category`, `action_type`, `start_date`, `end_date`, `limit`, `offset`. |
+| `POST` | `/api/admin/audit/pageview` | Record a page view event. Body: `{user_id, browser_session_id, page_name, entered_at, duration_seconds?}`. |
+| `GET` | `/api/admin/audit/pageviews` | List page view events. Query params: `user_id`, `browser_session_id`, `page_name`, `start_date`, `end_date`, `limit`, `offset`. |
+| `GET` | `/api/admin/audit/sessions` | List browser sessions with aggregated counts. Returns `{browser_session_id, user_id, logged_in_at, action_count, page_view_count, last_activity_at}`. Query params: `user_id`, `start_date`, `end_date`. |
+| `GET` | `/api/admin/audit/sessions/{browser_session_id}/timeline` | Interleaved chronological event feed for a single browser session (logins, actions, and page views). |
+| `GET` | `/api/admin/audit/summary` | Aggregated metrics. Query params: `start_date`, `end_date`. Returns `{total_logins, active_users, total_actions, actions_by_category, page_views_by_page, logins_by_day, actions_by_day}`. |
+
 ---
 
 ## 7. Service Modules
@@ -994,7 +1045,7 @@ Wraps `boto3.client('bedrock-agentcore-control')` for memory operations:
 Deployment runs asynchronously via FastAPI `BackgroundTasks` with progressive `deployment_status` updates:
 
 1. User submits a deploy form with agent configuration (model and IAM role are required).
-2. Backend creates the agent record with `deployment_status="initializing"` and returns immediately with HTTP 202.
+2. Backend creates the agent record with `deployment_status="initializing"`, immediately applies resolved tags to the DB record (so tag-based resource filtering is active from the first poll), and returns immediately with HTTP 202.
 3. Background task progresses through deployment phases:
    - **`creating_credentials`**: For each MCP server or A2A agent with OAuth2 auth, calls `create_oauth2_credential_provider` (vendor=`CustomOauth2`, using `discoveryUrl` from config) with exponential backoff retry. Stores credential provider names in `AGENT_CONFIG_JSON` under `integrations.mcp_servers[].auth.credential_provider_name` or `integrations.a2a_agents[].auth.credential_provider_name`. If credential provider creation fails after all retries, sets `deployment_status="credential_creation_failed"` and returns without deploying.
    - **`creating_role`**: Creates or validates the IAM execution role (if needed).

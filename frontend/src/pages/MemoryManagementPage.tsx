@@ -6,10 +6,11 @@ interface MemoryManagementPageProps {
   onViewModeChange: (mode: "cards" | "table") => void;
   readOnly?: boolean;
   groupRestriction?: string;
+  ownerRestriction?: string;
   userGroups?: string[];
 }
 
-export function MemoryManagementPage({ viewMode, onViewModeChange, readOnly, groupRestriction, userGroups = [] }: MemoryManagementPageProps) {
+export function MemoryManagementPage({ viewMode, onViewModeChange, readOnly, groupRestriction, ownerRestriction, userGroups = [] }: MemoryManagementPageProps) {
 
   return (
     <div className="space-y-6">
@@ -41,7 +42,7 @@ export function MemoryManagementPage({ viewMode, onViewModeChange, readOnly, gro
           </button>
         </div>
       </div>
-      <MemoryManagementPanel viewMode={viewMode} readOnly={readOnly} groupRestriction={groupRestriction} userGroups={userGroups} />
+      <MemoryManagementPanel viewMode={viewMode} readOnly={readOnly} groupRestriction={groupRestriction} ownerRestriction={ownerRestriction} userGroups={userGroups} />
     </div>
   );
 }

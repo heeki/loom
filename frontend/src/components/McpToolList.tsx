@@ -5,6 +5,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, RefreshCw, ChevronRight, ChevronDown, Play, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { trackAction } from "@/api/audit";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { getServerTools, refreshServerTools, invokeServerTool } from "@/api/mcp";
@@ -42,6 +44,7 @@ interface McpToolListProps {
 
 export function McpToolList({ serverId, readOnly }: McpToolListProps) {
   const { timezone } = useTimezone();
+  const { user, browserSessionId } = useAuth();
   const [tools, setTools] = useState<McpTool[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -69,6 +72,7 @@ export function McpToolList({ serverId, readOnly }: McpToolListProps) {
   }, [fetchTools]);
 
   const handleRefresh = async () => {
+    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'mcp', 'test_connection', String(serverId));
     setRefreshing(true);
     try {
       const data = await refreshServerTools(serverId);
@@ -114,6 +118,7 @@ export function McpToolList({ serverId, readOnly }: McpToolListProps) {
       }
     }
     parsedArgs = coerceArgs(parsedArgs, selectedTool.input_schema);
+    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'mcp', 'invoke_tool', selectedTool.tool_name);
     setInvoking(true);
     setInvokeResult(null);
     try {

@@ -32,29 +32,30 @@ GROUP_SCOPES: dict[str, list[str]] = {
         "settings:read", "settings:write", "tagging:read", "tagging:write",
         "costs:read", "costs:write",
         "mcp:read", "mcp:write", "a2a:read", "a2a:write", "invoke",
+        "admin:read", "admin:write",
     ],
     "g-admins-demo": [
         "catalog:read", "agent:read", "agent:write", "memory:read", "memory:write",
-        "security:read", "settings:read", "tagging:read", "costs:read", "costs:write",
+        "security:read", "settings:read", "settings:write", "tagging:read", "costs:read", "costs:write",
         "mcp:read", "a2a:read", "invoke",
     ],
     "g-admins-security": [
-        "security:read", "security:write", "settings:read", "tagging:read", "tagging:write",
+        "security:read", "security:write", "settings:read", "settings:write", "tagging:read",
     ],
     "g-admins-memory": [
-        "memory:read", "memory:write", "settings:read", "tagging:read", "tagging:write",
+        "memory:read", "memory:write", "settings:read", "settings:write", "tagging:read",
     ],
     "g-admins-mcp": [
-        "mcp:read", "mcp:write", "settings:read", "tagging:read", "tagging:write",
+        "mcp:read", "mcp:write", "settings:read", "settings:write", "tagging:read",
     ],
     "g-admins-a2a": [
-        "a2a:read", "a2a:write", "settings:read", "tagging:read", "tagging:write",
+        "a2a:read", "a2a:write", "settings:read", "settings:write", "tagging:read",
     ],
 
     # User groups (t-user users - can have multiple)
-    "g-users-demo": ["catalog:read", "agent:read", "memory:read", "costs:read", "costs:write", "invoke"],
-    "g-users-test": ["catalog:read", "agent:read", "memory:read", "costs:read", "costs:write", "invoke"],
-    "g-users-strategics": ["catalog:read", "agent:read", "memory:read", "costs:read", "costs:write", "invoke"],
+    "g-users-demo": ["catalog:read", "agent:read", "agent:write", "memory:read", "memory:write", "costs:read", "costs:write", "mcp:read", "a2a:read", "invoke"],
+    "g-users-test": ["catalog:read", "agent:read", "agent:write", "memory:read", "memory:write", "costs:read", "costs:write", "mcp:read", "a2a:read", "invoke"],
+    "g-users-strategics": ["catalog:read", "agent:read", "agent:write", "memory:read", "memory:write", "costs:read", "costs:write", "mcp:read", "a2a:read", "invoke"],
 }
 
 ALL_SCOPES: set[str] = {s for scopes in GROUP_SCOPES.values() for s in scopes}
@@ -84,6 +85,8 @@ oauth2_scheme = OAuth2AuthorizationCodeBearer(
         "mcp:write": "Write MCP",
         "a2a:read": "Read A2A",
         "a2a:write": "Write A2A",
+        "admin:read": "View admin dashboard",
+        "admin:write": "Manage admin settings",
         "invoke": "Invoke agents",
     },
     auto_error=False,

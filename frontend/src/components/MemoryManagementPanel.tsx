@@ -28,6 +28,8 @@ import { statusVariant } from "@/lib/status";
 import { listMemories, createMemory, importMemory, refreshMemory, deleteMemory, purgeMemory } from "@/api/memories";
 import { listTagPolicies, listTagProfiles } from "@/api/settings";
 import { ApiError } from "@/api/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { trackAction } from "@/api/audit";
 import type { MemoryResponse, MemoryStrategyRequest, TagPolicy, TagProfile } from "@/api/types";
 import { MemoryCard } from "./MemoryCard";
 import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "./SortableCardGrid";
@@ -89,11 +91,13 @@ interface MemoryManagementPanelProps {
   viewMode: "cards" | "table";
   readOnly?: boolean;
   groupRestriction?: string;
+  ownerRestriction?: string;
   userGroups?: string[];
 }
 
-export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, userGroups = [] }: MemoryManagementPanelProps) {
+export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, ownerRestriction, userGroups = [] }: MemoryManagementPanelProps) {
   const { timezone } = useTimezone();
+  const { user, browserSessionId } = useAuth();
   const [memories, setMemories] = useState<MemoryResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -257,6 +261,7 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, us
             }))
           : undefined;
 
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'memory', 'create', formName.trim());
       const created = await createMemory({
         name: formName.trim(),
         description: formDescription.trim() || undefined,
@@ -282,6 +287,7 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, us
     if (!importMemoryId.trim()) return;
     setSubmitting(true);
     try {
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'memory', 'import', importMemoryId.trim());
       await importMemory(importMemoryId.trim());
       resetForm();
       setShowAddForm(false);
@@ -310,6 +316,8 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, us
   const handleDelete = async (id: number, deleteInAws: boolean) => {
     setSubmitting(true);
     try {
+      const memName = memories.find(m => m.id === id)?.name ?? String(id);
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'memory', 'delete', memName);
       const updated = await deleteMemory(id, deleteInAws);
       if (updated.status === "DELETING") {
         // Async deletion — update local state so polling picks it up
@@ -494,7 +502,7 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, us
                     const result: Record<string, unknown> = {};
                     if (formName) result.name = formName;
                     if (formDescription) result.description = formDescription;
-                    if (formExpiryDays !== 7) result.event_expiry_duration = formExpiryDays;
+                    result.event_expiry_duration = formExpiryDays;
                     if (selectedTagProfileId) {
                       const profile = tagProfiles.find((p) => p.id.toString() === selectedTagProfileId);
                       if (profile) result.tags = profile.name;
@@ -551,7 +559,7 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, us
                 </div>
 
                 {/* Resource Tags */}
-                <ResourceTagFields onChange={setTagValues} profileId={selectedTagProfileId} groupRestriction={groupRestriction} />
+                <ResourceTagFields onChange={setTagValues} profileId={selectedTagProfileId} groupRestriction={groupRestriction} ownerRestriction={ownerRestriction} />
 
                 {/* Long-Term Strategies */}
                 <div className="space-y-2">
@@ -834,11 +842,12 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, us
               <Table className="table-fixed">
                 <TableHeader>
                   <TableRow className="bg-card hover:bg-card">
-                    <SortableTableHead column="name" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[30%]">Name</SortableTableHead>
-                    <SortableTableHead column="status" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[12%]">Status</SortableTableHead>
-                    <SortableTableHead column="strategies" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[14%]">Strategies</SortableTableHead>
-                    <SortableTableHead column="expiry" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[14%]">Event Expiry</SortableTableHead>
-                    <SortableTableHead column="region" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[14%]">Region</SortableTableHead>
+                    <SortableTableHead column="name" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[26%]">Name</SortableTableHead>
+                    <SortableTableHead column="status" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[10%]">Status</SortableTableHead>
+                    <SortableTableHead column="cost" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[12%]">Cost</SortableTableHead>
+                    <SortableTableHead column="strategies" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[12%]">Strategies</SortableTableHead>
+                    <SortableTableHead column="expiry" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[12%]">Event Expiry</SortableTableHead>
+                    <SortableTableHead column="region" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[12%]">Region</SortableTableHead>
                     <SortableTableHead column="registered" activeColumn={memoryTableCol} direction={memoryTableDir} onSort={handleMemoryTableSort} className="w-[16%]">Registered</SortableTableHead>
                   </TableRow>
                 </TableHeader>
@@ -846,6 +855,7 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, us
                   {sortRows(filteredMemories, memoryTableCol, memoryTableDir, {
                     name: (m) => m.name,
                     status: (m) => m.status,
+                    cost: (m) => m.cost_summary?.total_memory_estimated_cost ?? 0,
                     strategies: (m) => Array.isArray(m.strategies_config) ? m.strategies_config.length : Array.isArray(m.strategies_response) ? m.strategies_response.length : 0,
                     expiry: (m) => m.event_expiry_duration,
                     region: (m) => m.region ?? "",
@@ -867,6 +877,13 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, us
                             </>
                           )}
                         </div>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {mem.cost_summary && mem.cost_summary.total_memory_estimated_cost > 0
+                          ? (mem.cost_summary.total_memory_estimated_cost < 0.01
+                              ? `~$${mem.cost_summary.total_memory_estimated_cost.toFixed(6)}`
+                              : `~$${mem.cost_summary.total_memory_estimated_cost.toFixed(4)}`)
+                          : "\u2014"}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {strategiesCount(mem)}

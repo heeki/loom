@@ -93,6 +93,7 @@ class SessionResponse(BaseModel):
     status: str
     live_status: str
     created_at: str | None
+    user_id: str | None = None
     invocations: List[InvocationResponse]
 
 
@@ -444,6 +445,7 @@ async def invoke_agent_stream(
     prompt: str,
     access_token: str | None = None,
     token_source: str | None = None,
+    actor_id: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Invoke the agent and yield SSE events as the response streams.
@@ -508,6 +510,7 @@ async def invoke_agent_stream(
             prompt=prompt,
             region=region,
             access_token=access_token,
+            actor_id=actor_id,
         )
 
         # Stream chunks to frontend. Each next() call on the synchronous
@@ -788,6 +791,12 @@ async def invoke_agent_endpoint(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Qualifier mismatch: session uses '{session.qualifier}', request uses '{request_body.qualifier}'"
             )
+        # Enforce session ownership: only the original invoker may reuse a session
+        if session.user_id and session.user_id != user.username:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You cannot invoke in a session created by another user",
+            )
         session.status = "pending"
         db.commit()
     else:
@@ -797,6 +806,7 @@ async def invoke_agent_endpoint(
             qualifier=request_body.qualifier,
             status="pending",
             created_at=datetime.utcnow(),
+            user_id=user.username,
         )
         db.add(session)
         db.commit()
@@ -887,7 +897,7 @@ async def invoke_agent_endpoint(
 
     # Return streaming response
     return StreamingResponse(
-        invoke_agent_stream(agent, session, invocation, db, client_invoke_time, request_body.prompt, access_token, token_source),
+        invoke_agent_stream(agent, session, invocation, db, client_invoke_time, request_body.prompt, access_token, token_source, user.username or user.sub or "loom-agent"),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

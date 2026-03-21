@@ -12,6 +12,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { trackAction } from "@/api/audit";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { useA2aAgents } from "@/hooks/useA2aAgents";
@@ -30,6 +32,7 @@ interface A2aAgentsPageProps {
 
 export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgentsPageProps) {
   const { timezone } = useTimezone();
+  const { user, browserSessionId } = useAuth();
   const { agents, loading, createAgent, updateAgent, deleteAgent, refreshCard } = useA2aAgents();
   const [showAddForm, setShowAddForm] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
@@ -55,6 +58,7 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
 
   const handleCreate = async (data: A2aAgentCreateRequest) => {
     try {
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'a2a', 'add_agent', data.name);
       await createAgent(data);
       setShowAddForm(false);
     } catch (e) {
@@ -74,6 +78,8 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
 
   const handleDelete = async (id: number) => {
     try {
+      const agentName = agents.find(a => a.id === id)?.name ?? String(id);
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'a2a', 'delete_agent', agentName);
       await deleteAgent(id);
       setConfirmingDeleteId(null);
       if (selectedAgentId === id) setSelectedAgentId(null);
@@ -84,6 +90,7 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
 
   const handleRefresh = async () => {
     if (!selectedAgent) return;
+    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'a2a', 'test_connection', selectedAgent.name);
     setRefreshing(true);
     try {
       await refreshCard(selectedAgent.id);
@@ -333,12 +340,11 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
           <Table className="table-fixed">
             <TableHeader>
               <TableRow className="bg-card hover:bg-card">
-                <SortableTableHead column="name" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[25%]">Name</SortableTableHead>
-                <SortableTableHead column="url" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[30%]">URL</SortableTableHead>
+                <SortableTableHead column="name" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[18%]">Name</SortableTableHead>
+                <SortableTableHead column="url" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[46%]">URL</SortableTableHead>
                 <SortableTableHead column="version" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[10%]">Version</SortableTableHead>
-                <SortableTableHead column="provider" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[15%]">Provider</SortableTableHead>
                 <SortableTableHead column="auth" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[10%]">Auth</SortableTableHead>
-                <SortableTableHead column="created" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[10%]">Created</SortableTableHead>
+                <SortableTableHead column="created" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[16%]">Created</SortableTableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -346,7 +352,6 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
                 name: (a) => a.name,
                 url: (a) => a.base_url,
                 version: (a) => a.agent_version,
-                provider: (a) => a.provider_organization ?? "",
                 auth: (a) => a.auth_type,
                 created: (a) => a.created_at ?? "",
               }).map((agent) => (
@@ -358,7 +363,6 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
                   <TableCell className="font-medium text-sm">{agent.name}</TableCell>
                   <TableCell className="text-xs text-muted-foreground truncate">{agent.base_url}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{agent.agent_version}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{agent.provider_organization ?? "-"}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{agent.auth_type === "oauth2" ? "OAuth2" : "None"}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {formatTimestamp(agent.created_at, timezone)}

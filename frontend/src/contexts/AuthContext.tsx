@@ -17,6 +17,7 @@ import {
   type CognitoAuthResult,
 } from "@/api/auth";
 import { setAuthToken, setOnUnauthorized } from "@/api/client";
+import { recordLogin } from "@/api/audit";
 
 interface CognitoUser {
   sub: string;
@@ -36,6 +37,7 @@ export type Scope =
   | "costs:read" | "costs:write"
   | "mcp:read" | "mcp:write"
   | "a2a:read" | "a2a:write"
+  | "admin:read" | "admin:write"
   | "invoke";
 
 const GROUP_SCOPES: Record<string, Scope[]> = {
@@ -50,29 +52,30 @@ const GROUP_SCOPES: Record<string, Scope[]> = {
     "settings:read", "settings:write", "tagging:read", "tagging:write",
     "costs:read", "costs:write",
     "mcp:read", "mcp:write", "a2a:read", "a2a:write", "invoke",
+    "admin:read", "admin:write",
   ],
   "g-admins-demo": [
     "catalog:read", "agent:read", "agent:write", "memory:read", "memory:write",
-    "security:read", "settings:read", "tagging:read", "costs:read", "costs:write",
+    "security:read", "settings:read", "settings:write", "tagging:read", "costs:read", "costs:write",
     "mcp:read", "a2a:read", "invoke",
   ],
   "g-admins-security": [
-    "security:read", "security:write", "settings:read", "tagging:read", "tagging:write",
+    "security:read", "security:write", "settings:read", "settings:write", "tagging:read",
   ],
   "g-admins-memory": [
-    "memory:read", "memory:write", "settings:read", "tagging:read", "tagging:write",
+    "memory:read", "memory:write", "settings:read", "settings:write", "tagging:read",
   ],
   "g-admins-mcp": [
-    "mcp:read", "mcp:write", "settings:read", "tagging:read", "tagging:write",
+    "mcp:read", "mcp:write", "settings:read", "settings:write", "tagging:read",
   ],
   "g-admins-a2a": [
-    "a2a:read", "a2a:write", "settings:read", "tagging:read", "tagging:write",
+    "a2a:read", "a2a:write", "settings:read", "settings:write", "tagging:read",
   ],
 
   // User groups (t-user users - can have multiple)
-  "g-users-demo": ["catalog:read", "agent:read", "memory:read", "costs:read", "costs:write", "invoke"],
-  "g-users-test": ["catalog:read", "agent:read", "memory:read", "costs:read", "costs:write", "invoke"],
-  "g-users-strategics": ["catalog:read", "agent:read", "memory:read", "costs:read", "costs:write", "invoke"],
+  "g-users-demo": ["catalog:read", "agent:read", "agent:write", "memory:read", "memory:write", "costs:read", "costs:write", "mcp:read", "a2a:read", "invoke"],
+  "g-users-test": ["catalog:read", "agent:read", "agent:write", "memory:read", "memory:write", "costs:read", "costs:write", "mcp:read", "a2a:read", "invoke"],
+  "g-users-strategics": ["catalog:read", "agent:read", "agent:write", "memory:read", "memory:write", "costs:read", "costs:write", "mcp:read", "a2a:read", "invoke"],
 };
 
 function deriveScopes(groups: string[]): Set<Scope> {
@@ -102,6 +105,7 @@ interface AuthContextValue {
     newPassword: string,
   ) => Promise<void>;
   logout: () => void;
+  browserSessionId: string | null;
 }
 
 const ALL_SCOPES = new Set<Scope>([
@@ -123,6 +127,7 @@ const AuthContext = createContext<AuthContextValue>({
   login: async () => ({}),
   completeNewPassword: async () => {},
   logout: () => {},
+  browserSessionId: null,
 });
 
 function decodeJwtPayload(token: string): Record<string, unknown> {
@@ -138,6 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<CognitoUser | null>(null);
   const [config, setConfig] = useState<AuthConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [browserSessionId, setBrowserSessionId] = useState<string | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tokensRef = useRef<AuthTokens | null>(null);
   tokensRef.current = tokens;
@@ -271,6 +277,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser({ sub: "unknown" });
         }
 
+        // Generate browser session ID and record login
+        const sessionId = crypto.randomUUID();
+        setBrowserSessionId(sessionId);
+        try {
+          const claims = decodeJwtPayload(newTokens.idToken);
+          const username = (claims["cognito:username"] as string) || (claims.sub as string);
+          recordLogin(username, sessionId).catch(() => {});
+        } catch {
+          // ignore
+        }
+
         scheduleRefresh(newTokens.accessToken, newTokens.refreshToken);
       }
     },
@@ -311,9 +328,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setTokens(null);
     setUser(null);
     setAuthToken(null);
+    setBrowserSessionId(null);
     if (refreshTimerRef.current) {
       clearTimeout(refreshTimerRef.current);
     }
+    // Clear per-agent invoke prompts stored in session storage
+    Object.keys(sessionStorage)
+      .filter((k) => k.startsWith("loom:invokePrompt:"))
+      .forEach((k) => sessionStorage.removeItem(k));
   }, []);
 
   // Cleanup timer on unmount
@@ -353,6 +375,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         completeNewPassword,
         logout,
+        browserSessionId,
       }}
     >
       {children}

@@ -1,6 +1,6 @@
 # Loom Backend
 
-FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, paginated CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, tag policy management, tag profile management, cost estimation dashboard, and actual runtime cost retrieval from CloudWatch usage logs.
+FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, paginated CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, tag policy management, tag profile management, cost estimation dashboard, actual runtime cost retrieval from CloudWatch usage logs, and admin audit tracking (login events, user actions, page views, per-session aggregation). Agent deploy applies resolved tags to the DB record immediately on creation so tag-based resource filtering (e.g., demo user group restrictions) is effective from CREATING status.
 
 ## Technology Stack
 
@@ -146,6 +146,7 @@ backend/
 │   │   ├── tag_policy.py    # TagPolicy ORM model (configurable tag policies)
 │   │   ├── tag_profile.py   # TagProfile ORM model (named tag presets)
 │   │   ├── site_setting.py    # SiteSetting ORM model (site-wide settings)
+│   │   └── audit.py           # AuditLogin, AuditAction, AuditPageView ORM models
 │   ├── dependencies/
 │   │   └── auth.py          # Auth dependencies (get_current_user, require_scopes, UserInfo)
 │   ├── routers/
@@ -160,6 +161,7 @@ backend/
 │   │   ├── settings.py      # Tag policy + tag profile CRUD (/api/settings/tags, /api/settings/tag-profiles)
 │   │   ├── costs.py          # Cost dashboard: estimates + runtime/memory actuals from CloudWatch
 │   │   ├── traces.py         # Trace retrieval: OTEL log parsing for trace summaries and span detail
+│   │   ├── admin.py          # Admin audit API: login/action/pageview tracking, sessions, summary
 │   │   └── utils.py         # Shared router utilities
 │   └── services/
 │       ├── agentcore.py     # boto3 wrapper: describe, list endpoints, invoke
@@ -259,6 +261,10 @@ Stores per-invocation timing measurements, token usage, cost breakdowns, and sta
 ### `site_settings`
 
 Stores configurable site-wide settings. Currently includes `cpu_io_wait_discount` (default 75%) which is applied universally to runtime CPU cost calculations.
+
+### `audit_login`, `audit_action`, `audit_page_view`
+
+Write-only audit tables populated by the frontend. `audit_login` records user login events with a `browser_session_id` (client-generated UUID) to distinguish concurrent sessions for shared accounts. `audit_action` records explicit user interactions (deploys, creates, deletes, etc.) with category, type, and optional resource name. `audit_page_view` records persona navigation with entry time and duration. Only the Admin Dashboard reads from these tables.
 
 ## API Endpoints
 
@@ -417,6 +423,22 @@ Agent list responses include a computed `active_session_count` field based on `L
 |--------|------|-------------|
 | `GET` | `/api/agents/{agent_id}/sessions/{session_id}/traces` | List traces for a session (parsed from OTEL log records in CloudWatch) |
 | `GET` | `/api/agents/{agent_id}/traces/{trace_id}` | Get full trace detail with per-span events |
+
+### Admin Audit
+
+Requires `security:read` scope (super-admins and demo-admins).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/admin/audit/login` | Record a user login event |
+| `GET` | `/api/admin/audit/logins` | List login events (filterable by user_id, date range) |
+| `POST` | `/api/admin/audit/action` | Record a user action event |
+| `GET` | `/api/admin/audit/actions` | List action events (filterable by user_id, session, category, type, date range) |
+| `POST` | `/api/admin/audit/pageview` | Record a page view event |
+| `GET` | `/api/admin/audit/pageviews` | List page view events (filterable by user_id, session, page name, date range) |
+| `GET` | `/api/admin/audit/sessions` | List browser sessions with aggregated action and page view counts |
+| `GET` | `/api/admin/audit/sessions/{browser_session_id}/timeline` | Interleaved event timeline for a browser session |
+| `GET` | `/api/admin/audit/summary` | Aggregated metrics: totals, by-category counts, by-page stats, daily series |
 
 ## Streaming Architecture
 

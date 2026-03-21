@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, Pencil, Trash2, Lock } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { trackAction } from "@/api/audit";
 import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "@/components/SortableCardGrid";
 import {
   listTagPolicies,
@@ -25,7 +27,10 @@ interface TaggingPageProps {
 }
 
 export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
+  const { user, browserSessionId } = useAuth();
   const isSuperAdmin = userGroups.includes("g-admins-super");
+  const isAdminUser = userGroups.includes("t-admin");
+  const userGroup = userGroups.find((g) => g.startsWith("g-users-"))?.replace("g-users-", "");
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
   const [profiles, setProfiles] = useState<TagProfile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -90,6 +95,7 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
     setSubmitting(true);
     try {
       if (editingPolicyId) {
+        if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'tagging', 'edit_tag', policyFormKey);
         const existing = tagPolicies.find((tp) => tp.id === editingPolicyId);
         await updateTagPolicy(editingPolicyId, {
           key: policyFormKey,
@@ -99,6 +105,7 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
         });
         toast.success("Tag policy updated");
       } else {
+        if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'tagging', 'add_tag', policyFormKey.trim());
         await createTagPolicy({
           key: policyFormKey.trim(),
           default_value: policyFormDefault || undefined,
@@ -118,6 +125,7 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
 
   const handlePolicyDelete = async (id: number) => {
     const policy = tagPolicies.find((tp) => tp.id === id);
+    if (policy && user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'tagging', 'delete_tag', policy.key);
     if (policy) {
       const usingProfiles = profiles.filter((p) => p.tags[policy.key]);
       if (usingProfiles.length > 0) {
@@ -189,9 +197,11 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
     setSubmitting(true);
     try {
       if (editingProfileId) {
+        if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'tagging', 'edit_profile', profileFormName.trim());
         await updateTagProfile(editingProfileId, { name: profileFormName.trim(), tags: finalTags });
         toast.success("Tag profile updated");
       } else {
+        if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'tagging', 'add_profile', profileFormName.trim());
         await createTagProfile({ name: profileFormName.trim(), tags: finalTags });
         toast.success("Tag profile created");
       }
@@ -207,6 +217,8 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
   const handleProfileDelete = async (id: number) => {
     setSubmitting(true);
     try {
+      const profileName = profiles.find(p => p.id === id)?.name ?? String(id);
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'tagging', 'delete_profile', profileName);
       await deleteTagProfile(id);
       setConfirmDeleteProfileId(null);
       toast.success("Tag profile deleted");
@@ -584,13 +596,17 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
           </Card>
         )}
 
-        {profiles.length === 0 && !showProfileForm ? (
+        {(() => {
+          const visibleProfiles = !isAdminUser && userGroup
+            ? profiles.filter((p) => p.tags?.["loom:group"] === userGroup)
+            : profiles;
+          return visibleProfiles.length === 0 && !showProfileForm ? (
           <p className="text-sm text-muted-foreground py-8">
             No tag profiles yet. Create one to apply consistent tags across agents and memory resources.
           </p>
         ) : (
           <SortableCardGrid
-            items={profiles}
+            items={visibleProfiles}
             getId={(p) => p.id.toString()}
             getName={(p) => p.name}
             storageKey="tag-profiles"
@@ -667,7 +683,8 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
             );
             }}
           />
-        )}
+        );
+        })()}
       </div>
     </div>
   );
