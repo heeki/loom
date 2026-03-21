@@ -62,7 +62,7 @@ Loom is an enterprise-grade platform for building, deploying, and operating AI a
 - Estimated cost column in agent and memory table views; consistent 5-column layout for MCP and A2A tables
 - Drag-to-reorder cards with persistent ordering
 - JSON import/export on deploy and create forms
-- 10 color themes (5 light, 5 dark) and timezone-aware timestamps
+- 12 color themes (6 light, 6 dark) with WCAG AA contrast compliance and two accessible High Contrast options (WCAG AAA)
 
 ## Project Structure
 
