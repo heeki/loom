@@ -453,7 +453,18 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - **Logout sessionStorage cleanup:** On logout, all `loom:invokePrompt:*` keys are cleared from `sessionStorage` so per-agent prompt drafts do not persist across sessions.
 - **Deploy flow:** Reverted to fire-and-forget pattern where the form collapses immediately and the real agent card appears once the DB record is created. Removed the ephemeral pending-card approach in favor of the direct DB-record polling flow.
 
-### Phase 18 — Advanced Operations
+### Phase 18 — End-User Chat Interface *(Complete)*
+- **End-user routing:** `App.tsx` detects the type group of the authenticated user (or admin in "View as" mode). Users in `t-user` (without `t-admin`) are routed to `ChatPage` instead of the admin layout. Admins can preview the end-user experience by selecting any `demo-user-*` or `test-user` in the "View as" dropdown.
+- **ChatPage layout:** Two-column layout — narrow left sidebar and main chat area, with an optional right memory panel. The sidebar contains: logo, agent picker (shown when multiple agents exist), "New Conversation" button, conversation history list, "My Memory" button (when agent has memory), and user info/logout.
+- **Agent filtering:** Agents are filtered by `loom:group` tag vs. the user's `g-users-*` group names. Agents with no group tag are visible to all users. A single accessible agent is auto-selected.
+- **Chat interface:** Alternating user (right, primary) and assistant (left, muted) message bubbles. In-flight messages (user prompt + streaming assistant response) displayed during streaming. Animated cursor while streaming. Error display inline in the chat area. Enter to send, Shift+Enter for newline.
+- **Streaming:** Reuses `useInvoke` hook with `qualifier: "DEFAULT"` and no credential selection. On `sessionEnd`, in-flight bubbles are committed to persistent message history.
+- **Session management:** New conversations start without a session ID; the first invocation creates a new `InvocationSession`. Subsequent messages reuse the session ID from `sessionEnd`. Resuming a past session rebuilds message history from `invocation.prompt_text` / `invocation.response_text` pairs.
+- **User isolation:** Session list filtered to the authenticated user's sessions (`user_id` match). Admin details (session IDs, qualifiers, credentials, bearer tokens) are not exposed in the end-user interface.
+- **Memory panel:** Accessible via "My Memory" button when the agent has memory resources. Displays Session Memory (current exchange count + custom strategy names/descriptions) and "What I Remember About You" (long-term strategies: semantic, summary, user_preference, episodic). No memory IDs, ARNs, namespaces, strategy types, or configuration objects shown.
+- **View-as banner:** When an admin is previewing the end-user experience via "View as", a non-destructive banner indicates the preview mode with an "Exit preview" button.
+
+### Phase 19 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

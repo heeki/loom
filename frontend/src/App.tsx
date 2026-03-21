@@ -35,6 +35,7 @@ import { AuthProvider, useAuth, type Scope } from "@/contexts/AuthContext";
 import { LoginPage } from "@/pages/LoginPage";
 import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings, Eye, Tags, DollarSign, BarChart3 } from "lucide-react";
 import { AdminDashboardPage } from "./pages/AdminDashboardPage";
+import { ChatPage } from "./pages/ChatPage";
 import { recordPageView, sendBeaconPageView, trackAction } from "./api/audit";
 
 type Persona = "catalog" | "security" | "builder" | "memory" | "tagging" | "settings" | "mcp" | "a2a" | "costs" | "admin";
@@ -220,6 +221,13 @@ function AppContent() {
   }, [user, browserSessionId]);
 
   const isAdmin = user?.groups?.includes("t-admin") ?? false;
+
+  // Determine if the effective user (real or view-as) is an end-user (t-user, not t-admin)
+  const effectiveUserGroups = viewAsUser
+    ? (USER_GROUPS[viewAsUser] ?? [])
+    : (user?.groups ?? []);
+  const isEndUser =
+    effectiveUserGroups.includes("t-user") && !effectiveUserGroups.includes("t-admin");
 
   const effectiveHasScope = useCallback(
     (scope: Scope) => {
@@ -411,6 +419,26 @@ function AppContent() {
 
   if (selectedInvocationId) {
     breadcrumb.push({ label: selectedInvocationId });
+  }
+
+  // End-user chat layout — rendered when user (or admin in view-as mode) is a t-user
+  if (isEndUser) {
+    return (
+      <ChatPage
+        userGroups={effectiveUserGroups}
+        onLogout={() => {
+          if (viewAsUser) {
+            setViewAsUser(null);
+          } else {
+            if (user && browserSessionId)
+              trackAction(user.username ?? user.sub, browserSessionId, "auth", "logout");
+            logout();
+          }
+        }}
+        viewAsUser={viewAsUser ?? null}
+        onExitViewAs={viewAsUser ? () => setViewAsUser(null) : undefined}
+      />
+    );
   }
 
   return (

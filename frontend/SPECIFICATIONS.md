@@ -726,7 +726,70 @@ The invoke panel's credential dropdown includes a "Manual token" sentinel value.
 
 ---
 
-## 13. Future Work
+## 13. End-User Chat Interface
+
+**Purpose:** A consumer-oriented chat experience for end-users (`t-user` group). Hides all admin functionality and presents a clean, focused interface for interacting with agents.
+
+### Routing
+
+After authentication, `App.tsx` checks whether the effective user (real or "view as") belongs to the `t-user` type group and not `t-admin`. If so, `ChatPage` is rendered instead of the admin layout. Admins can switch to end-user mode via the "View as" dropdown by selecting any `demo-user-*` or `test-user` account.
+
+A "Previewing end-user experience as [user]" banner is shown to admins when in view-as mode, with an "Exit preview" button that returns to the admin layout.
+
+### ChatPage (`frontend/src/pages/ChatPage.tsx`)
+
+**Layout:** Two-column with a narrow left sidebar and a main chat area. An optional right panel shows memory information.
+
+**Sidebar contents:**
+- Logo
+- Agent picker — shown only when multiple agents are accessible; auto-selected when only one exists
+- "New Conversation" button
+- Conversation history list (past sessions for the current user, showing date/time and message count)
+- "My Memory" button (shown only when the selected agent has memory resources attached)
+- User indicator and logout button
+
+**Agent filtering:** Agents are filtered client-side by comparing the agent's `loom:group` tag against the user's `g-users-*` group names. An agent with no `loom:group` tag is visible to all users.
+
+**Chat area:**
+- Header with agent name and "responding..." indicator while streaming
+- Scrollable message history with alternating user (right-aligned, primary color) and assistant (left-aligned, muted) bubbles
+- In-flight messages displayed during streaming: user prompt bubble immediately, streaming assistant bubble with animated cursor
+- Error display as styled text in the chat area
+- Text input at the bottom (Enter to send, Shift+Enter for newline), with Send/Cancel buttons
+
+**Session management:**
+- New conversations start with no session ID; a new `InvocationSession` is created automatically on first invocation
+- After each invocation, `sessionEnd.session_id` is captured and used for subsequent messages in the same conversation
+- Resuming a past session calls `getSession()` and reconstructs the message history from `invocation.prompt_text` / `invocation.response_text` pairs
+
+**Streaming:** Reuses `useInvoke` hook with `qualifier: "DEFAULT"`, no credential selection, no qualifier picker. When `sessionEnd` fires, the in-flight bubbles are moved into the persistent message history.
+
+**Abstractions (admin details hidden):**
+- No qualifier picker
+- No credential selector (uses default)
+- No session ID display
+- No bearer token input
+
+### Memory Panel
+
+Accessible via the "My Memory" sidebar button when the selected agent has memory resources.
+
+**Session Memory section:**
+- Shows the current conversation's exchange count
+- Lists any custom-strategy names/descriptions from attached memory resources
+
+**"What I Remember About You" section (long-term):**
+- Shown only when at least one long-term strategy exists (`semantic`, `summary`, `user_preference`, `episodic`)
+- Displays each strategy's admin-configured `name` and `description` as user-facing labels
+- No memory IDs, ARNs, namespaces, strategy types, or configuration objects exposed
+
+**User isolation:**
+- Session list filtered server-side; frontend additionally filters sessions by `user_id` matching the authenticated user
+- Memory content is managed by the agent; the panel shows strategy metadata only
+
+---
+
+## 14. Future Work
 
 - **Markdown rendering** for agent responses
 - **VPC network mode** support
