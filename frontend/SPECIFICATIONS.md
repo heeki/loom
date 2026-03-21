@@ -8,7 +8,7 @@
 | Build tool | Vite 6 |
 | UI components | shadcn/ui (Radix primitives) |
 | Styling | Tailwind CSS v4 (Vite plugin, no PostCSS) |
-| Theme | 12 themes: 6 light + 6 dark (Catppuccin, Rosé Pine Dawn, Ayu, Everforest, Solarized, High Contrast Light, Catppuccin Mocha, Dracula, Gruvbox, Nord, Tokyo Night, High Contrast Dark) |
+| Theme | 10 themes: 5 light + 5 dark (Catppuccin, Rosé Pine Dawn, Ayu, Everforest, Solarized, Catppuccin Mocha, Dracula, Gruvbox, Nord, Tokyo Night) |
 | HTTP client | Native `fetch` (typed wrappers in `src/api/client.ts`) |
 | SSE streaming | `fetch` + `ReadableStream` (POST-based SSE) |
 | Notifications | Sonner (toast) |
@@ -39,7 +39,7 @@ frontend/
 │   ├── contexts/
 │   │   ├── AuthContext.tsx      # Cognito auth provider (login, logout, token refresh, browserSessionId generation and login audit)
 │   │   ├── TimezoneContext.tsx  # Timezone preference provider + hook
-│   │   └── ThemeContext.tsx     # Theme provider with 12 themes, localStorage persistence, WCAG-compliant contrast
+│   │   └── ThemeContext.tsx     # Theme provider with 10 themes, localStorage persistence, WCAG-compliant contrast
 │   ├── hooks/
 │   │   ├── useAgents.ts        # Agent list state + CRUD actions
 │   │   ├── useSessions.ts      # Session list state per agent
@@ -525,17 +525,16 @@ The delete confirmation uses absolute positioning (`absolute inset-x-0 bottom-0`
 Model selection uses `SearchableSelect` with group headers (Anthropic / Amazon). Search matches both display name and model ID value, allowing power users to search by inference profile ID. No default is pre-selected — the user must explicitly choose a model on both register and deploy forms.
 
 ### Theme System
-12 themes organized into Light and Dark groups:
-- **Light:** Ayu Light (warm sandy/orange), Catppuccin Latte (cool blue-gray, default), Everforest Light (warm green), High Contrast Light (WCAG AAA accessible), Rosé Pine Dawn (warm rose), Solarized Light (warm yellow-blue)
-- **Dark:** Catppuccin Mocha (deep purple-blue), Dracula (vibrant purple), Gruvbox (warm earthy), High Contrast Dark (WCAG AAA accessible), Nord (arctic blue), Tokyo Night (indigo blue)
+10 themes organized into Light and Dark groups:
+- **Light:** Ayu Light (warm sandy/orange), Catppuccin Latte (cool blue-gray, default), Everforest Light (warm green), Rosé Pine Dawn (warm rose), Solarized Light (warm yellow-blue)
+- **Dark:** Catppuccin Mocha (deep purple-blue), Dracula (vibrant purple), Gruvbox (warm earthy), Nord (arctic blue), Tokyo Night (indigo blue)
 
-ThemeContext manages theme state with localStorage persistence. Latte uses `:root` variables (no class); all other themes use CSS class selectors on `<html>`. The `@custom-variant dark` includes all dark theme classes (`dark`, `dracula`, `gruvbox`, `hc-dark`, `nord`, `tokyonight`). Badge `default` and `secondary` variants include `border-border` for visibility across all themes.
+ThemeContext manages theme state with localStorage persistence. Latte uses `:root` variables (no class); all other themes use CSS class selectors on `<html>`. The `@custom-variant dark` includes all dark theme classes (`dark`, `dracula`, `gruvbox`, `nord`, `tokyonight`). Badge `default` and `secondary` variants include `border-border` for visibility across all themes.
 
 **WCAG Accessibility Compliance:**
 All themes target WCAG 2.1 AA or better:
 - Text contrast (`--foreground`, `--muted-foreground`): ≥ 4.5:1 against their background surface
 - Border contrast (`--border`): ≥ 3:1 against adjacent surfaces
-- High Contrast themes (`hc-light`, `hc-dark`): WCAG AAA — all text ≥ 7:1, muted text ≥ 4.5:1
 
 Light theme card backgrounds are set to significantly darker surface values (e.g., Latte uses Catppuccin `surface0 #ccd0da` as card, vs. the `base #eff1f5` background) so cards are visually distinct from the page. Dark theme `--muted-foreground` and `--border` values are lightened relative to prior values to satisfy contrast thresholds on dark surfaces.
 

@@ -1,11 +1,9 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
 
-export type Theme = "ayu" | "hc-dark" | "hc-light" | "latte" | "dracula" | "everforest" | "gruvbox" | "mocha" | "nord" | "rosepine" | "solarized" | "tokyonight";
+export type Theme = "ayu" | "latte" | "dracula" | "everforest" | "gruvbox" | "mocha" | "nord" | "rosepine" | "solarized" | "tokyonight";
 
 export const THEME_LABELS: Record<Theme, string> = {
   ayu: "Ayu Light",
-  "hc-dark": "High Contrast Dark",
-  "hc-light": "High Contrast Light",
   latte: "Catppuccin Latte",
   dracula: "Dracula",
   everforest: "Everforest Light",
@@ -19,8 +17,6 @@ export const THEME_LABELS: Record<Theme, string> = {
 
 const THEME_CLASSES: Record<Theme, string | null> = {
   ayu: "ayu",
-  "hc-dark": "hc-dark",
-  "hc-light": "hc-light",
   latte: null,
   dracula: "dracula",
   everforest: "everforest",
@@ -33,7 +29,7 @@ const THEME_CLASSES: Record<Theme, string | null> = {
 };
 
 export function isLightTheme(theme: Theme): boolean {
-  return theme === "ayu" || theme === "hc-light" || theme === "latte" || theme === "rosepine" || theme === "everforest" || theme === "solarized";
+  return theme === "ayu" || theme === "latte" || theme === "rosepine" || theme === "everforest" || theme === "solarized";
 }
 
 interface ThemeContextValue {
@@ -51,8 +47,6 @@ function detectInitialTheme(): Theme {
   if (stored && stored in THEME_CLASSES) return stored;
   const el = document.documentElement;
   if (el.classList.contains("ayu")) return "ayu";
-  if (el.classList.contains("hc-dark")) return "hc-dark";
-  if (el.classList.contains("hc-light")) return "hc-light";
   if (el.classList.contains("dark")) return "mocha";
   if (el.classList.contains("dracula")) return "dracula";
   if (el.classList.contains("everforest")) return "everforest";
@@ -69,7 +63,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const el = document.documentElement;
-    el.classList.remove("ayu", "dark", "dracula", "everforest", "gruvbox", "hc-dark", "hc-light", "nord", "rosepine", "solarized", "tokyonight");
+    el.classList.remove("ayu", "dark", "dracula", "everforest", "gruvbox", "nord", "rosepine", "solarized", "tokyonight");
     const cls = THEME_CLASSES[theme];
     if (cls) el.classList.add(cls);
     localStorage.setItem("loom-theme", theme);
