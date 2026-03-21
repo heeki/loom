@@ -123,9 +123,10 @@ function _cancel(agentId: number) {
 
 export function clearInvokeState(agentId: number) {
   _controllers.get(agentId)?.abort();
-  _state.delete(agentId);
   _controllers.delete(agentId);
-  _listeners.delete(agentId);
+  // Reset state to EMPTY and notify subscribers — do NOT delete listeners so
+  // the component stays subscribed and sees subsequent invocations.
+  _update(agentId, { ...EMPTY });
 }
 
 // ---------------------------------------------------------------------------

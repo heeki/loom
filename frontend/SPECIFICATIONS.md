@@ -707,12 +707,14 @@ The invoke panel's credential dropdown includes a "Manual token" sentinel value.
 
 | Category | Actions |
 |----------|---------|
-| `agent` | `deploy`, `import`, `invoke`, `redeploy`, `delete` |
+| `agent` | `deploy`, `import`, `invoke`, `redeploy`, `delete`, `remove_conversation` |
 | `memory` | `create`, `import`, `delete` |
 | `security` | `add_role`, `delete_role`, `add_authorizer`, `add_credential`, `delete_authorizer`, `approve_request`, `deny_request` |
 | `tagging` | `add_tag`, `edit_tag`, `delete_tag`, `add_profile`, `edit_profile`, `delete_profile` |
 | `mcp` | `add_server`, `delete_server`, `test_connection`, `invoke_tool`, `update_permissions` |
 | `a2a` | `add_agent`, `delete_agent`, `test_connection`, `update_permissions` |
+
+`remove_conversation` is emitted from `ChatPage` when a user removes a conversation from the sidebar (calls `hideSession` then records the action with the agent name as the resource name).
 
 **Dashboard layout (`AdminDashboardPage.tsx`):**
 - **Global user filter:** Multi-select dropdown in the header (labeled "Users:") listing all unique user IDs from the loaded data. Selecting users filters all summary cards, charts, and tab tables to only that subset. When no users are selected ("All users"), the full unfiltered data is shown. When a filter is active, summary stats are recomputed client-side from the filtered sessions, actions, and page views (rather than relying on the API summary, which is unfiltered). Pagination page counters reset when the filter changes.
@@ -738,7 +740,7 @@ A "Previewing end-user experience as [user]" banner is shown to admins when in v
 
 ### ChatPage (`frontend/src/pages/ChatPage.tsx`)
 
-**Layout:** Two-column with a narrow left sidebar and a main chat area. An optional right panel shows memory information.
+**Layout:** Two-column with a narrow left sidebar and a main chat area. An optional right panel shows memory information. Content is centered with a max-width on wide screens.
 
 **Sidebar contents:**
 - Logo
@@ -751,21 +753,29 @@ A "Previewing end-user experience as [user]" banner is shown to admins when in v
 **Agent filtering:** Agents are filtered client-side by comparing the agent's `loom:group` tag against the user's `g-users-*` group names. An agent with no `loom:group` tag is visible to all users.
 
 **Chat area:**
-- Header with agent name and "responding..." indicator while streaming
+- Header with agent name and "responding..." indicator while streaming (scoped to the active conversation)
 - Scrollable message history with alternating user (right-aligned, primary color) and assistant (left-aligned, muted) bubbles
-- In-flight messages displayed during streaming: user prompt bubble immediately, streaming assistant bubble with animated cursor
+- In-flight messages displayed during streaming: user prompt bubble immediately, streaming assistant bubble with animated cursor and thinking spinner
+- Markdown rendering for assistant responses via `react-markdown` + `remark-gfm`: paragraphs, headings (h1–h3), ordered/unordered lists, tables, blockquotes, inline code, fenced code blocks, bold, links. JSON code blocks rendered as collapsible `CollapsibleJsonBlock` components (click to expand/collapse).
 - Error display as styled text in the chat area
 - Text input at the bottom (Enter to send, Shift+Enter for newline), with Send/Cancel buttons
 
 **Session management:**
 - New conversations start with no session ID; a new `InvocationSession` is created automatically on first invocation
+- **Immediate session tab creation:** On `session_start` SSE event, the new session is immediately added to the sidebar conversation list and auto-selected (highlighted). The conversation tab appears as soon as the agent acknowledges the invocation — before the response finishes streaming.
 - After each invocation, `sessionEnd.session_id` is captured and used for subsequent messages in the same conversation
+- On `sessionEnd`, messages are loaded from the backend via `getSession()` as the authoritative source. `setPendingPrompt(null)` is deferred until after `setMessages()` completes, preventing the streaming bubbles from disappearing before persisted messages are ready.
 - Resuming a past session calls `getSession()` and reconstructs the message history from `invocation.prompt_text` / `invocation.response_text` pairs
+- Removing a conversation calls `hideSession()`, records a `remove_conversation` audit action via `trackAction`, and clears the chat area if the removed session was active
 
-**Streaming:** Reuses `useInvoke` hook with `qualifier: "DEFAULT"`, no credential selection, no qualifier picker. When `sessionEnd` fires, the in-flight bubbles are moved into the persistent message history.
+**Streaming state scoping:**
+- `isCurrentlyStreaming` is derived as `isStreaming && (!sessionStart || sessionStart.session_id === currentSessionId)`. The thinking spinner, streaming bubble, and "responding..." header text are all conditioned on `isCurrentlyStreaming`, not `isStreaming`. This prevents streaming UI from leaking into unrelated conversations when the user switches sessions mid-stream.
+
+**`useInvoke` subscription stability:**
+- `clearInvokeState(agentId)` resets the module-level store to `EMPTY` and notifies subscribers, but does NOT remove the listener set for the agent. This keeps the component's subscription alive after "New Conversation" so that subsequent invocations correctly propagate to the UI. Deleting the listener entry (the prior behavior) caused a silent state-update drop where streams ran to completion without any React re-renders.
 
 **Abstractions (admin details hidden):**
-- No qualifier picker
+- No qualifier picker (always uses `DEFAULT`)
 - No credential selector (uses default)
 - No session ID display
 - No bearer token input
@@ -791,7 +801,6 @@ Accessible via the "My Memory" sidebar button when the selected agent has memory
 
 ## 14. Future Work
 
-- **Markdown rendering** for agent responses
 - **VPC network mode** support
 - **Operate Tab** — aggregate dashboard with summary cards, per-agent latency charts
 - **Real-time auto-refresh** of sessions and metrics
