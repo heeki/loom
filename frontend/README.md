@@ -1,6 +1,6 @@
 # Loom Frontend
 
-Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, resource tag management, tag profile management, cost estimation dashboard, actual runtime cost analysis, and an admin dashboard with platform usage analytics.
+Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, resource tag management, tag profile management, cost estimation dashboard, actual runtime cost analysis, an admin dashboard with platform usage analytics, and an end-user chat interface.
 
 ## Prerequisites
 
@@ -66,7 +66,9 @@ The sidebar provides access to persona-based workflows:
 | **Settings** | Settings | Manage display preferences (theme, timezone) and cost estimation settings (CPU I/O wait discount) |
 | **Admin Dashboard** | BarChart3 | Platform usage analytics: login tracking, action tracking, page navigation, per-session drill-down (super-admins only) |
 
-The sidebar also includes a user indicator (when authenticated), admin View As dropdown (simulates specific users like demo-admin-1, demo-user-1 with their group-based scopes), live clock, and version badge. Theme and timezone are configured on the Settings page. Each listing page has a card/table view toggle; the selection persists per-page across persona switches.
+**End-user chat layout:** Users in the `t-user` Cognito group (without `t-admin`) see a dedicated `ChatPage` instead of the admin sidebar. The chat layout provides a focused chat interface with agent selection, conversation history with immediate tab creation on `session_start`, streaming responses scoped to the active conversation, markdown rendering with collapsible JSON blocks, and a memory panel — with no admin navigation items exposed.
+
+The admin sidebar includes a View As dropdown (Eye icon) to preview specific user experiences including end-users (`demo-user-*`, `test-user`). Selecting an end-user persona switches to the `ChatPage` layout so admins can verify the end-user experience. A banner indicates the preview mode. Theme and timezone are configured on the Settings page. Each listing page has a card/table view toggle; the selection persists per-page across persona switches.
 
 ### Drill-Down Navigation
 
@@ -167,7 +169,7 @@ The `AuthContext` also provides scope-based authorization using a two-dimensiona
 
 - `useAgents()` — Agent list with auto-fetch, CRUD actions, register (with optional modelId), async deletion polling (DELETING → 404 → purge)
 - `useSessions(agentId)` — Session list that re-fetches on agent change
-- `useInvoke(authorizerName?)` — Streaming state management with `AbortController`, supports credential_id and bearer_token, provides friendly error messages with authorizer-specific hints
+- `useInvoke(authorizerName?)` — Streaming state management with module-level store (survives component unmount/remount), `AbortController` for cancellation, supports credential_id and bearer_token, provides friendly error messages with authorizer-specific hints. `clearInvokeState()` preserves the subscriber set so the component stays subscribed across "New Conversation" resets.
 - `useLogs()` — On-demand session log fetching with `noCache` support for cache-busting refresh, vended log source management, stream log retrieval
 - `useTraces()` — Trace list and detail state management with lazy loading
 - `useA2aAgents()` — A2A agent list with auto-fetch, CRUD callbacks, toast notifications
@@ -212,6 +214,7 @@ The `AuthContext` also provides scope-based authorization using a two-dimensiona
 | CostDashboardPage | Costs | Estimated costs table (per-agent breakdown with methodology formulas), actual costs with Runtime (collapsible agent groups, per-session detail) and Memory (consolidated per-resource) sub-sections, summary cards, time-range selector, sortable columns |
 | SettingsPage | Settings | Display preferences (theme, timezone), cost estimation settings (CPU I/O wait discount) |
 | AdminDashboardPage | Admin | Global multi-select user filter; summary cards (total logins, page views, actions, duration, most active page); recharts bar charts (logins over time, actions over time, page views by page); tabbed tables: Sessions (with timeline drill-down), Actions (category/type filters), Page Views (page filter); all data filtered by selected users when filter is active |
+| ChatPage | End-user | Chat interface for `t-user` group: agent picker (multi-agent) or auto-selected (single agent), conversation history sidebar with immediate tab creation on `session_start` and auto-selection, streaming bubbles scoped to the active conversation (`isCurrentlyStreaming`), markdown rendering with collapsible JSON blocks, session management, conversation removal with audit tracking, memory panel with strategy-based labels |
 
 ### Session Liveness
 

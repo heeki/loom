@@ -707,12 +707,14 @@ The invoke panel's credential dropdown includes a "Manual token" sentinel value.
 
 | Category | Actions |
 |----------|---------|
-| `agent` | `deploy`, `import`, `invoke`, `redeploy`, `delete` |
+| `agent` | `deploy`, `import`, `invoke`, `redeploy`, `delete`, `remove_conversation` |
 | `memory` | `create`, `import`, `delete` |
 | `security` | `add_role`, `delete_role`, `add_authorizer`, `add_credential`, `delete_authorizer`, `approve_request`, `deny_request` |
 | `tagging` | `add_tag`, `edit_tag`, `delete_tag`, `add_profile`, `edit_profile`, `delete_profile` |
 | `mcp` | `add_server`, `delete_server`, `test_connection`, `invoke_tool`, `update_permissions` |
 | `a2a` | `add_agent`, `delete_agent`, `test_connection`, `update_permissions` |
+
+`remove_conversation` is emitted from `ChatPage` when a user removes a conversation from the sidebar (calls `hideSession` then records the action with the agent name as the resource name).
 
 **Dashboard layout (`AdminDashboardPage.tsx`):**
 - **Global user filter:** Multi-select dropdown in the header (labeled "Users:") listing all unique user IDs from the loaded data. Selecting users filters all summary cards, charts, and tab tables to only that subset. When no users are selected ("All users"), the full unfiltered data is shown. When a filter is active, summary stats are recomputed client-side from the filtered sessions, actions, and page views (rather than relying on the API summary, which is unfiltered). Pagination page counters reset when the filter changes.
@@ -726,9 +728,79 @@ The invoke panel's credential dropdown includes a "Manual token" sentinel value.
 
 ---
 
-## 13. Future Work
+## 13. End-User Chat Interface
 
-- **Markdown rendering** for agent responses
+**Purpose:** A consumer-oriented chat experience for end-users (`t-user` group). Hides all admin functionality and presents a clean, focused interface for interacting with agents.
+
+### Routing
+
+After authentication, `App.tsx` checks whether the effective user (real or "view as") belongs to the `t-user` type group and not `t-admin`. If so, `ChatPage` is rendered instead of the admin layout. Admins can switch to end-user mode via the "View as" dropdown by selecting any `demo-user-*` or `test-user` account.
+
+A "Previewing end-user experience as [user]" banner is shown to admins when in view-as mode, with an "Exit preview" button that returns to the admin layout.
+
+### ChatPage (`frontend/src/pages/ChatPage.tsx`)
+
+**Layout:** Two-column with a narrow left sidebar and a main chat area. An optional right panel shows memory information. Content is centered with a max-width on wide screens.
+
+**Sidebar contents:**
+- Logo
+- Agent picker — shown only when multiple agents are accessible; auto-selected when only one exists
+- "New Conversation" button
+- Conversation history list (past sessions for the current user, showing date/time and message count)
+- "My Memory" button (shown only when the selected agent has memory resources attached)
+- User indicator and logout button
+
+**Agent filtering:** Agents are filtered client-side by comparing the agent's `loom:group` tag against the user's `g-users-*` group names. An agent with no `loom:group` tag is visible to all users.
+
+**Chat area:**
+- Header with agent name and "responding..." indicator while streaming (scoped to the active conversation)
+- Scrollable message history with alternating user (right-aligned, primary color) and assistant (left-aligned, muted) bubbles
+- In-flight messages displayed during streaming: user prompt bubble immediately, streaming assistant bubble with animated cursor and thinking spinner
+- Markdown rendering for assistant responses via `react-markdown` + `remark-gfm`: paragraphs, headings (h1–h3), ordered/unordered lists, tables, blockquotes, inline code, fenced code blocks, bold, links. JSON code blocks rendered as collapsible `CollapsibleJsonBlock` components (click to expand/collapse).
+- Error display as styled text in the chat area
+- Text input at the bottom (Enter to send, Shift+Enter for newline), with Send/Cancel buttons
+
+**Session management:**
+- New conversations start with no session ID; a new `InvocationSession` is created automatically on first invocation
+- **Immediate session tab creation:** On `session_start` SSE event, the new session is immediately added to the sidebar conversation list and auto-selected (highlighted). The conversation tab appears as soon as the agent acknowledges the invocation — before the response finishes streaming.
+- After each invocation, `sessionEnd.session_id` is captured and used for subsequent messages in the same conversation
+- On `sessionEnd`, messages are loaded from the backend via `getSession()` as the authoritative source. `setPendingPrompt(null)` is deferred until after `setMessages()` completes, preventing the streaming bubbles from disappearing before persisted messages are ready.
+- Resuming a past session calls `getSession()` and reconstructs the message history from `invocation.prompt_text` / `invocation.response_text` pairs
+- Removing a conversation calls `hideSession()`, records a `remove_conversation` audit action via `trackAction`, and clears the chat area if the removed session was active
+
+**Streaming state scoping:**
+- `isCurrentlyStreaming` is derived as `isStreaming && (!sessionStart || sessionStart.session_id === currentSessionId)`. The thinking spinner, streaming bubble, and "responding..." header text are all conditioned on `isCurrentlyStreaming`, not `isStreaming`. This prevents streaming UI from leaking into unrelated conversations when the user switches sessions mid-stream.
+
+**`useInvoke` subscription stability:**
+- `clearInvokeState(agentId)` resets the module-level store to `EMPTY` and notifies subscribers, but does NOT remove the listener set for the agent. This keeps the component's subscription alive after "New Conversation" so that subsequent invocations correctly propagate to the UI. Deleting the listener entry (the prior behavior) caused a silent state-update drop where streams ran to completion without any React re-renders.
+
+**Abstractions (admin details hidden):**
+- No qualifier picker (always uses `DEFAULT`)
+- No credential selector (uses default)
+- No session ID display
+- No bearer token input
+
+### Memory Panel
+
+Accessible via the "My Memory" sidebar button when the selected agent has memory resources.
+
+**Session Memory section:**
+- Shows the current conversation's exchange count
+- Lists any custom-strategy names/descriptions from attached memory resources
+
+**"What I Remember About You" section (long-term):**
+- Shown only when at least one long-term strategy exists (`semantic`, `summary`, `user_preference`, `episodic`)
+- Displays each strategy's admin-configured `name` and `description` as user-facing labels
+- No memory IDs, ARNs, namespaces, strategy types, or configuration objects exposed
+
+**User isolation:**
+- Session list filtered server-side; frontend additionally filters sessions by `user_id` matching the authenticated user
+- Memory content is managed by the agent; the panel shows strategy metadata only
+
+---
+
+## 14. Future Work
+
 - **VPC network mode** support
 - **Operate Tab** — aggregate dashboard with summary cards, per-agent latency charts
 - **Real-time auto-refresh** of sessions and metrics
