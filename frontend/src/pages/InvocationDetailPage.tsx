@@ -3,6 +3,9 @@ import { Badge } from "@/components/ui/badge";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp, formatMs } from "@/lib/format";
 import type { AgentResponse, SessionResponse, InvocationResponse } from "@/api/types";
+import ReactMarkdown from "react-markdown";
+import { CollapsibleJsonBlock } from "@/components/CollapsibleJsonBlock";
+import remarkGfm from "remark-gfm";
 
 interface InvocationDetailPageProps {
   agent: AgentResponse;
@@ -44,7 +47,7 @@ function CostRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function InvocationDetailPage({ agent, session, invocation }: InvocationDetailPageProps) {
+export function InvocationDetailPage({ invocation }: InvocationDetailPageProps) {
   const { timezone } = useTimezone();
 
   const rtCpu = invocation.compute_cpu_cost ?? 0;
@@ -95,9 +98,64 @@ export function InvocationDetailPage({ agent, session, invocation }: InvocationD
               <CardTitle className="text-sm font-medium">Prompt</CardTitle>
             </CardHeader>
             <CardContent>
-              <pre className="bg-input-bg rounded-md p-4 text-sm font-mono whitespace-pre-wrap overflow-x-auto">
-                {invocation.prompt_text ?? "Not captured"}
-              </pre>
+              {invocation.prompt_text ? (
+                <div className="rounded border bg-input-bg p-4 text-sm">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                      h1: ({ children }) => <h1 className="text-base font-bold mb-2 mt-3 first:mt-0">{children}</h1>,
+                      h2: ({ children }) => <h2 className="text-sm font-bold mb-2 mt-3 first:mt-0">{children}</h2>,
+                      h3: ({ children }) => <h3 className="text-sm font-semibold mb-1 mt-2 first:mt-0">{children}</h3>,
+                      ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
+                      ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
+                      li: ({ children }) => <li className="leading-snug">{children}</li>,
+                      pre: ({ children }) => {
+                        const codeClass = (children as { props?: { className?: string } } | null)?.props?.className ?? '';
+                        if (codeClass.includes('language-json')) {
+                          return <CollapsibleJsonBlock>{children}</CollapsibleJsonBlock>;
+                        }
+                        return (
+                          <pre className="mb-2 overflow-x-auto rounded bg-black/10 dark:bg-white/10 p-3 text-xs font-mono">{children}</pre>
+                        );
+                      },
+                      code: ({ className, children }) =>
+                        className?.startsWith("language-") ? (
+                          <code className={className}>{children}</code>
+                        ) : (
+                          <code className="rounded bg-black/10 dark:bg-white/10 px-1 py-0.5 text-xs font-mono">{children}</code>
+                        ),
+                      blockquote: ({ children }) => (
+                        <blockquote className="border-l-2 border-muted-foreground/30 pl-3 italic text-muted-foreground mb-2">{children}</blockquote>
+                      ),
+                      table: ({ children }) => (
+                        <div className="overflow-x-auto mb-2">
+                          <table className="border-collapse text-xs w-full">{children}</table>
+                        </div>
+                      ),
+                      thead: ({ children }) => <thead>{children}</thead>,
+                      tbody: ({ children }) => <tbody>{children}</tbody>,
+                      tr: ({ children }) => <tr>{children}</tr>,
+                      th: ({ children }) => (
+                        <th className="border border-border px-2 py-1 text-left font-semibold bg-muted/50">{children}</th>
+                      ),
+                      td: ({ children }) => (
+                        <td className="border border-border px-2 py-1">{children}</td>
+                      ),
+                      strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                      a: ({ href, children }) => (
+                        <a href={href} className="underline underline-offset-2 hover:opacity-80" target="_blank" rel="noopener noreferrer">{children}</a>
+                      ),
+                    }}
+                  >
+                    {invocation.prompt_text}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                <pre className="bg-input-bg rounded-md p-4 text-sm font-mono whitespace-pre-wrap overflow-x-auto text-muted-foreground">
+                  Not captured
+                </pre>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -163,9 +221,58 @@ export function InvocationDetailPage({ agent, session, invocation }: InvocationD
           <CardTitle className="text-sm font-medium">Response</CardTitle>
         </CardHeader>
         <CardContent>
-          <pre className="bg-input-bg rounded-md p-4 text-sm font-mono whitespace-pre-wrap overflow-x-auto">
-            {invocation.response_text ?? "Not captured"}
-          </pre>
+          {invocation.response_text ? (
+            <div className="rounded border bg-input-bg p-4 text-sm">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                  h1: ({ children }) => <h1 className="text-base font-bold mb-2 mt-3 first:mt-0">{children}</h1>,
+                  h2: ({ children }) => <h2 className="text-sm font-bold mb-2 mt-3 first:mt-0">{children}</h2>,
+                  h3: ({ children }) => <h3 className="text-sm font-semibold mb-1 mt-2 first:mt-0">{children}</h3>,
+                  ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
+                  ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
+                  li: ({ children }) => <li className="leading-snug">{children}</li>,
+                  pre: ({ children }) => (
+                    <pre className="mb-2 overflow-x-auto rounded bg-black/10 dark:bg-white/10 p-3 text-xs font-mono">{children}</pre>
+                  ),
+                  code: ({ className, children }) =>
+                    className?.startsWith("language-") ? (
+                      <code className={className}>{children}</code>
+                    ) : (
+                      <code className="rounded bg-black/10 dark:bg-white/10 px-1 py-0.5 text-xs font-mono">{children}</code>
+                    ),
+                  blockquote: ({ children }) => (
+                    <blockquote className="border-l-2 border-muted-foreground/30 pl-3 italic text-muted-foreground mb-2">{children}</blockquote>
+                  ),
+                  table: ({ children }) => (
+                    <div className="overflow-x-auto mb-2">
+                      <table className="border-collapse text-xs w-full">{children}</table>
+                    </div>
+                  ),
+                  thead: ({ children }) => <thead>{children}</thead>,
+                  tbody: ({ children }) => <tbody>{children}</tbody>,
+                  tr: ({ children }) => <tr>{children}</tr>,
+                  th: ({ children }) => (
+                    <th className="border border-border px-2 py-1 text-left font-semibold bg-muted/50">{children}</th>
+                  ),
+                  td: ({ children }) => (
+                    <td className="border border-border px-2 py-1">{children}</td>
+                  ),
+                  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                  a: ({ href, children }) => (
+                    <a href={href} className="underline underline-offset-2 hover:opacity-80" target="_blank" rel="noopener noreferrer">{children}</a>
+                  ),
+                }}
+              >
+                {invocation.response_text}
+              </ReactMarkdown>
+            </div>
+          ) : (
+            <pre className="bg-input-bg rounded-md p-4 text-sm font-mono whitespace-pre-wrap overflow-x-auto text-muted-foreground">
+              Not captured
+            </pre>
+          )}
         </CardContent>
       </Card>
     </div>

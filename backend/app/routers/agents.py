@@ -151,6 +151,7 @@ class AgentResponse(BaseModel):
     arn: str
     runtime_id: str
     name: str | None
+    description: str | None = None
     status: str | None
     region: str
     account_id: str
@@ -193,6 +194,11 @@ class ConfigEntryResponse(BaseModel):
 class ConfigUpdateRequest(BaseModel):
     """Request body for updating agent config entries."""
     config: dict[str, str] = Field(..., description="Key-value pairs to set")
+
+
+class AgentUpdateRequest(BaseModel):
+    """Request body for patching editable agent fields."""
+    description: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -717,6 +723,7 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
         arn=placeholder_arn,
         runtime_id="",
         name=request.name,
+        description=request.description or None,
         status="CREATING",
         region=region,
         account_id=account_id,
@@ -1509,6 +1516,22 @@ def get_agent_config(agent_id: int, user: UserInfo = Depends(require_scopes("age
             d["value"] = "********"
         result.append(ConfigEntryResponse(**d))
     return result
+
+
+@router.patch("/{agent_id}", response_model=AgentResponse)
+def patch_agent(
+    agent_id: int,
+    request: AgentUpdateRequest,
+    user: UserInfo = Depends(require_scopes("agent:write")),
+    db: Session = Depends(get_db),
+) -> AgentResponse:
+    """Update editable fields on an agent (e.g. description)."""
+    agent = get_agent_or_404(agent_id, db)
+    if "description" in request.model_fields_set:
+        agent.description = request.description
+    db.commit()
+    db.refresh(agent)
+    return _agent_response(agent, db)
 
 
 @router.put("/{agent_id}/config", response_model=list[ConfigEntryResponse])

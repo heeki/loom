@@ -32,6 +32,12 @@ export function getSession(
   );
 }
 
+export function hideSession(agentId: number, sessionId: string): Promise<void> {
+  return apiFetch<void>(`/api/agents/${agentId}/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
+}
+
 export interface StreamCallbacks {
   onSessionStart?: (data: SSESessionStart) => void;
   onChunk?: (data: SSEChunk) => void;
