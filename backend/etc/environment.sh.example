@@ -11,6 +11,8 @@ LOG_LEVEL=info
 # Loom configurations
 LOOM_ARTIFACT_BUCKET=<your-s3-bucket-for-deployments>
 LOOM_DATABASE_URL=sqlite:///./loom.db
+# For RDS/cloud deployments, replace the SQLite URL above with a PostgreSQL URL:
+# LOOM_DATABASE_URL=postgresql+psycopg2://username:password@hostname:5432/loom
 LOOM_BACKEND_PORT=8000
 LOOM_FRONTEND_PORT=5173
 

@@ -10,6 +10,11 @@ test:
 run:
 	source .venv/bin/activate && uvicorn app.main:app --reload --port $${LOOM_BACKEND_PORT:-8000}
 
+migrate-db:
+	source .venv/bin/activate && python scripts/migrate_sqlite_to_postgres.py \
+		--source sqlite:///./loom.db \
+		--dest $${LOOM_DATABASE_URL}
+
 # Manual testing targets
 curl.health:
 	curl -s $(BASE_URL)/health | jq

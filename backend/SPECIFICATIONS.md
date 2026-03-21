@@ -6,7 +6,7 @@
 |---------|--------|
 | Framework | FastAPI |
 | Server | Uvicorn (local dev) |
-| ORM | SQLAlchemy (with SQLite) |
+| ORM | SQLAlchemy (SQLite for local dev, PostgreSQL for cloud) |
 | AWS SDK | boto3 |
 | Python version | 3.11+ (3.13 for ARM64 runtime deployment) |
 | Dependency manager | uv |
@@ -20,7 +20,7 @@ All runtime configuration is injected via environment variables sourced from `et
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DATABASE_URL` | SQLite file path | `sqlite:///./loom.db` |
+| `LOOM_DATABASE_URL` | SQLAlchemy database URL (SQLite or PostgreSQL) | `sqlite:///./loom.db` |
 | `BACKEND_PORT` | Port for uvicorn | `8000` |
 | `FRONTEND_PORT` | Port for Vite dev server (CORS) | `5173` |
 | `LOG_LEVEL` | Backend log level | `info` |
@@ -94,7 +94,8 @@ backend/
 │       ├── memory.py        # Bedrock AgentCore Memory API wrapper
 │       └── secrets.py       # AWS Secrets Manager wrapper with in-memory caching
 ├── scripts/
-│   └── stream.py            # SSE streaming client for CLI invocations (httpx)
+│   ├── stream.py            # SSE streaming client for CLI invocations (httpx)
+│   └── migrate_sqlite_to_postgres.py  # CLI utility to migrate SQLite data to PostgreSQL
 ├── tests/
 │   ├── test_agentcore.py    # AgentCore service tests
 │   ├── test_agents.py       # Agent router tests
@@ -121,7 +122,62 @@ backend/
 
 ---
 
-## 4. Database Schema
+## 4. Database Backend
+
+### Supported Backends
+
+Loom supports two database backends selected via `LOOM_DATABASE_URL`:
+
+| Backend | URL Format | Use Case |
+|---------|-----------|----------|
+| SQLite | `sqlite:///./loom.db` | Local development and single-instance deployments |
+| PostgreSQL | `postgresql+psycopg2://user:pass@host:5432/loom` | Cloud deployments with load balancing across multiple containers |
+
+The backend is designed for transparent compatibility — no changes to application code or the frontend are required when switching backends. SQLAlchemy abstracts all database interactions.
+
+### Dialect-Aware Engine Configuration
+
+`backend/app/db.py` detects the dialect from `LOOM_DATABASE_URL` at startup:
+
+- **SQLite**: sets `connect_args={"check_same_thread": False}` and registers a `PRAGMA foreign_keys=ON` connection hook.
+- **PostgreSQL**: omits both (handled natively by PostgreSQL).
+
+### Schema Migrations (`_migrate_add_columns`)
+
+The `_migrate_add_columns` helper adds missing columns to existing tables at startup (SQLAlchemy's `create_all` does not alter existing tables). It is dialect-aware:
+
+- **SQLite**: `ALTER TABLE {table} ADD COLUMN {column} {type}`
+- **PostgreSQL**: `ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {pg_type}`
+  - `DATETIME` → `TIMESTAMP`
+  - `REAL` → `DOUBLE PRECISION`
+
+### SQLite-to-PostgreSQL Migration
+
+`backend/scripts/migrate_sqlite_to_postgres.py` migrates all data from a source database to a destination database:
+
+```bash
+python scripts/migrate_sqlite_to_postgres.py \
+  --source sqlite:///./loom.db \
+  --dest postgresql+psycopg2://user:pass@host:5432/loom [--skip-existing]
+```
+
+- Discovers all tables at runtime via SQLAlchemy reflection (no hardcoded table names).
+- Copies tables in foreign-key dependency order using Kahn's topological sort.
+- `--skip-existing`: skips tables in the destination that already contain data.
+- Per-table error handling: logs failures and continues with remaining tables.
+- Also available as `make migrate-db` (uses `$LOOM_DATABASE_URL` as destination).
+
+### PostgreSQL Dependency
+
+`psycopg2-binary` is required for PostgreSQL connections. Install it with:
+
+```bash
+uv pip install ".[postgres]"
+```
+
+---
+
+## 5. Database Schema
 
 ### `agents` table
 
