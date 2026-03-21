@@ -47,6 +47,17 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
   const [agentSearch, setAgentSearch] = useState("");
   const [agentSort, setAgentSort] = useState<"asc" | "desc">("asc");
   const [showThemePicker, setShowThemePicker] = useState(false);
+  const themePickerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showThemePicker) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (themePickerRef.current && !themePickerRef.current.contains(e.target as Node)) {
+        setShowThemePicker(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showThemePicker]);
 
   // Session state
   const [sessions, setSessions] = useState<SessionResponse[]>([]);
@@ -548,7 +559,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                 </span>
               </div>
               <div className="flex items-center gap-1">
-                <div className="relative">
+                <div className="relative" ref={themePickerRef}>
                   <button
                     onClick={() => setShowThemePicker((v) => !v)}
                     className="text-muted-foreground hover:text-foreground transition-colors"
@@ -557,21 +568,41 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                     <Palette className="h-3.5 w-3.5" />
                   </button>
                   {showThemePicker && (
-                    <div className="absolute bottom-6 right-0 z-50 w-44 rounded border bg-popover shadow-md py-1">
-                      {(Object.entries(THEME_LABELS) as [Theme, string][]).map(([k, v]) => (
-                        <button
-                          key={k}
-                          onClick={() => {
-                            setTheme(k);
-                            setShowThemePicker(false);
-                          }}
-                          className={`w-full text-left px-3 py-1.5 text-xs transition-colors hover:bg-accent ${
-                            theme === k ? "font-medium text-primary" : "text-foreground"
-                          }`}
-                        >
-                          {v}
-                        </button>
-                      ))}
+                    <div className="absolute bottom-6 right-0 z-50 w-44 rounded border bg-white shadow-md py-1">
+                      <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Light</div>
+                      {(Object.entries(THEME_LABELS) as [Theme, string][])
+                        .filter(([k]) => isLightTheme(k as Theme))
+                        .map(([k, v]) => (
+                          <button
+                            key={k}
+                            onClick={() => {
+                              setTheme(k);
+                              setShowThemePicker(false);
+                            }}
+                            className={`w-full text-left px-3 py-1.5 text-xs transition-colors hover:bg-gray-100 text-gray-700 ${
+                              theme === k ? "font-bold" : ""
+                            }`}
+                          >
+                            {v}
+                          </button>
+                        ))}
+                      <div className="px-3 py-1 mt-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wide border-t border-gray-100">Dark</div>
+                      {(Object.entries(THEME_LABELS) as [Theme, string][])
+                        .filter(([k]) => !isLightTheme(k as Theme))
+                        .map(([k, v]) => (
+                          <button
+                            key={k}
+                            onClick={() => {
+                              setTheme(k);
+                              setShowThemePicker(false);
+                            }}
+                            className={`w-full text-left px-3 py-1.5 text-xs transition-colors hover:bg-gray-100 text-gray-700 ${
+                              theme === k ? "font-bold" : ""
+                            }`}
+                          >
+                            {v}
+                          </button>
+                        ))}
                     </div>
                   )}
                 </div>
