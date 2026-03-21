@@ -4,6 +4,7 @@ export interface AgentResponse {
   arn: string;
   runtime_id: string;
   name: string | null;
+  description: string | null;
   status: string | null;
   region: string;
   account_id: string;
@@ -210,6 +211,7 @@ export interface SessionResponse {
   live_status: string;
   created_at: string | null;
   user_id: string | null;
+  hidden_at: string | null;
   invocations: InvocationResponse[];
 }
 
@@ -447,6 +449,20 @@ export interface MemoryResponse {
     total_retrievals: number;
     total_events_sent: number;
   } | null;
+}
+
+export interface MemoryRecordItem {
+  memoryRecordId: string;
+  text: string;
+  memoryStrategyId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MemoryRecordsResponse {
+  memory_id: string;
+  actor_id: string;
+  records: MemoryRecordItem[];
 }
 
 // SSE event types

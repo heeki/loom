@@ -1,5 +1,5 @@
 import { apiFetch } from "./client";
-import type { MemoryCreateRequest, MemoryResponse } from "./types";
+import type { MemoryCreateRequest, MemoryResponse, MemoryRecordsResponse } from "./types";
 
 export function createMemory(request: MemoryCreateRequest): Promise<MemoryResponse> {
   return apiFetch<MemoryResponse>("/api/memories", {
@@ -41,4 +41,8 @@ export function purgeMemory(id: number): Promise<void> {
   return apiFetch<void>(`/api/memories/${id}/purge`, {
     method: "DELETE",
   });
+}
+
+export function getMemoryRecords(id: number): Promise<MemoryRecordsResponse> {
+  return apiFetch<MemoryRecordsResponse>(`/api/memories/${id}/records`);
 }

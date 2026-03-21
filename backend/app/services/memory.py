@@ -102,6 +102,63 @@ def list_memories(region: str = "us-east-1") -> dict[str, Any]:
     return response
 
 
+def list_memory_records(
+    memory_id: str,
+    actor_id: str,
+    max_records: int = 100,
+    region: str = "us-east-1",
+) -> list[dict[str, Any]]:
+    """
+    List stored memory records for a specific actor (user) within a memory resource.
+
+    Paginates automatically and returns up to max_records results.
+
+    Args:
+        memory_id: The AWS memory resource ID (e.g. my_memory-zYcvlyGXsK)
+        actor_id: The actor identifier to scope the query (Cognito username)
+        max_records: Maximum total records to return across all pages
+        region: AWS region name
+
+    Returns:
+        List of memory record dicts with keys:
+        memoryRecordId, content (text), memoryStrategyId, createdAt, updatedAt
+    """
+    import boto3
+
+    client = boto3.client("bedrock-agentcore-control", region_name=region)
+
+    records: list[dict[str, Any]] = []
+    next_token: str | None = None
+
+    while len(records) < max_records:
+        params: dict[str, Any] = {
+            "memoryId": memory_id,
+            "actorId": actor_id,
+            "maxResults": min(max_records - len(records), 50),
+        }
+        if next_token:
+            params["nextToken"] = next_token
+
+        response = client.list_memory_records(**params)
+
+        for raw in response.get("memoryRecords", []):
+            content = raw.get("content", {})
+            text = content.get("text", "") if isinstance(content, dict) else str(content)
+            records.append({
+                "memoryRecordId": raw.get("memoryRecordId", ""),
+                "text": text,
+                "memoryStrategyId": raw.get("memoryStrategyId", ""),
+                "createdAt": raw.get("createdAt", ""),
+                "updatedAt": raw.get("updatedAt", ""),
+            })
+
+        next_token = response.get("nextToken")
+        if not next_token:
+            break
+
+    return records
+
+
 def delete_memory(memory_id: str, region: str = "us-east-1") -> dict[str, Any]:
     """
     Delete an AgentCore Memory resource.

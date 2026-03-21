@@ -258,7 +258,7 @@ function AppContent() {
       ? `demo-user-${_demoAdminMatch[1]}`
       : undefined;
 
-  const { agents, loading, deleteStartTimes, fetchAgents, registerAgent, deployAgent, redeployAgent, refreshAgent, deleteAgent } = useAgents();
+  const { agents, loading, deleteStartTimes, fetchAgents, registerAgent, deployAgent, redeployAgent, refreshAgent, patchAgent, deleteAgent } = useAgents();
 
   // Re-fetch agents after authentication completes and when navigating to agent tabs
   useEffect(() => {
@@ -649,6 +649,7 @@ function AppContent() {
                     if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'agent', 'redeploy', agentName);
                     await redeployAgent(id);
                   }}
+                  onPatchAgent={patchAgent}
                   canInvoke={effectiveHasScope("invoke")}
                   userGroups={viewAsUser ? (USER_GROUPS[viewAsUser] ?? []) : (user?.groups ?? [])}
                 />

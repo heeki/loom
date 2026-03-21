@@ -24,6 +24,7 @@ from app.services.memory import (
     get_memory as svc_get_memory,
     list_memories as svc_list_memories,
     delete_memory as svc_delete_memory,
+    list_memory_records as svc_list_memory_records,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,22 @@ class MemoryCreateRequest(BaseModel):
 class MemoryImportRequest(BaseModel):
     """Request body for importing an existing memory resource by its AWS memory ID."""
     memory_id: str = Field(..., description="AWS memory ID (e.g. my_memory-zYcvlyGXsK)")
+
+
+class MemoryRecordItem(BaseModel):
+    """A single stored memory record for a user."""
+    memoryRecordId: str
+    text: str
+    memoryStrategyId: str
+    createdAt: str
+    updatedAt: str
+
+
+class MemoryRecordsResponse(BaseModel):
+    """Response model for a user's memory records within a memory resource."""
+    memory_id: str
+    actor_id: str
+    records: list[MemoryRecordItem]
 
 
 class MemoryResponse(BaseModel):
@@ -585,3 +602,54 @@ def purge_memory(memory_id: int, user: UserInfo = Depends(require_scopes("memory
         )
     db.delete(memory)
     db.commit()
+
+
+@router.get("/{memory_id}/records", response_model=MemoryRecordsResponse)
+def get_memory_records(
+    memory_id: int,
+    user: UserInfo = Depends(require_scopes("memory:read")),
+    db: Session = Depends(get_db),
+) -> MemoryRecordsResponse:
+    """
+    Retrieve stored memory records for the authenticated user within a memory resource.
+
+    Records are scoped to the requesting user's username (from JWT) as the actorId.
+    Users cannot access records belonging to other actors.
+    """
+    memory = db.query(Memory).filter(Memory.id == memory_id).first()
+    if not memory:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Memory with id {memory_id} not found",
+        )
+    if not memory.memory_id:
+        return MemoryRecordsResponse(memory_id="", actor_id=user.username, records=[])
+
+    actor_id = user.username
+    try:
+        raw_records = svc_list_memory_records(
+            memory_id=memory.memory_id,
+            actor_id=actor_id,
+            region=memory.region,
+        )
+    except Exception as e:
+        logger.warning("Failed to list memory records for memory_id=%s actor=%s: %s", memory.memory_id, actor_id, e)
+        return MemoryRecordsResponse(memory_id=memory.memory_id, actor_id=actor_id, records=[])
+
+    records = [
+        MemoryRecordItem(
+            memoryRecordId=r["memoryRecordId"],
+            text=r["text"],
+            memoryStrategyId=r["memoryStrategyId"],
+            createdAt=str(r["createdAt"]),
+            updatedAt=str(r["updatedAt"]),
+        )
+        for r in raw_records
+        if r.get("text")
+    ]
+
+    return MemoryRecordsResponse(
+        memory_id=memory.memory_id,
+        actor_id=actor_id,
+        records=records,
+    )

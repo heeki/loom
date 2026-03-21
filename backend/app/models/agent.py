@@ -42,6 +42,7 @@ class Agent(Base):
     protocol = Column(String, nullable=True)  # HTTP, MCP, A2A
     network_mode = Column(String, nullable=True)  # PUBLIC or VPC
     authorizer_config = Column(Text, nullable=True)  # JSON: {type, pool_id, discovery_url, client_id, client_secret}
+    description = Column(Text, nullable=True)  # Human-readable description of the agent
     tags = Column(Text, nullable=True)  # JSON dict of resolved tags
     deployed_at = Column(DateTime, nullable=True)
     registered_at = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -112,6 +113,7 @@ class Agent(Base):
             "arn": self.arn,
             "runtime_id": self.runtime_id,
             "name": self.name,
+            "description": self.description,
             "status": self.status,
             "region": self.region,
             "account_id": self.account_id,

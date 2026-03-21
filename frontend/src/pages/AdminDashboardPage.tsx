@@ -33,6 +33,8 @@ import {
   trackAction,
 } from "@/api/audit";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTimezone } from "@/contexts/TimezoneContext";
+import { formatTimestamp as fmtTs } from "@/lib/format";
 import type {
   AuditSummary,
   AuditSession,
@@ -43,19 +45,21 @@ import type {
 
 type TimeRange = "today" | "7d" | "30d" | "all";
 
-function getDateRange(range: TimeRange): { start?: string; end?: string } {
+function getDateRange(range: TimeRange, useUtc: boolean): { start?: string; end?: string } {
   if (range === "all") return {};
   const now = new Date();
-  const todayDate = now.toISOString().slice(0, 10);
+  // "sv" locale produces ISO-style "YYYY-MM-DD" in the requested timezone
+  const todayDate = useUtc
+    ? now.toISOString().slice(0, 10)
+    : now.toLocaleDateString("sv");
   const end = `${todayDate}T23:59:59`;
   if (range === "today") return { start: todayDate, end };
   const days = range === "7d" ? 7 : 30;
   const startDate = new Date(now.getTime() - days * 86400000);
-  return { start: startDate.toISOString().slice(0, 10), end };
-}
-
-function formatTimestamp(ts: string): string {
-  return new Date(ts).toLocaleString();
+  const startStr = useUtc
+    ? startDate.toISOString().slice(0, 10)
+    : startDate.toLocaleDateString("sv");
+  return { start: startStr, end };
 }
 
 function formatDuration(seconds: number | null): string {
@@ -76,6 +80,8 @@ function getPageNumbers(current: number, total: number): (number | null)[] {
 
 export function AdminDashboardPage() {
   const { user, browserSessionId } = useAuth();
+  const { timezone } = useTimezone();
+  const useUtc = timezone === "UTC";
   const [timeRange, setTimeRange] = useState<TimeRange>("7d");
   const [summary, setSummary] = useState<AuditSummary | null>(null);
   const [sessions, setSessions] = useState<AuditSession[]>([]);
@@ -109,7 +115,7 @@ export function AdminDashboardPage() {
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const params = getDateRange(timeRange);
+    const params = getDateRange(timeRange, useUtc);
     try {
       const [s, sess, act, pv] = await Promise.all([
         fetchAuditSummary(params),
@@ -129,7 +135,7 @@ export function AdminDashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [timeRange]);
+  }, [timeRange, useUtc]);
 
   useEffect(() => {
     void loadData();
@@ -477,7 +483,7 @@ export function AdminDashboardPage() {
                             Session {selectedSession.browser_session_id}
                           </h3>
                           <p className="text-xs text-muted-foreground">
-                            User: {selectedSession.user_id} | Login: {formatTimestamp(selectedSession.logged_in_at)}
+                            User: {selectedSession.user_id} | Login: {fmtTs(selectedSession.logged_in_at, timezone)}
                           </p>
                         </div>
                         <button
@@ -528,9 +534,9 @@ export function AdminDashboardPage() {
                                           ? String(evt.detail.page_name ?? "")
                                           : "Logged in"}
                                     </TableCell>
-                                    <TableCell className="text-xs font-mono">{formatTimestamp(evt.timestamp)}</TableCell>
+                                    <TableCell className="text-xs font-mono">{fmtTs(evt.timestamp, timezone)}</TableCell>
                                     <TableCell className="text-xs font-mono">
-                                      {exitedAt ? formatTimestamp(exitedAt) : "-"}
+                                      {exitedAt ? fmtTs(exitedAt, timezone) : "-"}
                                     </TableCell>
                                     <TableCell className="text-xs font-mono">
                                       {evt.type === "page_view" && evt.detail.duration_seconds != null
@@ -583,9 +589,9 @@ export function AdminDashboardPage() {
                             >
                               <TableCell className="text-xs font-mono">{s.browser_session_id}</TableCell>
                               <TableCell className="text-xs">{s.user_id}</TableCell>
-                              <TableCell className="text-xs font-mono">{formatTimestamp(s.logged_in_at)}</TableCell>
+                              <TableCell className="text-xs font-mono">{fmtTs(s.logged_in_at, timezone)}</TableCell>
                               <TableCell className="text-xs font-mono">
-                                {s.last_activity_at ? formatTimestamp(s.last_activity_at) : "-"}
+                                {s.last_activity_at ? fmtTs(s.last_activity_at, timezone) : "-"}
                               </TableCell>
                               <TableCell className="text-xs text-right font-mono">{s.page_view_count}</TableCell>
                               <TableCell className="text-xs text-right font-mono">{s.action_count}</TableCell>
@@ -685,7 +691,7 @@ export function AdminDashboardPage() {
                               <TableCell className="text-xs">{a.action_type}</TableCell>
                               <TableCell className="text-xs">{a.user_id}</TableCell>
                               <TableCell className="text-xs text-muted-foreground">{a.resource_name ?? "-"}</TableCell>
-                              <TableCell className="text-xs font-mono">{formatTimestamp(a.performed_at)}</TableCell>
+                              <TableCell className="text-xs font-mono">{fmtTs(a.performed_at, timezone)}</TableCell>
                             </TableRow>
                           ))}
                         </TableBody>
@@ -764,10 +770,10 @@ export function AdminDashboardPage() {
                               <TableCell className="text-xs font-mono">{p.browser_session_id}</TableCell>
                               <TableCell className="text-xs">{p.page_name}</TableCell>
                               <TableCell className="text-xs">{p.user_id}</TableCell>
-                              <TableCell className="text-xs font-mono">{formatTimestamp(p.entered_at)}</TableCell>
+                              <TableCell className="text-xs font-mono">{fmtTs(p.entered_at, timezone)}</TableCell>
                               <TableCell className="text-xs font-mono">
                                 {p.duration_seconds != null
-                                  ? formatTimestamp(new Date(new Date(p.entered_at).getTime() + p.duration_seconds * 1000).toISOString())
+                                  ? fmtTs(new Date(new Date(p.entered_at).getTime() + p.duration_seconds * 1000).toISOString(), timezone)
                                   : "-"}
                               </TableCell>
                               <TableCell className="text-xs font-mono">{formatDuration(p.duration_seconds)}</TableCell>

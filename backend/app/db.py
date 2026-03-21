@@ -91,6 +91,8 @@ def _migrate_add_columns(eng) -> None:
         ("invocations", "cost_source", "VARCHAR"),
         ("invocations", "request_id", "VARCHAR"),
         ("invocation_sessions", "user_id", "VARCHAR"),
+        ("invocation_sessions", "hidden_at", "DATETIME"),
+        ("agents", "description", "TEXT"),
     ]
 
     for table, column, col_type in migrations:

@@ -94,6 +94,7 @@ class SessionResponse(BaseModel):
     live_status: str
     created_at: str | None
     user_id: str | None = None
+    hidden_at: str | None = None
     invocations: List[InvocationResponse]
 
 
@@ -973,7 +974,8 @@ def list_sessions(
         )
 
     sessions = db.query(InvocationSession).filter(
-        InvocationSession.agent_id == agent_id
+        InvocationSession.agent_id == agent_id,
+        InvocationSession.hidden_at.is_(None),
     ).order_by(InvocationSession.created_at.desc()).all()
 
     from app.routers.settings import get_cpu_io_wait_discount
@@ -1015,6 +1017,39 @@ def get_session(
     sdict = session.to_dict()
     sdict["invocations"] = [_apply_view_time_costs(inv, io_discount) for inv in sdict.get("invocations", [])]
     return SessionResponse(**sdict, live_status=live_status)
+
+
+@router.delete("/{agent_id}/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def hide_session(
+    agent_id: int,
+    session_id: str,
+    user: UserInfo = Depends(require_scopes("invoke")),
+    db: Session = Depends(get_db),
+) -> None:
+    """Hide a session from the user's conversation history (soft delete).
+
+    Sets hidden_at on the session record — no data is removed. The session
+    remains visible to admins and continues to contribute to cost reporting.
+    Only the session owner may hide their own sessions.
+    """
+    session = db.query(InvocationSession).filter(
+        InvocationSession.agent_id == agent_id,
+        InvocationSession.session_id == session_id,
+    ).first()
+
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+    # Ownership check — users may only hide their own sessions
+    if session.user_id != (user.username or user.sub):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only remove your own conversations")
+
+    # Only allow hiding completed sessions
+    if session.status in ("pending", "streaming"):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Cannot remove an active session")
+
+    session.hidden_at = datetime.utcnow()
+    db.commit()
 
 
 @router.get("/{agent_id}/sessions/{session_id}/invocations/{invocation_id}", response_model=InvocationResponse)

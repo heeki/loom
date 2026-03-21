@@ -19,6 +19,7 @@ class InvocationSession(Base):
     status = Column(String, nullable=False, default="pending")  # pending, streaming, complete, error
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
     user_id = Column(String, nullable=True, index=True)
+    hidden_at = Column(DateTime, nullable=True)  # Set when user hides the session from their view
 
     # Relationships
     agent = relationship("Agent", back_populates="sessions")
@@ -33,5 +34,6 @@ class InvocationSession(Base):
             "status": self.status,
             "created_at": (self.created_at.isoformat() + "Z") if self.created_at else None,
             "user_id": self.user_id,
+            "hidden_at": (self.hidden_at.isoformat() + "Z") if self.hidden_at else None,
             "invocations": [inv.to_dict() for inv in self.invocations] if self.invocations else [],
         }

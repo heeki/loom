@@ -157,6 +157,15 @@ export function useAgents() {
     [fetchAgents],
   );
 
+  const patchAgent = useCallback(
+    async (id: number, updates: { description?: string | null }) => {
+      const agent = await agentsApi.patchAgent(id, updates);
+      setAgents((prev) => prev.map((a) => (a.id === id ? agent : a)));
+      return agent;
+    },
+    [],
+  );
+
   const deleteAgent = useCallback(
     async (id: number, cleanupAws: boolean = false) => {
       const updated = await agentsApi.deleteAgent(id, cleanupAws);
@@ -174,5 +183,5 @@ export function useAgents() {
     [],
   );
 
-  return { agents, loading, error, deleteStartTimes, fetchAgents, registerAgent, deployAgent, redeployAgent, refreshAgent, deleteAgent };
+  return { agents, loading, error, deleteStartTimes, fetchAgents, registerAgent, deployAgent, redeployAgent, refreshAgent, patchAgent, deleteAgent };
 }

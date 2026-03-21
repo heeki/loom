@@ -79,6 +79,16 @@ export function updateAgentConfig(
   });
 }
 
+export function patchAgent(
+  id: number,
+  updates: { description?: string | null },
+): Promise<AgentResponse> {
+  return apiFetch<AgentResponse>(`/api/agents/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(updates),
+  });
+}
+
 export function fetchRoles(): Promise<IamRole[]> {
   return apiFetch<IamRole[]>("/api/agents/roles");
 }
