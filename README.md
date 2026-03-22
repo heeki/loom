@@ -41,7 +41,7 @@ Loom is an enterprise-grade platform for building, deploying, and operating AI a
 - Tag badges with filtering and persistent state
 
 ### Token Usage and Cost Tracking
-- Per-invocation token estimation (4 chars/token heuristic) and cost calculation from model pricing
+- Per-invocation token counting via Bedrock CountTokens API (Anthropic/Meta models) with 4 chars/token heuristic fallback
 - Cost dashboard with time-range selector and per-agent breakdown
 - Cost badges on agent cards, token/cost columns in invocation tables
 - Model pricing metadata for all supported Anthropic and Amazon models
@@ -105,7 +105,7 @@ cp backend/etc/environment.sh.example backend/etc/environment.sh
 | `AWS_PROFILE` | AWS CLI profile name |
 | `AWS_REGION` | AWS region (e.g., `us-east-1`) |
 | `LOOM_ARTIFACT_BUCKET` | S3 bucket for agent deployment artifacts |
-| `LOOM_DATABASE_URL` | SQLAlchemy database URL (default: `sqlite:///./loom.db`) |
+| `LOOM_DATABASE_URL` | SQLAlchemy database URL — SQLite for local dev (default: `sqlite:///./loom.db`) or PostgreSQL for cloud deployments (e.g. `postgresql+psycopg2://user:pass@host:5432/loom`) |
 | `LOOM_BACKEND_PORT` | Backend port (default: `8000`) |
 | `LOOM_FRONTEND_PORT` | Frontend port (default: `5173`) |
 | `LOOM_COGNITO_USER_POOL_ID` | Cognito User Pool ID (from Step 2) |
@@ -179,6 +179,20 @@ make test       # Run unit tests
 make run        # Start FastAPI dev server on LOOM_BACKEND_PORT
 ```
 
+For **cloud deployments** using RDS PostgreSQL, install the PostgreSQL driver and point `LOOM_DATABASE_URL` to your RDS instance:
+
+```bash
+uv pip install ".[postgres]"
+# Set LOOM_DATABASE_URL=postgresql+psycopg2://user:pass@host:5432/loom in backend/etc/environment.sh
+make run
+```
+
+To migrate an existing SQLite database to PostgreSQL:
+
+```bash
+make migrate-db   # copies sqlite:///./loom.db → $LOOM_DATABASE_URL
+```
+
 ### Step 4: Start the Frontend
 
 ```bash
@@ -189,7 +203,8 @@ npm run dev     # Start Vite dev server on LOOM_FRONTEND_PORT
 
 ## Architecture
 
-- **Backend:** FastAPI with SQLAlchemy (SQLite), boto3 for AWS, SSE streaming via `StreamingResponse`
+- **Backend:** FastAPI with SQLAlchemy (SQLite for local dev, PostgreSQL/RDS for cloud), boto3 for AWS, SSE streaming via `StreamingResponse`
+- **Infrastructure:** SAM templates for S3 artifact bucket, RDS PostgreSQL with optional RDS Proxy, and EC2 SSM tunnel bastion
 - **Frontend:** React 18, TypeScript, Vite, shadcn/ui, Tailwind CSS v4
 - **Auth:** Cognito User Pool with group-based scopes; frontend enforces sidebar visibility and write permissions
-- **Navigation:** Platform Catalog, Agents, Memory, Security Admin, MCP Servers, A2A Agents, Tagging, Costs, Settings, Admin Dashboard (super-admins only)
+- **Navigation:** Platform Catalog, Agents, Memory, Security Admin, MCP Servers, A2A Agents, Tags, Costs, Settings, Admin Dashboard (super-admins only)

@@ -4,10 +4,11 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Pencil, Trash2, Lock } from "lucide-react";
+import { Plus, Pencil, Trash2, Lock, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { trackAction } from "@/api/audit";
+import { JsonConfigSection } from "@/components/JsonConfigSection";
 import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "@/components/SortableCardGrid";
 import {
   listTagPolicies,
@@ -37,6 +38,14 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
   const [policySortDir, setPolicySortDir] = useState<SortDirection>(() => loadSortDirection("tag-policies"));
   const [profileSortDir, setProfileSortDir] = useState<SortDirection>(() => loadSortDirection("tag-profiles"));
 
+  // Policy form state
+  const [showPolicyForm, setShowPolicyForm] = useState(false);
+  const [editingPolicyId, setEditingPolicyId] = useState<number | null>(null);
+  const [policyFormKey, setPolicyFormKey] = useState("");
+  const [policyFormDefault, setPolicyFormDefault] = useState("");
+  const [policyFormShowOnCard, setPolicyFormShowOnCard] = useState(true);
+  const [confirmDeletePolicyId, setConfirmDeletePolicyId] = useState<number | null>(null);
+
   // Profile form state
   const [showProfileForm, setShowProfileForm] = useState(false);
   const [editingProfileId, setEditingProfileId] = useState<number | null>(null);
@@ -45,14 +54,7 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
   const [profileEnabledCustomKeys, setProfileEnabledCustomKeys] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [confirmDeleteProfileId, setConfirmDeleteProfileId] = useState<number | null>(null);
-
-  // Policy form state
-  const [showPolicyForm, setShowPolicyForm] = useState(false);
-  const [editingPolicyId, setEditingPolicyId] = useState<number | null>(null);
-  const [policyFormKey, setPolicyFormKey] = useState("");
-  const [policyFormDefault, setPolicyFormDefault] = useState("");
-  const [policyFormShowOnCard, setPolicyFormShowOnCard] = useState(true);
-  const [confirmDeletePolicyId, setConfirmDeletePolicyId] = useState<number | null>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
   const fetchData = useCallback(async () => {
     try {
@@ -161,12 +163,9 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
     setEditingProfileId(profile.id);
     setProfileFormName(profile.name);
     setProfileFormTags({ ...profile.tags });
-    // Enable custom keys that already have values in the profile
     const enabledKeys = new Set<string>();
     for (const cp of customPolicies) {
-      if (profile.tags[cp.key]) {
-        enabledKeys.add(cp.key);
-      }
+      if (profile.tags[cp.key]) enabledKeys.add(cp.key);
     }
     setProfileEnabledCustomKeys(enabledKeys);
     setShowProfileForm(true);
@@ -184,7 +183,6 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
 
   const handleProfileSubmit = async () => {
     if (!profileFormName.trim()) return;
-    // Build final tags: platform tags + enabled custom tags only
     const finalTags: Record<string, string> = {};
     for (const tp of platformPolicies) {
       const val = profileFormTags[tp.key];
@@ -235,7 +233,6 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
       const next = new Set(prev);
       if (next.has(key)) {
         next.delete(key);
-        // Clear the value when unchecking
         setProfileFormTags((tags) => {
           const updated = { ...tags };
           delete updated[key];
@@ -243,7 +240,6 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
         });
       } else {
         next.add(key);
-        // Initialize with default value if available
         const policy = customPolicies.find((p) => p.key === key);
         if (policy?.default_value) {
           setProfileFormTags((tags) => ({ ...tags, [key]: policy.default_value! }));
@@ -276,11 +272,11 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
         <p className="text-sm text-muted-foreground">Manage tag policies and tag profiles.</p>
       </div>
 
-      {/* Tag Policies Section */}
+      {/* Tags Section */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-medium">Tag Policies</h3>
+            <h3 className="text-sm font-medium">Tags</h3>
             <p className="text-xs text-muted-foreground mt-1">
               Platform tags are required for all resources. Custom tags are optional and can be included in profiles.
             </p>
@@ -291,10 +287,7 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => {
-                  resetPolicyForm();
-                  setShowPolicyForm(true);
-                }}
+                onClick={() => { resetPolicyForm(); setShowPolicyForm(true); }}
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />
                 Add Custom Tag
@@ -306,6 +299,36 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
         {showPolicyForm && (
           <Card>
             <CardContent className="pt-4 space-y-3">
+              <JsonConfigSection
+                  hideApply={!!editingPolicyId}
+                  placeholder='{ "key": "cost-center", "default_value": "engineering", "show_on_card": true }'
+                  onApply={(json) => {
+                    let parsed: unknown;
+                    try { parsed = JSON.parse(json); } catch { return "Invalid JSON"; }
+                    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "Expected a JSON object";
+                    const row = parsed as Record<string, unknown>;
+                    if (typeof row.key !== "string" || !row.key.trim()) return "Missing required field: key";
+                    setPolicyFormKey(row.key.trim());
+                    setPolicyFormDefault(typeof row.default_value === "string" ? row.default_value : "");
+                    setPolicyFormShowOnCard(typeof row.show_on_card === "boolean" ? row.show_on_card : true);
+                    return null;
+                  }}
+                  onExport={() => {
+                    if (editingPolicyId) {
+                      const p = tagPolicies.find((tp) => tp.id === editingPolicyId);
+                      if (!p) return "{}";
+                      return JSON.stringify({ key: p.key, ...(p.default_value ? { default_value: p.default_value } : {}), show_on_card: p.show_on_card }, null, 2);
+                    }
+                    return JSON.stringify(
+                      customPolicies.map((p) => ({
+                        key: p.key,
+                        ...(p.default_value ? { default_value: p.default_value } : {}),
+                        show_on_card: p.show_on_card,
+                      })),
+                      null, 2
+                    );
+                  }}
+                />
               <div className="flex gap-3">
                 {editingPolicyId ? (
                   <div className="w-1/3 min-w-0 space-y-1">
@@ -372,14 +395,14 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
           <SortableCardGrid
             items={tagPolicies}
             getId={(p) => p.id.toString()}
-            getName={(p) => p.key}
+            getName={(p) => `${p.designation === "platform:required" ? "0" : "1"}:${p.key}`}
             storageKey="tag-policies"
             sortDirection={policySortDir}
             onSortDirectionChange={(d) => { if (d) { setPolicySortDir(d); saveSortDirection("tag-policies", d); } }}
             className="grid gap-2 md:grid-cols-2 lg:grid-cols-3"
             renderItem={(policy) =>
               policy.designation === "platform:required" ? (
-                <Card className="relative py-3 gap-1">
+                <Card className="relative py-3 gap-1 transition-colors hover:bg-accent/50">
                   <CardHeader className="gap-1 pb-2">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-medium truncate min-w-0">{policy.key}</span>
@@ -398,7 +421,7 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
                   </CardContent>
                 </Card>
               ) : (
-                <Card className="relative py-3 gap-1">
+                <Card className="relative py-3 gap-1 transition-colors hover:bg-accent/50">
                   <CardHeader className="gap-1 pb-2">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-medium truncate min-w-0">{policy.key}</span>
@@ -492,6 +515,39 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
         {showProfileForm && (
           <Card>
             <CardContent className="pt-4 space-y-4">
+              <JsonConfigSection
+                  hideApply={!!editingProfileId}
+                  placeholder='{ "name": "team-alpha", "tags": { "loom:application": "app", "loom:group": "alpha", "loom:owner": "user1" } }'
+                  onApply={(json) => {
+                    let parsed: unknown;
+                    try { parsed = JSON.parse(json); } catch { return "Invalid JSON"; }
+                    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "Expected a JSON object";
+                    const row = parsed as Record<string, unknown>;
+                    if (typeof row.name !== "string" || !row.name.trim()) return "Missing required field: name";
+                    if (!row.tags || typeof row.tags !== "object" || Array.isArray(row.tags)) return "Missing required field: tags";
+                    setProfileFormName(row.name.trim());
+                    const tags = row.tags as Record<string, string>;
+                    setProfileFormTags(tags);
+                    const enabledKeys = new Set<string>();
+                    for (const cp of customPolicies) {
+                      if (tags[cp.key]) enabledKeys.add(cp.key);
+                    }
+                    setProfileEnabledCustomKeys(enabledKeys);
+                    return null;
+                  }}
+                  onExport={() => {
+                    if (editingProfileId) {
+                      const p = profiles.find((pr) => pr.id === editingProfileId);
+                      if (!p) return "{}";
+                      return JSON.stringify({ name: p.name, tags: p.tags }, null, 2);
+                    }
+                    const visibleProfiles = !isAdminUser && userGroup
+                      ? profiles.filter((p) => p.tags?.["loom:group"] === userGroup)
+                      : profiles;
+                    return JSON.stringify(visibleProfiles.map((p) => ({ name: p.name, tags: p.tags })), null, 2);
+                  }}
+                />
+
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">Profile Name *</label>
                 <Input
@@ -503,7 +559,6 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
                 />
               </div>
 
-              {/* Platform: Required section */}
               {platformPolicies.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
@@ -540,7 +595,6 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
                 </div>
               )}
 
-              {/* Custom: Optional section */}
               {customPolicies.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
@@ -600,90 +654,121 @@ export function TaggingPage({ readOnly, userGroups = [] }: TaggingPageProps) {
           const visibleProfiles = !isAdminUser && userGroup
             ? profiles.filter((p) => p.tags?.["loom:group"] === userGroup)
             : profiles;
-          return visibleProfiles.length === 0 && !showProfileForm ? (
-          <p className="text-sm text-muted-foreground py-8">
-            No tag profiles yet. Create one to apply consistent tags across agents and memory resources.
-          </p>
-        ) : (
-          <SortableCardGrid
-            items={visibleProfiles}
-            getId={(p) => p.id.toString()}
-            getName={(p) => p.name}
-            storageKey="tag-profiles"
-            sortDirection={profileSortDir}
-            onSortDirectionChange={(d) => { if (d) { setProfileSortDir(d); saveSortDirection("tag-profiles", d); } }}
-            className="grid gap-2 md:grid-cols-2 lg:grid-cols-3"
-            renderItem={(profile) => {
-              const profileGroup = profile.tags?.["loom:group"] || "";
-              const isDemoAdmin = userGroups.includes("g-admins-demo") && !isSuperAdmin;
-              const canEditProfile = !readOnly && (isSuperAdmin || (isDemoAdmin && profileGroup === "demo"));
-
-              return (
-                <Card className="relative py-3 gap-1">
-                  <CardHeader className="gap-1 pb-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium truncate min-w-0">{profile.name}</span>
-                      {canEditProfile && (
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => startEditProfile(profile)}
-                            className="text-muted-foreground/50 hover:text-foreground transition-colors"
-                            title="Edit"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setConfirmDeleteProfileId(profile.id)}
-                            className="text-muted-foreground/50 hover:text-destructive transition-colors"
-                            title="Delete"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </CardHeader>
-                <CardContent className="space-y-1.5">
-                  <div className="flex flex-wrap gap-1">
-                    {Object.entries(profile.tags).map(([key, value]) => (
-                      <Badge
-                        key={key}
-                        variant="outline"
-                        className="text-[10px] px-1.5 py-0 font-normal"
-                      >
-                        {key.replace(/^loom:/, "")}: {value}
-                      </Badge>
-                    ))}
-                  </div>
-                  {confirmDeleteProfileId === profile.id && (
-                    <div className="flex items-center justify-end gap-2 pt-1">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-6 text-xs"
-                        onClick={() => setConfirmDeleteProfileId(null)}
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        className="h-6 text-xs"
-                        onClick={() => handleProfileDelete(profile.id)}
-                        disabled={submitting}
-                      >
-                        Confirm
-                      </Button>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+          if (visibleProfiles.length === 0 && !showProfileForm) {
+            return (
+              <p className="text-sm text-muted-foreground py-8">
+                No tag profiles yet. Create one to apply consistent tags across agents and memory resources.
+              </p>
             );
-            }}
-          />
-        );
+          }
+          const grouped = new Map<string, TagProfile[]>();
+          for (const p of visibleProfiles) {
+            const group = p.tags?.["loom:group"] || "ungrouped";
+            const list = grouped.get(group);
+            if (list) list.push(p);
+            else grouped.set(group, [p]);
+          }
+          const sortedGroups = [...grouped.entries()].sort((a, b) =>
+            a[0] === "ungrouped" ? 1 : b[0] === "ungrouped" ? -1 : a[0].localeCompare(b[0])
+          );
+          const toggleGroup = (group: string) => {
+            setCollapsedGroups((prev) => {
+              const next = new Set(prev);
+              if (next.has(group)) next.delete(group);
+              else next.add(group);
+              return next;
+            });
+          };
+          return sortedGroups.map(([group, groupProfiles]) => (
+            <div key={group} className="space-y-2">
+              <button
+                type="button"
+                onClick={() => toggleGroup(group)}
+                className="flex items-center gap-1 text-xs font-medium text-muted-foreground uppercase tracking-wide hover:text-foreground"
+              >
+                {collapsedGroups.has(group) ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                {group} ({groupProfiles.length})
+              </button>
+              {collapsedGroups.has(group) ? null : <SortableCardGrid
+                items={groupProfiles}
+                getId={(p) => p.id.toString()}
+                getName={(p) => p.name}
+                storageKey={`tag-profiles-${group}`}
+                sortDirection={profileSortDir}
+                onSortDirectionChange={(d) => { if (d) { setProfileSortDir(d); saveSortDirection("tag-profiles", d); } }}
+                className="grid gap-2 md:grid-cols-2 lg:grid-cols-3"
+                renderItem={(profile) => {
+                  const profileGroup = profile.tags?.["loom:group"] || "";
+                  const isDemoAdmin = userGroups.includes("g-admins-demo") && !isSuperAdmin;
+                  const canEditProfile = !readOnly && (isSuperAdmin || (isDemoAdmin && profileGroup === "demo"));
+
+                  return (
+                    <Card className="relative py-3 gap-1 transition-colors hover:bg-accent/50">
+                      <CardHeader className="gap-1 pb-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-medium truncate min-w-0">{profile.name}</span>
+                          {canEditProfile && (
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => startEditProfile(profile)}
+                                className="text-muted-foreground/50 hover:text-foreground transition-colors"
+                                title="Edit"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteProfileId(profile.id)}
+                                className="text-muted-foreground/50 hover:text-destructive transition-colors"
+                                title="Delete"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-1.5">
+                        <div className="flex flex-wrap gap-1">
+                          {Object.entries(profile.tags).map(([key, value]) => (
+                            <Badge
+                              key={key}
+                              variant="outline"
+                              className="text-[10px] px-1.5 py-0 font-normal"
+                            >
+                              {key.replace(/^loom:/, "")}: {value}
+                            </Badge>
+                          ))}
+                        </div>
+                        {confirmDeleteProfileId === profile.id && (
+                          <div className="flex items-center justify-end gap-2 pt-1">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 text-xs"
+                              onClick={() => setConfirmDeleteProfileId(null)}
+                            >
+                              Cancel
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="h-6 text-xs"
+                              onClick={() => handleProfileDelete(profile.id)}
+                              disabled={submitting}
+                            >
+                              Confirm
+                            </Button>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                }}
+              />}
+            </div>
+          ));
         })()}
       </div>
     </div>

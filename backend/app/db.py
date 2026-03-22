@@ -12,11 +12,22 @@ logger = logging.getLogger(__name__)
 DATABASE_URL = os.getenv("LOOM_DATABASE_URL", "sqlite:///./loom.db")
 
 # Create SQLAlchemy engine
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
-    echo=False,
-)
+# PostgreSQL connections (including via RDS Proxy) use pool_pre_ping to detect
+# dropped connections and pool_recycle to avoid stale connections across proxy
+# idle timeouts. SQLite uses check_same_thread=False for multi-threaded access.
+if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False},
+        echo=False,
+    )
+else:
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_recycle=1800,
+        echo=False,
+    )
 
 # Enable foreign key constraints for SQLite
 if DATABASE_URL.startswith("sqlite"):
@@ -95,14 +106,26 @@ def _migrate_add_columns(eng) -> None:
         ("agents", "description", "TEXT"),
     ]
 
+    is_postgres = eng.dialect.name == "postgresql"
+
     for table, column, col_type in migrations:
         if not insp.has_table(table):
             continue
         existing = {c["name"] for c in insp.get_columns(table)}
         if column not in existing:
-            logger.info("Migrating: ALTER TABLE %s ADD COLUMN %s %s", table, column, col_type)
-            with eng.begin() as conn:
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
+            if is_postgres:
+                pg_type = col_type
+                if pg_type == "DATETIME":
+                    pg_type = "TIMESTAMP"
+                elif pg_type == "REAL":
+                    pg_type = "DOUBLE PRECISION"
+                logger.info("Migrating: ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s %s", table, column, pg_type)
+                with eng.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {pg_type}"))
+            else:
+                logger.info("Migrating: ALTER TABLE %s ADD COLUMN %s %s", table, column, col_type)
+                with eng.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
 
 
 def _backfill_session_users(eng) -> None:
@@ -113,7 +136,7 @@ def _backfill_session_users(eng) -> None:
     Only updates rows where user_id is currently NULL.
     """
     insp = inspect(eng)
-    if not insp.has_table("invocation_sessions") or not insp.has_table("audit_actions"):
+    if not insp.has_table("invocation_sessions") or not insp.has_table("audit_action"):
         return
     try:
         with eng.begin() as conn:
@@ -121,7 +144,7 @@ def _backfill_session_users(eng) -> None:
                 UPDATE invocation_sessions
                 SET user_id = (
                     SELECT a.user_id
-                    FROM audit_actions a
+                    FROM audit_action a
                     WHERE a.action_category = 'navigation'
                       AND a.action_type = 'session_detail'
                       AND a.resource_name = invocation_sessions.session_id
@@ -130,7 +153,7 @@ def _backfill_session_users(eng) -> None:
                 )
                 WHERE user_id IS NULL
                   AND EXISTS (
-                    SELECT 1 FROM audit_actions a
+                    SELECT 1 FROM audit_action a
                     WHERE a.action_category = 'navigation'
                       AND a.action_type = 'session_detail'
                       AND a.resource_name = invocation_sessions.session_id

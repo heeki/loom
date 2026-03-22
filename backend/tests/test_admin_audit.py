@@ -306,9 +306,9 @@ class TestAuditSessions(unittest.TestCase):
         data = response.json()
         self.assertEqual(len(data), 3)
         # Should be sorted chronologically
-        self.assertEqual(data[0]["event_type"], "login")
-        self.assertEqual(data[1]["event_type"], "page_view")
-        self.assertEqual(data[2]["event_type"], "action")
+        self.assertEqual(data[0]["type"], "login")
+        self.assertEqual(data[1]["type"], "page_view")
+        self.assertEqual(data[2]["type"], "action")
 
     def test_session_timeline_empty(self):
         """Test timeline for non-existent session returns empty list."""
@@ -358,8 +358,8 @@ class TestAuditSummary(unittest.TestCase):
         self.assertEqual(data["total_actions"], 0)
         self.assertEqual(data["actions_by_category"], {})
         self.assertEqual(data["page_views_by_page"], {})
-        self.assertEqual(data["logins_by_day"], {})
-        self.assertEqual(data["actions_by_day"], {})
+        self.assertEqual(data["logins_by_day"], [])
+        self.assertEqual(data["actions_by_day"], [])
 
     def test_summary_with_data(self):
         """Test summary with seeded data."""

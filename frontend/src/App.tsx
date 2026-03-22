@@ -13,7 +13,7 @@ import {
   TimezoneProvider,
   useTimezone,
 } from "@/contexts/TimezoneContext";
-import { ThemeProvider, useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { ThemeProvider, useTheme, isLightTheme, THEME_LABELS, type Theme } from "@/contexts/ThemeContext";
 import { useAgents } from "@/hooks/useAgents";
 import { useSessions } from "@/hooks/useSessions";
 import { clearInvokeState } from "@/hooks/useInvoke";
@@ -33,7 +33,7 @@ import { CostDashboardPage } from "@/pages/CostDashboardPage";
 import type { SessionResponse, InvocationResponse } from "@/api/types";
 import { AuthProvider, useAuth, type Scope } from "@/contexts/AuthContext";
 import { LoginPage } from "@/pages/LoginPage";
-import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings, Eye, Tags, DollarSign, BarChart3 } from "lucide-react";
+import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings, Eye, Tags, DollarSign, BarChart3, Palette } from "lucide-react";
 import { AdminDashboardPage } from "./pages/AdminDashboardPage";
 import { ChatPage } from "./pages/ChatPage";
 import { recordPageView, sendBeaconPageView, trackAction } from "./api/audit";
@@ -163,7 +163,19 @@ function SidebarItem({
 
 function AppContent() {
   const { isAuthenticated, isLoading, user, logout, hasScope, browserSessionId } = useAuth();
-  const { theme } = useTheme();
+  const { theme, setTheme } = useTheme();
+  const [showThemePicker, setShowThemePicker] = useState(false);
+  const themePickerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showThemePicker) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (themePickerRef.current && !themePickerRef.current.contains(e.target as Node)) {
+        setShowThemePicker(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showThemePicker]);
 
   // Determine default persona based on user's scopes
   const getDefaultPersona = useCallback((): Persona => {
@@ -543,17 +555,57 @@ function AppContent() {
                   {user.username || "User"}
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "auth", "logout");
-                  logout();
-                }}
-                className="text-muted-foreground hover:text-foreground transition-colors"
-                title="Sign out"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-              </button>
+              <div className="flex items-center gap-1">
+                <div className="relative" ref={themePickerRef}>
+                  <button
+                    type="button"
+                    onClick={() => setShowThemePicker((v) => !v)}
+                    className="text-muted-foreground hover:text-foreground transition-colors"
+                    title="Change theme"
+                  >
+                    <Palette className="h-3.5 w-3.5" />
+                  </button>
+                  {showThemePicker && (
+                    <div className="absolute bottom-6 right-0 z-50 w-44 rounded border bg-white shadow-md py-1">
+                      <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Light</div>
+                      {(Object.entries(THEME_LABELS) as [Theme, string][])
+                        .filter(([k]) => isLightTheme(k as Theme))
+                        .map(([k, v]) => (
+                          <button
+                            key={k}
+                            onClick={() => { setTheme(k); setShowThemePicker(false); }}
+                            className={`w-full text-left px-3 py-1.5 text-xs transition-colors hover:bg-gray-100 text-gray-700 ${theme === k ? "font-bold" : ""}`}
+                          >
+                            {v}
+                          </button>
+                        ))}
+                      <div className="px-3 py-1 mt-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wide border-t border-gray-100">Dark</div>
+                      {(Object.entries(THEME_LABELS) as [Theme, string][])
+                        .filter(([k]) => !isLightTheme(k as Theme))
+                        .map(([k, v]) => (
+                          <button
+                            key={k}
+                            onClick={() => { setTheme(k); setShowThemePicker(false); }}
+                            className={`w-full text-left px-3 py-1.5 text-xs transition-colors hover:bg-gray-100 text-gray-700 ${theme === k ? "font-bold" : ""}`}
+                          >
+                            {v}
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "auth", "logout");
+                    logout();
+                  }}
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                  title="Sign out"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
           )}
           {isAdmin && (

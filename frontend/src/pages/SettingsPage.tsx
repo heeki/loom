@@ -2,20 +2,16 @@ import { useEffect, useState, useCallback } from "react";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { useTimezone, type TimezonePreference } from "@/contexts/TimezoneContext";
-import { useTheme, THEME_LABELS, isLightTheme, type Theme } from "@/contexts/ThemeContext";
 import { listSiteSettings, updateSiteSetting } from "@/api/settings";
 
 export function SettingsPage() {
   const { timezone, setTimezone } = useTimezone();
-  const { theme, setTheme } = useTheme();
   const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const [cpuIdleDiscount, setCpuIdleDiscount] = useState("75");
@@ -60,32 +56,6 @@ export function SettingsPage() {
           </p>
         </div>
         <div className="flex gap-4">
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">Theme</label>
-            <Select value={theme} onValueChange={(v) => setTheme(v as Theme)}>
-              <SelectTrigger className="h-8 w-[200px] text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent position="popper" side="bottom" sideOffset={4}>
-                <SelectGroup>
-                  <SelectLabel>Light</SelectLabel>
-                  {(Object.entries(THEME_LABELS) as [Theme, string][])
-                    .filter(([value]) => isLightTheme(value))
-                    .map(([value, label]) => (
-                      <SelectItem key={value} value={value}>{label}</SelectItem>
-                    ))}
-                </SelectGroup>
-                <SelectGroup>
-                  <SelectLabel>Dark</SelectLabel>
-                  {(Object.entries(THEME_LABELS) as [Theme, string][])
-                    .filter(([value]) => !isLightTheme(value))
-                    .map(([value, label]) => (
-                      <SelectItem key={value} value={value}>{label}</SelectItem>
-                    ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
           <div className="space-y-1">
             <label className="text-xs text-muted-foreground">Timezone</label>
             <Select value={timezone} onValueChange={(v) => setTimezone(v as TimezonePreference)}>

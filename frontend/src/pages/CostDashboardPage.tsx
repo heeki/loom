@@ -350,7 +350,7 @@ export function CostDashboardPage({ readOnly: _readOnly, groupRestriction }: Cos
                 <button
                   onClick={() => void pullActuals()}
                   disabled={actualsLoading}
-                  className="w-[160px] px-3 py-1 text-xs rounded-md border bg-background transition-colors hover:bg-accent disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="w-[190px] px-3 py-1 text-xs rounded-md border bg-background transition-colors hover:bg-accent disabled:opacity-50 flex items-center justify-center gap-2 shrink-0"
                 >
                   <ScrollText className="h-3 w-3" />
                   <span>Pull Actuals</span>

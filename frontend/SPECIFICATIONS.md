@@ -122,7 +122,7 @@ The app uses a persona-based single-page architecture with a sidebar for workflo
 | Agents | Bot | Deploy new agents or import existing ones | `agent:read` or `agent:write` | |
 | Memory | Brain | Create and manage AgentCore Memory resources | `memory:read` or `memory:write` | |
 | Security Admin | Shield | Manage roles, authorizers, credentials, permissions | `security:read` or `security:write` | |
-| Tagging | Tags | Manage tag policies and tag profiles | Always visible | |
+| Tags | Tags | Manage tag policies and tag profiles | Always visible | |
 | Settings | Settings | Manage display preferences | Always visible | |
 | MCP Servers | Network | Register and manage MCP servers, tools, and access control | `mcp:read` or `mcp:write` | |
 | A2A Agents | Users | Register and manage A2A agents, view Agent Cards, and control access | `a2a:read` or `a2a:write` | |
@@ -477,12 +477,14 @@ Create/edit form with:
 
 **Content:**
 - Page header: "Tagging" with description "Manage tag policies and tag profiles."
-- **Tag Policies** section (top): displays `platform:required` tags as read-only rows with a Lock icon and designation badge, followed by `custom:optional` tags (editable/deletable with designation badge). "Add Custom Tag" button shows a form with: key (text, required), default value (optional text), show on card (checkbox, default true). Custom tags are always created as `required=false`.
+- **Tag Policies** section (top): displays `platform:required` tags as read-only rows with a Lock icon and designation badge, followed by `custom:optional` tags (editable/deletable with designation badge). "Add Custom Tag" button shows a form with: key (text, required), default value (optional text), show on card (checkbox, default true). Custom tags are always created as `required=false`. Sort toggle (A-Z/Z-A) available for policies and profiles.
 - **Tag Profiles** section (below policies): list, create, edit, delete named tag presets
   - Each profile card shows: name, timestamps, and tag value badges
+  - Collapsible profile groups: platform required tags and custom optional tags are in collapsible sections (ChevronDown/ChevronRight toggle)
   - Create/edit form has two sections:
     1. **Platform (Required)** — input fields for each `platform:required` tag (mandatory, marked with `*`)
     2. **Custom (Optional)** — checkbox per custom tag; checking reveals a value input. Unchecking removes the tag from the profile.
+  - Form-fill import: JSON import via `JsonConfigSection` auto-populates profile form with tag key-value pairs from the imported JSON
   - Accessible to all scopes; `*:write` can create, edit, and delete; `*:read` can only view
   - Delete with inline confirmation (Confirm/Cancel)
 - Always visible in the sidebar (no scope guard for visibility)
@@ -684,7 +686,7 @@ The invoke panel's credential dropdown includes a "Manual token" sentinel value.
   - **Summary cards**: Total Cost (Model + Runtime + Memory), Model Tokens (with invocation count), Runtime (CPU + Mem breakdown), Memory (STM + LTM breakdown).
   - **Estimated Costs table**: Per-agent breakdown with columns Agent, Model, Invocations, Model Tokens, AgentCore Runtime, AgentCore Memory, Per Invoke, Total. Single-row per agent with sub-details as `text-[10px]` inline divs (token in/out, CPU+Mem split, STM+LTM split). Methodology formulas displayed below header. Sortable columns via `SortableTableHead`. Estimates disclaimer: costs are estimates based on token heuristics and pricing defaults.
   - **Actual Costs** with separate Runtime and Memory sub-cards:
-    - **Runtime**: Collapsible agent groups — each agent row shows agent name, session count, total CPU cost, total memory cost, and subtotal. Expand to see individual session rows with event counts, time range, resource hours (vCPU·h, GB·h), and per-session costs. Sortable at the agent level. Description: "Costs from runtime USAGE_LOGS, filtered to Loom-tracked sessions. CPU I/O wait discount: N%, configurable in Settings."
+    - **Runtime**: Collapsible agent groups — each agent row shows agent name, session count, total CPU cost, total memory cost, and subtotal. Expand to see individual session rows with event counts, time range, resource hours (vCPU·h, GB·h), and per-session costs. Sortable at the agent level. Description: "Costs from runtime USAGE_LOGS for the runtime within the time window. CPU I/O wait discount: N%, configurable in Settings." Note: USAGE_LOGS session IDs are internal to AgentCore and do not match Loom's runtimeSessionId.
     - **Memory**: Consolidated per-resource table with columns Memory, Log Events, Extractions, Consolidations, LTM Retrievals, Records Stored, Total. One row per memory resource. Sortable columns. Description: "Costs from memory APPLICATION_LOGS. Memory pipeline session IDs are internal to AgentCore and do not correlate with runtime session IDs."
     - NOTE: "Delivery of usage logs for calculating actual costs can be delayed. If costs are not showing up, try again in 15 minutes."
   - Pull Actuals button with loading timer. Module-level cache preserves actuals across page navigation.
@@ -727,7 +729,7 @@ The invoke panel's credential dropdown includes a "Manual token" sentinel value.
 - **Global user filter:** Multi-select dropdown in the header (labeled "Users:") listing all unique user IDs from the loaded data. Selecting users filters all summary cards, charts, and tab tables to only that subset. When no users are selected ("All users"), the full unfiltered data is shown. When a filter is active, summary stats are recomputed client-side from the filtered sessions, actions, and page views (rather than relying on the API summary, which is unfiltered). Pagination page counters reset when the filter changes.
 - Time range selector: Today / Last 7 days / Last 30 days / All time.
 - Summary cards (5): Total Logins, Total Page Views, Total Actions, Total Duration, Most Active Page. Stats reflect the active user filter when set.
-- Charts (recharts, 3): Logins Over Time (bar chart, daily), Actions Over Time (bar chart, daily), Page Views by page name (horizontal bar chart). Chart data reflects the active user filter.
+- Charts (recharts, 3): Logins Over Time (bar chart, daily), Actions Over Time (bar chart, daily), Page Views by page name (horizontal bar chart). All charts use custom tooltip components for consistent theme-aware styling. Chart data reflects the active user filter.
 - Tabs (3): Sessions, Actions, Page Views.
   - **Sessions:** Table of aggregated browser sessions (session ID, user, login time, last activity, page view count, action count, duration). Clicking a row shows the full interleaved event timeline (logins, actions, page views). Filtered by the global user filter.
   - **Actions:** Table with category and action type filters. Filtered by the global user filter.

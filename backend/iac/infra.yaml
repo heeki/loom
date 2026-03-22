@@ -1,0 +1,59 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Loom shared infrastructure — S3 deployment bucket for agent artifacts
+
+Parameters:
+  pArtifactBucketName:
+    Type: String
+    Description: Name for the S3 artifact bucket
+  pTagApplication:
+    Type: String
+    Description: Value for the loom:application tag
+  pTagGroup:
+    Type: String
+    Description: Value for the loom:group tag
+  pTagOwner:
+    Type: String
+    Description: Value for the loom:owner tag
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # S3 — Deployment artifact bucket
+  # ---------------------------------------------------------------------------
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref pArtifactBucketName
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: CleanupOldVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 90
+      Tags:
+        - Key: loom:application
+          Value: !Ref pTagApplication
+        - Key: loom:group
+          Value: !Ref pTagGroup
+        - Key: loom:owner
+          Value: !Ref pTagOwner
+
+Outputs:
+  oArtifactBucket:
+    Description: S3 bucket for agent deployment artifacts
+    Value: !Ref ArtifactBucket
+  oArtifactBucketArn:
+    Description: ARN of the S3 artifact bucket
+    Value: !GetAtt ArtifactBucket.Arn

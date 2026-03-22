@@ -68,7 +68,7 @@ export function MemoryCard({
   })();
 
   return (
-    <Card className="relative py-3 gap-1">
+    <Card className="relative py-3 gap-1 transition-colors hover:bg-accent/50">
       <CardHeader className="gap-1 pb-3">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">

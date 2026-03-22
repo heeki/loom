@@ -6,7 +6,7 @@
 |---------|--------|
 | Framework | FastAPI |
 | Server | Uvicorn (local dev) |
-| ORM | SQLAlchemy (with SQLite) |
+| ORM | SQLAlchemy (SQLite for local dev, PostgreSQL for cloud) |
 | AWS SDK | boto3 |
 | Python version | 3.11+ (3.13 for ARM64 runtime deployment) |
 | Dependency manager | uv |
@@ -20,7 +20,7 @@ All runtime configuration is injected via environment variables sourced from `et
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DATABASE_URL` | SQLite file path | `sqlite:///./loom.db` |
+| `LOOM_DATABASE_URL` | SQLAlchemy database URL (SQLite or PostgreSQL) | `sqlite:///./loom.db` |
 | `BACKEND_PORT` | Port for uvicorn | `8000` |
 | `FRONTEND_PORT` | Port for Vite dev server (CORS) | `5173` |
 | `LOG_LEVEL` | Backend log level | `info` |
@@ -84,6 +84,7 @@ backend/
 │       ├── a2a.py           # A2A Agent Card fetching, parsing, connection test
 │       ├── cloudwatch.py    # CloudWatch log retrieval and parsing
 │       ├── otel.py          # OTEL log parsing: fetch events from otel-rt-logs, parse traces and spans
+│       ├── observability.py # CloudWatch vended log delivery configuration (USAGE_LOGS, APPLICATION_LOGS)
 │       ├── cognito.py       # Cognito OAuth2 token retrieval (client credentials grant)
 │       ├── credential.py    # AgentCore credential provider management
 │       ├── deployment.py    # Agent artifact build, runtime CRUD, secret detection
@@ -92,9 +93,14 @@ backend/
 │       ├── latency.py       # Latency calculation helpers
 │       ├── mcp.py           # MCP server connection test and tool discovery stubs
 │       ├── memory.py        # Bedrock AgentCore Memory API wrapper
-│       └── secrets.py       # AWS Secrets Manager wrapper with in-memory caching
+│       ├── secrets.py       # AWS Secrets Manager wrapper with in-memory caching
+│       ├── tokens.py        # Bedrock CountTokens API with provider guard (Anthropic/Meta)
+│       └── usage_poller.py  # Background poller: updates estimated costs with actual USAGE_LOGS data
 ├── scripts/
-│   └── stream.py            # SSE streaming client for CLI invocations (httpx)
+│   ├── stream.py            # SSE streaming client for CLI invocations (httpx)
+│   ├── migrate_sqlite_to_postgres.py  # CLI utility to migrate SQLite data to PostgreSQL
+│   ├── fix_sequences.py     # PostgreSQL sequence auto-repair after migration
+│   └── reset_db.py          # Database reset utility
 ├── tests/
 │   ├── test_agentcore.py    # AgentCore service tests
 │   ├── test_agents.py       # Agent router tests
@@ -121,7 +127,62 @@ backend/
 
 ---
 
-## 4. Database Schema
+## 4. Database Backend
+
+### Supported Backends
+
+Loom supports two database backends selected via `LOOM_DATABASE_URL`:
+
+| Backend | URL Format | Use Case |
+|---------|-----------|----------|
+| SQLite | `sqlite:///./loom.db` | Local development and single-instance deployments |
+| PostgreSQL | `postgresql+psycopg2://user:pass@host:5432/loom` | Cloud deployments with load balancing across multiple containers |
+
+The backend is designed for transparent compatibility — no changes to application code or the frontend are required when switching backends. SQLAlchemy abstracts all database interactions.
+
+### Dialect-Aware Engine Configuration
+
+`backend/app/db.py` detects the dialect from `LOOM_DATABASE_URL` at startup:
+
+- **SQLite**: sets `connect_args={"check_same_thread": False}` and registers a `PRAGMA foreign_keys=ON` connection hook.
+- **PostgreSQL**: omits both (handled natively by PostgreSQL).
+
+### Schema Migrations (`_migrate_add_columns`)
+
+The `_migrate_add_columns` helper adds missing columns to existing tables at startup (SQLAlchemy's `create_all` does not alter existing tables). It is dialect-aware:
+
+- **SQLite**: `ALTER TABLE {table} ADD COLUMN {column} {type}`
+- **PostgreSQL**: `ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {pg_type}`
+  - `DATETIME` → `TIMESTAMP`
+  - `REAL` → `DOUBLE PRECISION`
+
+### SQLite-to-PostgreSQL Migration
+
+`backend/scripts/migrate_sqlite_to_postgres.py` migrates all data from a source database to a destination database:
+
+```bash
+python scripts/migrate_sqlite_to_postgres.py \
+  --source sqlite:///./loom.db \
+  --dest postgresql+psycopg2://user:pass@host:5432/loom [--skip-existing]
+```
+
+- Discovers all tables at runtime via SQLAlchemy reflection (no hardcoded table names).
+- Copies tables in foreign-key dependency order using Kahn's topological sort.
+- `--skip-existing`: skips tables in the destination that already contain data.
+- Per-table error handling: logs failures and continues with remaining tables.
+- Also available as `make migrate-db` (uses `$LOOM_DATABASE_URL` as destination).
+
+### PostgreSQL Dependency
+
+`psycopg2-binary` is required for PostgreSQL connections. Install it with:
+
+```bash
+uv pip install ".[postgres]"
+```
+
+---
+
+## 5. Database Schema
 
 ### `agents` table
 
@@ -840,7 +901,7 @@ The `has_token` and `token_source` fields in `session_start` indicate whether an
 
 **CPU I/O Wait Discount:** A single configurable site setting (`cpu_io_wait_discount`, default 75%) applied universally to runtime CPU costs across both estimates and actuals. Stored as integer percentage (0–99).
 
-**Actuals from CloudWatch usage logs:** The `POST /api/dashboard/costs/actuals` endpoint queries CloudWatch `BedrockAgentCoreRuntime_UsageLogs` streams for each runtime. Usage events (1-second granularity) are aggregated by `(agent_name, session_id)` from `attributes.agent.name` and `attributes.session.id`. Only sessions that exist in Loom's `invocation_sessions` table are included, filtering out external invocations. Timestamps are normalized from epoch milliseconds or ISO strings to UTC ISO 8601. Delivery of usage logs can be delayed up to 15 minutes.
+**Actuals from CloudWatch usage logs:** The `POST /api/dashboard/costs/actuals` endpoint queries CloudWatch `BedrockAgentCoreRuntime_UsageLogs` streams for each runtime. Usage events (1-second granularity) are aggregated by `(agent_name, session_id)` from `attributes.agent.name` and `attributes.session.id`. All events within the time window for a given runtime are included — USAGE_LOGS session IDs are internal to AgentCore and do NOT match Loom's `runtimeSessionId`, so session-based filtering is not applied. Timestamps are normalized from epoch milliseconds or ISO strings to UTC ISO 8601. Delivery of usage logs can be delayed up to 15 minutes.
 
 **Memory actuals from CloudWatch APPLICATION_LOGS:** For each memory resource, the endpoint queries the vended log group `/aws/vendedlogs/bedrock-agentcore/memory/APPLICATION_LOGS/{memory_id}` stream `BedrockAgentCoreMemory_ApplicationLogs`. Memory pipeline session IDs are internal to AgentCore and do NOT correlate with runtime session IDs — they represent asynchronous extraction/consolidation/storage pipeline runs. The `parse_memory_log_events()` function maps `body.log` messages to pricing operations: "Retrieving memories." → LTM retrievals ($0.50/1K), "Succeeded to upsert N records." → LTM records stored ($0.75/1K/month), extraction and consolidation events are tracked as counts. Per-session breakdowns include `log_events`, `retrieve_records`, `records_stored`, `extractions`, `consolidations`, and `errors`.
 
@@ -1038,6 +1099,25 @@ Wraps `boto3.client('bedrock-agentcore-control')` for memory operations:
 - `compute_cold_start(client_invoke_time: float, agent_start_time: float) -> float` — returns millisecond delta.
 - `compute_client_duration(client_invoke_time: float, client_done_time: float) -> float` — returns millisecond delta.
 
+### `services/tokens.py`
+
+Bedrock token counting via the CountTokens API:
+
+- `count_input_tokens(model_id, prompt, region) -> int` — counts input tokens using the Bedrock `count_tokens` API. Provider guard restricts API calls to supported providers (`anthropic`, `meta`); other models fall back to `len(prompt) // 4` heuristic.
+- `count_output_tokens(model_id, output_text, region) -> int` — counts output tokens by passing text through `count_tokens` (returns `inputTokens` for any content). Same provider guard and fallback.
+
+### `services/usage_poller.py`
+
+Background poller that updates estimated compute costs with actual USAGE_LOGS data:
+
+- `start_usage_poller() -> None` — async task that runs every 10 minutes (`POLL_INTERVAL_SECONDS = 600`). Finds invocations with `cost_source="estimated"` and `status="complete"`, groups them by runtime, polls CloudWatch USAGE_LOGS, matches events by timestamp (within 5 seconds of `client_invoke_time`), and updates `compute_cpu_cost`, `compute_memory_cost`, `compute_cost`, and `cost_source` from `"estimated"` to `"usage_logs"`.
+
+### `services/observability.py`
+
+CloudWatch vended log delivery configuration for agent runtimes and memory resources:
+
+- `enable_runtime_observability(runtime_arn, runtime_id, account_id, region) -> dict` — configures USAGE_LOGS and APPLICATION_LOGS delivery for an agent runtime using the CloudWatch `put_delivery_source`, `put_delivery_destination`, and `create_delivery` APIs. Called during agent deployment to enable cost tracking via vended logs.
+
 ---
 
 ## 8. Agent Deployment Flow
@@ -1137,6 +1217,40 @@ install              # uv pip install -r requirements.txt
 test                 # python -m pytest tests/ -v
 run                  # uvicorn app.main:app --reload --port $BACKEND_PORT
 
+# Database operations
+migrate-db           # Migrate SQLite → PostgreSQL (uses $LOOM_DATABASE_URL)
+fix-sequences        # Repair PostgreSQL sequences after migration
+reset-db             # Reset database (drop all tables)
+
+# Shared infrastructure (S3 artifact bucket)
+infra                # Package and deploy S3 infra stack
+infra.package        # SAM package for infra stack
+infra.deploy         # SAM deploy for infra stack
+infra.outputs        # Query infra stack outputs
+infra.delete         # Delete infra stack
+
+# RDS infrastructure (PostgreSQL + optional RDS Proxy)
+rds                  # Package and deploy RDS stack
+rds.package          # SAM package for RDS stack
+rds.deploy           # SAM deploy for RDS stack
+rds.outputs          # Query RDS stack outputs
+rds.get-url          # Get database URL from Secrets Manager
+rds.delete           # Delete RDS stack
+
+# EC2 infrastructure (SSM tunnel bastion)
+ec2                  # Package and deploy EC2 stack
+ec2.package          # SAM package for EC2 stack
+ec2.deploy           # SAM deploy for EC2 stack
+ec2.outputs          # Query EC2 stack outputs
+ec2.delete           # Delete EC2 stack
+
+# SSM tunnel (port forwarding to RDS)
+tunnel               # Start SSM port forwarding session to RDS
+
+# AgentCore credential providers
+agentcore.credentials.list       # List OAuth2 credential providers
+agentcore.credentials.delete-all # Delete all credential providers
+
 # Manual testing targets
 curl.health          # GET /health
 curl.agents.register # POST /api/agents (ARN= required)
@@ -1153,10 +1267,8 @@ curl.logs.session    # GET /api/agents/{AGENT_ID}/sessions/{SESSION_ID}/logs
 
 # Memory resource targets
 curl.memories.create  # POST /api/memories (MEMORY_NAME, MEMORY_EVENT_EXPIRY_DURATION)
-curl.memories.import  # POST /api/memories/import (MEMORY_AWS_ID)
 curl.memories.list    # GET /api/memories
 curl.memories.get     # GET /api/memories/{MEMORY_ID}
 curl.memories.refresh # POST /api/memories/{MEMORY_ID}/refresh
-curl.memories.delete  # DELETE /api/memories/{MEMORY_ID}?cleanup_aws=true
-curl.memories.purge   # DELETE /api/memories/{MEMORY_ID}/purge
+curl.memories.delete  # DELETE /api/memories/{MEMORY_ID}
 ```

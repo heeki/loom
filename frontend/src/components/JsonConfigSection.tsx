@@ -5,13 +5,15 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 
 interface JsonConfigSectionProps {
   /** Called when the user clicks Apply. Return an error string on failure, or null on success. */
-  onApply: (json: string) => string | null;
+  onApply: (json: string) => string | null | Promise<string | null>;
   /** Called when the user clicks Export. Return the JSON string to display. */
   onExport: () => string;
   /** Optional label text (defaults to "Paste JSON"). */
   label?: string;
   /** Placeholder text for the textarea. */
   placeholder?: string;
+  /** Hide the Apply button (e.g. in edit mode where only export is needed). */
+  hideApply?: boolean;
 }
 
 export function JsonConfigSection({
@@ -19,13 +21,14 @@ export function JsonConfigSection({
   onExport,
   label = "Paste JSON",
   placeholder = '{"name": "...", "description": "..."}',
+  hideApply = false,
 }: JsonConfigSectionProps) {
   const [showSection, setShowSection] = useState(false);
   const [jsonInput, setJsonInput] = useState("");
   const [jsonError, setJsonError] = useState("");
 
-  const handleApply = () => {
-    const error = onApply(jsonInput);
+  const handleApply = async () => {
+    const error = await Promise.resolve(onApply(jsonInput));
     if (error) {
       setJsonError(error);
     } else {
@@ -71,15 +74,17 @@ export function JsonConfigSection({
             <p className="text-xs text-red-500">{jsonError}</p>
           )}
           <div className="flex gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={handleApply}
-              disabled={!jsonInput.trim()}
-            >
-              Apply
-            </Button>
+            {!hideApply && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void handleApply()}
+                disabled={!jsonInput.trim()}
+              >
+                Apply
+              </Button>
+            )}
             <Button
               type="button"
               size="sm"

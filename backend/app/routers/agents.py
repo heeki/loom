@@ -386,6 +386,8 @@ def _resolve_tags(
                 resolved[p.key] = p.default_value
             else:
                 missing.append(p.key)
+        elif p.default_value:
+            resolved[p.key] = p.default_value
 
     if missing:
         raise HTTPException(

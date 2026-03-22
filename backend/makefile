@@ -10,6 +10,193 @@ test:
 run:
 	source .venv/bin/activate && uvicorn app.main:app --reload --port $${LOOM_BACKEND_PORT:-8000}
 
+# Setup and migration
+migrate: migrate-db fix-sequences
+
+reset-db:
+	source .venv/bin/activate && python scripts/reset_db.py
+
+migrate-db:
+	source .venv/bin/activate && python scripts/migrate_sqlite_to_postgres.py \
+		--source sqlite:///./loom.db \
+		--dest $${LOOM_DATABASE_URL}
+
+fix-sequences:
+	source .venv/bin/activate && python scripts/fix_sequences.py
+
+# AgentCore credential providers
+agentcore.credentials.list:
+	aws bedrock-agentcore-control list-oauth2-credential-providers \
+		--profile $(PROFILE) \
+		--region $(REGION) | jq
+
+agentcore.credentials.delete-all:
+	@for name in $$(aws bedrock-agentcore-control list-oauth2-credential-providers \
+		--profile $(PROFILE) \
+		--region $(REGION) | jq -r '.credentialProviders[].name'); do \
+		echo "Deleting $$name..."; \
+		aws bedrock-agentcore-control delete-oauth2-credential-provider \
+			--profile $(PROFILE) \
+			--region $(REGION) \
+			--name "$$name"; \
+	done
+
+# Shared infrastructure (S3)
+infra: infra.package infra.deploy
+
+infra.package:
+	sam package \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_INFRA_TEMPLATE) \
+		--output-template-file $(P_INFRA_OUTPUT) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_INFRA_STACK)
+
+infra.deploy:
+	sam deploy \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_INFRA_OUTPUT) \
+		--stack-name $(P_INFRA_STACK) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_INFRA_STACK) \
+		--parameter-overrides \
+			pArtifactBucketName=$${LOOM_ARTIFACT_BUCKET} \
+			pTagApplication=$(P_TAG_APPLICATION) \
+			pTagGroup=$(P_TAG_GROUP) \
+			pTagOwner=$(P_TAG_OWNER) \
+		--no-confirm-changeset
+
+infra.outputs:
+	@aws cloudformation describe-stacks \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_INFRA_STACK) \
+		--query 'Stacks[0].Outputs' \
+		--output json | jq .
+
+infra.delete:
+	sam delete \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_INFRA_STACK) \
+		--no-prompts
+
+# RDS infrastructure
+rds: rds.package rds.deploy
+
+rds.package:
+	sam package \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_RDS_TEMPLATE) \
+		--output-template-file $(P_RDS_OUTPUT) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_RDS_STACK)
+
+rds.deploy:
+	sam deploy \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_RDS_OUTPUT) \
+		--stack-name $(P_RDS_STACK) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_RDS_STACK) \
+		--parameter-overrides \
+			pDbName=$(P_RDS_DB_NAME) \
+			pDbUsername=$(P_RDS_USERNAME) \
+			pDbPassword=$(P_RDS_PASSWORD) \
+			pDbInstanceClass=$(P_RDS_INSTANCE_CLASS) \
+			pDbAllocatedStorage=$(P_RDS_ALLOCATED_STORAGE) \
+			pDbMultiAZ=$(P_RDS_MULTI_AZ) \
+			pEnableProxy=$(P_RDS_ENABLE_PROXY) \
+			pVpcId=$(P_RDS_VPC_ID) \
+			pSubnetIds=$(P_RDS_PRIVATE_SUBNET_IDS) \
+			pAllowedCidr=$(P_RDS_ALLOWED_CIDR) \
+			pTagApplication=$(P_TAG_APPLICATION) \
+			pTagGroup=$(P_TAG_GROUP) \
+			pTagOwner=$(P_TAG_OWNER) \
+		--capabilities CAPABILITY_NAMED_IAM \
+		--no-confirm-changeset
+
+rds.outputs:
+	@aws cloudformation describe-stacks \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_RDS_STACK) \
+		--query 'Stacks[0].Outputs' \
+		--output json | jq .
+
+rds.get-url:
+	@aws secretsmanager get-secret-value \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--secret-id $(P_RDS_STACK)/database-url \
+		--query SecretString \
+		--output text | jq -r .url
+
+rds.delete:
+	sam delete \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_RDS_STACK) \
+		--no-prompts
+
+# EC2 infrastructure (SSM tunnel)
+ec2: ec2.package ec2.deploy
+
+ec2.package:
+	sam package \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_EC2_TEMPLATE) \
+		--output-template-file $(P_EC2_OUTPUT) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_EC2_STACK)
+
+ec2.deploy:
+	sam deploy \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_EC2_OUTPUT) \
+		--stack-name $(P_EC2_STACK) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_EC2_STACK) \
+		--parameter-overrides \
+			pVpcId=$(P_RDS_VPC_ID) \
+			pSubnetId=$(P_EC2_PUBLIC_SUBNET_ID) \
+			pInstanceType=$(P_EC2_INSTANCE_TYPE) \
+			pTagApplication=$(P_TAG_APPLICATION) \
+			pTagGroup=$(P_TAG_GROUP) \
+			pTagOwner=$(P_TAG_OWNER) \
+		--capabilities CAPABILITY_NAMED_IAM \
+		--no-confirm-changeset
+
+ec2.outputs:
+	@aws cloudformation describe-stacks \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_EC2_STACK) \
+		--query 'Stacks[0].Outputs' \
+		--output json | jq .
+
+ec2.delete:
+	sam delete \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_EC2_STACK) \
+		--no-prompts
+
+# SSM tunnel
+tunnel:
+	aws ssm start-session \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--target $(P_EC2_INSTANCE_ID) \
+		--document-name AWS-StartPortForwardingSessionToRemoteHost \
+		--parameters '{"host":["$(P_RDS_PROXY_ENDPOINT)"],"portNumber":["$(P_RDS_PORT)"],"localPortNumber":["$(P_RDS_PORT)"]}'
+
 # Manual testing targets
 curl.health:
 	curl -s $(BASE_URL)/health | jq
@@ -17,7 +204,7 @@ curl.health:
 curl.agents.register:
 	curl -s -X POST $(BASE_URL)/api/agents \
 		-H "Content-Type: application/json" \
-		-d '{"arn": "$(ARN)"}' | jq
+		-d '{"arn": "$(AGENT_ARN)"}' | jq
 
 curl.agents.list:
 	curl -s $(BASE_URL)/api/agents | jq

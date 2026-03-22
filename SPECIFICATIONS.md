@@ -6,7 +6,7 @@ Loom is an agent builder playground that simplifies the lifecycle of building, t
 
 - A **FastAPI backend** that encapsulates all AWS interactions and business logic.
 - A **React/TypeScript frontend** (Vite, shadcn, Tailwind CSS) that interacts exclusively through the backend API.
-- A **local SQLite database** (via SQLAlchemy) for persisting agent metadata, session history, security configurations, and credential management.
+- A **relational database** (via SQLAlchemy) — SQLite for local development or PostgreSQL for cloud deployments — for persisting agent metadata, session history, security configurations, and credential management.
 
 The platform tracks session liveness using a local idle timeout heuristic, providing cold-start indicators so users know whether their next invocation will incur agent startup latency.
 
@@ -78,6 +78,7 @@ loom/
 │   │       ├── a2a.py
 │   │       ├── cloudwatch.py    # CloudWatch log retrieval with pagination, session-filtered queries, and usage log parsing
 │   │       ├── otel.py          # OTEL log parsing from CloudWatch otel-rt-logs stream
+│   │       ├── observability.py # CloudWatch vended log delivery configuration (USAGE_LOGS, APPLICATION_LOGS)
 │   │       ├── mcp.py
 │   │       ├── memory.py
 │   │       ├── secrets.py
@@ -86,9 +87,19 @@ loom/
 │   │       ├── deployment.py
 │   │       ├── iam.py
 │   │       ├── jwt_validator.py
-│   │       └── latency.py
+│   │       ├── latency.py
+│   │       ├── tokens.py        # Bedrock CountTokens API with provider guard (Anthropic/Meta only)
+│   │       └── usage_poller.py  # Background poller: updates estimated costs with actual USAGE_LOGS data
 │   ├── scripts/
+│   │   ├── stream.py            # SSE streaming client for CLI invocations
+│   │   ├── migrate_sqlite_to_postgres.py  # SQLite → PostgreSQL migration
+│   │   ├── fix_sequences.py     # PostgreSQL sequence auto-repair
+│   │   └── reset_db.py          # Database reset utility
 │   ├── tests/
+│   ├── iac/                       # Backend infrastructure (RDS, EC2, S3)
+│   │   ├── infra.yaml             # S3 artifact bucket (versioning, encryption, public access block)
+│   │   ├── rds.yaml               # RDS PostgreSQL with optional RDS Proxy
+│   │   └── ec2.yaml               # EC2 bastion for SSM tunnel to RDS
 │   ├── makefile
 │   ├── SPECIFICATIONS.md
 │   └── README.md
@@ -467,7 +478,21 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - **View-as banner:** When an admin is previewing the end-user experience via "View as", a non-destructive banner indicates the preview mode with an "Exit preview" button.
 - **`useInvoke` subscription stability:** `clearInvokeState()` resets the module-level store to `EMPTY` and notifies all subscribers, but deliberately does NOT remove the subscriber set for the agent. This keeps the React component subscribed across "New Conversation" resets so that subsequent invocations correctly propagate streaming state updates to the UI.
 
-### Phase 19 — Advanced Operations
+### Phase 19 — Cloud Infrastructure and Operations *(Complete)*
+- **RDS PostgreSQL support:** SAM template (`iac/rds.yaml`) for RDS PostgreSQL with optional RDS Proxy, multi-AZ, and Secrets Manager integration. Dialect-aware engine configuration in `db.py` (SQLite vs PostgreSQL). `_migrate_add_columns` helper handles both dialects. Migration script (`scripts/migrate_sqlite_to_postgres.py`) with topological sort for foreign-key dependency order. Sequence auto-repair script (`scripts/fix_sequences.py`) for PostgreSQL after migration. Database reset script (`scripts/reset_db.py`).
+- **S3 infrastructure stack:** SAM template (`iac/infra.yaml`) for the agent deployment artifact bucket with versioning, AES256 encryption, and public access block.
+- **EC2 SSM tunnel:** SAM template (`iac/ec2.yaml`) for an EC2 bastion instance with SSM access for tunneling to RDS in private subnets. Makefile `tunnel` target configures port forwarding via `aws ssm start-session`.
+- **Multi-account environment configuration:** `backend/etc/environment.sh` sources account-specific files (e.g., `environment_9582.sh`, `environment_1527.sh`) containing AWS profile, account ID, VPC/subnet IDs, RDS parameters, and stack names. Enables managing multiple AWS accounts from the same codebase.
+- **CountTokens API integration:** `services/tokens.py` uses the Bedrock `count_tokens` API for accurate token counting. Provider guard restricts API calls to supported providers (Anthropic, Meta); all other models fall back to the 4 chars/token heuristic.
+- **Background usage poller:** `services/usage_poller.py` runs every 10 minutes, finds invocations with `cost_source="estimated"`, polls USAGE_LOGS from CloudWatch, matches events to invocations by timestamp (within 5 seconds), and updates costs from estimated to actual (`cost_source="usage_logs"`).
+- **Observability service:** `services/observability.py` enables USAGE_LOGS and APPLICATION_LOGS delivery for agent runtimes via CloudWatch vended log delivery APIs (`put_delivery_source`, `put_delivery_destination`, `create_delivery`).
+- **AgentCore credential management:** Makefile targets for listing and bulk-deleting AgentCore OAuth2 credential providers.
+- **Infrastructure makefile targets:** `infra`, `rds`, `ec2`, `tunnel` targets for packaging, deploying, querying outputs, and deleting CloudFormation stacks. `migrate-db`, `fix-sequences`, `reset-db` targets for database operations.
+- **Pull Actuals session ID fix:** Removed `tracked_session_ids` filter from `pull_cost_actuals` in `costs.py`. USAGE_LOGS use internal AgentCore session IDs that do not match Loom's `runtimeSessionId`, so session-based filtering dropped all events. Events are now scoped by time window and runtime ID only.
+- **Tagging UX improvements:** Collapsible tag profile groups in `TaggingPage` (platform required vs custom optional sections). Form-fill import from tag policies (auto-populates profile form with policy defaults). Tag policy and profile sorting. Sidebar entry renamed from "Tagging" to "Tags".
+- **Admin dashboard fixes:** Fixed `page_views_by_page` type mismatch that caused dashboard crash. Custom tooltips on all recharts charts for consistent styling. Theme picker moved from Settings page to admin sidebar for easier access.
+
+### Phase 20 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.
