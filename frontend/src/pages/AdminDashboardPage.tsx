@@ -205,8 +205,12 @@ export function AdminDashboardPage() {
   })();
 
   // Derived data for charts
+  // Backend returns page_views_by_page values as {count, total_duration_seconds} objects
   const pageData = effectiveSummary
-    ? Object.entries(effectiveSummary.page_views_by_page).map(([name, value]) => ({ name, value }))
+    ? Object.entries(effectiveSummary.page_views_by_page ?? {}).map(([name, raw]) => ({
+        name,
+        value: typeof raw === "number" ? raw : (raw as { count: number }).count,
+      }))
     : [];
   const mostActivePage = pageData.length > 0
     ? pageData.reduce((a, b) => (b.value > a.value ? b : a)).name
@@ -382,14 +386,26 @@ export function AdminDashboardPage() {
                 <CardTitle className="text-sm font-medium">Logins Over Time</CardTitle>
               </CardHeader>
               <CardContent className="pb-3">
-                {effectiveSummary.logins_by_day.length > 0 ? (
+                {(effectiveSummary.logins_by_day?.length ?? 0) > 0 ? (
                   <div className="bg-white dark:bg-background rounded-md pt-2 px-2 pb-0">
                     <ResponsiveContainer width="100%" height={200}>
-                      <BarChart data={effectiveSummary.logins_by_day} margin={{ top: 16, right: 10, bottom: 0, left: -20 }}>
+                      <BarChart data={effectiveSummary.logins_by_day ?? []} margin={{ top: 16, right: 10, bottom: 0, left: -20 }}>
                         <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                         <XAxis dataKey="date" tick={{ fontSize: 10 }} />
                         <YAxis tick={{ fontSize: 10 }} allowDecimals={false} width={28} />
-                        <Tooltip />
+                        <Tooltip
+                          cursor={{ fill: "var(--muted, #f1f5f9)", opacity: 0.5 }}
+                          content={({ active, payload }) => {
+                            if (!active || !payload?.length || !payload[0]) return null;
+                            const d = payload[0].payload as { date: string; count: number };
+                            return (
+                              <div className="rounded-md border bg-background px-3 py-1.5 text-xs shadow-sm">
+                                <p className="font-medium">{d.date}</p>
+                                <p className="text-muted-foreground">{d.count} logins</p>
+                              </div>
+                            );
+                          }}
+                        />
                         <Bar dataKey="count" fill="var(--chart-1, #2563eb)" radius={[2, 2, 0, 0]}>
                           <LabelList dataKey="count" position="top" style={{ fontSize: 9, fill: "currentColor" }} />
                         </Bar>
@@ -407,14 +423,26 @@ export function AdminDashboardPage() {
                 <CardTitle className="text-sm font-medium">Actions Over Time</CardTitle>
               </CardHeader>
               <CardContent className="pb-3">
-                {effectiveSummary.actions_by_day.length > 0 ? (
+                {(effectiveSummary.actions_by_day?.length ?? 0) > 0 ? (
                   <div className="bg-white dark:bg-background rounded-md pt-2 px-2 pb-0">
                     <ResponsiveContainer width="100%" height={200}>
-                      <BarChart data={effectiveSummary.actions_by_day} margin={{ top: 16, right: 10, bottom: 0, left: -20 }}>
+                      <BarChart data={effectiveSummary.actions_by_day ?? []} margin={{ top: 16, right: 10, bottom: 0, left: -20 }}>
                         <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                         <XAxis dataKey="date" tick={{ fontSize: 10 }} />
                         <YAxis tick={{ fontSize: 10 }} allowDecimals={false} width={28} />
-                        <Tooltip />
+                        <Tooltip
+                          cursor={{ fill: "var(--muted, #f1f5f9)", opacity: 0.5 }}
+                          content={({ active, payload }) => {
+                            if (!active || !payload?.length || !payload[0]) return null;
+                            const d = payload[0].payload as { date: string; count: number };
+                            return (
+                              <div className="rounded-md border bg-background px-3 py-1.5 text-xs shadow-sm">
+                                <p className="font-medium">{d.date}</p>
+                                <p className="text-muted-foreground">{d.count} actions</p>
+                              </div>
+                            );
+                          }}
+                        />
                         <Bar dataKey="count" fill="var(--chart-3, #ea580c)" radius={[2, 2, 0, 0]}>
                           <LabelList dataKey="count" position="top" style={{ fontSize: 9, fill: "currentColor" }} />
                         </Bar>
@@ -434,18 +462,24 @@ export function AdminDashboardPage() {
               <CardContent className="pb-3">
                 {pageData.length > 0 ? (
                   <div className="bg-white dark:bg-background rounded-md pt-2 px-2 pb-0">
-                    <ResponsiveContainer width="100%" height={200}>
-                      <BarChart data={pageData} layout="vertical" margin={{ top: 5, right: 30, bottom: 0, left: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                        <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals={false} width={28} />
-                        <YAxis
-                          dataKey="name"
-                          type="category"
-                          tick={{ fontSize: 10 }}
-                          width={Math.min(Math.max(...pageData.map((d) => d.name.length)) * 7 + 8, 110)}
-                          interval={0}
+                    <ResponsiveContainer width="100%" height={Math.max(150, pageData.length * 20)}>
+                      <BarChart data={pageData} layout="vertical" margin={{ top: 4, right: 30, bottom: 0, left: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-border" horizontal={false} />
+                        <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals={false} />
+                        <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={50} interval={0} />
+                        <Tooltip
+                          cursor={{ fill: "var(--muted, #f1f5f9)", opacity: 0.5 }}
+                          content={({ active, payload }) => {
+                            if (!active || !payload?.length || !payload[0]) return null;
+                            const d = payload[0].payload as { name: string; value: number };
+                            return (
+                              <div className="rounded-md border bg-background px-3 py-1.5 text-xs shadow-sm">
+                                <p className="font-medium">{d.name}</p>
+                                <p className="text-muted-foreground">{d.value} views</p>
+                              </div>
+                            );
+                          }}
                         />
-                        <Tooltip />
                         <Bar dataKey="value" fill="var(--chart-2, #16a34a)" radius={[0, 2, 2, 0]}>
                           <LabelList dataKey="value" position="right" style={{ fontSize: 9, fill: "currentColor" }} />
                         </Bar>

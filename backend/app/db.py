@@ -12,11 +12,22 @@ logger = logging.getLogger(__name__)
 DATABASE_URL = os.getenv("LOOM_DATABASE_URL", "sqlite:///./loom.db")
 
 # Create SQLAlchemy engine
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
-    echo=False,
-)
+# PostgreSQL connections (including via RDS Proxy) use pool_pre_ping to detect
+# dropped connections and pool_recycle to avoid stale connections across proxy
+# idle timeouts. SQLite uses check_same_thread=False for multi-threaded access.
+if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False},
+        echo=False,
+    )
+else:
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_recycle=1800,
+        echo=False,
+    )
 
 # Enable foreign key constraints for SQLite
 if DATABASE_URL.startswith("sqlite"):

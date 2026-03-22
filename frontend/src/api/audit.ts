@@ -47,7 +47,7 @@ export interface AuditSummary {
   total_actions: number;
   total_page_views: number;
   actions_by_category: Record<string, number>;
-  page_views_by_page: Record<string, number>;
+  page_views_by_page: Record<string, number | { count: number; total_duration_seconds: number }>;
   logins_by_day: Array<{ date: string; count: number }>;
   actions_by_day: Array<{ date: string; count: number }>;
 }

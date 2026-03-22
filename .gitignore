@@ -12,7 +12,7 @@ tmp
 .env
 .env.*
 !.env.example
-environment.sh
+environment*.sh
 loom.db
 notes.md
 *_output.yaml

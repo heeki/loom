@@ -687,7 +687,7 @@ export function CatalogPage({
             sortDirection={mcpSortDir}
             onSortDirectionChange={(d) => { if (d) { setMcpSortDir(d); saveSortDirection("catalog-mcp", d); } }}
             renderItem={(server) => (
-              <Card className="py-3 gap-1">
+              <Card className="py-3 gap-1 transition-colors hover:bg-accent/50">
                 <CardHeader className="gap-0 pb-2">
                   <div className="text-sm font-medium truncate" title={server.name}>
                     {server.name}
@@ -770,7 +770,7 @@ export function CatalogPage({
             sortDirection={a2aSortDir}
             onSortDirectionChange={(d) => { if (d) { setA2aSortDir(d); saveSortDirection("catalog-a2a", d); } }}
             renderItem={(agent) => (
-              <Card className="py-3 gap-1">
+              <Card className="py-3 gap-1 transition-colors hover:bg-accent/50">
                 <CardHeader className="gap-0 pb-2">
                   <div className="flex items-center gap-2">
                     <div className="text-sm font-medium truncate" title={agent.name}>

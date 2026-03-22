@@ -62,9 +62,10 @@ The sidebar provides access to persona-based workflows:
 | **Security Admin** | Shield | Manage IAM roles, authorizer configs, credentials, permission requests |
 | **MCP Servers** | Network | Register and manage MCP servers with OAuth2 auth, tool discovery, and access control |
 | **A2A Agents** | Users | Register and manage A2A agents with OAuth2 auth, Agent Card display, and access control |
+| **Tags** | Tags | Manage tag policies and tag profiles with collapsible groups and JSON import |
 | **Costs** | DollarSign | Cost dashboard with estimated costs, actual runtime costs from CloudWatch, and cost settings |
 | **Settings** | Settings | Manage display preferences (theme, timezone) and cost estimation settings (CPU I/O wait discount) |
-| **Admin Dashboard** | BarChart3 | Platform usage analytics: login tracking, action tracking, page navigation, per-session drill-down (super-admins only) |
+| **Admin Dashboard** | BarChart3 | Platform usage analytics with custom tooltips on all charts, login tracking, action tracking, page navigation, per-session drill-down (super-admins only) |
 
 **End-user chat layout:** Users in the `t-user` Cognito group (without `t-admin`) see a dedicated `ChatPage` instead of the admin sidebar. The chat layout provides a focused chat interface with agent selection, conversation history with immediate tab creation on `session_start`, streaming responses scoped to the active conversation, markdown rendering with collapsible JSON blocks, and a memory panel — with no admin navigation items exposed.
 

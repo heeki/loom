@@ -11,6 +11,15 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Models known to support the CountTokens API
+_SUPPORTED_PROVIDERS = ("anthropic", "meta")
+
+
+def _supports_count_tokens(model_id: str) -> bool:
+    """Check if a model supports the CountTokens API based on its provider."""
+    model_lower = model_id.lower()
+    return any(provider in model_lower for provider in _SUPPORTED_PROVIDERS)
+
 
 def count_input_tokens(
     model_id: str,
@@ -27,29 +36,30 @@ def count_input_tokens(
     Returns:
         Token count for the prompt. Falls back to ``len(prompt) // 4`` on error.
     """
-    try:
-        import boto3
+    if _supports_count_tokens(model_id):
+        try:
+            import boto3
 
-        client = boto3.client("bedrock-runtime", region_name=region)
-        response = client.count_tokens(
-            modelId=model_id,
-            input={
-                "converse": {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [{"text": prompt}],
-                        }
-                    ],
-                }
-            },
-        )
-        token_count = response.get("inputTokens", 0)
-        if token_count > 0:
-            logger.info("Input tokens via CountTokens API: %d (model=%s)", token_count, model_id)
-            return token_count
-    except Exception as e:
-        logger.warning("CountTokens API failed for input (model=%s): %s", model_id, e)
+            client = boto3.client("bedrock-runtime", region_name=region)
+            response = client.count_tokens(
+                modelId=model_id,
+                input={
+                    "converse": {
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": [{"text": prompt}],
+                            }
+                        ],
+                    }
+                },
+            )
+            token_count = response.get("inputTokens", 0)
+            if token_count > 0:
+                logger.info("Input tokens via CountTokens API: %d (model=%s)", token_count, model_id)
+                return token_count
+        except Exception as e:
+            logger.warning("CountTokens API failed for input (model=%s): %s", model_id, e)
 
     fallback = max(1, len(prompt) // 4)
     logger.info("Input tokens via heuristic (4 chars/token): %d (model=%s)", fallback, model_id)
@@ -77,29 +87,30 @@ def count_output_tokens(
     if not output_text:
         return 1
 
-    try:
-        import boto3
+    if _supports_count_tokens(model_id):
+        try:
+            import boto3
 
-        client = boto3.client("bedrock-runtime", region_name=region)
-        response = client.count_tokens(
-            modelId=model_id,
-            input={
-                "converse": {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [{"text": output_text}],
-                        }
-                    ],
-                }
-            },
-        )
-        token_count = response.get("inputTokens", 0)
-        if token_count > 0:
-            logger.info("Output tokens via CountTokens API: %d (model=%s)", token_count, model_id)
-            return token_count
-    except Exception as e:
-        logger.warning("CountTokens API failed for output (model=%s): %s", model_id, e)
+            client = boto3.client("bedrock-runtime", region_name=region)
+            response = client.count_tokens(
+                modelId=model_id,
+                input={
+                    "converse": {
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": [{"text": output_text}],
+                            }
+                        ],
+                    }
+                },
+            )
+            token_count = response.get("inputTokens", 0)
+            if token_count > 0:
+                logger.info("Output tokens via CountTokens API: %d (model=%s)", token_count, model_id)
+                return token_count
+        except Exception as e:
+            logger.warning("CountTokens API failed for output (model=%s): %s", model_id, e)
 
     fallback = max(1, len(output_text) // 4)
     logger.info("Output tokens via heuristic (4 chars/token): %d (model=%s)", fallback, model_id)

@@ -164,15 +164,15 @@
 .rosepine {
     --background: #faf4ed;
     --foreground: #433f60;
-    --card: #dfd8d0;
+    --card: #ead8d4;
     --card-foreground: #433f60;
-    --popover: #dfd8d0;
+    --popover: #ead8d4;
     --popover-foreground: #433f60;
     --primary: #d7827e;
     --primary-foreground: #fffaf3;
-    --secondary: #dfd8d0;
+    --secondary: #ead8d4;
     --secondary-foreground: #433f60;
-    --muted: #dfd8d0;
+    --muted: #ead8d4;
     --muted-foreground: #5f5a75;
     --accent: #f2e9e1;
     --accent-foreground: #433f60;
@@ -186,11 +186,11 @@
     --chart-3: #ea9d34;
     --chart-4: #907aa9;
     --chart-5: #56949f;
-    --sidebar: #dfd8d0;
+    --sidebar: #e0ccc8;
     --sidebar-foreground: #433f60;
     --sidebar-primary: #d7827e;
     --sidebar-primary-foreground: #fffaf3;
-    --sidebar-accent: #d6cfc7;
+    --sidebar-accent: #d8c0bc;
     --sidebar-accent-foreground: #433f60;
     --sidebar-border: #8f8a9a;
     --sidebar-ring: #907aa9;

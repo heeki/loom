@@ -31,11 +31,21 @@ class TestDeriveScopes(unittest.TestCase):
 
     def test_users_group_only_has_invoke(self) -> None:
         scopes = derive_scopes(["t-user", "g-users-demo"])
-        self.assertEqual(scopes, {"catalog:read", "agent:read", "memory:read", "invoke"})
+        self.assertEqual(scopes, {
+            "catalog:read", "agent:read", "agent:write",
+            "memory:read", "memory:write",
+            "costs:read", "costs:write",
+            "mcp:read", "a2a:read", "invoke",
+        })
 
     def test_multiple_groups_union(self) -> None:
         scopes = derive_scopes(["t-admin", "g-admins-security", "g-admins-memory"])
-        expected = {"security:read", "security:write", "memory:read", "memory:write", "settings:read", "tagging:read", "tagging:write"}
+        expected = {
+            "security:read", "security:write",
+            "memory:read", "memory:write",
+            "settings:read", "settings:write",
+            "tagging:read",
+        }
         self.assertEqual(scopes, expected)
 
     def test_unknown_group_returns_empty(self) -> None:
@@ -62,10 +72,10 @@ class TestDeriveScopes(unittest.TestCase):
         # Assert other write scopes are NOT present
         self.assertNotIn("catalog:write", scopes)
         self.assertNotIn("security:write", scopes)
-        self.assertNotIn("settings:write", scopes)
         self.assertNotIn("tagging:write", scopes)
         self.assertNotIn("mcp:write", scopes)
         self.assertNotIn("a2a:write", scopes)
+        # settings:write is intentionally granted to g-admins-demo
 
     def test_group_scopes_consistency(self) -> None:
         """Every scope in ALL_SCOPES should appear in at least one group."""
@@ -132,9 +142,11 @@ class TestScopeEnforcement(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
 
     # -- Settings endpoints --
-    def test_settings_tags_requires_tagging_read(self) -> None:
-        self._override_user(["t-user", "g-users-demo"])  # users don't have tagging scope
-        response = self.client.get("/api/settings/tags")
+    def test_settings_tags_requires_tagging_write_to_create(self) -> None:
+        self._override_user(["t-user", "g-users-demo"])  # users don't have tagging:write
+        response = self.client.post("/api/settings/tags", json={
+            "key": "env", "default_value": None, "required": False, "show_on_card": False
+        })
         self.assertEqual(response.status_code, 403)
 
     def test_settings_tags_allowed_with_tagging_read(self) -> None:
@@ -144,7 +156,8 @@ class TestScopeEnforcement(unittest.TestCase):
 
     # -- Security endpoints --
     def test_security_requires_security_read(self) -> None:
-        self._override_user(["t-user", "g-users-demo"])
+        # g-admins-memory has memory/settings scopes only — no security:read or agent:write
+        self._override_user(["t-admin", "g-admins-memory"])
         response = self.client.get("/api/security/roles")
         self.assertEqual(response.status_code, 403)
 
@@ -167,20 +180,18 @@ class TestScopeEnforcement(unittest.TestCase):
 
 
     # -- Users group restrictions --
-    def test_users_denied_on_write_endpoints(self) -> None:
-        """Users should be denied on all write endpoints."""
+    def test_users_denied_on_security_write_endpoints(self) -> None:
+        """Users (g-users-demo) should be denied on security:write endpoints."""
         self._override_user(["t-user", "g-users-demo"])
-        # Test agent write
-        response = self.client.post("/api/agents", json={
-            "name": "test-agent",
-            "agent_type": "bedrock",
-            "model_id": "test-model",
+        # g-users-demo has no security:write scope
+        response = self.client.post("/api/security/roles", json={
+            "name": "test-role",
+            "account_id": "123456789012",
         })
         self.assertEqual(response.status_code, 403)
-        # Test memory write
-        response = self.client.post("/api/memories", json={
-            "name": "test-memory",
-            "backend": "pgvector",
+        # g-users-demo has no tagging:write scope
+        response = self.client.post("/api/settings/tags", json={
+            "key": "env", "default_value": None, "required": False, "show_on_card": False
         })
         self.assertEqual(response.status_code, 403)
 

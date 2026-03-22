@@ -1,18 +1,24 @@
 # Copy this file to environment.sh and update all values marked with <...>
 # cp etc/environment.sh.example etc/environment.sh
 
-# AWS configuration
+# AWS Configurations
 AWS_PROFILE=<your-aws-profile>
 AWS_REGION=us-east-1
+
+PROFILE=${AWS_PROFILE}
+REGION=${AWS_REGION}
+ACCOUNTID=<your-aws-account-id>
+BUCKET=<your-s3-bucket-for-sam-deployments>
 
 # General configurations
 LOG_LEVEL=info
 
 # Loom configurations
 LOOM_ARTIFACT_BUCKET=<your-s3-bucket-for-deployments>
+# SQLite for local development:
 LOOM_DATABASE_URL=sqlite:///./loom.db
-# For RDS/cloud deployments, replace the SQLite URL above with a PostgreSQL URL:
-# LOOM_DATABASE_URL=postgresql+psycopg2://username:password@hostname:5432/loom
+# PostgreSQL via RDS Proxy for cloud deployments (comment out SQLite line above and uncomment below):
+# LOOM_DATABASE_URL=postgresql+psycopg2://$(P_RDS_USERNAME):$(P_RDS_PASSWORD)@$(P_RDS_PROXY_ENDPOINT):$(P_RDS_PORT)/$(P_RDS_DB_NAME)
 LOOM_BACKEND_PORT=8000
 LOOM_FRONTEND_PORT=5173
 
@@ -22,6 +28,8 @@ LOOM_COGNITO_USER_CLIENT_ID=<your-cognito-user-client-id>
 LOOM_COGNITO_REGION=${AWS_REGION}
 
 # Exports
+export AWS_PROFILE
+export AWS_REGION
 export LOOM_ARTIFACT_BUCKET
 export LOOM_DATABASE_URL
 export LOOM_BACKEND_PORT
@@ -31,7 +39,7 @@ export LOOM_COGNITO_USER_CLIENT_ID
 export LOOM_COGNITO_REGION
 
 # Local testing
-ARN=<your-agent-runtime-arn>
+AGENT_ARN=<your-agent-runtime-arn>
 AGENT_ID=1
 SESSION_ID=1
 PROMPT=Tell me about the benefits of using Amazon Bedrock AgentCore.
@@ -40,3 +48,46 @@ PROMPT=Tell me about the benefits of using Amazon Bedrock AgentCore.
 MEMORY_ID=1
 MEMORY_NAME=<your-memory-name>
 MEMORY_EVENT_EXPIRY_DURATION_DAYS=7
+
+# Infrastructure stack configuration (S3)
+P_INFRA_STACK=loom-infra
+P_INFRA_TEMPLATE=iac/infra.yaml
+P_INFRA_OUTPUT=iac/infra_output.yaml
+
+# RDS stack configuration
+P_RDS_STACK=loom-rds
+P_RDS_TEMPLATE=iac/rds.yaml
+P_RDS_OUTPUT=iac/rds_output.yaml
+
+# RDS instance parameters
+P_RDS_DB_NAME=loom
+P_RDS_USERNAME=loom
+P_RDS_PASSWORD=<your-secure-db-password>
+P_RDS_INSTANCE_CLASS=db.t3.small
+P_RDS_ALLOCATED_STORAGE=20
+P_RDS_MULTI_AZ=true
+P_RDS_ENABLE_PROXY=true
+
+# RDS networking (from your VPC)
+P_RDS_VPC_ID=<your-vpc-id>
+P_RDS_PRIVATE_SUBNET_IDS=<subnet-id-1>,<subnet-id-2>
+P_RDS_ALLOWED_CIDR=10.0.0.0/8
+
+# Resource tagging
+P_TAG_APPLICATION=<your-application-name>
+P_TAG_GROUP=<your-group-or-team>
+P_TAG_OWNER=<your-owner-alias-or-email>
+
+# OUTPUTS: RDS connection (from stack outputs: oConnectEndpoint, oRdsPort)
+P_RDS_PROXY_ENDPOINT=<proxy-or-rds-endpoint>
+P_RDS_PORT=5432
+
+# EC2 stack configuration (SSM tunnel)
+P_EC2_STACK=loom-ec2
+P_EC2_TEMPLATE=iac/ec2.yaml
+P_EC2_OUTPUT=iac/ec2_output.yaml
+P_EC2_INSTANCE_TYPE=t3.micro
+P_EC2_SUBNET_ID=<your-public-subnet-id>
+
+# OUTPUTS: EC2 (from stack outputs: oInstanceId)
+P_EC2_INSTANCE_ID=<your-instance-id>

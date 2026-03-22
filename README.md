@@ -41,7 +41,7 @@ Loom is an enterprise-grade platform for building, deploying, and operating AI a
 - Tag badges with filtering and persistent state
 
 ### Token Usage and Cost Tracking
-- Per-invocation token estimation (4 chars/token heuristic) and cost calculation from model pricing
+- Per-invocation token counting via Bedrock CountTokens API (Anthropic/Meta models) with 4 chars/token heuristic fallback
 - Cost dashboard with time-range selector and per-agent breakdown
 - Cost badges on agent cards, token/cost columns in invocation tables
 - Model pricing metadata for all supported Anthropic and Amazon models
@@ -203,7 +203,8 @@ npm run dev     # Start Vite dev server on LOOM_FRONTEND_PORT
 
 ## Architecture
 
-- **Backend:** FastAPI with SQLAlchemy (SQLite for local dev, PostgreSQL for cloud), boto3 for AWS, SSE streaming via `StreamingResponse`
+- **Backend:** FastAPI with SQLAlchemy (SQLite for local dev, PostgreSQL/RDS for cloud), boto3 for AWS, SSE streaming via `StreamingResponse`
+- **Infrastructure:** SAM templates for S3 artifact bucket, RDS PostgreSQL with optional RDS Proxy, and EC2 SSM tunnel bastion
 - **Frontend:** React 18, TypeScript, Vite, shadcn/ui, Tailwind CSS v4
 - **Auth:** Cognito User Pool with group-based scopes; frontend enforces sidebar visibility and write permissions
-- **Navigation:** Platform Catalog, Agents, Memory, Security Admin, MCP Servers, A2A Agents, Tagging, Costs, Settings, Admin Dashboard (super-admins only)
+- **Navigation:** Platform Catalog, Agents, Memory, Security Admin, MCP Servers, A2A Agents, Tags, Costs, Settings, Admin Dashboard (super-admins only)

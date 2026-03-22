@@ -8,7 +8,7 @@ FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for ag
 |---------|--------|
 | Framework | FastAPI |
 | Server | Uvicorn |
-| ORM | SQLAlchemy (SQLite) |
+| ORM | SQLAlchemy (SQLite / PostgreSQL) |
 | AWS SDK | boto3 |
 | Python | 3.11+ |
 | Dependency manager | uv |
@@ -167,6 +167,7 @@ backend/
 │       ├── agentcore.py     # boto3 wrapper: describe, list endpoints, invoke
 │       ├── cloudwatch.py    # CloudWatch log retrieval with pagination, session filtering, usage log parsing, memory log parsing
 │       ├── otel.py          # OTEL log parsing: fetch events from otel-rt-logs stream, parse traces and spans
+│       ├── observability.py # CloudWatch vended log delivery configuration
 │       ├── cognito.py       # Cognito OAuth2 token retrieval
 │       ├── credential.py    # AgentCore credential provider management
 │       ├── deployment.py    # Agent artifact build + runtime CRUD
@@ -176,10 +177,15 @@ backend/
 │       ├── a2a.py           # A2A Agent Card fetching, parsing, connection test
 │       ├── mcp.py           # MCP connection test + tool fetch stubs
 │       ├── memory.py        # boto3 wrapper: AgentCore Memory CRUD
-│       └── secrets.py       # Secrets Manager wrapper with caching
+│       ├── secrets.py       # Secrets Manager wrapper with caching
+│       ├── tokens.py        # Bedrock CountTokens API with provider guard
+│       └── usage_poller.py  # Background poller: estimated → actual costs
 ├── scripts/
 │   ├── stream.py            # CLI streaming client (httpx-based)
-│   └── debug_session_correlation.py  # Debug script to correlate session IDs across runtime and memory logs
+│   ├── migrate_sqlite_to_postgres.py  # SQLite → PostgreSQL migration
+│   ├── fix_sequences.py     # PostgreSQL sequence auto-repair
+│   ├── reset_db.py          # Database reset utility
+│   └── debug_session_correlation.py  # Debug script to correlate session IDs
 ├── tests/
 │   ├── test_agents_deploy.py
 │   ├── test_a2a.py          # A2A agent CRUD, Agent Card, skills, access
@@ -332,7 +338,7 @@ Write-only audit tables populated by the frontend. `audit_login` records user lo
 | `GET` | `/api/dashboard/costs` | Aggregate estimated costs (group filter, time-range filter, per-agent breakdown) |
 | `POST` | `/api/dashboard/costs/actuals` | Pull actual costs from CloudWatch usage logs (runtime per-session breakdown) and APPLICATION_LOGS (memory per-resource breakdown) |
 
-Runtime costs are recomputed from `client_duration_ms` at view time using current pricing defaults (1 vCPU, 0.5 GB memory, $0.0895/vCPU-hour, $0.00945/GB-hour). The CPU I/O Wait Discount (configurable in Settings, default 75%) is applied universally to CPU costs across both estimates and actuals. Runtime actuals are filtered to only include sessions tracked in Loom. Memory actuals are parsed from vended `BedrockAgentCoreMemory_ApplicationLogs` — memory pipeline session IDs are internal to AgentCore and do not correlate with runtime session IDs.
+Runtime costs are recomputed from `client_duration_ms` at view time using current pricing defaults (1 vCPU, 0.5 GB memory, $0.0895/vCPU-hour, $0.00945/GB-hour). The CPU I/O Wait Discount (configurable in Settings, default 75%) is applied universally to CPU costs across both estimates and actuals. Runtime actuals include all events within the time window for a given runtime — USAGE_LOGS session IDs are internal to AgentCore and do not match Loom's `runtimeSessionId`. Memory actuals are parsed from vended `BedrockAgentCoreMemory_ApplicationLogs` — memory pipeline session IDs are also internal to AgentCore.
 
 ### Site Settings
 
@@ -489,6 +495,18 @@ Invocations support multiple token sources with priority ordering:
 
 Group-based invoke restriction: `super-admins` can invoke any agent. Other users can only invoke agents whose `loom:group` tag matches one of their groups. For example, demo users can only invoke agents tagged `loom:group=demo`. The backend checks group-tag permission BEFORE creating the invocation session to prevent orphaned pending sessions. Returns 403 if the user's groups don't match the agent's tag. The backend automatically includes `LOOM_COGNITO_USER_CLIENT_ID` in agent authorizer `allowedClients` on deploy so user tokens are accepted.
 
+## Infrastructure
+
+The backend includes SAM templates for cloud infrastructure:
+
+| Stack | Template | Description |
+|-------|----------|-------------|
+| `loom-infra` | `iac/infra.yaml` | S3 artifact bucket with versioning, encryption, and public access block |
+| `loom-rds` | `iac/rds.yaml` | RDS PostgreSQL with optional RDS Proxy, multi-AZ, and Secrets Manager |
+| `loom-ec2` | `iac/ec2.yaml` | EC2 bastion instance with SSM access for tunneling to RDS |
+
+Deploy with `make infra`, `make rds`, `make ec2`. Use `make tunnel` to start an SSM port-forwarding session to the RDS instance.
+
 ## Makefile Targets
 
 ```bash
@@ -496,6 +514,21 @@ Group-based invoke restriction: `super-admins` can invoke any agent. Other users
 make install              # Install dependencies
 make test                 # Run test suite
 make run                  # Start dev server
+
+# Database operations
+make migrate-db           # Migrate SQLite → PostgreSQL
+make fix-sequences        # Repair PostgreSQL sequences after migration
+make reset-db             # Reset database
+
+# Infrastructure (S3, RDS, EC2)
+make infra                # Deploy S3 artifact bucket stack
+make rds                  # Deploy RDS PostgreSQL stack
+make ec2                  # Deploy EC2 bastion stack
+make tunnel               # Start SSM tunnel to RDS
+
+# AgentCore credentials
+make agentcore.credentials.list       # List OAuth2 credential providers
+make agentcore.credentials.delete-all # Delete all credential providers
 
 # Manual testing (requires etc/environment.sh)
 make curl.health

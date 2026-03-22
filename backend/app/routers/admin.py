@@ -395,6 +395,14 @@ def get_audit_summary(
         login_q = login_q.filter(AuditLogin.logged_in_at <= end_dt)
     total_logins = login_q.count()
 
+    # Active users (distinct user_ids across logins)
+    active_users = db.query(func.count(func.distinct(AuditLogin.user_id)))
+    if start_dt:
+        active_users = active_users.filter(AuditLogin.logged_in_at >= start_dt)
+    if end_dt:
+        active_users = active_users.filter(AuditLogin.logged_in_at <= end_dt)
+    active_users = active_users.scalar() or 0
+
     # Total actions
     action_q = db.query(AuditAction)
     if start_dt:
@@ -427,7 +435,10 @@ def get_audit_summary(
         pv_q = pv_q.filter(AuditPageView.entered_at <= end_dt)
     pv_q = pv_q.group_by(AuditPageView.page_name)
     pv_rows = pv_q.all()
-    page_views_by_page = {row.page_name: row.count for row in pv_rows}
+    page_views_by_page = {
+        row.page_name: {"count": row.count, "total_duration_seconds": row.total_duration}
+        for row in pv_rows
+    }
 
     # Total page views and total duration
     total_pv_q = db.query(
@@ -468,6 +479,7 @@ def get_audit_summary(
 
     return {
         "total_logins": total_logins,
+        "active_users": active_users,
         "total_duration": total_duration,
         "total_actions": total_actions,
         "total_page_views": total_page_views,

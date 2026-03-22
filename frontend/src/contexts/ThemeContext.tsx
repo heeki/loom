@@ -38,7 +38,7 @@ interface ThemeContextValue {
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
-  theme: "latte",
+  theme: "rosepine",
   setTheme: () => {},
 });
 
@@ -55,7 +55,7 @@ function detectInitialTheme(): Theme {
   if (el.classList.contains("rosepine")) return "rosepine";
   if (el.classList.contains("solarized")) return "solarized";
   if (el.classList.contains("tokyonight")) return "tokyonight";
-  return "latte";
+  return "rosepine";
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {

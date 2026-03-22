@@ -272,20 +272,12 @@ def pull_cost_actuals(
 
         total_events += len(usage_events)
 
-        # Get all session IDs tracked in Loom for agents on this runtime
-        agent_ids_for_runtime = [a.id for a in agent_list]
-        tracked_session_ids: set[str] = {
-            row[0] for row in db.query(InvocationSession.session_id).filter(
-                InvocationSession.agent_id.in_(agent_ids_for_runtime)
-            ).all()
-        }
-
-        # Aggregate by (agent_name, session_id) — only tracked sessions
+        # Aggregate by (agent_name, session_id) — include all events for the
+        # runtime within the time window.  USAGE_LOGS session IDs may differ
+        # from Loom's runtimeSessionId, so we cannot filter by tracked sessions.
         session_agg: dict[tuple[str | None, str | None], dict[str, Any]] = {}
         for ue in usage_events:
             sid = ue.get("session_id")
-            if sid and sid not in tracked_session_ids:
-                continue
             key = (ue.get("agent_name"), sid)
             if key not in session_agg:
                 session_agg[key] = {

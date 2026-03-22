@@ -131,7 +131,7 @@ export function RoleManagementPanel({ readOnly }: { readOnly?: boolean }) {
           onSortDirectionChange={(d) => { if (d) { setSortDir(d); saveSortDirection("security-roles", d); } }}
           className="grid gap-2"
           renderItem={(role) => (
-            <Card className="relative py-3 gap-1">
+            <Card className="relative py-3 gap-1 transition-colors hover:bg-accent/50">
               <CardHeader className="gap-1 pb-2">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
