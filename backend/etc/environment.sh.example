@@ -18,14 +18,19 @@ LOOM_ARTIFACT_BUCKET=<your-s3-bucket-for-deployments>
 # SQLite for local development:
 LOOM_DATABASE_URL=sqlite:///./loom.db
 # PostgreSQL via RDS Proxy for cloud deployments (comment out SQLite line above and uncomment below):
-# LOOM_DATABASE_URL=postgresql+psycopg2://$(P_RDS_USERNAME):$(P_RDS_PASSWORD)@$(P_RDS_PROXY_ENDPOINT):$(P_RDS_PORT)/$(P_RDS_DB_NAME)
+# LOOM_DATABASE_HOST=localhost
+# LOOM_DATABASE_HOST=$(O_RDS_PROXY_ENDPOINT)
+# LOOM_DATABASE_URL=postgresql+psycopg2://$(P_RDS_USERNAME):$(P_RDS_PASSWORD)@$(LOOM_DATABASE_HOST):$(O_RDS_PORT)/$(P_RDS_DB_NAME)
 LOOM_BACKEND_PORT=8000
 LOOM_FRONTEND_PORT=5173
 
-# Cognito user authentication (from cognito stack outputs)
-LOOM_COGNITO_USER_POOL_ID=<your-cognito-user-pool-id>
-LOOM_COGNITO_USER_CLIENT_ID=<your-cognito-user-client-id>
+# Cognito user authentication (from Cognito stack outputs)
+LOOM_COGNITO_USER_POOL_ID=$(O_COGNITO_USER_POOL_ID)
+LOOM_COGNITO_USER_CLIENT_ID=$(O_COGNITO_USER_CLIENT_ID)
 LOOM_COGNITO_REGION=${AWS_REGION}
+
+# CORS allowed origins for deployed environments (comma-separated, e.g. https://loom.example.com)
+LOOM_ALLOWED_ORIGINS=
 
 # Exports
 export AWS_PROFILE
@@ -37,22 +42,12 @@ export LOOM_FRONTEND_PORT
 export LOOM_COGNITO_USER_POOL_ID
 export LOOM_COGNITO_USER_CLIENT_ID
 export LOOM_COGNITO_REGION
+export LOOM_ALLOWED_ORIGINS
 
-# Local testing
-AGENT_ARN=<your-agent-runtime-arn>
-AGENT_ID=1
-SESSION_ID=1
-PROMPT=Tell me about the benefits of using Amazon Bedrock AgentCore.
-
-# Memory resources
-MEMORY_ID=1
-MEMORY_NAME=<your-memory-name>
-MEMORY_EVENT_EXPIRY_DURATION_DAYS=7
-
-# Infrastructure stack configuration (S3)
-P_INFRA_STACK=loom-infra
-P_INFRA_TEMPLATE=iac/infra.yaml
-P_INFRA_OUTPUT=iac/infra_output.yaml
+# Resource tagging
+P_TAG_APPLICATION=<your-application-name>
+P_TAG_GROUP=<your-group-or-team>
+P_TAG_OWNER=<your-owner-alias-or-email>
 
 # RDS stack configuration
 P_RDS_STACK=loom-rds
@@ -73,21 +68,29 @@ P_RDS_VPC_ID=<your-vpc-id>
 P_RDS_PRIVATE_SUBNET_IDS=<subnet-id-1>,<subnet-id-2>
 P_RDS_ALLOWED_CIDR=10.0.0.0/8
 
-# Resource tagging
-P_TAG_APPLICATION=<your-application-name>
-P_TAG_GROUP=<your-group-or-team>
-P_TAG_OWNER=<your-owner-alias-or-email>
-
-# OUTPUTS: RDS connection (from stack outputs: oConnectEndpoint, oRdsPort)
-P_RDS_PROXY_ENDPOINT=<proxy-or-rds-endpoint>
-P_RDS_PORT=5432
-
 # EC2 stack configuration (SSM tunnel)
 P_EC2_STACK=loom-ec2
 P_EC2_TEMPLATE=iac/ec2.yaml
 P_EC2_OUTPUT=iac/ec2_output.yaml
 P_EC2_INSTANCE_TYPE=t3.micro
-P_EC2_SUBNET_ID=<your-public-subnet-id>
+P_EC2_PUBLIC_SUBNET_ID=<your-public-subnet-id>
 
-# OUTPUTS: EC2 (from stack outputs: oInstanceId)
-P_EC2_INSTANCE_ID=<your-instance-id>
+# ECS backend stack configuration
+P_ECS_BACKEND_STACK=loom-ecs-backend
+P_ECS_BACKEND_TEMPLATE=iac/ecs.yaml
+P_ECS_BACKEND_OUTPUT=iac/ecs_output.yaml
+
+# ECS backend parameters
+P_ECS_PRIVATE_SUBNET_IDS=<private-subnet-id-1>,<private-subnet-id-2>
+P_ECS_BACKEND_CPU=512
+P_ECS_BACKEND_MEMORY=1024
+P_ECS_BACKEND_DESIRED_COUNT=1
+P_ECS_BACKEND_MAX_COUNT=4
+
+# Loom configurations (passed to ECS task environment)
+P_LOOM_ARTIFACT_BUCKET=<your-s3-bucket-for-deployments>
+P_LOOM_COGNITO_REGION=$(REGION)
+P_LOOM_ALLOWED_ORIGINS=
+
+# Stack outputs — reads from shared/etc/outputs_<account>.sh
+include ../shared/etc/outputs_<account>.sh

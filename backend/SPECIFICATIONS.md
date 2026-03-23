@@ -33,6 +33,7 @@ All runtime configuration is injected via environment variables sourced from `et
 | `LOOM_COGNITO_USER_POOL_ID` | Cognito User Pool ID for user authentication | — |
 | `LOOM_COGNITO_REGION` | Region of the Cognito pool | `AWS_REGION` |
 | `LOOM_COGNITO_USER_CLIENT_ID` | Cognito user app client ID (auto-included in agent authorizer `allowedClients` on deploy) | — |
+| `LOOM_ALLOWED_ORIGINS` | Comma-separated additional CORS origins for deployed environments | — |
 
 AWS credentials use the standard boto3 credential chain (environment variables, AWS profile, instance metadata).
 
@@ -119,7 +120,14 @@ backend/
 │   ├── test_traces.py       # Trace router + OTEL parsing tests (12 tests)
 │   └── test_admin_audit.py  # Admin audit router tests (14 tests: login, action, pageview, sessions, summary)
 ├── etc/
-│   └── environment.sh.example  # Example environment configuration template
+│   ├── environment.sh           # Sources account-specific file + shared outputs
+│   └── environment.sh.example   # Example environment configuration template
+├── iac/
+│   ├── rds.yaml                 # RDS PostgreSQL with optional RDS Proxy
+│   ├── ec2.yaml                 # EC2 bastion for SSM tunnel to RDS
+│   └── ecs.yaml                 # Backend ECS Fargate service (task def, task role, service, auto-scaling)
+├── .dockerignore                # Excludes .env, .venv, __pycache__, tests, etc.
+├── Dockerfile                   # Backend container image (Python 3.13 slim + uvicorn)
 ├── makefile
 ├── pyproject.toml
 └── requirements.txt
@@ -1222,13 +1230,6 @@ migrate-db           # Migrate SQLite → PostgreSQL (uses $LOOM_DATABASE_URL)
 fix-sequences        # Repair PostgreSQL sequences after migration
 reset-db             # Reset database (drop all tables)
 
-# Shared infrastructure (S3 artifact bucket)
-infra                # Package and deploy S3 infra stack
-infra.package        # SAM package for infra stack
-infra.deploy         # SAM deploy for infra stack
-infra.outputs        # Query infra stack outputs
-infra.delete         # Delete infra stack
-
 # RDS infrastructure (PostgreSQL + optional RDS Proxy)
 rds                  # Package and deploy RDS stack
 rds.package          # SAM package for RDS stack
@@ -1244,31 +1245,17 @@ ec2.deploy           # SAM deploy for EC2 stack
 ec2.outputs          # Query EC2 stack outputs
 ec2.delete           # Delete EC2 stack
 
+# ECS backend service
+ecs                  # Package and deploy backend ECS service
+ecs.package          # SAM package for backend ECS stack
+ecs.deploy           # SAM deploy for backend ECS stack (pImageUri includes git SHA tag)
+ecs.outputs          # Query backend ECS stack outputs
+ecs.delete           # Delete backend ECS stack
+
 # SSM tunnel (port forwarding to RDS)
 tunnel               # Start SSM port forwarding session to RDS
 
 # AgentCore credential providers
 agentcore.credentials.list       # List OAuth2 credential providers
 agentcore.credentials.delete-all # Delete all credential providers
-
-# Manual testing targets
-curl.health          # GET /health
-curl.agents.register # POST /api/agents (ARN= required)
-curl.agents.list     # GET /api/agents
-curl.agents.get      # GET /api/agents/{AGENT_ID}
-curl.agents.refresh  # POST /api/agents/{AGENT_ID}/refresh
-curl.agents.delete   # DELETE /api/agents/{AGENT_ID}
-curl.invoke          # POST /api/agents/{AGENT_ID}/invoke (streams via scripts/stream.py)
-curl.sessions.list   # GET /api/agents/{AGENT_ID}/sessions
-curl.sessions.get    # GET /api/agents/{AGENT_ID}/sessions/{SESSION_ID}
-curl.logs            # GET /api/agents/{AGENT_ID}/logs (optional QUALIFIER, LIMIT, STREAM)
-curl.logs.streams    # GET /api/agents/{AGENT_ID}/logs/streams
-curl.logs.session    # GET /api/agents/{AGENT_ID}/sessions/{SESSION_ID}/logs
-
-# Memory resource targets
-curl.memories.create  # POST /api/memories (MEMORY_NAME, MEMORY_EVENT_EXPIRY_DURATION)
-curl.memories.list    # GET /api/memories
-curl.memories.get     # GET /api/memories/{MEMORY_ID}
-curl.memories.refresh # POST /api/memories/{MEMORY_ID}/refresh
-curl.memories.delete  # DELETE /api/memories/{MEMORY_ID}
 ```

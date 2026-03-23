@@ -6,7 +6,7 @@ Single-page React application for managing, deploying, and invoking Bedrock Agen
 
 - Node.js 18+
 - npm
-- Backend API running on `http://localhost:8000`
+- Backend API running on `http://localhost:8000` (or set `VITE_API_BASE_URL` for remote deployments)
 
 ## Quick Start
 
@@ -46,7 +46,7 @@ make preview
 The app supports 10 color themes, managed by `ThemeContext` with localStorage persistence:
 
 - **Light:** Ayu Light, Catppuccin Latte (default), Everforest Light, Rosé Pine Dawn, Solarized Light
-- **Dark:** Catppuccin Mocha, Dracula, Gruvbox, Nord, Tokyo Night
+- **Dark:** Ayu Dark, Catppuccin Mocha, Dracula, Nord, Tokyo Night
 
 Theme and timezone preferences are configured on the Settings page. Colors are mapped to shadcn CSS variables in `src/index.css` using CSS class selectors per theme.
 
@@ -225,7 +225,7 @@ Session liveness is computed server-side using `LOOM_SESSION_IDLE_TIMEOUT_SECOND
 
 ## Configuration
 
-The frontend connects to the backend at `http://localhost:8000`. The backend CORS configuration allows requests from `http://localhost:5173`.
+The frontend connects to the backend at the URL specified by `VITE_API_BASE_URL` (defaults to `http://localhost:8000` for local dev). For cloud deployments behind an ALB with path-based routing, `VITE_API_BASE_URL` should be empty string (same-origin). The client uses nullish coalescing (`??`) so empty string is preserved. The backend CORS configuration allows requests from `http://localhost:5173` and any additional origins specified in `LOOM_ALLOWED_ORIGINS`.
 
 To change the dev server port:
 
@@ -240,3 +240,19 @@ make build
 ```
 
 Output is written to `dist/`. Serve with `make preview` or any static file server.
+
+## Container Deployment
+
+A multi-stage Dockerfile is provided for building a production container image:
+
+```bash
+# Build for cloud deployment (same-origin API via ALB path routing)
+podman build --platform linux/amd64 \
+  --build-arg VITE_COGNITO_USER_CLIENT_ID=<client-id> \
+  -t loom-frontend .
+
+# Run locally
+podman run -p 80:80 loom-frontend
+```
+
+The container uses nginx to serve static assets with SPA routing (`try_files` fallback to `index.html`), gzip compression, and immutable cache headers for versioned assets.
