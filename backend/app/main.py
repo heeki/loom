@@ -53,16 +53,22 @@ app = FastAPI(
     description="Backend API for the Loom agent platform",
     version="0.1.0",
     lifespan=lifespan,
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
 )
 
 # Configure CORS
 FRONTEND_PORT = os.getenv("LOOM_FRONTEND_PORT", "5173")
+_default_origins = [
+    f"http://localhost:{FRONTEND_PORT}",
+    "http://127.0.0.1:5173",
+]
+_extra_origins = os.getenv("LOOM_ALLOWED_ORIGINS", "")
+ALLOWED_ORIGINS = _default_origins + [o.strip() for o in _extra_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        f"http://localhost:{FRONTEND_PORT}",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

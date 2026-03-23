@@ -1,17 +1,17 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
 
-export type Theme = "ayu" | "latte" | "dracula" | "everforest" | "gruvbox" | "mocha" | "nord" | "rosepine" | "solarized" | "tokyonight";
+export type Theme = "ayu" | "latte" | "dracula" | "everforest" | "ayudark" | "mocha" | "nord" | "rosepine" | "solarized" | "tokyonight";
 
 export const THEME_LABELS: Record<Theme, string> = {
   ayu: "Ayu Light",
   latte: "Catppuccin Latte",
-  dracula: "Dracula",
   everforest: "Everforest Light",
-  gruvbox: "Gruvbox",
-  mocha: "Catppuccin Mocha",
-  nord: "Nord",
   rosepine: "Rosé Pine Dawn",
   solarized: "Solarized Light",
+  ayudark: "Ayu Dark",
+  mocha: "Catppuccin Mocha",
+  dracula: "Dracula",
+  nord: "Nord",
   tokyonight: "Tokyo Night",
 };
 
@@ -20,7 +20,7 @@ const THEME_CLASSES: Record<Theme, string | null> = {
   latte: null,
   dracula: "dracula",
   everforest: "everforest",
-  gruvbox: "gruvbox",
+  ayudark: "ayudark",
   mocha: "dark",
   nord: "nord",
   rosepine: "rosepine",
@@ -38,7 +38,7 @@ interface ThemeContextValue {
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
-  theme: "rosepine",
+  theme: "ayu",
   setTheme: () => {},
 });
 
@@ -50,12 +50,12 @@ function detectInitialTheme(): Theme {
   if (el.classList.contains("dark")) return "mocha";
   if (el.classList.contains("dracula")) return "dracula";
   if (el.classList.contains("everforest")) return "everforest";
-  if (el.classList.contains("gruvbox")) return "gruvbox";
+  if (el.classList.contains("ayudark")) return "ayudark";
   if (el.classList.contains("nord")) return "nord";
   if (el.classList.contains("rosepine")) return "rosepine";
   if (el.classList.contains("solarized")) return "solarized";
   if (el.classList.contains("tokyonight")) return "tokyonight";
-  return "rosepine";
+  return "ayu";
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -63,7 +63,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const el = document.documentElement;
-    el.classList.remove("ayu", "dark", "dracula", "everforest", "gruvbox", "nord", "rosepine", "solarized", "tokyonight");
+    el.classList.remove("ayu", "dark", "dracula", "everforest", "ayudark", "nord", "rosepine", "solarized", "tokyonight");
     const cls = THEME_CLASSES[theme];
     if (cls) el.classList.add(cls);
     localStorage.setItem("loom-theme", theme);

@@ -1,0 +1,377 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Loom shared infrastructure — S3 artifact bucket, ECR repositories, ACM certificate, ALB, and networking
+
+Parameters:
+  pArtifactBucketName:
+    Type: String
+    Description: Name for the S3 artifact bucket
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID for ALB and ECS security groups
+  pPublicSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Public subnet IDs for ALB placement
+  pDomainName:
+    Type: String
+    Description: Subdomain name for the application (e.g. loom.example.com)
+  pHostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+    Description: Route 53 hosted zone ID for the subdomain (from loom-dns stack)
+  pFrontendRepoName:
+    Type: String
+    Description: ECR repository name for the frontend image
+    Default: loom-frontend
+  pBackendRepoName:
+    Type: String
+    Description: ECR repository name for the backend image
+    Default: loom-backend
+  pTagApplication:
+    Type: String
+    Description: Value for the loom:application tag
+  pTagGroup:
+    Type: String
+    Description: Value for the loom:group tag
+  pTagOwner:
+    Type: String
+    Description: Value for the loom:owner tag
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # S3 — Deployment artifact bucket
+  # ---------------------------------------------------------------------------
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref pArtifactBucketName
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: CleanupOldVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 90
+      Tags:
+        - Key: loom:application
+          Value: !Ref pTagApplication
+        - Key: loom:group
+          Value: !Ref pTagGroup
+        - Key: loom:owner
+          Value: !Ref pTagOwner
+
+  # ---------------------------------------------------------------------------
+  # ECR — Container image repositories
+  # ---------------------------------------------------------------------------
+  FrontendRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: !Ref pFrontendRepoName
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 10 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+      Tags:
+        - Key: loom:application
+          Value: !Ref pTagApplication
+        - Key: loom:group
+          Value: !Ref pTagGroup
+        - Key: loom:owner
+          Value: !Ref pTagOwner
+
+  BackendRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: !Ref pBackendRepoName
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 10 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+      Tags:
+        - Key: loom:application
+          Value: !Ref pTagApplication
+        - Key: loom:group
+          Value: !Ref pTagGroup
+        - Key: loom:owner
+          Value: !Ref pTagOwner
+
+  # ---------------------------------------------------------------------------
+  # ACM — TLS certificate with DNS validation
+  # ---------------------------------------------------------------------------
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref pDomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref pDomainName
+          HostedZoneId: !Ref pHostedZoneId
+      Tags:
+        - Key: loom:application
+          Value: !Ref pTagApplication
+        - Key: loom:group
+          Value: !Ref pTagGroup
+        - Key: loom:owner
+          Value: !Ref pTagOwner
+
+  # ---------------------------------------------------------------------------
+  # Security Groups
+  # ---------------------------------------------------------------------------
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow inbound HTTP and HTTPS traffic to the ALB
+      VpcId: !Ref pVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-alb-sg"
+        - Key: loom:application
+          Value: !Ref pTagApplication
+        - Key: loom:group
+          Value: !Ref pTagGroup
+        - Key: loom:owner
+          Value: !Ref pTagOwner
+
+  EcsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow inbound traffic from ALB to ECS tasks
+      VpcId: !Ref pVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !GetAtt AlbSecurityGroup.GroupId
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          SourceSecurityGroupId: !GetAtt AlbSecurityGroup.GroupId
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-ecs-sg"
+        - Key: loom:application
+          Value: !Ref pTagApplication
+        - Key: loom:group
+          Value: !Ref pTagGroup
+        - Key: loom:owner
+          Value: !Ref pTagOwner
+
+  # ---------------------------------------------------------------------------
+  # Application Load Balancer
+  # ---------------------------------------------------------------------------
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub "${AWS::StackName}-alb"
+      Scheme: internet-facing
+      Type: application
+      Subnets: !Ref pPublicSubnetIds
+      SecurityGroups:
+        - !GetAtt AlbSecurityGroup.GroupId
+      Tags:
+        - Key: loom:application
+          Value: !Ref pTagApplication
+        - Key: loom:group
+          Value: !Ref pTagGroup
+        - Key: loom:owner
+          Value: !Ref pTagOwner
+
+  # ---------------------------------------------------------------------------
+  # ALB Listeners
+  # ---------------------------------------------------------------------------
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref Certificate
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref FrontendTargetGroup
+
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: "443"
+            StatusCode: HTTP_301
+
+  # ---------------------------------------------------------------------------
+  # Target Groups
+  # ---------------------------------------------------------------------------
+  FrontendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${AWS::StackName}-fe-tg"
+      VpcId: !Ref pVpcId
+      Protocol: HTTP
+      Port: 80
+      TargetType: ip
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      HealthCheckTimeoutSeconds: 5
+      Tags:
+        - Key: loom:application
+          Value: !Ref pTagApplication
+        - Key: loom:group
+          Value: !Ref pTagGroup
+        - Key: loom:owner
+          Value: !Ref pTagOwner
+
+  BackendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${AWS::StackName}-be-tg"
+      VpcId: !Ref pVpcId
+      Protocol: HTTP
+      Port: 8000
+      TargetType: ip
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      HealthCheckTimeoutSeconds: 5
+      Tags:
+        - Key: loom:application
+          Value: !Ref pTagApplication
+        - Key: loom:group
+          Value: !Ref pTagGroup
+        - Key: loom:owner
+          Value: !Ref pTagOwner
+
+  # ---------------------------------------------------------------------------
+  # ALB Listener Rules
+  # ---------------------------------------------------------------------------
+  BackendListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HttpsListener
+      Priority: 1
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /api/*
+            - /health
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref BackendTargetGroup
+
+  # ---------------------------------------------------------------------------
+  # Route 53 — DNS alias record for ALB
+  # ---------------------------------------------------------------------------
+  DnsRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref pHostedZoneId
+      Name: !Ref pDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ApplicationLoadBalancer.DNSName
+        HostedZoneId: !GetAtt ApplicationLoadBalancer.CanonicalHostedZoneID
+
+Outputs:
+  oArtifactBucket:
+    Description: S3 bucket for agent deployment artifacts
+    Value: !Ref ArtifactBucket
+  oArtifactBucketArn:
+    Description: ARN of the S3 artifact bucket
+    Value: !GetAtt ArtifactBucket.Arn
+  oFrontendRepositoryUri:
+    Description: ECR repository URI for the frontend image
+    Value: !GetAtt FrontendRepository.RepositoryUri
+  oBackendRepositoryUri:
+    Description: ECR repository URI for the backend image
+    Value: !GetAtt BackendRepository.RepositoryUri
+  oCertificateArn:
+    Description: ARN of the ACM TLS certificate
+    Value: !Ref Certificate
+  oAlbDnsName:
+    Description: ALB DNS name
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+  oAlbArn:
+    Description: ALB ARN
+    Value: !Ref ApplicationLoadBalancer
+  oAlbSecurityGroupId:
+    Description: Security group ID for the ALB
+    Value: !GetAtt AlbSecurityGroup.GroupId
+  oEcsSecurityGroupId:
+    Description: Security group ID for ECS tasks
+    Value: !GetAtt EcsSecurityGroup.GroupId
+  oFrontendTargetGroupArn:
+    Description: ARN of the frontend target group
+    Value: !Ref FrontendTargetGroup
+  oBackendTargetGroupArn:
+    Description: ARN of the backend target group
+    Value: !Ref BackendTargetGroup
+  oHttpsListenerArn:
+    Description: ARN of the HTTPS listener
+    Value: !Ref HttpsListener
+  oDomainName:
+    Description: Domain name for the application
+    Value: !Ref pDomainName

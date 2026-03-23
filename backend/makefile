@@ -1,5 +1,6 @@
 include etc/environment.sh
-BASE_URL=http://localhost:$${LOOM_BACKEND_PORT:-8000}
+
+IMAGE_TAG := $(shell git rev-parse --short HEAD)
 
 install:
 	source .venv/bin/activate && uv pip install -r requirements.txt
@@ -40,48 +41,6 @@ agentcore.credentials.delete-all:
 			--region $(REGION) \
 			--name "$$name"; \
 	done
-
-# Shared infrastructure (S3)
-infra: infra.package infra.deploy
-
-infra.package:
-	sam package \
-		--profile $(PROFILE) \
-		--region $(REGION) \
-		--template-file $(P_INFRA_TEMPLATE) \
-		--output-template-file $(P_INFRA_OUTPUT) \
-		--s3-bucket $(BUCKET) \
-		--s3-prefix $(P_INFRA_STACK)
-
-infra.deploy:
-	sam deploy \
-		--profile $(PROFILE) \
-		--region $(REGION) \
-		--template-file $(P_INFRA_OUTPUT) \
-		--stack-name $(P_INFRA_STACK) \
-		--s3-bucket $(BUCKET) \
-		--s3-prefix $(P_INFRA_STACK) \
-		--parameter-overrides \
-			pArtifactBucketName=$${LOOM_ARTIFACT_BUCKET} \
-			pTagApplication=$(P_TAG_APPLICATION) \
-			pTagGroup=$(P_TAG_GROUP) \
-			pTagOwner=$(P_TAG_OWNER) \
-		--no-confirm-changeset
-
-infra.outputs:
-	@aws cloudformation describe-stacks \
-		--profile $(PROFILE) \
-		--region $(REGION) \
-		--stack-name $(P_INFRA_STACK) \
-		--query 'Stacks[0].Outputs' \
-		--output json | jq .
-
-infra.delete:
-	sam delete \
-		--profile $(PROFILE) \
-		--region $(REGION) \
-		--stack-name $(P_INFRA_STACK) \
-		--no-prompts
 
 # RDS infrastructure
 rds: rds.package rds.deploy
@@ -188,117 +147,68 @@ ec2.delete:
 		--stack-name $(P_EC2_STACK) \
 		--no-prompts
 
+# ECS backend service
+ecs: ecs.package ecs.deploy
+
+ecs.package:
+	sam package \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_ECS_BACKEND_TEMPLATE) \
+		--output-template-file $(P_ECS_BACKEND_OUTPUT) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_ECS_BACKEND_STACK)
+
+ecs.deploy:
+	sam deploy \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_ECS_BACKEND_OUTPUT) \
+		--stack-name $(P_ECS_BACKEND_STACK) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_ECS_BACKEND_STACK) \
+		--parameter-overrides \
+			pEcsClusterArn=$(O_ECS_CLUSTER_ARN) \
+			pEcsClusterName=$(O_ECS_CLUSTER_NAME) \
+			pEcsSecurityGroupId=$(O_INFRA_ECS_SG_ID) \
+			pTargetGroupArn=$(O_INFRA_BACKEND_TG_ARN) \
+			pPrivateSubnetIds=$(P_ECS_PRIVATE_SUBNET_IDS) \
+			pImageUri=$(O_ECR_BACKEND_URI):$(IMAGE_TAG) \
+			pCpu=$(P_ECS_BACKEND_CPU) \
+			pMemory=$(P_ECS_BACKEND_MEMORY) \
+			pDesiredCount=$(P_ECS_BACKEND_DESIRED_COUNT) \
+			pMaxCount=$(P_ECS_BACKEND_MAX_COUNT) \
+			pDatabaseSecretArn=$(O_RDS_SECRET_ARN) \
+			pArtifactBucket=$(P_LOOM_ARTIFACT_BUCKET) \
+			pCognitoUserPoolId=$(O_COGNITO_USER_POOL_ID) \
+			pCognitoRegion=$(P_LOOM_COGNITO_REGION) \
+			$(if $(P_LOOM_ALLOWED_ORIGINS),pAllowedOrigins=$(P_LOOM_ALLOWED_ORIGINS)) \
+			pTagApplication=$(P_TAG_APPLICATION) \
+			pTagGroup=$(P_TAG_GROUP) \
+			pTagOwner=$(P_TAG_OWNER) \
+		--capabilities CAPABILITY_NAMED_IAM \
+		--no-confirm-changeset
+
+ecs.outputs:
+	@aws cloudformation describe-stacks \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_ECS_BACKEND_STACK) \
+		--query 'Stacks[0].Outputs' \
+		--output json | jq .
+
+ecs.delete:
+	sam delete \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_ECS_BACKEND_STACK) \
+		--no-prompts
+
 # SSM tunnel
 tunnel:
 	aws ssm start-session \
 		--profile $(PROFILE) \
 		--region $(REGION) \
-		--target $(P_EC2_INSTANCE_ID) \
+		--target $(O_EC2_INSTANCE_ID) \
 		--document-name AWS-StartPortForwardingSessionToRemoteHost \
-		--parameters '{"host":["$(P_RDS_PROXY_ENDPOINT)"],"portNumber":["$(P_RDS_PORT)"],"localPortNumber":["$(P_RDS_PORT)"]}'
-
-# Manual testing targets
-curl.health:
-	curl -s $(BASE_URL)/health | jq
-
-curl.agents.register:
-	curl -s -X POST $(BASE_URL)/api/agents \
-		-H "Content-Type: application/json" \
-		-d '{"arn": "$(AGENT_ARN)"}' | jq
-
-curl.agents.list:
-	curl -s $(BASE_URL)/api/agents | jq
-
-curl.agents.get:
-	curl -s $(BASE_URL)/api/agents/$(AGENT_ID) | jq
-
-curl.agents.refresh:
-	curl -s -X POST $(BASE_URL)/api/agents/$(AGENT_ID)/refresh | jq
-
-curl.agents.delete:
-	curl -s -X DELETE $(BASE_URL)/api/agents/$(AGENT_ID) -w "\nHTTP %{http_code}\n"
-
-curl.invoke:
-	source .venv/bin/activate && python scripts/stream.py \
-		$(BASE_URL) $(AGENT_ID) "$(PROMPT)" "$(or $(QUALIFIER),DEFAULT)"
-
-curl.sessions.list:
-	curl -s $(BASE_URL)/api/agents/$(AGENT_ID)/sessions | jq
-
-curl.sessions.get:
-	curl -s $(BASE_URL)/api/agents/$(AGENT_ID)/sessions/$(SESSION_ID) | jq
-
-curl.logs:
-	curl -s "$(BASE_URL)/api/agents/$(AGENT_ID)/logs?qualifier=$(or $(QUALIFIER),DEFAULT)&limit=$(or $(LIMIT),20)$(if $(STREAM),&stream=$(STREAM),)" | jq
-
-curl.logs.streams:
-	curl -s "$(BASE_URL)/api/agents/$(AGENT_ID)/logs/streams?qualifier=$(or $(QUALIFIER),DEFAULT)" | jq
-
-curl.logs.session:
-	curl -s "$(BASE_URL)/api/agents/$(AGENT_ID)/sessions/$(SESSION_ID)/logs?qualifier=$(or $(QUALIFIER),DEFAULT)" | jq
-
-# Deploy agent
-curl.agents.deploy:
-	curl -s -X POST $(BASE_URL)/api/agents \
-		-H "Content-Type: application/json" \
-		-d '{"source": "deploy", "name": "$(NAME)", "code_uri": "$(CODE_URI)", "config": $(or $(CONFIG),{})}' | jq
-
-# Redeploy agent
-curl.agents.redeploy:
-	curl -s -X POST $(BASE_URL)/api/agents/$(AGENT_ID)/redeploy | jq
-
-# Agent config
-curl.agents.config.get:
-	curl -s $(BASE_URL)/api/agents/$(AGENT_ID)/config | jq
-
-curl.agents.config.update:
-	curl -s -X PUT $(BASE_URL)/api/agents/$(AGENT_ID)/config \
-		-H "Content-Type: application/json" \
-		-d '{"config": $(CONFIG)}' | jq
-
-# Credential providers
-curl.credentials.create:
-	curl -s -X POST $(BASE_URL)/api/agents/$(AGENT_ID)/credential-providers \
-		-H "Content-Type: application/json" \
-		-d '$(BODY)' | jq
-
-curl.credentials.list:
-	curl -s $(BASE_URL)/api/agents/$(AGENT_ID)/credential-providers | jq
-
-curl.credentials.delete:
-	curl -s -X DELETE $(BASE_URL)/api/agents/$(AGENT_ID)/credential-providers/$(PROVIDER_ID) -w "\nHTTP %{http_code}\n"
-
-# Integrations
-curl.integrations.create:
-	curl -s -X POST $(BASE_URL)/api/agents/$(AGENT_ID)/integrations \
-		-H "Content-Type: application/json" \
-		-d '$(BODY)' | jq
-
-curl.integrations.list:
-	curl -s $(BASE_URL)/api/agents/$(AGENT_ID)/integrations | jq
-
-curl.integrations.update:
-	curl -s -X PUT $(BASE_URL)/api/agents/$(AGENT_ID)/integrations/$(INTEGRATION_ID) \
-		-H "Content-Type: application/json" \
-		-d '$(BODY)' | jq
-
-curl.integrations.delete:
-	curl -s -X DELETE $(BASE_URL)/api/agents/$(AGENT_ID)/integrations/$(INTEGRATION_ID) -w "\nHTTP %{http_code}\n"
-
-# Memory resources
-curl.memories.create:
-	curl -s -X POST $(BASE_URL)/api/memories \
-		-H "Content-Type: application/json" \
-		-d '{"name": "$(MEMORY_NAME)", "event_expiry_duration": $(MEMORY_EVENT_EXPIRY_DURATION), "memory_strategies": [{"strategy_type": "semantic", "name": "default_semantic"}]}' | jq
-
-curl.memories.list:
-	curl -s $(BASE_URL)/api/memories | jq
-
-curl.memories.get:
-	curl -s $(BASE_URL)/api/memories/$(MEMORY_ID) | jq
-
-curl.memories.refresh:
-	curl -s -X POST $(BASE_URL)/api/memories/$(MEMORY_ID)/refresh | jq
-
-curl.memories.delete:
-	curl -s -X DELETE $(BASE_URL)/api/memories/$(MEMORY_ID) -w "\nHTTP %{http_code}\n"
+		--parameters '{"host":["$(O_RDS_PROXY_ENDPOINT)"],"portNumber":["$(O_RDS_PORT)"],"localPortNumber":["$(O_RDS_PORT)"]}'

@@ -1,0 +1,307 @@
+include etc/environment.sh
+
+# role
+role: role.package role.deploy
+role.package:
+	sam package \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_ROLE_TEMPLATE) \
+		--output-template-file $(P_ROLE_OUTPUT) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_ROLE_STACK)
+
+role.deploy:
+	sam deploy \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_ROLE_OUTPUT) \
+		--stack-name $(P_ROLE_STACK) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_ROLE_STACK) \
+		--parameter-overrides \
+			pAgentName=$(P_AGENT_NAME) \
+			pRoleSuffix=$(P_AGENT_NAME_SANITIZED) \
+			pBedrockModelArns=$(P_BEDROCK_MODEL_ARNS) \
+			pAgentCoreRegions=$(P_AGENTCORE_REGIONS) \
+			pLogsRegion=$(P_LOGS_REGION) \
+			pMemoryArn=${P_MEMORY_ARN} \
+			pTagApplication=$(P_TAG_APPLICATION) \
+			pTagGroup=$(P_TAG_GROUP) \
+			pTagOwner=$(P_TAG_OWNER) \
+		--capabilities CAPABILITY_NAMED_IAM \
+		--no-confirm-changeset
+
+role.delete:
+	sam delete \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_ROLE_STACK) \
+		--no-prompts
+
+# cognito
+cognito: cognito.package cognito.deploy
+cognito.package:
+	sam package \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_COGNITO_TEMPLATE) \
+		--output-template-file $(P_COGNITO_OUTPUT) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_COGNITO_STACK)
+
+cognito.deploy:
+	sam deploy \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_COGNITO_OUTPUT) \
+		--stack-name $(P_COGNITO_STACK) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_COGNITO_STACK) \
+		--parameter-overrides \
+			pPoolName=$(P_COGNITO_POOL_NAME) \
+			pDomain=$(P_COGNITO_DOMAIN) \
+			pResourceServerIdentifier=$(P_COGNITO_RESOURCE_SERVER) \
+			pScopes=$(P_COGNITO_SCOPES) \
+			pCallbackUrls=$(P_COGNITO_CALLBACK_URLS) \
+			pTagApplication=$(P_TAG_APPLICATION) \
+			pTagGroup=$(P_TAG_GROUP) \
+			pTagOwner=$(P_TAG_OWNER) \
+		--capabilities CAPABILITY_NAMED_IAM \
+		--no-confirm-changeset
+
+cognito.delete:
+	sam delete \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_COGNITO_STACK) \
+		--no-prompts
+
+# cognito user management
+cognito.set-passwords:
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username admin --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username security-admin --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username integration-admin --password '$(P_COGNITO_PERMANENT_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username demo-user-1 --password '$(P_COGNITO_DEMO_USER_1_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username demo-admin-1 --password '$(P_COGNITO_DEMO_USER_1_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username demo-user-2 --password '$(P_COGNITO_DEMO_USER_2_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username demo-admin-2 --password '$(P_COGNITO_DEMO_USER_2_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username demo-user-3 --password '$(P_COGNITO_DEMO_USER_3_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username demo-admin-3 --password '$(P_COGNITO_DEMO_USER_3_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username demo-user-4 --password '$(P_COGNITO_DEMO_USER_4_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username demo-admin-4 --password '$(P_COGNITO_DEMO_USER_4_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username demo-user-5 --password '$(P_COGNITO_DEMO_USER_5_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username demo-admin-5 --password '$(P_COGNITO_DEMO_USER_5_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username demo-user-6 --password '$(P_COGNITO_DEMO_USER_6_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username demo-admin-6 --password '$(P_COGNITO_DEMO_USER_6_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username demo-user-7 --password '$(P_COGNITO_DEMO_USER_7_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username demo-admin-7 --password '$(P_COGNITO_DEMO_USER_7_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username demo-user-8 --password '$(P_COGNITO_DEMO_USER_8_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username demo-admin-8 --password '$(P_COGNITO_DEMO_USER_8_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username demo-user-9 --password '$(P_COGNITO_DEMO_USER_9_PASSWORD)' --permanent
+	aws cognito-idp admin-set-user-password --profile $(PROFILE) --region $(REGION) --user-pool-id $(O_COGNITO_USER_POOL_ID) --username demo-admin-9 --password '$(P_COGNITO_DEMO_USER_9_PASSWORD)' --permanent
+
+cognito.get-client-id:
+	@aws cloudformation describe-stacks \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_COGNITO_STACK) \
+		--query 'Stacks[0].Outputs[?OutputKey==`oUserClientId`].OutputValue' \
+		--output text
+
+cognito.get-tokens:
+	@echo "Getting tokens for admin user..."
+	@CLIENT_ID=$$(aws cloudformation describe-stacks \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_COGNITO_STACK) \
+		--query 'Stacks[0].Outputs[?OutputKey==`oUserClientId`].OutputValue' \
+		--output text); \
+	echo "Using client ID: $$CLIENT_ID"; \
+	aws cognito-idp admin-initiate-auth \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--user-pool-id $(O_COGNITO_USER_POOL_ID) \
+		--client-id $$CLIENT_ID \
+		--auth-flow ADMIN_NO_SRP_AUTH \
+		--auth-parameters USERNAME=admin,PASSWORD='$(P_COGNITO_PERMANENT_PASSWORD)' \
+		--output json | jq -r '.AuthenticationResult | "=== Cognito Tokens ===\n\nIdToken:\n\(.IdToken)\n\nAccessToken:\n\(.AccessToken)\n\nRefreshToken:\n\(.RefreshToken)\n\nExpires in: \(.ExpiresIn) seconds"'
+
+# DNS — Route 53 hosted zone for subdomain delegation
+dns: dns.package dns.deploy
+
+dns.package:
+	sam package \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_DNS_TEMPLATE) \
+		--output-template-file $(P_DNS_OUTPUT) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_DNS_STACK)
+
+dns.deploy:
+	sam deploy \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_DNS_OUTPUT) \
+		--stack-name $(P_DNS_STACK) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_DNS_STACK) \
+		--parameter-overrides \
+			pDomainName=$(P_INFRA_DOMAIN_NAME) \
+			pTagApplication=$(P_TAG_APPLICATION) \
+			pTagGroup=$(P_TAG_GROUP) \
+			pTagOwner=$(P_TAG_OWNER) \
+		--no-confirm-changeset
+
+dns.outputs:
+	@aws cloudformation describe-stacks \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_DNS_STACK) \
+		--query 'Stacks[0].Outputs' \
+		--output json | jq .
+
+dns.delete:
+	sam delete \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_DNS_STACK) \
+		--no-prompts
+
+# Shared infrastructure (S3, ECR, ACM, ALB)
+infra: infra.package infra.deploy
+
+infra.package:
+	sam package \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_INFRA_TEMPLATE) \
+		--output-template-file $(P_INFRA_OUTPUT) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_INFRA_STACK)
+
+infra.deploy:
+	sam deploy \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_INFRA_OUTPUT) \
+		--stack-name $(P_INFRA_STACK) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_INFRA_STACK) \
+		--parameter-overrides \
+			pArtifactBucketName=$(P_LOOM_ARTIFACT_BUCKET) \
+			pVpcId=$(P_INFRA_VPC_ID) \
+			pPublicSubnetIds=$(P_INFRA_PUBLIC_SUBNET_IDS) \
+			pDomainName=$(P_INFRA_DOMAIN_NAME) \
+			pHostedZoneId=$(O_INFRA_HOSTED_ZONE_ID) \
+			pFrontendRepoName=$(P_ECR_FRONTEND_REPO) \
+			pBackendRepoName=$(P_ECR_BACKEND_REPO) \
+			pTagApplication=$(P_TAG_APPLICATION) \
+			pTagGroup=$(P_TAG_GROUP) \
+			pTagOwner=$(P_TAG_OWNER) \
+		--no-confirm-changeset
+
+infra.outputs:
+	@aws cloudformation describe-stacks \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_INFRA_STACK) \
+		--query 'Stacks[0].Outputs' \
+		--output json | jq .
+
+infra.delete:
+	sam delete \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_INFRA_STACK) \
+		--no-prompts
+
+# ECS service-linked role (run once per account before first ECS deployment)
+ecs.init:
+	aws iam create-service-linked-role \
+		--profile $(PROFILE) \
+		--aws-service-name ecs.amazonaws.com || true
+
+# ECS cluster (shared by frontend and backend services)
+ecs: ecs.package ecs.deploy
+
+ecs.package:
+	sam package \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_ECS_TEMPLATE) \
+		--output-template-file $(P_ECS_OUTPUT) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_ECS_STACK)
+
+ecs.deploy:
+	sam deploy \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_ECS_OUTPUT) \
+		--stack-name $(P_ECS_STACK) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_ECS_STACK) \
+		--parameter-overrides \
+			pTagApplication=$(P_TAG_APPLICATION) \
+			pTagGroup=$(P_TAG_GROUP) \
+			pTagOwner=$(P_TAG_OWNER) \
+		--no-confirm-changeset
+
+ecs.outputs:
+	@aws cloudformation describe-stacks \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_ECS_STACK) \
+		--query 'Stacks[0].Outputs' \
+		--output json | jq .
+
+ecs.delete:
+	sam delete \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_ECS_STACK) \
+		--no-prompts
+
+# Image tag: git short SHA
+IMAGE_TAG := $(shell git rev-parse --short HEAD)
+
+# Podman build
+podman.build: podman.build.backend podman.build.frontend
+
+podman.build.backend:
+	podman build --platform linux/amd64 -t $(P_ECR_BACKEND_REPO):$(IMAGE_TAG) ../backend
+
+podman.build.frontend:
+	podman build --platform linux/amd64 -t $(P_ECR_FRONTEND_REPO):$(IMAGE_TAG) ../frontend
+
+# Podman push
+podman.push: podman.login podman.push.backend podman.push.frontend
+
+podman.login:
+	aws ecr get-login-password --profile $(PROFILE) --region $(REGION) | \
+		podman login --username AWS --password-stdin $(ACCOUNTID).dkr.ecr.$(REGION).amazonaws.com
+
+podman.push.backend:
+	podman tag $(P_ECR_BACKEND_REPO):$(IMAGE_TAG) $(ACCOUNTID).dkr.ecr.$(REGION).amazonaws.com/$(P_ECR_BACKEND_REPO):$(IMAGE_TAG)
+	podman push $(ACCOUNTID).dkr.ecr.$(REGION).amazonaws.com/$(P_ECR_BACKEND_REPO):$(IMAGE_TAG)
+
+podman.push.frontend:
+	podman tag $(P_ECR_FRONTEND_REPO):$(IMAGE_TAG) $(ACCOUNTID).dkr.ecr.$(REGION).amazonaws.com/$(P_ECR_FRONTEND_REPO):$(IMAGE_TAG)
+	podman push $(ACCOUNTID).dkr.ecr.$(REGION).amazonaws.com/$(P_ECR_FRONTEND_REPO):$(IMAGE_TAG)
+
+# Capture all stack outputs and write to shared/etc/outputs_<profile>.sh
+outputs:
+	@python3 scripts/capture_outputs.py $(PROFILE) $(REGION) $(PROFILE)
+
+# Full deployment
+deploy: podman.build podman.push
+	$(MAKE) -C ../backend ecs
+	$(MAKE) -C ../frontend ecs
+
+deploy.backend: podman.build.backend podman.login podman.push.backend
+	$(MAKE) -C ../backend ecs
+
+deploy.frontend: podman.build.frontend podman.login podman.push.frontend
+	$(MAKE) -C ../frontend ecs

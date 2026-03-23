@@ -7,6 +7,11 @@ REGION=us-east-1
 ACCOUNTID=<your-aws-account-id>
 BUCKET=<your-s3-bucket-for-sam-deployments>
 
+# Resource tagging (platform:required tags applied to all IaC resources)
+P_TAG_APPLICATION=<your-application-name>
+P_TAG_GROUP=<your-group-or-team>
+P_TAG_OWNER=<your-owner-alias-or-email>
+
 # Role configuration
 P_AGENT_NAME=<your-agent-name>
 P_BEDROCK_MODEL_ARNS="arn:aws:bedrock:*:$(ACCOUNTID):inference-profile/*,arn:aws:bedrock:*::foundation-model/*"
@@ -18,13 +23,8 @@ P_AGENT_NAME_SANITIZED=$(subst _,-,$(P_AGENT_NAME))
 
 # Role stack configuration
 P_ROLE_STACK=loom-role-$(P_AGENT_NAME_SANITIZED)
-ROLE_TEMPLATE=iac/role.yaml
-ROLE_OUTPUT=iac/role_output.yaml
-
-# Resource tagging (platform:required tags applied to all IaC resources)
-P_TAG_APPLICATION=<your-application-name>
-P_TAG_GROUP=<your-group-or-team>
-P_TAG_OWNER=<your-owner-alias-or-email>
+P_ROLE_TEMPLATE=iac/role.yaml
+P_ROLE_OUTPUT=iac/role_output.yaml
 
 # Cognito configuration
 P_COGNITO_POOL_NAME=loom
@@ -35,11 +35,10 @@ P_COGNITO_CALLBACK_URLS=https://localhost
 
 # Cognito stack configuration
 P_COGNITO_STACK=loom-cognito
-COGNITO_TEMPLATE=iac/cognito.yaml
-COGNITO_OUTPUT=iac/cognito_output.yaml
+P_COGNITO_TEMPLATE=iac/cognito.yaml
+P_COGNITO_OUTPUT=iac/cognito_output.yaml
 
-# Cognito user management (update after cognito stack deployment)
-P_COGNITO_USER_POOL_ID=<your-cognito-user-pool-id>
+# Cognito user management
 P_COGNITO_PERMANENT_PASSWORD=<your-secure-password>
 # demo-user-N and demo-admin-N share the same password (set per pair 1-9)
 P_COGNITO_DEMO_USER_1_PASSWORD=<unique-password-for-demo-1>
@@ -51,3 +50,34 @@ P_COGNITO_DEMO_USER_6_PASSWORD=<unique-password-for-demo-6>
 P_COGNITO_DEMO_USER_7_PASSWORD=<unique-password-for-demo-7>
 P_COGNITO_DEMO_USER_8_PASSWORD=<unique-password-for-demo-8>
 P_COGNITO_DEMO_USER_9_PASSWORD=<unique-password-for-demo-9>
+
+# DNS stack configuration (Route 53 hosted zone for subdomain delegation)
+P_DNS_STACK=loom-dns
+P_DNS_TEMPLATE=iac/dns.yaml
+P_DNS_OUTPUT=iac/dns_output.yaml
+
+# Infrastructure stack configuration (S3, ECR, ACM, ALB)
+P_INFRA_STACK=loom-infra
+P_INFRA_TEMPLATE=iac/infra.yaml
+P_INFRA_OUTPUT=iac/infra_output.yaml
+
+# Infrastructure parameters
+P_INFRA_VPC_ID=<your-vpc-id>
+P_INFRA_PUBLIC_SUBNET_IDS=<public-subnet-id-1>,<public-subnet-id-2>
+P_INFRA_DOMAIN_NAME=<your-subdomain-name>
+
+# ECR repository names
+P_ECR_FRONTEND_REPO=loom-frontend
+P_ECR_BACKEND_REPO=loom-backend
+
+# ECS cluster stack configuration
+P_ECS_STACK=loom-ecs-cluster
+P_ECS_TEMPLATE=iac/ecs.yaml
+P_ECS_OUTPUT=iac/ecs_output.yaml
+
+# Loom configurations
+P_LOOM_ARTIFACT_BUCKET=<your-s3-bucket-for-deployments>
+
+# Stack outputs — single file shared across all directories
+# Copy outputs.sh.example to outputs_<account>.sh, then run: cd shared && make outputs
+include etc/outputs_<account>.sh

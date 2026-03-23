@@ -45,11 +45,10 @@ Runtime configuration is sourced from `etc/environment.sh`:
 | `LOOM_SESSION_MAX_LIFETIME_SECONDS` | Maximum session lifetime | `3600` |
 | `AWS_REGION` | AWS region for deployments | `us-east-1` |
 | `LOOM_ARTIFACT_BUCKET` | S3 bucket for agent deployment artifacts | — |
-| `MEMORY_NAME` | Default memory resource name | `loom_memory` |
-| `MEMORY_EVENT_EXPIRY_DURATION` | Default memory event expiry in days | `30` |
 | `LOOM_COGNITO_USER_POOL_ID` | Cognito User Pool ID for user authentication | — |
 | `LOOM_COGNITO_REGION` | Region of the Cognito pool | `AWS_REGION` |
 | `LOOM_COGNITO_USER_CLIENT_ID` | Cognito user app client ID (auto-included in agent `allowedClients` on deploy) | — |
+| `LOOM_ALLOWED_ORIGINS` | Comma-separated additional CORS origins for deployed environments | — |
 
 AWS credentials use the standard boto3 credential chain (environment variables, AWS profile, instance metadata).
 
@@ -189,6 +188,7 @@ backend/
 ├── tests/
 │   ├── test_agents_deploy.py
 │   ├── test_a2a.py          # A2A agent CRUD, Agent Card, skills, access
+├── Dockerfile               # Backend container image (Python 3.13 slim + uvicorn)
 ├── makefile                 # Build, test, and manual testing targets
 ├── pyproject.toml
 └── requirements.txt
@@ -497,15 +497,16 @@ Group-based invoke restriction: `super-admins` can invoke any agent. Other users
 
 ## Infrastructure
 
-The backend includes SAM templates for cloud infrastructure:
+Backend-specific SAM templates for database infrastructure:
 
 | Stack | Template | Description |
 |-------|----------|-------------|
-| `loom-infra` | `iac/infra.yaml` | S3 artifact bucket with versioning, encryption, and public access block |
 | `loom-rds` | `iac/rds.yaml` | RDS PostgreSQL with optional RDS Proxy, multi-AZ, and Secrets Manager |
 | `loom-ec2` | `iac/ec2.yaml` | EC2 bastion instance with SSM access for tunneling to RDS |
 
-Deploy with `make infra`, `make rds`, `make ec2`. Use `make tunnel` to start an SSM port-forwarding session to the RDS instance.
+Deploy with `make rds` and `make ec2` from the backend directory. Use `make tunnel` to start an SSM port-forwarding session to the RDS instance.
+
+Cross-cutting infrastructure (S3, ECR, ACM, ALB, ECS) is managed from the root `makefile` — see root README for deployment commands.
 
 ## Makefile Targets
 
@@ -520,8 +521,7 @@ make migrate-db           # Migrate SQLite → PostgreSQL
 make fix-sequences        # Repair PostgreSQL sequences after migration
 make reset-db             # Reset database
 
-# Infrastructure (S3, RDS, EC2)
-make infra                # Deploy S3 artifact bucket stack
+# Backend infrastructure (RDS, EC2)
 make rds                  # Deploy RDS PostgreSQL stack
 make ec2                  # Deploy EC2 bastion stack
 make tunnel               # Start SSM tunnel to RDS
@@ -529,29 +529,6 @@ make tunnel               # Start SSM tunnel to RDS
 # AgentCore credentials
 make agentcore.credentials.list       # List OAuth2 credential providers
 make agentcore.credentials.delete-all # Delete all credential providers
-
-# Manual testing (requires etc/environment.sh)
-make curl.health
-make curl.agents.register ARN=arn:aws:bedrock-agentcore:REGION:ACCOUNT:runtime/ID
-make curl.agents.list
-make curl.agents.get AGENT_ID=1
-make curl.agents.refresh AGENT_ID=1
-make curl.agents.delete AGENT_ID=1
-make curl.invoke AGENT_ID=1 PROMPT="Hello" QUALIFIER=DEFAULT
-make curl.sessions.list AGENT_ID=1
-make curl.sessions.get AGENT_ID=1 SESSION_ID=uuid
-make curl.logs AGENT_ID=1 QUALIFIER=DEFAULT LIMIT=20
-make curl.logs.streams AGENT_ID=1
-make curl.logs.session AGENT_ID=1 SESSION_ID=uuid
-
-# Memory resources
-make curl.memories.create MEMORY_NAME=loom_memory MEMORY_EVENT_EXPIRY_DURATION=30
-make curl.memories.import MEMORY_AWS_ID=my_memory-zYcvlyGXsK
-make curl.memories.list
-make curl.memories.get MEMORY_ID=1
-make curl.memories.refresh MEMORY_ID=1
-make curl.memories.delete MEMORY_ID=1
-make curl.memories.purge MEMORY_ID=1
 ```
 
 ## Tests

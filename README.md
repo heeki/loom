@@ -70,13 +70,14 @@ Loom is an enterprise-grade platform for building, deploying, and operating AI a
 loom/
 ├── agents/            # Agent blueprint source code (Strands Agent)
 ├── backend/           # FastAPI backend (Python, SQLAlchemy, boto3)
-│   └── etc/           # Backend environment config
+│   ├── etc/           # Backend environment config (app + ECS backend service)
+│   └── iac/           # Backend infrastructure (RDS, EC2 bastion, ECS backend service)
 ├── frontend/          # React/TypeScript frontend (Vite, shadcn, Tailwind CSS)
-├── security/          # Security IaC (IAM roles, Cognito) + makefile
-│   └── etc/           # Security environment config
-├── iac/               # Infrastructure as Code (CloudFormation, SAM)
-├── etc/               # Root configuration
-├── makefile           # Root orchestration
+│   ├── etc/           # Frontend environment config (ECS frontend service)
+│   └── iac/           # Frontend infrastructure (ECS frontend service)
+├── shared/            # Shared IaC (IAM roles, Cognito, DNS, infra, ECS cluster) + deployment makefile
+│   └── etc/           # Shared environment config (Cognito, infra, DNS)
+├── makefile           # Infrastructure, Docker, and deployment orchestration
 └── SPECIFICATIONS.md  # Project-level specification
 ```
 
@@ -93,7 +94,24 @@ See [`backend/SPECIFICATIONS.md`](backend/SPECIFICATIONS.md) and [`frontend/SPEC
 
 ### Step 1: Configure Environment Files
 
-Three environment files are required. Copy each example and fill in your values:
+Four environment files are required. Copy each example and fill in your values:
+
+**Shared** (`shared/etc/environment.sh`):
+```bash
+cp shared/etc/environment.sh.example shared/etc/environment.sh
+```
+
+| Variable | Description |
+|----------|-------------|
+| `PROFILE` | AWS CLI profile name |
+| `REGION` | AWS region |
+| `ACCOUNTID` | AWS account ID |
+| `BUCKET` | S3 bucket for SAM deployments |
+| `P_COGNITO_DOMAIN` | Globally unique Cognito domain prefix |
+| `P_TAG_APPLICATION` | Application tag value |
+| `P_TAG_GROUP` | Group/team tag value |
+| `P_TAG_OWNER` | Owner alias or email |
+| `P_COGNITO_PERMANENT_PASSWORD` | Password for provisioned demo users |
 
 **Backend** (`backend/etc/environment.sh`):
 ```bash
@@ -107,14 +125,13 @@ cp backend/etc/environment.sh.example backend/etc/environment.sh
 | `LOOM_ARTIFACT_BUCKET` | S3 bucket for agent deployment artifacts |
 | `LOOM_DATABASE_URL` | SQLAlchemy database URL — SQLite for local dev (default: `sqlite:///./loom.db`) or PostgreSQL for cloud deployments (e.g. `postgresql+psycopg2://user:pass@host:5432/loom`) |
 | `LOOM_BACKEND_PORT` | Backend port (default: `8000`) |
-| `LOOM_FRONTEND_PORT` | Frontend port (default: `5173`) |
 | `LOOM_COGNITO_USER_POOL_ID` | Cognito User Pool ID (from Step 2) |
 | `LOOM_COGNITO_USER_CLIENT_ID` | Cognito User Client ID (from Step 2) |
 | `LOOM_COGNITO_REGION` | Cognito region (defaults to `AWS_REGION`) |
 
-**Security** (`security/etc/environment.sh`):
+**Frontend environment** (`frontend/etc/environment.sh`):
 ```bash
-cp security/etc/environment.sh.example security/etc/environment.sh
+cp frontend/etc/environment.sh.example frontend/etc/environment.sh
 ```
 
 | Variable | Description |
@@ -122,15 +139,11 @@ cp security/etc/environment.sh.example security/etc/environment.sh
 | `PROFILE` | AWS CLI profile name |
 | `REGION` | AWS region |
 | `ACCOUNTID` | AWS account ID |
-| `BUCKET` | S3 bucket for SAM deployments |
-| `P_COGNITO_DOMAIN` | Globally unique Cognito domain prefix |
-| `P_TAG_APPLICATION` | Application tag value |
-| `P_TAG_GROUP` | Group/team tag value |
-| `P_TAG_OWNER` | Owner alias or email |
-| `P_COGNITO_USER_POOL_ID` | Cognito User Pool ID (set after Step 2) |
-| `P_COGNITO_PERMANENT_PASSWORD` | Password for provisioned demo users |
+| `P_ECS_PUBLIC_SUBNET_IDS` | Public subnet IDs for frontend ECS tasks |
+| `P_ECS_FRONTEND_CPU` | CPU units (default: `256`) |
+| `P_ECS_FRONTEND_MEMORY` | Memory in MiB (default: `512`) |
 
-**Frontend** (`frontend/.env`):
+**Frontend Vite** (`frontend/.env`):
 ```bash
 cp frontend/.env.example frontend/.env
 ```
@@ -144,10 +157,10 @@ cp frontend/.env.example frontend/.env
 Authentication is optional. Skip this step to run without login.
 
 ```bash
-cd security
+cd shared
 make cognito                   # Deploy Cognito User Pool, groups, scopes, and clients
-# Update P_COGNITO_USER_POOL_ID in security/etc/environment.sh with the stack output
-# Update LOOM_COGNITO_USER_POOL_ID and LOOM_COGNITO_USER_CLIENT_ID in backend/etc/environment.sh
+# Update O_COGNITO_USER_POOL_ID in shared/etc/environment.sh with the stack output
+# Update O_COGNITO_USER_POOL_ID and O_COGNITO_USER_CLIENT_ID in backend/etc/environment.sh
 # Update VITE_COGNITO_USER_CLIENT_ID in frontend/.env
 make cognito.set-passwords     # Set permanent passwords for demo users
 ```
@@ -201,10 +214,131 @@ npm install
 npm run dev     # Start Vite dev server on LOOM_FRONTEND_PORT
 ```
 
+### Step 5: Deploy to AWS (Optional)
+
+For cloud deployment, the frontend and backend are containerized and deployed to ECS Fargate behind an ALB. The deployment uses a multi-stack architecture:
+
+| Stack | Directory | Description |
+|-------|-----------|-------------|
+| `loom-dns` | `shared/` | Route 53 hosted zone for subdomain delegation |
+| `loom-infra` | `shared/` | S3, ECR, ACM certificate, ALB |
+| `loom-cognito` | `shared/` | Cognito User Pool, groups, scopes |
+| `loom-role-*` | `shared/` | IAM execution roles for agents |
+| `loom-ecs-cluster` | `shared/` | ECS Fargate cluster (shared) |
+| `loom-ecs-frontend` | `frontend/` | Frontend ECS task definition + service |
+| `loom-ecs-backend` | `backend/` | Backend ECS task definition + service + auto-scaling |
+| `loom-rds` | `backend/` | RDS PostgreSQL + optional RDS Proxy |
+| `loom-ec2` | `backend/` | EC2 bastion for SSM tunneling (optional) |
+
+**DNS prerequisite:** The DNS stack creates a Route 53 hosted zone for `P_INFRA_DOMAIN_NAME`. If your domain's parent hosted zone is in a different account, you must add NS delegation records in the parent account before deploying the infra stack (see [Cross-Account DNS Delegation](#cross-account-dns-delegation) below).
+
+**Phase 0** — Deploy DNS, set up delegation, and create ECS service-linked role:
+
+```bash
+cd shared && make dns         # Route 53 hosted zone for subdomain
+cd shared && make dns.outputs # Capture oHostedZoneId → O_INFRA_HOSTED_ZONE_ID, oNameServers → NS delegation
+cd shared && make ecs.init    # Create ECS service-linked role (once per account)
+```
+
+If cross-account: add NS delegation records in the parent account's hosted zone (see below).
+
+**Phase 1** — Deploy foundation stacks (all independent, can run in parallel):
+
+```bash
+cd shared && make infra       # S3, ECR, ACM, ALB
+cd shared && make cognito     # Cognito User Pool, groups, scopes
+cd shared && make role        # IAM execution roles
+cd shared && make ecs         # ECS Fargate cluster
+cd backend && make rds        # RDS PostgreSQL + optional RDS Proxy
+cd backend && make ec2        # EC2 bastion for SSM tunneling (optional)
+```
+
+**Phase 2** — Capture stack outputs:
+
+All stack outputs are stored in a single file (`shared/etc/outputs_<profile>.sh`) that is included by all environment files across shared, frontend, and backend directories.
+
+```bash
+cd shared && make outputs     # Query all stacks, write to shared/etc/outputs_<profile>.sh
+```
+
+This writes all `O_*` variables to one file and updates `frontend/.env` with the Cognito client ID. No manual copy-paste needed.
+
+| Stack | Output | Variable |
+|-------|--------|----------|
+| `loom-ecs-cluster` | `oEcsClusterArn` | `O_ECS_CLUSTER_ARN` |
+| `loom-ecs-cluster` | `oEcsClusterName` | `O_ECS_CLUSTER_NAME` |
+| `loom-dns` | `oHostedZoneId` | `O_INFRA_HOSTED_ZONE_ID` |
+| `loom-dns` | `oNameServers` | *(NS delegation — displayed in terminal)* |
+| `loom-infra` | `oEcsSecurityGroupId` | `O_INFRA_ECS_SG_ID` |
+| `loom-infra` | `oFrontendTargetGroupArn` | `O_INFRA_FRONTEND_TG_ARN` |
+| `loom-infra` | `oBackendTargetGroupArn` | `O_INFRA_BACKEND_TG_ARN` |
+| `loom-infra` | `oFrontendRepositoryUri` | `O_ECR_FRONTEND_URI` |
+| `loom-infra` | `oBackendRepositoryUri` | `O_ECR_BACKEND_URI` |
+| `loom-cognito` | `oCognitoUserPoolId` | `O_COGNITO_USER_POOL_ID` |
+| `loom-cognito` | `oUserClientId` | `O_COGNITO_USER_CLIENT_ID` |
+| `loom-rds` | `oRdsSecretArn` | `O_RDS_SECRET_ARN` |
+| `loom-rds` | `oConnectEndpoint` | `O_RDS_PROXY_ENDPOINT` |
+| `loom-rds` | `oRdsPort` | `O_RDS_PORT` |
+| `loom-ec2` | `oInstanceId` | `O_EC2_INSTANCE_ID` |
+
+Then set Cognito user passwords: `cd shared && make cognito.set-passwords`.
+
+**Phase 3** — Deploy containers (frontend and backend can run in parallel):
+
+```bash
+cd shared && make deploy              # Build, push, and deploy both
+
+# Or independently:
+cd shared && make deploy.frontend     # Frontend only
+cd shared && make deploy.backend      # Backend only
+
+# Or deploy ECS services directly (after images are pushed):
+cd frontend && make ecs               # Frontend ECS service only
+cd backend && make ecs                # Backend ECS service only
+```
+
 ## Architecture
 
 - **Backend:** FastAPI with SQLAlchemy (SQLite for local dev, PostgreSQL/RDS for cloud), boto3 for AWS, SSE streaming via `StreamingResponse`
-- **Infrastructure:** SAM templates for S3 artifact bucket, RDS PostgreSQL with optional RDS Proxy, and EC2 SSM tunnel bastion
+- **Infrastructure:** SAM templates — shared (DNS, S3, ECR, ACM, ALB, ECS cluster) in `shared/iac/`, frontend ECS service in `frontend/iac/`, backend (RDS, EC2 bastion, ECS service) in `backend/iac/`
+- **Containers:** Dockerfiles for both frontend (multi-stage Node + nginx) and backend (Python 3.13 slim + uvicorn), deployable to ECS Fargate behind an ALB with ACM certificate
 - **Frontend:** React 18, TypeScript, Vite, shadcn/ui, Tailwind CSS v4
 - **Auth:** Cognito User Pool with group-based scopes; frontend enforces sidebar visibility and write permissions
 - **Navigation:** Platform Catalog, Agents, Memory, Security Admin, MCP Servers, A2A Agents, Tags, Costs, Settings, Admin Dashboard (super-admins only)
+
+### Cross-Account DNS Delegation
+
+The DNS stack (`loom-dns`) creates a Route 53 hosted zone for `P_INFRA_DOMAIN_NAME`. If your domain's parent hosted zone is in a different AWS account, you must add NS delegation records in the parent account **before** deploying the infra stack (which creates the ACM certificate).
+
+**After deploying the DNS stack**, retrieve the NS records:
+
+```bash
+cd shared && make dns.outputs    # Look for oNameServers (comma-separated list of 4 NS records)
+```
+
+**In the parent account** (where the domain's hosted zone lives):
+
+Add an NS record in the parent hosted zone that delegates the subdomain to the deployment account:
+
+```bash
+aws route53 change-resource-record-sets --hosted-zone-id <parent-hosted-zone-id> --profile <parent-account-profile> --change-batch '{
+  "Changes": [{
+    "Action": "CREATE",
+    "ResourceRecordSet": {
+      "Name": "loom.yourdomain.com",
+      "Type": "NS",
+      "TTL": 300,
+      "ResourceRecords": [
+        {"Value": "ns-XXXX.awsdns-XX.org"},
+        {"Value": "ns-XXXX.awsdns-XX.co.uk"},
+        {"Value": "ns-XXXX.awsdns-XX.com"},
+        {"Value": "ns-XXXX.awsdns-XX.net"}
+      ]
+    }
+  }]
+}'
+```
+
+Replace the 4 NS values with the actual name servers from `oNameServers`. Once delegation is active, the ACM certificate will validate automatically and the ALB alias record will resolve through the delegation from the parent zone.
+
+If your domain's hosted zone is already in the deployment account, no delegation is needed — DNS resolution works directly.

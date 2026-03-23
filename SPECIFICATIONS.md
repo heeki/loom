@@ -96,12 +96,14 @@ loom/
 │   │   ├── fix_sequences.py     # PostgreSQL sequence auto-repair
 │   │   └── reset_db.py          # Database reset utility
 │   ├── tests/
-│   ├── iac/                       # Backend infrastructure (RDS, EC2, S3)
-│   │   ├── infra.yaml             # S3 artifact bucket (versioning, encryption, public access block)
+│   ├── iac/                       # Backend infrastructure
+│   │   ├── infra.yaml             # Shared infra: S3 artifact bucket, ECR repos, ACM certificate, ALB, security groups, Route 53
 │   │   ├── rds.yaml               # RDS PostgreSQL with optional RDS Proxy
-│   │   └── ec2.yaml               # EC2 bastion for SSM tunnel to RDS
+│   │   ├── ec2.yaml               # EC2 bastion for SSM tunnel to RDS
+│   │   └── ecs.yaml               # ECS Fargate services (cluster, task definitions, services, auto-scaling)
 │   ├── makefile
 │   ├── SPECIFICATIONS.md
+│   ├── Dockerfile              # Backend container image (Python 3.13 slim + uvicorn)
 │   └── README.md
 ├── frontend/                   # Frontend UI (see frontend/SPECIFICATIONS.md)
 │   ├── src/
@@ -116,14 +118,18 @@ loom/
 │   ├── package.json
 │   ├── tsconfig.json
 │   ├── vite.config.ts
+│   ├── Dockerfile              # Frontend container image (multi-stage Node + nginx)
+│   ├── nginx.conf              # nginx SPA config with gzip and cache headers
 │   └── SPECIFICATIONS.md
-├── security/                   # Security IaC templates + user management
+├── shared/                    # Shared IaC, deployment, and security
 │   ├── iac/
 │   │   ├── role.yaml           # SAM template for IAM roles
-│   │   └── cognito.yaml        # SAM template for Cognito pools, groups, users, scopes
+│   │   ├── cognito.yaml        # SAM template for Cognito pools, groups, users, scopes
+│   │   ├── infra.yaml          # Shared infra: S3, ECR, ACM, ALB, security groups, Route 53
+│   │   └── ecs.yaml            # ECS Fargate services (cluster, task definitions, auto-scaling)
 │   ├── etc/
-│   │   └── environment.sh      # Security configuration (Cognito pool, passwords)
-│   └── makefile                # Cognito stack deploy, user password management
+│   │   └── environment.sh      # Shared configuration (Cognito, infra, ECS, Docker)
+│   └── makefile                # Cognito, infra, ECS, Docker build/push, deploy
 ├── etc/
 │   └── environment.sh          # Source-of-truth for injectable parameters
 ├── tmp/
@@ -151,7 +157,7 @@ Detailed specifications for each component are maintained in their respective di
 - `etc/environment.sh` and `.env` files are listed in `.gitignore`.
 - The backend uses the standard boto3 credential chain (environment variables, AWS profile, instance metadata) — no hardcoded credentials.
 - All AWS API calls follow least-privilege IAM.
-- CORS is configured to allow `localhost:{FRONTEND_PORT}` only in development.
+- CORS is configured to allow `localhost:{FRONTEND_PORT}` in development. When deployed, the `LOOM_ALLOWED_ORIGINS` environment variable adds additional allowed origins (e.g., the ALB domain).
 - Cognito client secrets are stored in AWS Secrets Manager, never in the local database.
 - The backend retrieves secrets at invocation time with in-memory caching (5-minute TTL).
 - Secrets are cleaned up from Secrets Manager when authorizer credentials or agents are deleted.
@@ -173,7 +179,7 @@ Detailed specifications for each component are maintained in their respective di
 
 ### Cognito User Pool Configuration
 
-The Cognito User Pool is managed via CloudFormation (`security/iac/cognito.yaml`) and includes:
+The Cognito User Pool is managed via CloudFormation (`shared/iac/cognito.yaml`) and includes:
 
 - **Password policy:** Minimum 12 characters, uppercase, lowercase, numbers required; symbols not required.
 - **Resource server scopes (19 total):** `invoke`, `catalog:read`, `catalog:write`, `agent:read`, `agent:write`, `memory:read`, `memory:write`, `security:read`, `security:write`, `settings:read`, `settings:write`, `tagging:read`, `tagging:write`, `costs:read`, `costs:write`, `mcp:read`, `mcp:write`, `a2a:read`, `a2a:write`.
@@ -185,7 +191,7 @@ The Cognito User Pool is managed via CloudFormation (`security/iac/cognito.yaml`
 - **Clients:**
   - **M2MClient** — `client_credentials` flow with secret, scoped to `invoke`.
   - **UserClient** — `USER_PASSWORD_AUTH` + `REFRESH_TOKEN_AUTH` flows without secret, scoped to all custom scopes plus `openid`, `email`, `profile`.
-- User passwords are set via `make cognito.set-passwords` in the `security/` directory.
+- User passwords are set via `make cognito.set-passwords` in the `shared/` directory.
 
 ### Scope-Based Frontend Authorization
 
@@ -315,7 +321,7 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - 29 backend tests covering tag policy CRUD, tag designation, tag resolution, validation, and agent tag storage.
 
 ### Phase 8 — Frontend Visual Polish *(Complete)*
-- Theme system: `ThemeContext` with 10 themes — 5 light (Ayu Light, Catppuccin Latte, Everforest Light, Rosé Pine Dawn, Solarized Light) and 5 dark (Catppuccin Mocha, Dracula, Gruvbox, Nord, Tokyo Night). Theme selector on Settings page with Light/Dark grouping. CSS variables per theme in `index.css`. Latte is the default (no class); other themes use class selectors. `localStorage` persistence.
+- Theme system: `ThemeContext` with 10 themes — 5 light (Ayu Light, Catppuccin Latte, Everforest Light, Rosé Pine Dawn, Solarized Light) and 5 dark (Ayu Dark, Catppuccin Mocha, Dracula, Nord, Tokyo Night). Theme selector on Settings page with Light/Dark grouping. CSS variables per theme in `index.css`. Latte is the default (no class); other themes use class selectors. `localStorage` persistence.
 - Theme accessibility: darkened `foreground`/`muted-foreground`/`border` for all light themes for better readability. Brightened `foreground`/`muted-foreground`/`border` for all dark themes. Badge `border-border` added to default and secondary badge variants for visibility.
 - Settings page: moved theme and timezone selectors from sidebar to Settings preferences section. Description updated to "Manage settings and tag profiles."
 - Drag-to-reorder cards: `@dnd-kit` for card reordering in grid sections (`SortableCardGrid` component), order persisted to `localStorage`.
@@ -480,19 +486,34 @@ Model selectors in the UI are searchable by both display name and model ID, with
 
 ### Phase 19 — Cloud Infrastructure and Operations *(Complete)*
 - **RDS PostgreSQL support:** SAM template (`iac/rds.yaml`) for RDS PostgreSQL with optional RDS Proxy, multi-AZ, and Secrets Manager integration. Dialect-aware engine configuration in `db.py` (SQLite vs PostgreSQL). `_migrate_add_columns` helper handles both dialects. Migration script (`scripts/migrate_sqlite_to_postgres.py`) with topological sort for foreign-key dependency order. Sequence auto-repair script (`scripts/fix_sequences.py`) for PostgreSQL after migration. Database reset script (`scripts/reset_db.py`).
-- **S3 infrastructure stack:** SAM template (`iac/infra.yaml`) for the agent deployment artifact bucket with versioning, AES256 encryption, and public access block.
+- **Shared infrastructure stack:** SAM template (`iac/infra.yaml`) for long-lived resources: S3 artifact bucket (versioning, AES256 encryption, public access block), ECR repositories (frontend + backend, with lifecycle policies), ACM certificate (DNS validation via Route 53), ALB (internet-facing, HTTPS with TLS 1.3, HTTP-to-HTTPS redirect, path-based routing), security groups (ALB + ECS), target groups (frontend port 80, backend port 8000), and Route 53 A-record alias for the ALB.
 - **EC2 SSM tunnel:** SAM template (`iac/ec2.yaml`) for an EC2 bastion instance with SSM access for tunneling to RDS in private subnets. Makefile `tunnel` target configures port forwarding via `aws ssm start-session`.
 - **Multi-account environment configuration:** `backend/etc/environment.sh` sources account-specific files (e.g., `environment_9582.sh`, `environment_1527.sh`) containing AWS profile, account ID, VPC/subnet IDs, RDS parameters, and stack names. Enables managing multiple AWS accounts from the same codebase.
 - **CountTokens API integration:** `services/tokens.py` uses the Bedrock `count_tokens` API for accurate token counting. Provider guard restricts API calls to supported providers (Anthropic, Meta); all other models fall back to the 4 chars/token heuristic.
 - **Background usage poller:** `services/usage_poller.py` runs every 10 minutes, finds invocations with `cost_source="estimated"`, polls USAGE_LOGS from CloudWatch, matches events to invocations by timestamp (within 5 seconds), and updates costs from estimated to actual (`cost_source="usage_logs"`).
 - **Observability service:** `services/observability.py` enables USAGE_LOGS and APPLICATION_LOGS delivery for agent runtimes via CloudWatch vended log delivery APIs (`put_delivery_source`, `put_delivery_destination`, `create_delivery`).
 - **AgentCore credential management:** Makefile targets for listing and bulk-deleting AgentCore OAuth2 credential providers.
-- **Infrastructure makefile targets:** `infra`, `rds`, `ec2`, `tunnel` targets for packaging, deploying, querying outputs, and deleting CloudFormation stacks. `migrate-db`, `fix-sequences`, `reset-db` targets for database operations.
+- **Infrastructure makefile targets:** Shared makefile (`shared/makefile`): `infra`, `ecs`, `docker.*`, `deploy` targets for cross-cutting infrastructure and container deployment. Backend makefile: `rds`, `ec2`, `tunnel` targets for database infrastructure. `migrate-db`, `fix-sequences`, `reset-db` targets for database operations.
 - **Pull Actuals session ID fix:** Removed `tracked_session_ids` filter from `pull_cost_actuals` in `costs.py`. USAGE_LOGS use internal AgentCore session IDs that do not match Loom's `runtimeSessionId`, so session-based filtering dropped all events. Events are now scoped by time window and runtime ID only.
 - **Tagging UX improvements:** Collapsible tag profile groups in `TaggingPage` (platform required vs custom optional sections). Form-fill import from tag policies (auto-populates profile form with policy defaults). Tag policy and profile sorting. Sidebar entry renamed from "Tagging" to "Tags".
 - **Admin dashboard fixes:** Fixed `page_views_by_page` type mismatch that caused dashboard crash. Custom tooltips on all recharts charts for consistent styling. Theme picker moved from Settings page to admin sidebar for easier access.
 
-### Phase 20 — Advanced Operations
+### Phase 20 — Container Deployment to AWS *(Complete)*
+- **Containerization:** `backend/Dockerfile` (Python 3.13-slim, non-root user, uvicorn on port 8000) and `frontend/Dockerfile` (multi-stage: Node 20 build + nginx Alpine serving on port 80). `frontend/nginx.conf` with SPA fallback routing, gzip compression, and immutable asset caching.
+- **Dynamic API base URL:** `frontend/src/api/client.ts` reads `VITE_API_BASE_URL` from Vite build-time env (falls back to `http://localhost:8000` for local dev). Injected via `ARG`/`ENV` in the frontend Dockerfile.
+- **Two-stack deployment architecture:** Long-lived infrastructure (S3, ECR, ACM, ALB, security groups, target groups, Route 53 DNS) is managed in `shared/iac/infra.yaml`. Ephemeral ECS resources (cluster, task definitions, services, auto-scaling) are in `shared/iac/ecs.yaml`, receiving infra outputs as parameters. Both templates are deployed via `shared/makefile`.
+- **ECS Fargate deployment:** SAM template (`shared/iac/ecs.yaml`) deploys frontend and backend as Fargate services, referencing ALB target groups and security groups from the infra stack.
+- **Granular deployment targets:** `shared/makefile` supports `deploy` (full), `deploy.frontend`, and `deploy.backend` for independent container build+push. Docker targets split into `docker.build.frontend`/`docker.build.backend` and `docker.push.frontend`/`docker.push.backend`.
+- **ALB with HTTPS:** HTTPS listener (port 443) with ACM certificate (DNS-validated via Route 53), HTTP-to-HTTPS redirect, TLS 1.3 policy. Path-based routing: `/api/*` and `/health` to backend target group, default to frontend. Route 53 A-record alias for the ALB domain.
+- **ECR repositories:** CloudFormation-managed ECR repos (frontend + backend) with scan-on-push and lifecycle policies (keep last 10 images).
+- **Cost-optimized configuration:** Fargate Spot capacity provider (base 1 on-demand, weight on Spot), modest task sizes (0.25 vCPU/0.5 GB frontend, 0.5 vCPU/1 GB backend), desired count 1 with auto-scaling (CPU target tracking at 70%).
+- **Security groups:** ALB allows inbound 443/80 from anywhere; ECS tasks allow inbound only from ALB security group.
+- **IAM roles:** Task execution role (ECR pull, CloudWatch Logs, Secrets Manager for DB URL). Backend task role (Bedrock, Bedrock AgentCore, S3, CloudWatch Logs, IAM PassRole, Secrets Manager, Cognito, CloudFormation).
+- **Dynamic CORS:** `LOOM_ALLOWED_ORIGINS` env var (comma-separated) adds origins to the default localhost entries. Backend reads this for CORSMiddleware configuration.
+- **Database URL injection:** `LOOM_DATABASE_URL` injected via ECS Secrets (ValueFrom) referencing the RDS stack's Secrets Manager ARN with JSON key extraction.
+- **Makefile targets:** `docker.build`, `docker.push`, `docker.login`, `ecs` (package + deploy), `ecs.outputs`, `ecs.delete`, `deploy` (full end-to-end build + push + deploy).
+
+### Phase 21 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

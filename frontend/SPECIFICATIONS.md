@@ -8,8 +8,8 @@
 | Build tool | Vite 6 |
 | UI components | shadcn/ui (Radix primitives) |
 | Styling | Tailwind CSS v4 (Vite plugin, no PostCSS) |
-| Theme | 10 themes: 5 light + 5 dark (Catppuccin, Rosé Pine Dawn, Ayu, Everforest, Solarized, Catppuccin Mocha, Dracula, Gruvbox, Nord, Tokyo Night) |
-| HTTP client | Native `fetch` (typed wrappers in `src/api/client.ts`) |
+| Theme | 10 themes: 5 light + 5 dark (Ayu Light, Catppuccin Latte, Everforest, Rosé Pine Dawn, Solarized, Ayu Dark, Catppuccin Mocha, Dracula, Nord, Tokyo Night) |
+| HTTP client | Native `fetch` (typed wrappers in `src/api/client.ts`, dynamic `VITE_API_BASE_URL`) |
 | SSE streaming | `fetch` + `ReadableStream` (POST-based SSE) |
 | Notifications | Sonner (toast) |
 | Module system | ESM |
@@ -23,7 +23,7 @@ frontend/
 ├── src/
 │   ├── api/
 │   │   ├── types.ts            # TypeScript interfaces mirroring backend models (A2aAgent, A2aAgentSkill, A2aAgentAccess, A2aAgentCard, CostDashboardResponse, CostActualsResponse, CostActualAgent, CostActualSession, AgentCostSummary, ModelPricing)
-│   │   ├── client.ts           # apiFetch<T>() wrapper + ApiError class, automatic auth token injection, and 401 auto-refresh via `setOnUnauthorized` callback
+│   │   ├── client.ts           # apiFetch<T>() wrapper + ApiError class, dynamic BASE_URL via VITE_API_BASE_URL, automatic auth token injection, and 401 auto-refresh via `setOnUnauthorized` callback
 │   │   ├── auth.ts             # Cognito auth API (initiateAuth, respondToChallenge, refreshTokens)
 │   │   ├── agents.ts           # Agent CRUD + fetchRoles(), fetchCognitoPools(), fetchModels(), fetchDefaults()
 │   │   ├── invocations.ts      # Session queries + SSE stream consumer (with auth header)
@@ -103,6 +103,8 @@ frontend/
 ├── tsconfig.json
 ├── tsconfig.app.json
 ├── vite.config.ts
+├── Dockerfile                  # Multi-stage container image (Node build + nginx serve)
+├── nginx.conf                  # nginx SPA config with gzip and immutable asset caching
 ├── components.json             # shadcn configuration
 ├── makefile
 └── SPECIFICATIONS.md           # This file
@@ -528,10 +530,10 @@ Model selection uses `SearchableSelect` with group headers (Anthropic / Amazon).
 
 ### Theme System
 10 themes organized into Light and Dark groups:
-- **Light:** Ayu Light (warm sandy/orange), Catppuccin Latte (cool blue-gray, default), Everforest Light (warm green), Rosé Pine Dawn (warm rose), Solarized Light (warm yellow-blue)
-- **Dark:** Catppuccin Mocha (deep purple-blue), Dracula (vibrant purple), Gruvbox (warm earthy), Nord (arctic blue), Tokyo Night (indigo blue)
+- **Light:** Ayu Light (white + blue), Catppuccin Latte (cool blue-gray, default), Everforest Light (warm green), Rosé Pine Dawn (warm rose), Solarized Light (warm yellow-blue)
+- **Dark:** Ayu Dark (dark blue), Catppuccin Mocha (deep purple-blue), Dracula (vibrant purple), Nord (arctic blue), Tokyo Night (indigo blue)
 
-ThemeContext manages theme state with localStorage persistence. Latte uses `:root` variables (no class); all other themes use CSS class selectors on `<html>`. The `@custom-variant dark` includes all dark theme classes (`dark`, `dracula`, `gruvbox`, `nord`, `tokyonight`). Badge `default` and `secondary` variants include `border-border` for visibility across all themes.
+ThemeContext manages theme state with localStorage persistence. Latte uses `:root` variables (no class); all other themes use CSS class selectors on `<html>`. The `@custom-variant dark` includes all dark theme classes (`dark`, `dracula`, `ayudark`, `nord`, `tokyonight`). Badge `default` and `secondary` variants include `border-border` for visibility across all themes.
 
 **WCAG Accessibility Compliance:**
 All themes target WCAG 2.1 AA or better:
