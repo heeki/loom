@@ -69,6 +69,16 @@ def create_oauth2_credential_provider(
         try:
             response = client.create_oauth2_credential_provider(**kwargs)
             return response
+        except client.exceptions.ValidationException as e:
+            if "already exists" in str(e):
+                logger.info(
+                    "Credential provider '%s' already exists, updating instead",
+                    name,
+                )
+                update_kwargs = {k: v for k, v in kwargs.items() if k != 'tags'}
+                response = client.update_oauth2_credential_provider(**update_kwargs)
+                return response
+            raise
         except Exception as e:
             last_exc = e
             if attempt < _MAX_RETRIES:

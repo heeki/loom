@@ -202,7 +202,7 @@ backend/
 ├── tests/
 │   ├── test_agents_deploy.py
 │   ├── test_a2a.py          # A2A agent CRUD, Agent Card, skills, access
-├── Dockerfile               # Backend container image (Python 3.13 slim + uvicorn)
+├── Dockerfile               # Backend container image (Python 3.13 slim + uvicorn + agent source)
 ├── makefile                 # Build, test, and manual testing targets
 ├── pyproject.toml
 └── requirements.txt
@@ -482,7 +482,7 @@ Cold-start latency is computed automatically during the invoke flow:
 
 Deploy creates a Strands Agent runtime on AgentCore with background deployment and progressive status updates. The deployment flow includes:
 
-1. **OAuth2 credential provider creation** — MCP server and A2A agent integrations with OAuth2 are provisioned as AgentCore credential providers with exponential backoff retry (4 retries, delays 2s/4s/8s/16s). Deployment fails with `credential_creation_failed` status if all retries are exhausted.
+1. **OAuth2 credential provider creation** — MCP server and A2A agent integrations with OAuth2 are provisioned as AgentCore credential providers with exponential backoff retry (4 retries, delays 2s/4s/8s/16s). If a provider already exists (e.g., redeployment), it is automatically updated with the latest configuration. Deployment fails with `credential_creation_failed` status if all retries are exhausted.
 2. **IAM role creation** — Execution role provisioning (if creating new role)
 3. **Artifact build** — Cross-compiles ARM64 artifact (pip install into target directory, zips, uploads to S3)
 4. **Runtime deployment** — Creates AgentCore runtime and endpoint
@@ -518,6 +518,10 @@ Backend-specific SAM templates:
 | `loom-rds` | `iac/rds.yaml` | RDS PostgreSQL with optional RDS Proxy, multi-AZ, and Secrets Manager |
 | `loom-ec2` | `iac/ec2.yaml` | EC2 bastion instance with SSM access for tunneling to RDS |
 | `loom-ecs-backend` | `iac/ecs.yaml` | Backend ECS Fargate service (task def, task role, service, auto-scaling) |
+
+The ECS task role includes policies for Bedrock, AgentCore, S3, CloudWatch Logs, IAM PassRole, Secrets Manager, Cognito, and CloudFormation. Notably, the Secrets Manager policy covers both the RDS database secret and `bedrock-agentcore-identity!*` secrets used by OAuth2 credential providers (created/deleted during agent deployment). The CloudWatch Logs policy covers both `/aws/bedrock-agentcore/*` and `/aws/vendedlogs/bedrock-agentcore/*` prefixes. Default task resources are 1 vCPU / 2 GB RAM.
+
+The backend Docker image is built with the repository root as the build context (via `-f backend/Dockerfile ..` from `shared/makefile`) so it can include both `backend/app/` and `agents/strands_agent/` source. The agent source is required by `build_agent_artifact` to package and upload agent code to S3 during deployment.
 
 Deploy with `make rds`, `make ec2`, and `make ecs` from the backend directory. Use `make tunnel` to start an SSM port-forwarding session to the RDS instance.
 

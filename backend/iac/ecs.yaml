@@ -23,12 +23,12 @@ Parameters:
     Description: ECR image URI for the backend container
   pCpu:
     Type: String
-    Description: CPU units for backend task (512 = 0.5 vCPU)
-    Default: "512"
+    Description: CPU units for backend task (1024 = 1 vCPU)
+    Default: "1024"
   pMemory:
     Type: String
-    Description: Memory in MiB for backend task (1024 = 1 GB)
-    Default: "1024"
+    Description: Memory in MiB for backend task (2048 = 2 GB)
+    Default: "2048"
   pDesiredCount:
     Type: Number
     Description: Desired number of backend tasks
@@ -212,7 +212,9 @@ Resources:
                   - logs:FilterLogEvents
                   - logs:GetLogEvents
                   - logs:DescribeLogStreams
-                Resource: !Sub "arn:aws:logs:*:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/*"
+                Resource:
+                  - !Sub "arn:aws:logs:*:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/*"
+                  - !Sub "arn:aws:logs:*:${AWS::AccountId}:log-group:/aws/vendedlogs/bedrock-agentcore/*"
         - PolicyName: IamPassRolePolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -232,6 +234,16 @@ Resources:
                 Action:
                   - secretsmanager:GetSecretValue
                 Resource: !Ref pDatabaseSecretArn
+              # OAuth2 credential providers store secrets in Secrets Manager
+              # under the bedrock-agentcore-identity! prefix. The control plane
+              # API needs this access when creating/deleting credential providers.
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:DeleteSecret
+                  - secretsmanager:PutSecretValue
+                Resource: !Sub "arn:aws:secretsmanager:*:${AWS::AccountId}:secret:bedrock-agentcore-identity!*"
         - PolicyName: CognitoPolicy
           PolicyDocument:
             Version: "2012-10-17"
