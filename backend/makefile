@@ -42,6 +42,39 @@ agentcore.credentials.delete-all:
 			--name "$$name"; \
 	done
 
+# AgentCore memory queries
+# Usage: Set P_MEMORY_ID in your environment file (e.g. test-mY9W6S5gdE)
+#        Set P_MEMORY_ACTOR_ID to scope records to a specific user (e.g. test-user)
+agentcore.memory.list:
+	aws bedrock-agentcore-control list-memories \
+		--profile $(PROFILE) \
+		--region $(REGION) | jq
+
+agentcore.memory.get:
+	aws bedrock-agentcore-control get-memory \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--memory-id $(P_MEMORY_ID) | jq
+
+agentcore.memory.records:
+	@source .venv/bin/activate && python scripts/query_memory_records.py \
+		--memory-id $(P_MEMORY_ID) \
+		--actor-id $(P_MEMORY_ACTOR_ID) \
+		--region $(REGION)
+
+agentcore.memory.records-by-namespace:
+	@source .venv/bin/activate && python scripts/list_memory_records.py \
+		--memory-id $(P_MEMORY_ID) \
+		--namespace $(P_MEMORY_NAMESPACE) \
+		--region $(REGION)
+
+agentcore.memory.extraction-jobs:
+	@source .venv/bin/activate && python -c "\
+	import boto3, json;\
+	client = boto3.client('bedrock-agentcore', region_name='$(REGION)');\
+	resp = client.list_memory_extraction_jobs(memoryId='$(P_MEMORY_ID)', maxResults=10);\
+	print(json.dumps(resp.get('memoryExtractionJobs', []), indent=2, default=str))"
+
 # RDS infrastructure
 rds: rds.package rds.deploy
 

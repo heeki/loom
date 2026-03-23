@@ -625,17 +625,32 @@ def get_memory_records(
     if not memory.memory_id:
         return MemoryRecordsResponse(memory_id="", actor_id=user.username, records=[])
 
-    actor_id = user.username
+    # R1: Use same actor_id logic as write side (invocations.py:901)
+    actor_id = user.username or user.sub or "loom-agent"
+
+    # Resolve strategy metadata so the service can build namespace queries
+    strategies = memory.get_strategies_response() or []
+
+    # R6: Debug logging before API call
+    logger.info("get_memory_records: memory_id=%s actor_id=%s strategies=%d",
+                memory.memory_id, actor_id, len(strategies))
+
     try:
         raw_records = svc_list_memory_records(
             memory_id=memory.memory_id,
             actor_id=actor_id,
+            strategies=strategies,
             region=memory.region,
         )
     except Exception as e:
         logger.warning("Failed to list memory records for memory_id=%s actor=%s: %s", memory.memory_id, actor_id, e)
         return MemoryRecordsResponse(memory_id=memory.memory_id, actor_id=actor_id, records=[])
 
+    # R6: Log number of raw records returned
+    logger.info("get_memory_records: received %d raw records for memory_id=%s actor_id=%s",
+                len(raw_records), memory.memory_id, actor_id)
+
+    # R5: Filter records and log dropped count
     records = [
         MemoryRecordItem(
             memoryRecordId=r["memoryRecordId"],
@@ -647,6 +662,14 @@ def get_memory_records(
         for r in raw_records
         if r.get("text")
     ]
+
+    # R6: Log filtering results
+    filtered_count = len(raw_records) - len(records)
+    if filtered_count > 0:
+        logger.info("get_memory_records: filtered out %d records with empty text (kept %d records)",
+                    filtered_count, len(records))
+    else:
+        logger.info("get_memory_records: returning %d records", len(records))
 
     return MemoryRecordsResponse(
         memory_id=memory.memory_id,

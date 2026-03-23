@@ -44,6 +44,11 @@ export LOOM_COGNITO_USER_CLIENT_ID
 export LOOM_COGNITO_REGION
 export LOOM_ALLOWED_ORIGINS
 
+# AgentCore memory queries (used by make agentcore.memory.* targets)
+P_MEMORY_ID=<your-memory-id>
+P_MEMORY_ACTOR_ID=<cognito-username-or-sub>
+P_MEMORY_NAMESPACE=<namespace-e.g.-/strategy/strat-id/actor/actor-id/>
+
 # Resource tagging
 P_TAG_APPLICATION=<your-application-name>
 P_TAG_GROUP=<your-group-or-team>

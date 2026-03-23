@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Send, Plus, Brain, LogOut, Bot, User, X, Loader2, Palette } from "lucide-react";
+import { Send, Plus, Brain, LogOut, Bot, User, X, Loader2, Palette, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import ReactMarkdown from "react-markdown";
 import { CollapsibleJsonBlock } from "@/components/CollapsibleJsonBlock";
 import remarkGfm from "remark-gfm";
+import { toast } from "sonner";
 import { listAgents } from "@/api/agents";
 import { listSessions, getSession, hideSession } from "@/api/invocations";
 import { listMemories, getMemoryRecords } from "@/api/memories";
@@ -76,6 +77,8 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
   const [memories, setMemories] = useState<MemoryResponse[]>([]);
   const [memoryRecords, setMemoryRecords] = useState<MemoryRecordItem[]>([]);
   const [memoryRecordsLoading, setMemoryRecordsLoading] = useState(false);
+  const [memoryRecordsError, setMemoryRecordsError] = useState<string | null>(null);
+  const [memoryRefreshCounter, setMemoryRefreshCounter] = useState(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -141,20 +144,34 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
   // Load memory records when panel is opened (scoped to current user via JWT)
   useEffect(() => {
     if (!showMemory || memories.length === 0) {
-      if (!showMemory) setMemoryRecords([]);
+      if (!showMemory) {
+        setMemoryRecords([]);
+        setMemoryRecordsError(null);
+      }
       return;
     }
     setMemoryRecordsLoading(true);
+    setMemoryRecordsError(null);
     const firstMemory = memories[0];
     if (!firstMemory) {
       setMemoryRecordsLoading(false);
       return;
     }
     getMemoryRecords(firstMemory.id)
-      .then((res) => setMemoryRecords(res.records))
-      .catch(() => setMemoryRecords([]))
+      .then((res) => {
+        setMemoryRecords(res.records);
+        setMemoryRecordsError(null);
+      })
+      .catch((err) => {
+        const errorMsg = err instanceof Error ? err.message : "Failed to load memories";
+        setMemoryRecordsError(errorMsg);
+        setMemoryRecords([]);
+        toast.error("Failed to load memories", {
+          description: "Check that the memory resource is active and try again.",
+        });
+      })
       .finally(() => setMemoryRecordsLoading(false));
-  }, [showMemory, memories]);
+  }, [showMemory, memories, memoryRefreshCounter]);
 
   const filteredAgents = useMemo(() => {
     let result = agents;
@@ -216,6 +233,11 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
         // Load authoritative messages from the backend, then clear pendingPrompt.
         // Keeping pendingPrompt set until setMessages runs prevents the streaming
         // bubble from disappearing before the persisted messages are ready.
+        //
+        // Capture the current pendingPrompt so we only clear it if it hasn't been
+        // replaced by a new invocation (e.g. auto-sent queued prompt) by the time
+        // the async fetch completes.
+        const capturedPending = pendingPromptRef.current;
         getSession(selectedAgentId, sessionId)
           .then((session) => {
             const msgs: ChatMessage[] = [];
@@ -226,9 +248,18 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                 msgs.push({ id: `assistant-${inv.invocation_id}`, role: "assistant", text: inv.response_text });
             }
             setMessages(msgs);
-            setPendingPrompt(null);
+            // Only clear pendingPrompt if it still matches the prompt from this
+            // completed stream. If auto-send replaced it with a queued prompt,
+            // the ref will have changed and we must not clear it.
+            if (pendingPromptRef.current === capturedPending) {
+              setPendingPrompt(null);
+            }
           })
-          .catch(() => setPendingPrompt(null));
+          .catch(() => {
+            if (pendingPromptRef.current === capturedPending) {
+              setPendingPrompt(null);
+            }
+          });
 
         listSessions(selectedAgentId)
           .then((data) => {
@@ -805,6 +836,8 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
             currentSessionId={currentSessionId}
             records={memoryRecords}
             recordsLoading={memoryRecordsLoading}
+            recordsError={memoryRecordsError}
+            onRefresh={() => setMemoryRefreshCounter((c) => c + 1)}
             onClose={() => setShowMemory(false)}
           />
         )}
@@ -966,6 +999,8 @@ function MemoryPanel({
   currentSessionId,
   records,
   recordsLoading,
+  recordsError,
+  onRefresh,
   onClose,
 }: {
   memories: MemoryResponse[];
@@ -973,6 +1008,8 @@ function MemoryPanel({
   currentSessionId: string | null;
   records: MemoryRecordItem[];
   recordsLoading: boolean;
+  recordsError: string | null;
+  onRefresh: () => void;
   onClose: () => void;
 }) {
   // Group records by strategy type label
@@ -996,12 +1033,22 @@ function MemoryPanel({
           <Brain className="h-4 w-4" />
           <span className="font-medium text-sm">My Memory</span>
         </div>
-        <button
-          onClick={onClose}
-          className="text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onRefresh}
+            disabled={recordsLoading}
+            className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+            title="Refresh memories"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${recordsLoading ? "animate-spin" : ""}`} />
+          </button>
+          <button
+            onClick={onClose}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-5">
@@ -1013,6 +1060,15 @@ function MemoryPanel({
           <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground text-sm">
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading memories…
+          </div>
+        ) : recordsError ? (
+          <div className="text-center py-8 space-y-2">
+            <p className="text-sm text-destructive font-medium">
+              Failed to load memories.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Check that the memory resource is active and try again.
+            </p>
           </div>
         ) : records.length === 0 ? (
           <div className="space-y-3">
@@ -1048,9 +1104,10 @@ function MemoryPanel({
                   {items.map((rec) => (
                     <div key={rec.memoryRecordId} className="rounded border p-3 text-sm">
                       <p className="leading-snug">{rec.text}</p>
-                      <p className="text-xs text-muted-foreground mt-1.5">
-                        Updated {formatRelativeDate(rec.updatedAt)}
-                      </p>
+                      <div className="text-xs text-muted-foreground mt-1.5 space-y-0.5">
+                        <p>Created {formatRelativeDate(rec.createdAt)}</p>
+                        <p>Updated {formatRelativeDate(rec.updatedAt)}</p>
+                      </div>
                     </div>
                   ))}
                 </div>

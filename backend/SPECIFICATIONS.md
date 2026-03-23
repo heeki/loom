@@ -101,7 +101,9 @@ backend/
 │   ├── stream.py            # SSE streaming client for CLI invocations (httpx)
 │   ├── migrate_sqlite_to_postgres.py  # CLI utility to migrate SQLite data to PostgreSQL
 │   ├── fix_sequences.py     # PostgreSQL sequence auto-repair after migration
-│   └── reset_db.py          # Database reset utility
+│   ├── reset_db.py          # Database reset utility
+│   ├── query_memory_records.py  # Query LTM records by actor ID (resolves strategy namespaces)
+│   └── list_memory_records.py   # List LTM records by memory ID and namespace
 ├── tests/
 │   ├── test_agentcore.py    # AgentCore service tests
 │   ├── test_agents.py       # Agent router tests
@@ -691,6 +693,7 @@ Tag profiles are named presets of tag key-value pairs. When creating or updating
 | `POST` | `/api/memories/{memory_id}/refresh` | Refresh memory status from AWS. |
 | `DELETE` | `/api/memories/{memory_id}?cleanup_aws=true` | Delete a memory resource; optionally delete from AWS. |
 | `DELETE` | `/api/memories/{memory_id}/purge` | Remove from local DB only (no AWS call). |
+| `GET` | `/api/memories/{memory_id}/records` | Retrieve stored LTM records for the authenticated user. |
 
 **Naming convention:** Memory names and strategy names must match `[a-zA-Z][a-zA-Z0-9_]{0,47}` — start with a letter, letters/digits/underscores only, max 48 characters. Hyphens are not allowed.
 
@@ -729,6 +732,17 @@ When `cleanup_aws=true` (default), initiates async deletion in AWS and marks sta
 
 **`DELETE /api/memories/{memory_id}/purge`:**
 Removes the memory record from the local database without any AWS API call. Used by the frontend after confirming that AWS deletion is complete (404 on refresh). Returns 204 No Content.
+
+**`GET /api/memories/{memory_id}/records`:**
+Retrieves stored long-term memory records for the authenticated user within a memory resource. Records are scoped to the requesting user's identity — users cannot access records belonging to other actors.
+
+- **Data plane vs control plane:** `list_memory_records` is a data plane operation on `bedrock-agentcore`, not the control plane `bedrock-agentcore-control` used by other memory CRUD operations.
+- **Namespace-based querying:** The data plane API requires a `namespace` parameter (not `actorId`). Each LTM strategy defines a namespace template (e.g. `/strategy/{memoryStrategyId}/actor/{actorId}/`). The service substitutes the strategy ID and actor ID into each template, then queries each namespace. For summary strategies with `{sessionId}` placeholders, the query is truncated at the unresolved placeholder to match all sessions.
+- **Tagged union unwrapping:** The `strategies_response` stored from the AWS `get_memory` API uses a tagged union format where each strategy is wrapped in a type key (e.g. `{"userPreferenceMemoryStrategy": {"strategyId": "...", "namespaces": [...]}}`). The service unwraps this format to extract `strategyId` and `namespaces` from the inner dict, falling back to top-level access for pre-unwrapped formats.
+- **Actor ID resolution:** Uses `user.username or user.sub or "loom-agent"` — the same fallback chain used on the write side when the agent sends memory events during chat.
+- **Content field mapping:** The AWS response contains `memoryRecords[].content` which may be a dict with a `text` key, a plain string, or another structure. The service handles all three cases. Records with empty text are filtered out.
+- **Debug logging:** INFO-level logs are emitted at each stage: before the API call (memory_id, actor_id, strategy count), after receiving raw records (count), and after filtering (kept vs filtered counts).
+- **Error handling:** On AWS API failure, returns an empty records list with a warning log. The frontend error state is reserved for HTTP errors from the backend.
 
 **Strategy type mapping:**
 
@@ -1097,11 +1111,12 @@ A2A Agent Card fetching and connection testing:
 
 ### `services/memory.py`
 
-Wraps `boto3.client('bedrock-agentcore-control')` for memory operations:
+Wraps `boto3.client('bedrock-agentcore-control')` for memory CRUD and `boto3.client('bedrock-agentcore')` for memory record queries:
 
 - `create_memory(name, event_expiry_duration, ..., region) -> dict` — calls `create_memory` and returns the full response including ARN, ID, and status.
 - `get_memory(memory_id, region) -> dict` — calls `get_memory(memoryId=...)` and returns current memory state.
 - `list_memories(region) -> dict` — calls `list_memories()` and returns all memory resources.
+- `list_memory_records(memory_id, actor_id, strategies, max_records, region) -> list[dict]` — data plane operation that queries LTM records by resolving strategy namespace templates with the actor ID. Unwraps the AWS tagged union strategy format (e.g. `{"userPreferenceMemoryStrategy": {...}}`) to extract `strategyId` and `namespaces`. Truncates unresolved placeholders (e.g. `{sessionId}`) to query all matching records.
 - `delete_memory(memory_id, region) -> dict` — calls `delete_memory(memoryId=...)`.
 
 ### `services/latency.py`
@@ -1260,4 +1275,11 @@ tunnel               # Start SSM port forwarding session to RDS
 # AgentCore credential providers
 agentcore.credentials.list       # List OAuth2 credential providers
 agentcore.credentials.delete-all # Delete all credential providers
+
+# AgentCore memory queries (requires P_MEMORY_ID, P_MEMORY_ACTOR_ID, P_MEMORY_NAMESPACE in env)
+agentcore.memory.list                  # List all memory resources
+agentcore.memory.get                   # Get a specific memory resource
+agentcore.memory.records               # Query LTM records by actor ID (resolves strategy namespaces)
+agentcore.memory.records-by-namespace  # List LTM records by memory ID and namespace
+agentcore.memory.extraction-jobs       # List memory extraction jobs
 ```
