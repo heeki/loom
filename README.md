@@ -83,14 +83,92 @@ loom/
 
 See [`backend/SPECIFICATIONS.md`](backend/SPECIFICATIONS.md) and [`frontend/SPECIFICATIONS.md`](frontend/SPECIFICATIONS.md) for detailed component specifications.
 
+## Local Development
+
+### SQLite (Zero-Config)
+
+The backend defaults to SQLite (`sqlite:///./loom.db`) — no database setup required. Tables are auto-created on startup via `app.db:init_db()`.
+
+**Backend:**
+```bash
+cd backend
+uv venv .venv && source .venv/bin/activate
+make install
+make test       # Run unit tests
+make run        # Runs on LOOM_BACKEND_PORT (default 8000)
+```
+
+**Frontend:**
+```bash
+cd frontend
+npm install
+npm run dev     # Runs on LOOM_FRONTEND_PORT (default 5173)
+```
+
+### SSM Tunnel to Private RDS
+
+To develop locally against a deployed RDS instance, open an SSM tunnel through the EC2 bastion.
+
+**Prerequisites:** `loom-rds` and `loom-ec2` stacks must be deployed (see [Deployment](#deployment)).
+
+```bash
+cd backend
+make tunnel              # Port forwards localhost:5432 → RDS via EC2 bastion
+uv pip install ".[postgres]"
+```
+
+Set `LOOM_DATABASE_URL` in `backend/etc/environment.sh` — it is constructed from `P_RDS_USERNAME`, `P_RDS_PASSWORD`, `LOOM_DATABASE_HOST` (localhost when tunneled), `O_RDS_PORT`, and `P_RDS_DB_NAME`.
+
+To migrate an existing SQLite database to PostgreSQL:
+
+```bash
+make migrate-db          # Copies sqlite:///./loom.db → $LOOM_DATABASE_URL
+```
+
+### Database Selection Logic
+
+`backend/app/db.py` auto-detects the database type from the `LOOM_DATABASE_URL` scheme:
+- **SQLite** (`sqlite:///`): uses `check_same_thread=False`
+- **PostgreSQL** (`postgresql+psycopg2://`): uses `pool_pre_ping=True` and `pool_recycle=1800`
+
 ## Deployment
 
 ### Prerequisites
 
+**Development tools:**
 - Python 3.11+ with [uv](https://github.com/astral-sh/uv) for dependency management
 - Node.js 18+ with npm
 - AWS CLI configured with credentials (environment variables, AWS profile, or instance metadata)
 - SAM CLI for deploying infrastructure
+- Podman (or Docker) for building container images
+
+**VPC and networking:**
+- VPC with at least 2 private subnets in different AZs (required for RDS Multi-AZ)
+- At least 1 public subnet for ALB and EC2 bastion
+- Internet gateway for public subnets
+- NAT gateway in a public subnet for private subnet outbound traffic (required for ECR image pulls)
+
+**S3 bucket for SAM deployments:**
+- Create an S3 bucket for CloudFormation template artifacts with versioning enabled
+- Set the `BUCKET` variable in `shared/etc/environment.sh`
+
+**Domain and Route 53:**
+- Parent Route 53 hosted zone must be accessible for NS delegation
+- Set `P_INFRA_DOMAIN_NAME` to the desired subdomain (e.g., `loom.example.com`)
+
+**ECS service-linked role** (once per account):
+```bash
+cd shared && make ecs.init    # Creates AWSServiceRoleForECS service-linked role
+```
+
+**CloudWatch Transaction Search:**
+- Enable CloudWatch Transaction Search for AgentCore Observability in the AWS console
+- Navigate to CloudWatch > Settings > Transaction Search and enable it for the target region
+
+**Account-specific environment files:**
+- Create `shared/etc/environment_<account_suffix>.sh` and `backend/etc/environment_<account_suffix>.sh` with account-specific parameters
+- Use `*.sh.example` files as templates
+- Update `shared/etc/environment.sh` and `backend/etc/environment.sh` to source the new account file
 
 ### Step 1: Configure Environment Files
 
@@ -235,9 +313,9 @@ For cloud deployment, the frontend and backend are containerized and deployed to
 **Phase 0** — Deploy DNS, set up delegation, and create ECS service-linked role:
 
 ```bash
-cd shared && make dns         # Route 53 hosted zone for subdomain
+cd shared && make ecs.init    # Create ECS service-linked role, once per account (~1 min)
+cd shared && make dns         # Route 53 hosted zone for subdomain (~1 min)
 cd shared && make dns.outputs # Capture oHostedZoneId → O_INFRA_HOSTED_ZONE_ID, oNameServers → NS delegation
-cd shared && make ecs.init    # Create ECS service-linked role (once per account)
 ```
 
 If cross-account: add NS delegation records in the parent account's hosted zone (see below).
@@ -245,13 +323,15 @@ If cross-account: add NS delegation records in the parent account's hosted zone 
 **Phase 1** — Deploy foundation stacks (all independent, can run in parallel):
 
 ```bash
-cd shared && make infra       # S3, ECR, ACM, ALB
-cd shared && make cognito     # Cognito User Pool, groups, scopes
-cd shared && make role        # IAM execution roles
-cd shared && make ecs         # ECS Fargate cluster
-cd backend && make rds        # RDS PostgreSQL + optional RDS Proxy
-cd backend && make ec2        # EC2 bastion for SSM tunneling (optional)
+cd shared && make infra       # S3, ECR, ACM, ALB (~3 min)
+cd shared && make cognito     # Cognito User Pool, groups, scopes (~1 min)
+cd shared && make role        # IAM execution roles (~1 min)
+cd shared && make ecs         # ECS Fargate cluster (~1 min)
+cd backend && make rds        # RDS PostgreSQL + optional RDS Proxy (~25 min)
+cd backend && make ec2        # EC2 bastion for SSM tunneling, optional (~3 min)
 ```
+
+**Note on `role` stacks:** A separate role stack must be created for each application prefix. For example, deploying a role with the prefix `demo` creates an execution role shared by all `demo_*` agents. If you add agents with a different prefix (e.g., `finance_*`), you must deploy an additional role stack for that prefix.
 
 **Phase 2** — Capture stack outputs:
 
@@ -283,19 +363,35 @@ This writes all `O_*` variables to one file and updates `frontend/.env` with the
 
 Then set Cognito user passwords: `cd shared && make cognito.set-passwords`.
 
+**Stack dependency graph:**
+```
+Phase 0          Phase 1                          Phase 3
+--------         ----------------------           ------------------
+ecs.init --+     infra    (~3 min)  --+
+           |     cognito  (~1 min)  --|
+dns -------+     role*    (~1 min)  --+--------> loom-ecs-frontend (~3 min)
+                 ecs      (~1 min)  --|          loom-ecs-backend  (~3 min)
+                 rds      (~25 min) --|
+                 ec2      (~3 min)  --+ (optional)
+
+* A role stack is deployed per application prefix (e.g., demo -> demo_* agents)
+```
+
 **Phase 3** — Deploy containers (frontend and backend can run in parallel):
 
 ```bash
 cd shared && make deploy              # Build, push, and deploy both
 
 # Or independently:
-cd shared && make deploy.frontend     # Frontend only
-cd shared && make deploy.backend      # Backend only
+cd shared && make deploy.frontend     # Frontend only (~1 min build + ~3 min deploy)
+cd shared && make deploy.backend      # Backend only (~1 min build + ~3 min deploy)
 
 # Or deploy ECS services directly (after images are pushed):
 cd frontend && make ecs               # Frontend ECS service only
 cd backend && make ecs                # Backend ECS service only
 ```
+
+**Approximate total deployment time:** ~35 minutes end-to-end (dominated by RDS at ~25 min; Phase 1 stacks deploy in parallel).
 
 ## Architecture
 

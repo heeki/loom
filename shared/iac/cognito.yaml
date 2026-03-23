@@ -375,6 +375,15 @@ Resources:
         - Name: email
           Value: demo-user-9@heeki.cloud
 
+  TestUser:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: test-user
+      UserAttributes:
+        - Name: email
+          Value: test-user@heeki.cloud
+
   # User-to-group assignments
   # Admin user: t-admin + g-admins-super
   AdminToTypeAdmin:
@@ -688,6 +697,21 @@ Resources:
       UserPoolId: !Ref CognitoUserPool
       Username: !Ref DemoUser9User
       GroupName: !Ref GroupUsersDemoGroup
+
+  # Test user: t-user + g-users-test
+  TestUserToTypeUser:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref TestUser
+      GroupName: !Ref TypeUserGroup
+
+  TestUserToGroupUsersTest:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      Username: !Ref TestUser
+      GroupName: !Ref GroupUsersTestGroup
 
   # Machine-to-machine client (client_credentials flow, access token only)
   M2MClient:
