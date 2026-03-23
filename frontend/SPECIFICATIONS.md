@@ -651,6 +651,9 @@ Agent deployment uses a fire-and-forget pattern. The form collapses immediately 
 ### SSE Stream Consumer
 `invokeAgentStream()` uses `ReadableStream` to consume POST-based SSE responses with buffer-based line parsing, typed callback dispatch, and `AbortSignal` for cancellation.
 
+### Queued Prompt (ChatPage)
+The input textarea remains enabled during streaming. Sending a message while a response is streaming enqueues it (single slot, last-write-wins). The queued message appears as a dimmed bubble (`bg-primary/50`) with a cancel (X) button and full markdown rendering. It auto-sends when streaming completes (skipped on error). Switching agents or starting a new conversation discards the queued message. Send and cancel-stream buttons are independent (both visible during streaming).
+
 ### Deploy Card
 When a deploy starts, `AgentListPage` records the deploying agent name and triggers an immediate `fetchAgents()` to pick up the DB record (created before the AWS API call). The `useAgents` hook handles ongoing polling for transitional agents. This replaced the earlier ephemeral card approach which caused position glitches when the real agent appeared.
 
@@ -773,7 +776,7 @@ A "Previewing end-user experience as [user]" banner is shown to admins when in v
 - Header with agent name and "responding..." indicator while streaming (scoped to the active conversation)
 - Scrollable message history with alternating user (right-aligned, primary color) and assistant (left-aligned, muted) bubbles
 - In-flight messages displayed during streaming: user prompt bubble immediately, streaming assistant bubble with animated cursor and thinking spinner
-- Markdown rendering for assistant responses via `react-markdown` + `remark-gfm`: paragraphs, headings (h1–h3), ordered/unordered lists, tables, blockquotes, inline code, fenced code blocks, bold, links. JSON code blocks rendered as collapsible `CollapsibleJsonBlock` components (click to expand/collapse).
+- Markdown rendering for all message bubbles (user, assistant, and queued) via `react-markdown` + `remark-gfm`: paragraphs, headings (h1–h3), ordered/unordered lists, tables, blockquotes, inline code, fenced code blocks, bold, links. Assistant responses additionally render JSON code blocks as collapsible `CollapsibleJsonBlock` components (click to expand/collapse).
 - Error display as styled text in the chat area
 - Text input at the bottom (Enter to send, Shift+Enter for newline), with Send/Cancel buttons
 
@@ -783,7 +786,7 @@ A "Previewing end-user experience as [user]" banner is shown to admins when in v
 - After each invocation, `sessionEnd.session_id` is captured and used for subsequent messages in the same conversation
 - On `sessionEnd`, messages are loaded from the backend via `getSession()` as the authoritative source. `setPendingPrompt(null)` is deferred until after `setMessages()` completes, preventing the streaming bubbles from disappearing before persisted messages are ready.
 - Resuming a past session calls `getSession()` and reconstructs the message history from `invocation.prompt_text` / `invocation.response_text` pairs
-- Removing a conversation calls `hideSession()`, records a `remove_conversation` audit action via `trackAction`, and clears the chat area if the removed session was active
+- Removing a conversation calls `hideSession()`, records a `remove_conversation` audit action via `trackAction`, and clears the chat area if the removed session was active. The remove button is shown on all owned sessions except the one currently streaming — sessions with an active AgentCore Runtime session (but not actively streaming a response) are removable.
 
 **Streaming state scoping:**
 - `isCurrentlyStreaming` is derived as `isStreaming && (!sessionStart || sessionStart.session_id === currentSessionId)`. The thinking spinner, streaming bubble, and "responding..." header text are all conditioned on `isCurrentlyStreaming`, not `isStreaming`. This prevents streaming UI from leaking into unrelated conversations when the user switches sessions mid-stream.
