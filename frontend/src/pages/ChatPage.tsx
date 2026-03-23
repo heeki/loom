@@ -397,6 +397,16 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
             />
           </div>
 
+          {/* Agent display (single agent) */}
+          {agents.length === 1 && selectedAgent && (
+            <div className="p-3 border-b shrink-0">
+              <p className="text-xs font-medium text-muted-foreground mb-1.5">Agent</p>
+              <div className="px-3 py-2 rounded bg-primary text-primary-foreground text-sm">
+                <span className="truncate block">{selectedAgent.name ?? selectedAgent.runtime_id}</span>
+              </div>
+            </div>
+          )}
+
           {/* Agent picker (shown when multiple agents available) */}
           {agents.length > 1 && (
             <div className="p-3 border-b shrink-0">

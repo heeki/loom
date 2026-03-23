@@ -31,6 +31,20 @@ make test
 make run
 ```
 
+### Local Development
+
+By default the backend uses **SQLite** (`sqlite:///./loom.db`) — no database setup required. Tables are auto-created on startup.
+
+To develop against a deployed **RDS PostgreSQL** instance via SSM tunnel (requires `loom-rds` + `loom-ec2` stacks):
+
+```bash
+make tunnel              # Port forwards localhost:5432 → RDS via EC2 bastion
+uv pip install ".[postgres]"
+make run
+```
+
+See the [root README](../README.md) for the full local development guide, deployment workflow, and environment configuration.
+
 ## Configuration
 
 Runtime configuration is sourced from `etc/environment.sh`:

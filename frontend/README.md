@@ -223,6 +223,10 @@ Session liveness is computed server-side using `LOOM_SESSION_IDLE_TIMEOUT_SECOND
 - **Active session count** on each agent card — cold-start indicator (0 = next invoke is cold)
 - **Live status badges** on sessions — color-coded: active (green), expired (muted), streaming/pending (yellow), error (red)
 
+## Deployment
+
+For cloud deployment to ECS Fargate, see the [root README](../README.md). The `frontend/.env` file is auto-populated by running `cd shared && make outputs` after deploying infrastructure stacks.
+
 ## Configuration
 
 The frontend connects to the backend at the URL specified by `VITE_API_BASE_URL` (defaults to `http://localhost:8000` for local dev). For cloud deployments behind an ALB with path-based routing, `VITE_API_BASE_URL` should be empty string (same-origin). The client uses nullish coalescing (`??`) so empty string is preserved. The backend CORS configuration allows requests from `http://localhost:5173` and any additional origins specified in `LOOM_ALLOWED_ORIGINS`.
