@@ -68,6 +68,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
   // Chat state
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+  const [queuedPrompt, setQueuedPrompt] = useState<string | null>(null);
   const [input, setInput] = useState("");
 
   // Memory panel state
@@ -250,14 +251,32 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     }
   }, [error, pendingPrompt, isStreaming]);
 
+  // Auto-send queued prompt when streaming completes without error
+  useEffect(() => {
+    if (!isStreaming && queuedPrompt && !error) {
+      const prompt = queuedPrompt;
+      setQueuedPrompt(null);
+      setPendingPrompt(prompt);
+      const agentName = agents.find((a) => a.id === selectedAgentId)?.name ?? String(selectedAgentId ?? 0);
+      if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "agent", "invoke", agentName);
+      invoke(prompt, "DEFAULT", currentSessionId ?? undefined);
+    }
+  }, [isStreaming, queuedPrompt, error]);
+
   // Scroll to bottom on new messages or streaming updates
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamedText, isStreaming]);
+  }, [messages, streamedText, isStreaming, queuedPrompt]);
 
   const handleSend = useCallback(async () => {
-    if (!input.trim() || isStreaming || selectedAgentId === null) return;
+    if (!input.trim() || selectedAgentId === null) return;
     const prompt = input.trim();
+    if (isStreaming) {
+      // Enqueue — last-write-wins
+      setQueuedPrompt(prompt);
+      setInput("");
+      return;
+    }
     setInput("");
     setPendingPrompt(prompt);
     const agentName = agents.find((a) => a.id === selectedAgentId)?.name ?? String(selectedAgentId);
@@ -296,6 +315,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     setMessages([]);
     setCurrentSessionId(null);
     setPendingPrompt(null);
+    setQueuedPrompt(null);
     lastSessionEndRef.current = null;
     lastSessionStartRef.current = null;
     if (selectedAgentId !== null) {
@@ -322,6 +342,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
       const saved = savedAgentState.current.get(id);
       setMessages(saved?.messages ?? []);
       setPendingPrompt(saved?.pendingPrompt ?? null);
+      setQueuedPrompt(null);
       setCurrentSessionId(saved?.currentSessionId ?? null);
       // Reset so the sessionEnd effect re-fires for the restored agent
       lastSessionEndRef.current = null;
@@ -497,7 +518,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
             ) : (
               sessions.map((session) => {
                 const isActive = currentSessionId === session.session_id;
-                const isComplete = session.status !== "pending" && session.status !== "streaming";
+                const isCurrentlyStreamingSession = isStreaming && isActive;
                 const isOwned = !!session.user_id && session.user_id === currentUserId;
                 return (
                   <div
@@ -527,7 +548,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                         {session.invocations.length === 1 ? "exchange" : "exchanges"}
                       </div>
                     </button>
-                    {isComplete && isOwned && (
+                    {!isCurrentlyStreamingSession && isOwned && (
                       <button
                         onClick={(e) => { e.stopPropagation(); setSessionToHide(session.session_id); }}
                         className={`opacity-0 group-hover:opacity-100 transition-opacity shrink-0 px-1.5 flex items-center ${
@@ -713,6 +734,31 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                       </div>
                     )}
 
+                    {/* Queued message bubble */}
+                    {queuedPrompt && (
+                      <div className="flex justify-end">
+                        <div className="relative max-w-[70%] rounded-2xl px-4 py-3 bg-primary/50 text-primary-foreground text-sm">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+                            p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                            ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
+                            ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
+                            li: ({ children }) => <li className="leading-snug">{children}</li>,
+                            code: ({ className, children }) => className?.startsWith("language-") ? <code className={className}>{children}</code> : <code className="rounded bg-black/10 dark:bg-white/10 px-1 py-0.5 text-xs font-mono">{children}</code>,
+                            pre: ({ children }) => <pre className="mb-2 overflow-x-auto rounded bg-black/10 dark:bg-white/10 p-3 text-xs font-mono">{children}</pre>,
+                            strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                            a: ({ href, children }) => <a href={href} className="underline underline-offset-2 hover:opacity-80" target="_blank" rel="noopener noreferrer">{children}</a>,
+                          }}>{queuedPrompt}</ReactMarkdown>
+                          <button
+                            onClick={() => setQueuedPrompt(null)}
+                            className="absolute -top-2 -right-2 h-5 w-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center hover:bg-destructive/80"
+                            title="Cancel queued message"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     <div ref={messagesEndRef} />
                   </div>
                 )}
@@ -728,20 +774,18 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                     onKeyDown={handleKeyDown}
                     rows={1}
                     className="resize-none flex-1"
-                    disabled={isStreaming}
                   />
-                  {isStreaming ? (
-                    <Button variant="outline" size="icon" onClick={cancel} title="Cancel">
+                  <Button
+                    size="icon"
+                    onClick={() => void handleSend()}
+                    disabled={!input.trim()}
+                    title={isStreaming ? "Enqueue message" : "Send"}
+                  >
+                    <Send className="h-4 w-4" />
+                  </Button>
+                  {isStreaming && (
+                    <Button variant="outline" size="icon" onClick={cancel} title="Cancel stream">
                       <X className="h-4 w-4" />
-                    </Button>
-                  ) : (
-                    <Button
-                      size="icon"
-                      onClick={() => void handleSend()}
-                      disabled={!input.trim()}
-                      title="Send"
-                    >
-                      <Send className="h-4 w-4" />
                     </Button>
                   )}
                 </div>
@@ -805,13 +849,9 @@ function MessageBubble({
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
         className={`${isUser ? "max-w-[70%]" : "max-w-[84%]"} rounded-2xl px-4 py-3 text-sm break-words ${
-          isUser ? "bg-primary text-primary-foreground whitespace-pre-wrap" : "bg-muted"
+          isUser ? "bg-primary text-primary-foreground" : "bg-muted"
         }`}
       >
-        {isUser ? (
-          text
-        ) : (
-          <>
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
@@ -890,8 +930,6 @@ function MessageBubble({
           {isStreaming && (
             <span className="inline-block w-1.5 h-4 bg-current animate-pulse ml-0.5 align-text-bottom opacity-70" />
           )}
-          </>
-        )}
       </div>
     </div>
   );
