@@ -274,7 +274,7 @@ podman.build.backend:
 	podman build --platform linux/amd64 -t $(P_ECR_BACKEND_REPO):$(IMAGE_TAG) ../backend
 
 podman.build.frontend:
-	podman build --platform linux/amd64 -t $(P_ECR_FRONTEND_REPO):$(IMAGE_TAG) ../frontend
+	podman build --platform linux/amd64 --build-arg VITE_COGNITO_USER_CLIENT_ID=$(O_COGNITO_USER_CLIENT_ID) -t $(P_ECR_FRONTEND_REPO):$(IMAGE_TAG) ../frontend
 
 # Podman push
 podman.push: podman.login podman.push.backend podman.push.frontend

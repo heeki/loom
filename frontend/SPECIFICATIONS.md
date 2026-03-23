@@ -9,7 +9,7 @@
 | UI components | shadcn/ui (Radix primitives) |
 | Styling | Tailwind CSS v4 (Vite plugin, no PostCSS) |
 | Theme | 10 themes: 5 light + 5 dark (Ayu Light, Catppuccin Latte, Everforest, Rosé Pine Dawn, Solarized, Ayu Dark, Catppuccin Mocha, Dracula, Nord, Tokyo Night) |
-| HTTP client | Native `fetch` (typed wrappers in `src/api/client.ts`, dynamic `VITE_API_BASE_URL`) |
+| HTTP client | Native `fetch` (typed wrappers in `src/api/client.ts`, dynamic `VITE_API_BASE_URL` with nullish coalescing fallback) |
 | SSE streaming | `fetch` + `ReadableStream` (POST-based SSE) |
 | Notifications | Sonner (toast) |
 | Module system | ESM |
@@ -103,11 +103,17 @@ frontend/
 ├── tsconfig.json
 ├── tsconfig.app.json
 ├── vite.config.ts
-├── Dockerfile                  # Multi-stage container image (Node build + nginx serve)
-├── nginx.conf                  # nginx SPA config with gzip and immutable asset caching
-├── components.json             # shadcn configuration
-├── makefile
-└── SPECIFICATIONS.md           # This file
+├── etc/
+│   ├── environment.sh           # Sources account-specific file + shared outputs
+│   └── environment.sh.example   # Example environment configuration template
+├── iac/
+│   └── ecs.yaml                 # Frontend ECS Fargate service (task def, service)
+├── .dockerignore                # Excludes .env, node_modules, dist
+├── Dockerfile                   # Multi-stage container image (Node build + nginx serve)
+├── nginx.conf                   # nginx SPA config with gzip and immutable asset caching
+├── components.json              # shadcn configuration
+├── makefile                     # dev, build, ecs.* targets
+└── SPECIFICATIONS.md            # This file
 ```
 
 ---

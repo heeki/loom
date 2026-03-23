@@ -497,16 +497,17 @@ Group-based invoke restriction: `super-admins` can invoke any agent. Other users
 
 ## Infrastructure
 
-Backend-specific SAM templates for database infrastructure:
+Backend-specific SAM templates:
 
 | Stack | Template | Description |
 |-------|----------|-------------|
 | `loom-rds` | `iac/rds.yaml` | RDS PostgreSQL with optional RDS Proxy, multi-AZ, and Secrets Manager |
 | `loom-ec2` | `iac/ec2.yaml` | EC2 bastion instance with SSM access for tunneling to RDS |
+| `loom-ecs-backend` | `iac/ecs.yaml` | Backend ECS Fargate service (task def, task role, service, auto-scaling) |
 
-Deploy with `make rds` and `make ec2` from the backend directory. Use `make tunnel` to start an SSM port-forwarding session to the RDS instance.
+Deploy with `make rds`, `make ec2`, and `make ecs` from the backend directory. Use `make tunnel` to start an SSM port-forwarding session to the RDS instance.
 
-Cross-cutting infrastructure (S3, ECR, ACM, ALB, ECS) is managed from the root `makefile` — see root README for deployment commands.
+Cross-cutting infrastructure (S3, ECR, ACM, ALB, ECS cluster) is managed from `shared/makefile` — see root README for deployment commands.
 
 ## Makefile Targets
 
@@ -521,9 +522,10 @@ make migrate-db           # Migrate SQLite → PostgreSQL
 make fix-sequences        # Repair PostgreSQL sequences after migration
 make reset-db             # Reset database
 
-# Backend infrastructure (RDS, EC2)
+# Backend infrastructure (RDS, EC2, ECS)
 make rds                  # Deploy RDS PostgreSQL stack
 make ec2                  # Deploy EC2 bastion stack
+make ecs                  # Deploy backend ECS service (uses git SHA image tag)
 make tunnel               # Start SSM tunnel to RDS
 
 # AgentCore credentials

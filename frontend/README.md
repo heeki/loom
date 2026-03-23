@@ -225,7 +225,7 @@ Session liveness is computed server-side using `LOOM_SESSION_IDLE_TIMEOUT_SECOND
 
 ## Configuration
 
-The frontend connects to the backend at the URL specified by `VITE_API_BASE_URL` (defaults to `http://localhost:8000`). For deployed environments, set `VITE_API_BASE_URL` at Docker build time. The backend CORS configuration allows requests from `http://localhost:5173` and any additional origins specified in `LOOM_ALLOWED_ORIGINS`.
+The frontend connects to the backend at the URL specified by `VITE_API_BASE_URL` (defaults to `http://localhost:8000` for local dev). For cloud deployments behind an ALB with path-based routing, `VITE_API_BASE_URL` should be empty string (same-origin). The client uses nullish coalescing (`??`) so empty string is preserved. The backend CORS configuration allows requests from `http://localhost:5173` and any additional origins specified in `LOOM_ALLOWED_ORIGINS`.
 
 To change the dev server port:
 
@@ -246,11 +246,13 @@ Output is written to `dist/`. Serve with `make preview` or any static file serve
 A multi-stage Dockerfile is provided for building a production container image:
 
 ```bash
-# Build with custom API URL for deployed backend
-docker build --build-arg VITE_API_BASE_URL=https://your-alb-dns.amazonaws.com -t loom-frontend .
+# Build for cloud deployment (same-origin API via ALB path routing)
+podman build --platform linux/amd64 \
+  --build-arg VITE_COGNITO_USER_CLIENT_ID=<client-id> \
+  -t loom-frontend .
 
 # Run locally
-docker run -p 80:80 loom-frontend
+podman run -p 80:80 loom-frontend
 ```
 
 The container uses nginx to serve static assets with SPA routing (`try_files` fallback to `index.html`), gzip compression, and immutable cache headers for versioned assets.

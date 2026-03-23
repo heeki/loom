@@ -41,103 +41,49 @@ loom/
 │       └── telemetry.py        # OTEL setup, ADOT auto-instrumentation, TelemetryHook
 ├── backend/                    # Backend API (see backend/SPECIFICATIONS.md)
 │   ├── app/
-│   │   ├── main.py
+│   │   ├── main.py             # FastAPI app (docs at /api/docs, /api/redoc, /api/openapi.json)
 │   │   ├── db.py
 │   │   ├── models/
-│   │   │   ├── agent.py
-│   │   │   ├── config_entry.py
-│   │   │   ├── session.py
-│   │   │   ├── invocation.py
-│   │   │   ├── managed_role.py
-│   │   │   ├── authorizer_config.py
-│   │   │   ├── authorizer_credential.py
-│   │   │   ├── permission_request.py
-│   │   │   ├── memory.py
-│   │   │   ├── mcp.py
-│   │   │   ├── a2a.py
-│   │   │   ├── tag_profile.py
-│   │   │   └── audit.py
 │   │   ├── dependencies/
-│   │   │   └── auth.py
 │   │   ├── routers/
-│   │   │   ├── auth.py
-│   │   │   ├── agents.py
-│   │   │   ├── a2a.py
-│   │   │   ├── costs.py
-│   │   │   ├── invocations.py
-│   │   │   ├── logs.py
-│   │   │   ├── memories.py
-│   │   │   ├── mcp.py
-│   │   │   ├── security.py
-│   │   │   ├── settings.py
-│   │   │   ├── traces.py
-│   │   │   ├── admin.py
-│   │   │   └── utils.py
 │   │   └── services/
-│   │       ├── agentcore.py
-│   │       ├── a2a.py
-│   │       ├── cloudwatch.py    # CloudWatch log retrieval with pagination, session-filtered queries, and usage log parsing
-│   │       ├── otel.py          # OTEL log parsing from CloudWatch otel-rt-logs stream
-│   │       ├── observability.py # CloudWatch vended log delivery configuration (USAGE_LOGS, APPLICATION_LOGS)
-│   │       ├── mcp.py
-│   │       ├── memory.py
-│   │       ├── secrets.py
-│   │       ├── cognito.py
-│   │       ├── credential.py
-│   │       ├── deployment.py
-│   │       ├── iam.py
-│   │       ├── jwt_validator.py
-│   │       ├── latency.py
-│   │       ├── tokens.py        # Bedrock CountTokens API with provider guard (Anthropic/Meta only)
-│   │       └── usage_poller.py  # Background poller: updates estimated costs with actual USAGE_LOGS data
 │   ├── scripts/
-│   │   ├── stream.py            # SSE streaming client for CLI invocations
-│   │   ├── migrate_sqlite_to_postgres.py  # SQLite → PostgreSQL migration
-│   │   ├── fix_sequences.py     # PostgreSQL sequence auto-repair
-│   │   └── reset_db.py          # Database reset utility
 │   ├── tests/
-│   ├── iac/                       # Backend infrastructure
-│   │   ├── infra.yaml             # Shared infra: S3 artifact bucket, ECR repos, ACM certificate, ALB, security groups, Route 53
-│   │   ├── rds.yaml               # RDS PostgreSQL with optional RDS Proxy
-│   │   ├── ec2.yaml               # EC2 bastion for SSM tunnel to RDS
-│   │   └── ecs.yaml               # ECS Fargate services (cluster, task definitions, services, auto-scaling)
+│   ├── etc/                     # Backend environment config (app + ECS backend service)
+│   │   └── environment.sh       # Sources account-specific file + shared outputs
+│   ├── iac/                     # Backend infrastructure
+│   │   ├── rds.yaml             # RDS PostgreSQL with optional RDS Proxy
+│   │   ├── ec2.yaml             # EC2 bastion for SSM tunnel to RDS
+│   │   └── ecs.yaml             # Backend ECS Fargate service (task def, service, auto-scaling)
+│   ├── Dockerfile               # Backend container image (Python 3.13 slim + uvicorn)
 │   ├── makefile
-│   ├── SPECIFICATIONS.md
-│   ├── Dockerfile              # Backend container image (Python 3.13 slim + uvicorn)
-│   └── README.md
-├── frontend/                   # Frontend UI (see frontend/SPECIFICATIONS.md)
-│   ├── src/
-│   │   ├── api/
-│   │   ├── components/
-│   │   ├── contexts/
-│   │   ├── hooks/
-│   │   ├── pages/
-│   │   ├── lib/
-│   │   ├── App.tsx
-│   │   └── main.tsx
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── vite.config.ts
-│   ├── Dockerfile              # Frontend container image (multi-stage Node + nginx)
-│   ├── nginx.conf              # nginx SPA config with gzip and cache headers
 │   └── SPECIFICATIONS.md
-├── shared/                    # Shared IaC, deployment, and security
+├── frontend/                    # Frontend UI (see frontend/SPECIFICATIONS.md)
+│   ├── src/
+│   ├── etc/                     # Frontend environment config (ECS frontend service)
+│   │   └── environment.sh       # Sources account-specific file + shared outputs
 │   ├── iac/
-│   │   ├── role.yaml           # SAM template for IAM roles
-│   │   ├── cognito.yaml        # SAM template for Cognito pools, groups, users, scopes
-│   │   ├── infra.yaml          # Shared infra: S3, ECR, ACM, ALB, security groups, Route 53
-│   │   └── ecs.yaml            # ECS Fargate services (cluster, task definitions, auto-scaling)
+│   │   └── ecs.yaml             # Frontend ECS Fargate service (task def, service)
+│   ├── Dockerfile               # Frontend container image (multi-stage Node + nginx)
+│   ├── nginx.conf               # nginx SPA config with gzip and cache headers
+│   ├── makefile
+│   └── SPECIFICATIONS.md
+├── shared/                      # Shared IaC, deployment, and security
+│   ├── iac/
+│   │   ├── role.yaml            # SAM template for IAM roles
+│   │   ├── cognito.yaml         # SAM template for Cognito pools, groups, users, scopes
+│   │   ├── dns.yaml             # Route 53 hosted zone for subdomain delegation
+│   │   ├── infra.yaml           # Shared infra: S3, ECR, ACM, ALB, security groups, Route 53
+│   │   └── ecs.yaml             # ECS Fargate cluster (shared by frontend and backend)
 │   ├── etc/
-│   │   └── environment.sh      # Shared configuration (Cognito, infra, ECS, Docker)
-│   └── makefile                # Cognito, infra, ECS, Docker build/push, deploy
-├── etc/
-│   └── environment.sh          # Source-of-truth for injectable parameters
-├── tmp/
-│   └── latency/                # Reference implementation (read-only)
-├── makefile
+│   │   ├── environment.sh       # Sources account-specific config
+│   │   └── outputs_<profile>.sh # Centralized stack outputs (auto-generated)
+│   ├── scripts/
+│   │   └── capture_outputs.py   # Query all stacks, write outputs + frontend/.env
+│   └── makefile                 # Cognito, infra, ECS, podman build/push, deploy
 ├── CLAUDE.md
 ├── README.md
-└── SPECIFICATIONS.md           # This file (project-level specification)
+└── SPECIFICATIONS.md            # This file (project-level specification)
 ```
 
 ---
@@ -499,19 +445,34 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - **Admin dashboard fixes:** Fixed `page_views_by_page` type mismatch that caused dashboard crash. Custom tooltips on all recharts charts for consistent styling. Theme picker moved from Settings page to admin sidebar for easier access.
 
 ### Phase 20 — Container Deployment to AWS *(Complete)*
-- **Containerization:** `backend/Dockerfile` (Python 3.13-slim, non-root user, uvicorn on port 8000) and `frontend/Dockerfile` (multi-stage: Node 20 build + nginx Alpine serving on port 80). `frontend/nginx.conf` with SPA fallback routing, gzip compression, and immutable asset caching.
-- **Dynamic API base URL:** `frontend/src/api/client.ts` reads `VITE_API_BASE_URL` from Vite build-time env (falls back to `http://localhost:8000` for local dev). Injected via `ARG`/`ENV` in the frontend Dockerfile.
-- **Two-stack deployment architecture:** Long-lived infrastructure (S3, ECR, ACM, ALB, security groups, target groups, Route 53 DNS) is managed in `shared/iac/infra.yaml`. Ephemeral ECS resources (cluster, task definitions, services, auto-scaling) are in `shared/iac/ecs.yaml`, receiving infra outputs as parameters. Both templates are deployed via `shared/makefile`.
-- **ECS Fargate deployment:** SAM template (`shared/iac/ecs.yaml`) deploys frontend and backend as Fargate services, referencing ALB target groups and security groups from the infra stack.
-- **Granular deployment targets:** `shared/makefile` supports `deploy` (full), `deploy.frontend`, and `deploy.backend` for independent container build+push. Docker targets split into `docker.build.frontend`/`docker.build.backend` and `docker.push.frontend`/`docker.push.backend`.
-- **ALB with HTTPS:** HTTPS listener (port 443) with ACM certificate (DNS-validated via Route 53), HTTP-to-HTTPS redirect, TLS 1.3 policy. Path-based routing: `/api/*` and `/health` to backend target group, default to frontend. Route 53 A-record alias for the ALB domain.
+- **Containerization:** `backend/Dockerfile` (Python 3.13-slim, non-root user, uvicorn on port 8000) and `frontend/Dockerfile` (multi-stage: Node 20 build + nginx Alpine serving on port 80). `frontend/nginx.conf` with SPA fallback routing, gzip compression, and immutable asset caching. `.dockerignore` files exclude `.env`, `node_modules`, `dist`, and development artifacts.
+- **Dynamic API base URL:** `frontend/src/api/client.ts` reads `VITE_API_BASE_URL` from Vite build-time env using nullish coalescing (`??`) so empty string (same-origin) works in production while falling back to `http://localhost:8000` for local dev. Injected via `ARG`/`ENV` in the frontend Dockerfile.
+- **Cognito client ID injection:** `VITE_COGNITO_USER_CLIENT_ID` is passed as a Docker build arg during `podman.build.frontend` (sourced from `O_COGNITO_USER_CLIENT_ID` in the outputs file). Required because `.dockerignore` excludes `.env`.
+- **FastAPI docs under /api:** `docs_url="/api/docs"`, `redoc_url="/api/redoc"`, `openapi_url="/api/openapi.json"` so API documentation is accessible through the ALB's `/api/*` path-based routing rule.
+- **Multi-stack deployment architecture:** 10 CloudFormation stacks across 3 directories:
+  - `shared/iac/dns.yaml` — Route 53 hosted zone for subdomain delegation
+  - `shared/iac/infra.yaml` — S3, ECR, ACM, ALB, security groups, target groups, Route 53 A-record
+  - `shared/iac/cognito.yaml` — Cognito User Pool, groups, scopes, users
+  - `shared/iac/role.yaml` — IAM execution roles for agents
+  - `shared/iac/ecs.yaml` — ECS Fargate cluster (shared by frontend and backend)
+  - `frontend/iac/ecs.yaml` — Frontend ECS service (task def, service, public subnets, port 80)
+  - `backend/iac/ecs.yaml` — Backend ECS service (task def, task role, service, auto-scaling, private subnets, port 8000)
+  - `backend/iac/rds.yaml` — RDS PostgreSQL with optional RDS Proxy
+  - `backend/iac/ec2.yaml` — EC2 bastion for SSM tunneling
+- **Centralized stack outputs:** `shared/scripts/capture_outputs.py` queries all stacks and writes `O_*` variables to `shared/etc/outputs_<profile>.sh`. This single file is included by all environment files across shared, frontend, and backend directories. Also writes `VITE_COGNITO_USER_CLIENT_ID` to `frontend/.env`.
+- **Git SHA image tagging:** `IMAGE_TAG := $(shell git rev-parse --short HEAD)` used in all podman build, tag, and push commands. ECR URIs stored without tags in outputs (`O_ECR_FRONTEND_URI`, `O_ECR_BACKEND_URI`); tags appended dynamically at deploy time as `$(O_ECR_*_URI):$(IMAGE_TAG)`.
+- **Cross-platform container builds:** `--platform linux/amd64` on all podman build commands to ensure ECS Fargate compatibility when building on ARM64 Macs (M-series).
+- **Split ECS services:** Cluster is shared (`shared/iac/ecs.yaml`); frontend and backend have independent ECS service stacks in their respective `iac/` directories. Each has its own environment config in `etc/`, including `ecs.*` makefile targets.
+- **4-phase deployment:** Phase 0 (DNS + delegation + ECS service-linked role) → Phase 1 (foundation stacks in parallel) → Phase 2 (capture outputs) → Phase 3 (container build + push + ECS deploy).
+- **Granular deployment targets:** `shared/makefile` supports `deploy` (full), `deploy.frontend`, and `deploy.backend` for independent container build+push+deploy. Podman targets: `podman.build.*`, `podman.push.*`, `podman.login`.
+- **ALB with HTTPS:** HTTPS listener (port 443) with ACM certificate (DNS-validated via Route 53), HTTP-to-HTTPS redirect, TLS 1.3 policy. Path-based routing: `/api/*` and `/health` to backend target group, default to frontend. Route 53 A-record alias for the ALB domain. Health check interval: 60 seconds.
 - **ECR repositories:** CloudFormation-managed ECR repos (frontend + backend) with scan-on-push and lifecycle policies (keep last 10 images).
-- **Cost-optimized configuration:** Fargate Spot capacity provider (base 1 on-demand, weight on Spot), modest task sizes (0.25 vCPU/0.5 GB frontend, 0.5 vCPU/1 GB backend), desired count 1 with auto-scaling (CPU target tracking at 70%).
-- **Security groups:** ALB allows inbound 443/80 from anywhere; ECS tasks allow inbound only from ALB security group.
-- **IAM roles:** Task execution role (ECR pull, CloudWatch Logs, Secrets Manager for DB URL). Backend task role (Bedrock, Bedrock AgentCore, S3, CloudWatch Logs, IAM PassRole, Secrets Manager, Cognito, CloudFormation).
+- **ECS Fargate configuration:** Fargate and Fargate Spot capacity providers on the cluster. Configurable task sizes via environment variables. Backend service includes auto-scaling (CPU target tracking at 70%).
+- **Security groups:** ALB allows inbound 443/80 from anywhere; ECS tasks allow inbound only from ALB security group on ports 80 (frontend) and 8000 (backend).
+- **IAM roles:** Frontend: execution role (ECR pull, CloudWatch Logs). Backend: execution role (ECR pull, CloudWatch Logs, Secrets Manager for DB URL) + task role (Bedrock, Bedrock AgentCore, S3, CloudWatch Logs, IAM PassRole, Secrets Manager, Cognito, CloudFormation).
 - **Dynamic CORS:** `LOOM_ALLOWED_ORIGINS` env var (comma-separated) adds origins to the default localhost entries. Backend reads this for CORSMiddleware configuration.
 - **Database URL injection:** `LOOM_DATABASE_URL` injected via ECS Secrets (ValueFrom) referencing the RDS stack's Secrets Manager ARN with JSON key extraction.
-- **Makefile targets:** `docker.build`, `docker.push`, `docker.login`, `ecs` (package + deploy), `ecs.outputs`, `ecs.delete`, `deploy` (full end-to-end build + push + deploy).
+- **Cross-account DNS delegation:** DNS stack creates a Route 53 hosted zone; if the parent domain is in a different account, NS delegation records must be added in the parent account before deploying the infra stack.
 
 ### Phase 21 — Advanced Operations
 - Real-time metrics auto-refresh.

@@ -120,8 +120,14 @@ backend/
 │   ├── test_traces.py       # Trace router + OTEL parsing tests (12 tests)
 │   └── test_admin_audit.py  # Admin audit router tests (14 tests: login, action, pageview, sessions, summary)
 ├── etc/
-│   └── environment.sh.example  # Example environment configuration template
-├── Dockerfile                 # Backend container image (Python 3.13 slim + uvicorn)
+│   ├── environment.sh           # Sources account-specific file + shared outputs
+│   └── environment.sh.example   # Example environment configuration template
+├── iac/
+│   ├── rds.yaml                 # RDS PostgreSQL with optional RDS Proxy
+│   ├── ec2.yaml                 # EC2 bastion for SSM tunnel to RDS
+│   └── ecs.yaml                 # Backend ECS Fargate service (task def, task role, service, auto-scaling)
+├── .dockerignore                # Excludes .env, .venv, __pycache__, tests, etc.
+├── Dockerfile                   # Backend container image (Python 3.13 slim + uvicorn)
 ├── makefile
 ├── pyproject.toml
 └── requirements.txt
@@ -1238,6 +1244,13 @@ ec2.package          # SAM package for EC2 stack
 ec2.deploy           # SAM deploy for EC2 stack
 ec2.outputs          # Query EC2 stack outputs
 ec2.delete           # Delete EC2 stack
+
+# ECS backend service
+ecs                  # Package and deploy backend ECS service
+ecs.package          # SAM package for backend ECS stack
+ecs.deploy           # SAM deploy for backend ECS stack (pImageUri includes git SHA tag)
+ecs.outputs          # Query backend ECS stack outputs
+ecs.delete           # Delete backend ECS stack
 
 # SSM tunnel (port forwarding to RDS)
 tunnel               # Start SSM port forwarding session to RDS

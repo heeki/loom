@@ -272,7 +272,7 @@ Resources:
       Port: 80
       TargetType: ip
       HealthCheckPath: /
-      HealthCheckIntervalSeconds: 30
+      HealthCheckIntervalSeconds: 60
       HealthyThresholdCount: 2
       UnhealthyThresholdCount: 3
       HealthCheckTimeoutSeconds: 5
@@ -293,7 +293,7 @@ Resources:
       Port: 8000
       TargetType: ip
       HealthCheckPath: /health
-      HealthCheckIntervalSeconds: 30
+      HealthCheckIntervalSeconds: 60
       HealthyThresholdCount: 2
       UnhealthyThresholdCount: 3
       HealthCheckTimeoutSeconds: 5
