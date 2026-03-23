@@ -127,7 +127,7 @@ backend/
 │   ├── ec2.yaml                 # EC2 bastion for SSM tunnel to RDS
 │   └── ecs.yaml                 # Backend ECS Fargate service (task def, task role, service, auto-scaling)
 ├── .dockerignore                # Excludes .env, .venv, __pycache__, tests, etc.
-├── Dockerfile                   # Backend container image (Python 3.13 slim + uvicorn)
+├── Dockerfile                   # Backend container image (Python 3.13 slim + uvicorn + agent source)
 ├── makefile
 ├── pyproject.toml
 └── requirements.txt
@@ -1008,8 +1008,10 @@ Handles agent artifact build and runtime lifecycle:
 
 AgentCore credential provider management:
 
-- `create_oauth2_credential_provider(name: str, client_id: str, client_secret: str, auth_server_url: str, region: str, tags: dict | None) -> dict` — creates an OAuth2 credential provider using the `CustomOauth2` vendor type. Retries with exponential backoff (4 retries, delays 2s/4s/8s/16s) on transient failures. Raises on exhaustion.
+- `create_oauth2_credential_provider(name: str, client_id: str, client_secret: str, auth_server_url: str, region: str, tags: dict | None) -> dict` — creates or updates an OAuth2 credential provider using the `CustomOauth2` vendor type. If creation fails with a `ValidationException` indicating the provider already exists, automatically falls back to `update_oauth2_credential_provider` (without tags, which the update API does not accept). Retries other transient failures with exponential backoff (4 retries, delays 2s/4s/8s/16s). Raises on exhaustion.
 - `delete_credential_provider(provider_name: str, region: str)` — deletes an OAuth2 credential provider by name.
+
+**IAM permissions required:** The ECS task role needs both `bedrock-agentcore:*` actions (for the control plane API) and Secrets Manager permissions scoped to `bedrock-agentcore-identity!*` secrets. Credential providers internally store OAuth2 client credentials in Secrets Manager under this prefix. The task role requires `secretsmanager:GetSecretValue`, `CreateSecret`, `DeleteSecret`, and `PutSecretValue` on `arn:aws:secretsmanager:*:${AccountId}:secret:bedrock-agentcore-identity!*`. The CloudWatch Logs policy covers both `/aws/bedrock-agentcore/*` and `/aws/vendedlogs/bedrock-agentcore/*` log group prefixes (the latter is used for agent observability vended logs).
 
 ### `services/jwt_validator.py`
 
@@ -1135,7 +1137,7 @@ Deployment runs asynchronously via FastAPI `BackgroundTasks` with progressive `d
 1. User submits a deploy form with agent configuration (model and IAM role are required).
 2. Backend creates the agent record with `deployment_status="initializing"`, immediately applies resolved tags to the DB record (so tag-based resource filtering is active from the first poll), and returns immediately with HTTP 202.
 3. Background task progresses through deployment phases:
-   - **`creating_credentials`**: For each MCP server or A2A agent with OAuth2 auth, calls `create_oauth2_credential_provider` (vendor=`CustomOauth2`, using `discoveryUrl` from config) with exponential backoff retry. Stores credential provider names in `AGENT_CONFIG_JSON` under `integrations.mcp_servers[].auth.credential_provider_name` or `integrations.a2a_agents[].auth.credential_provider_name`. If credential provider creation fails after all retries, sets `deployment_status="credential_creation_failed"` and returns without deploying.
+   - **`creating_credentials`**: For each MCP server or A2A agent with OAuth2 auth, calls `create_oauth2_credential_provider` (vendor=`CustomOauth2`, using `discoveryUrl` from config) with exponential backoff retry. If the provider already exists (e.g., redeployment), automatically falls back to `update_oauth2_credential_provider` to apply the latest configuration. Stores credential provider names in `AGENT_CONFIG_JSON` under `integrations.mcp_servers[].auth.credential_provider_name` or `integrations.a2a_agents[].auth.credential_provider_name`. If credential provider creation fails after all retries, sets `deployment_status="credential_creation_failed"` and returns without deploying.
    - **`creating_role`**: Creates or validates the IAM execution role (if needed).
    - **`building_artifact`**: Builds the deployment artifact by copying source from `agents/strands_agent/src/`, running `pip install` against `requirements.txt` targeting `linux/arm64` (`manylinux2014_aarch64`), fixing console script shebangs (e.g. `opentelemetry-instrument`) to use `#!/usr/bin/env python3` for Linux compatibility, zipping the package and uploading it to S3.
    - **`deploying`**: Calls `create_agent_runtime` with the artifact location, environment variables (including `OTEL_SERVICE_NAME` set to the agent name and `AGENT_OBSERVABILITY_ENABLED=true` to activate the `aws-opentelemetry-distro` export pipeline), network/protocol/lifecycle/authorizer configuration.

@@ -272,7 +272,7 @@ IMAGE_TAG := $(shell git rev-parse --short HEAD)
 podman.build: podman.build.backend podman.build.frontend
 
 podman.build.backend:
-	podman build --platform linux/amd64 -t $(P_ECR_BACKEND_REPO):$(IMAGE_TAG) ../backend
+	podman build --platform linux/amd64 -f ../backend/Dockerfile -t $(P_ECR_BACKEND_REPO):$(IMAGE_TAG) ..
 
 podman.build.frontend:
 	podman build --platform linux/amd64 --build-arg VITE_COGNITO_USER_CLIENT_ID=$(O_COGNITO_USER_CLIENT_ID) -t $(P_ECR_FRONTEND_REPO):$(IMAGE_TAG) ../frontend

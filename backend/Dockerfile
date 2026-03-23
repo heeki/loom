@@ -4,10 +4,14 @@ RUN groupadd --system appuser && useradd --system --gid appuser appuser
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app/ ./app/
+COPY backend/app/ ./app/
+
+# Agent source for build_agent_artifact (deployment.py resolves via parents[3] -> /)
+COPY agents/strands_agent/src/ /agents/strands_agent/src/
+COPY agents/strands_agent/requirements.txt /agents/strands_agent/requirements.txt
 
 EXPOSE 8000
 
