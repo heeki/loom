@@ -105,56 +105,104 @@ def list_memories(region: str = "us-east-1") -> dict[str, Any]:
 def list_memory_records(
     memory_id: str,
     actor_id: str,
+    strategies: list[dict] | None = None,
     max_records: int = 100,
     region: str = "us-east-1",
 ) -> list[dict[str, Any]]:
     """
     List stored memory records for a specific actor (user) within a memory resource.
 
-    Paginates automatically and returns up to max_records results.
+    The data plane ``list_memory_records`` API requires a ``namespace`` parameter
+    (not ``actorId``).  Each LTM strategy defines a namespace template such as
+    ``/strategy/{memoryStrategyId}/actor/{actorId}/``.  This function queries
+    each strategy's namespace with the given ``actor_id`` substituted and
+    aggregates the results.
 
     Args:
         memory_id: The AWS memory resource ID (e.g. my_memory-zYcvlyGXsK)
         actor_id: The actor identifier to scope the query (Cognito username)
+        strategies: List of strategy dicts from the Memory model's
+            ``strategies_response``.  Each dict should contain ``strategyId``
+            and ``namespaces`` (list of namespace templates).
         max_records: Maximum total records to return across all pages
         region: AWS region name
 
     Returns:
         List of memory record dicts with keys:
-        memoryRecordId, content (text), memoryStrategyId, createdAt, updatedAt
+        memoryRecordId, text, memoryStrategyId, createdAt, updatedAt
     """
     import boto3
 
-    client = boto3.client("bedrock-agentcore-control", region_name=region)
+    # list_memory_records is a data plane operation (bedrock-agentcore),
+    # not a control plane operation (bedrock-agentcore-control).
+    client = boto3.client("bedrock-agentcore", region_name=region)
+
+    # Build the list of namespaces to query by substituting actor_id into
+    # each strategy's namespace template.
+    #
+    # strategies_response from AWS uses a tagged union format where each
+    # entry is e.g. {"userPreferenceMemoryStrategy": {"strategyId": "...", "namespaces": [...]}}
+    # We need to unwrap the inner dict to access strategyId and namespaces.
+    namespaces: list[str] = []
+    for strat in (strategies or []):
+        # Unwrap tagged union: get the inner dict from the first (only) key
+        inner = strat
+        if "strategyId" not in strat:
+            for value in strat.values():
+                if isinstance(value, dict) and "strategyId" in value:
+                    inner = value
+                    break
+
+        strat_id = inner.get("strategyId", "")
+        for ns_template in inner.get("namespaces", []):
+            ns = ns_template.replace("{memoryStrategyId}", strat_id).replace("{actorId}", actor_id)
+            # Remove remaining placeholders (e.g. {sessionId} for summary strategies)
+            # by trimming at the first unresolved '{'.
+            brace = ns.find("{")
+            if brace != -1:
+                ns = ns[:brace]
+            namespaces.append(ns)
+
+    # Fallback: if no strategies provided, try the root namespace
+    if not namespaces:
+        namespaces = ["/"]
 
     records: list[dict[str, Any]] = []
-    next_token: str | None = None
 
-    while len(records) < max_records:
-        params: dict[str, Any] = {
-            "memoryId": memory_id,
-            "actorId": actor_id,
-            "maxResults": min(max_records - len(records), 50),
-        }
-        if next_token:
-            params["nextToken"] = next_token
+    for namespace in namespaces:
+        next_token: str | None = None
+        while len(records) < max_records:
+            params: dict[str, Any] = {
+                "memoryId": memory_id,
+                "namespace": namespace,
+                "maxResults": min(max_records - len(records), 50),
+            }
+            if next_token:
+                params["nextToken"] = next_token
 
-        response = client.list_memory_records(**params)
+            response = client.list_memory_records(**params)
 
-        for raw in response.get("memoryRecords", []):
-            content = raw.get("content", {})
-            text = content.get("text", "") if isinstance(content, dict) else str(content)
-            records.append({
-                "memoryRecordId": raw.get("memoryRecordId", ""),
-                "text": text,
-                "memoryStrategyId": raw.get("memoryStrategyId", ""),
-                "createdAt": raw.get("createdAt", ""),
-                "updatedAt": raw.get("updatedAt", ""),
-            })
+            for raw in response.get("memoryRecords", []):
+                # R5: Improved content field mapping to handle various structures
+                content = raw.get("content", {})
+                if isinstance(content, dict):
+                    text = content.get("text", "")
+                elif isinstance(content, str):
+                    text = content
+                else:
+                    text = str(content) if content else ""
 
-        next_token = response.get("nextToken")
-        if not next_token:
-            break
+                records.append({
+                    "memoryRecordId": raw.get("memoryRecordId", ""),
+                    "text": text,
+                    "memoryStrategyId": raw.get("memoryStrategyId", ""),
+                    "createdAt": raw.get("createdAt", ""),
+                    "updatedAt": raw.get("updatedAt", ""),
+                })
+
+            next_token = response.get("nextToken")
+            if not next_token:
+                break
 
     return records
 

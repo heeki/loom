@@ -189,7 +189,7 @@ backend/
 │       ├── latency.py       # Pure computation: cold_start_latency_ms, client_duration_ms
 │       ├── a2a.py           # A2A Agent Card fetching, parsing, connection test
 │       ├── mcp.py           # MCP connection test + tool fetch stubs
-│       ├── memory.py        # boto3 wrapper: AgentCore Memory CRUD
+│       ├── memory.py        # boto3 wrapper: AgentCore Memory CRUD + LTM record queries
 │       ├── secrets.py       # Secrets Manager wrapper with caching
 │       ├── tokens.py        # Bedrock CountTokens API with provider guard
 │       └── usage_poller.py  # Background poller: estimated → actual costs
@@ -198,7 +198,9 @@ backend/
 │   ├── migrate_sqlite_to_postgres.py  # SQLite → PostgreSQL migration
 │   ├── fix_sequences.py     # PostgreSQL sequence auto-repair
 │   ├── reset_db.py          # Database reset utility
-│   └── debug_session_correlation.py  # Debug script to correlate session IDs
+│   ├── debug_session_correlation.py  # Debug script to correlate session IDs
+│   ├── query_memory_records.py  # Query LTM records by actor ID (resolves strategy namespaces)
+│   └── list_memory_records.py   # List LTM records by memory ID and namespace
 ├── tests/
 │   ├── test_agents_deploy.py
 │   ├── test_a2a.py          # A2A agent CRUD, Agent Card, skills, access
@@ -378,8 +380,11 @@ Runtime costs are recomputed from `client_duration_ms` at view time using curren
 | `POST` | `/api/memories/{memory_id}/refresh` | Refresh memory status from AWS |
 | `DELETE` | `/api/memories/{memory_id}?cleanup_aws=true` | Delete a memory resource; optionally delete from AWS |
 | `DELETE` | `/api/memories/{memory_id}/purge` | Remove from local DB only (no AWS call) |
+| `GET` | `/api/memories/{memory_id}/records` | Retrieve stored LTM records for the authenticated user |
 
 Supports five memory strategy types: semantic, summary, user_preference, episodic, and custom. Strategies are mapped to AWS tagged union format on creation. The delete endpoint supports async deletion: when `cleanup_aws=true`, it initiates deletion in AWS and marks the resource as DELETING. The frontend polls via refresh and uses purge to clean up locally after AWS confirms deletion (404).
+
+The records endpoint uses the **data plane** client (`bedrock-agentcore`) — not the control plane — and queries by namespace, substituting the actor ID and strategy IDs from the memory's strategy configuration. The service unwraps the AWS tagged union strategy format (e.g. `{"userPreferenceMemoryStrategy": {"strategyId": "...", "namespaces": [...]}}`) to extract namespace templates. Records are scoped to the authenticated user's identity (`username or sub or "loom-agent"` fallback chain). Content field mapping handles dict, string, and fallback structures. Records with empty text are filtered out. INFO-level debug logging is emitted at each stage.
 
 ### MCP Server Management
 
@@ -549,6 +554,13 @@ make tunnel               # Start SSM tunnel to RDS
 # AgentCore credentials
 make agentcore.credentials.list       # List OAuth2 credential providers
 make agentcore.credentials.delete-all # Delete all credential providers
+
+# AgentCore memory queries
+make agentcore.memory.list                  # List all memory resources
+make agentcore.memory.get                   # Get a specific memory resource by P_MEMORY_ID
+make agentcore.memory.records               # Query LTM records by P_MEMORY_ID and P_MEMORY_ACTOR_ID
+make agentcore.memory.records-by-namespace  # List LTM records by P_MEMORY_ID and P_MEMORY_NAMESPACE
+make agentcore.memory.extraction-jobs       # List extraction jobs for P_MEMORY_ID
 ```
 
 ## Tests

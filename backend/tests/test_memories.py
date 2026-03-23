@@ -378,6 +378,311 @@ class TestMemoriesRouter(unittest.TestCase):
         response = self.client.get("/api/memories/999")
         self.assertEqual(response.status_code, 404)
 
+    @patch("app.routers.memories.svc_list_memory_records")
+    @patch("app.routers.memories.svc_create_memory")
+    def test_get_memory_records_actor_id_scoping(self, mock_create, mock_list_records):
+        """Test that memory records are scoped to the authenticated user's actor_id."""
+        # Create a memory
+        mock_create.return_value = {
+            "memory": {
+                "arn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-rec1",
+                "id": "mem-rec1",
+                "name": "record_test",
+                "status": "ACTIVE",
+                "eventExpiryDuration": 30,
+            }
+        }
+
+        create_response = self.client.post("/api/memories", json={
+            "name": "record_test",
+            "event_expiry_duration": 30,
+        })
+        mem_id = create_response.json()["id"]
+
+        # Mock the list_memory_records service to return sample records
+        mock_list_records.return_value = [
+            {
+                "memoryRecordId": "rec-1",
+                "text": "User preference: likes dark mode",
+                "memoryStrategyId": "strat-1",
+                "createdAt": "2024-01-01T00:00:00Z",
+                "updatedAt": "2024-01-01T00:00:00Z",
+            },
+            {
+                "memoryRecordId": "rec-2",
+                "text": "Previous conversation about Python",
+                "memoryStrategyId": "strat-2",
+                "createdAt": "2024-01-02T00:00:00Z",
+                "updatedAt": "2024-01-02T00:00:00Z",
+            },
+        ]
+
+        # Get memory records
+        response = self.client.get(f"/api/memories/{mem_id}/records")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Verify the response structure
+        self.assertEqual(data["memory_id"], "mem-rec1")
+        self.assertIn("actor_id", data)
+        self.assertEqual(len(data["records"]), 2)
+        self.assertEqual(data["records"][0]["text"], "User preference: likes dark mode")
+        self.assertEqual(data["records"][1]["text"], "Previous conversation about Python")
+
+        # Verify the service was called with the correct actor_id (from JWT)
+        # The mock user has username "test" by default
+        mock_list_records.assert_called_once()
+        call_kwargs = mock_list_records.call_args[1]
+        self.assertEqual(call_kwargs["memory_id"], "mem-rec1")
+        # Actor ID should be derived from JWT: username or sub or "loom-agent"
+        self.assertIn("actor_id", call_kwargs)
+
+    @patch("app.routers.memories.svc_list_memory_records")
+    @patch("app.routers.memories.svc_create_memory")
+    def test_get_memory_records_user_isolation(self, mock_create, mock_list_records):
+        """Test that users cannot retrieve other users' records via actor_id tampering.
+
+        The endpoint always uses the JWT username, not a user-supplied parameter.
+        """
+        # Create a memory
+        mock_create.return_value = {
+            "memory": {
+                "arn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-iso1",
+                "id": "mem-iso1",
+                "name": "isolation_test",
+                "status": "ACTIVE",
+                "eventExpiryDuration": 30,
+            }
+        }
+
+        create_response = self.client.post("/api/memories", json={
+            "name": "isolation_test",
+            "event_expiry_duration": 30,
+        })
+        mem_id = create_response.json()["id"]
+
+        # Mock returns empty list (user has no records)
+        mock_list_records.return_value = []
+
+        # Get memory records - the endpoint does NOT accept actor_id as a parameter
+        response = self.client.get(f"/api/memories/{mem_id}/records")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data["records"]), 0)
+
+        # Verify the actor_id is derived from JWT, not from query params
+        # There's no way for a user to supply a different actor_id
+        mock_list_records.assert_called_once()
+        call_kwargs = mock_list_records.call_args[1]
+        # The actor_id should always be from the JWT token (username/sub/loom-agent)
+        # not from any user input
+        self.assertIn("actor_id", call_kwargs)
+
+    @patch("app.routers.memories.svc_list_memory_records")
+    @patch("app.routers.memories.svc_create_memory")
+    def test_get_memory_records_content_field_mapping(self, mock_create, mock_list_records):
+        """Test that content field mapping handles various structures correctly."""
+        # Create a memory
+        mock_create.return_value = {
+            "memory": {
+                "arn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-map1",
+                "id": "mem-map1",
+                "name": "mapping_test",
+                "status": "ACTIVE",
+                "eventExpiryDuration": 30,
+            }
+        }
+
+        create_response = self.client.post("/api/memories", json={
+            "name": "mapping_test",
+            "event_expiry_duration": 30,
+        })
+        mem_id = create_response.json()["id"]
+
+        # Mock returns records with text content
+        mock_list_records.return_value = [
+            {
+                "memoryRecordId": "rec-1",
+                "text": "Content as text",
+                "memoryStrategyId": "strat-1",
+                "createdAt": "2024-01-01T00:00:00Z",
+                "updatedAt": "2024-01-01T00:00:00Z",
+            },
+            {
+                "memoryRecordId": "rec-2",
+                "text": "Another text record",
+                "memoryStrategyId": "strat-2",
+                "createdAt": "2024-01-02T00:00:00Z",
+                "updatedAt": "2024-01-02T00:00:00Z",
+            },
+        ]
+
+        # Get memory records
+        response = self.client.get(f"/api/memories/{mem_id}/records")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Verify both records are returned with text content
+        self.assertEqual(len(data["records"]), 2)
+        self.assertEqual(data["records"][0]["text"], "Content as text")
+        self.assertEqual(data["records"][1]["text"], "Another text record")
+
+    @patch("app.routers.memories.svc_list_memory_records")
+    @patch("app.routers.memories.svc_create_memory")
+    def test_get_memory_records_filters_empty_text(self, mock_create, mock_list_records):
+        """Test that records with empty text are filtered out."""
+        # Create a memory
+        mock_create.return_value = {
+            "memory": {
+                "arn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/mem-filt1",
+                "id": "mem-filt1",
+                "name": "filter_test",
+                "status": "ACTIVE",
+                "eventExpiryDuration": 30,
+            }
+        }
+
+        create_response = self.client.post("/api/memories", json={
+            "name": "filter_test",
+            "event_expiry_duration": 30,
+        })
+        mem_id = create_response.json()["id"]
+
+        # Mock returns mix of records with and without text
+        mock_list_records.return_value = [
+            {
+                "memoryRecordId": "rec-1",
+                "text": "Valid text",
+                "memoryStrategyId": "strat-1",
+                "createdAt": "2024-01-01T00:00:00Z",
+                "updatedAt": "2024-01-01T00:00:00Z",
+            },
+            {
+                "memoryRecordId": "rec-2",
+                "text": "",  # Empty text - should be filtered
+                "memoryStrategyId": "strat-2",
+                "createdAt": "2024-01-02T00:00:00Z",
+                "updatedAt": "2024-01-02T00:00:00Z",
+            },
+            {
+                "memoryRecordId": "rec-3",
+                "text": "Another valid text",
+                "memoryStrategyId": "strat-3",
+                "createdAt": "2024-01-03T00:00:00Z",
+                "updatedAt": "2024-01-03T00:00:00Z",
+            },
+        ]
+
+        # Get memory records
+        response = self.client.get(f"/api/memories/{mem_id}/records")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        # Verify only records with non-empty text are returned
+        self.assertEqual(len(data["records"]), 2)
+        self.assertEqual(data["records"][0]["text"], "Valid text")
+        self.assertEqual(data["records"][1]["text"], "Another valid text")
+
+    @patch("app.routers.memories.svc_create_memory")
+    def test_get_memory_records_no_memory_id(self, mock_create):
+        """Test that getting records for a memory without memory_id returns empty list."""
+        # Create a memory without memory_id (incomplete state)
+        memory = Memory(
+            name="incomplete_memory",
+            region="us-east-1",
+            account_id="123456789012",
+            status="CREATING",
+            event_expiry_duration=30,
+        )
+        self.session.add(memory)
+        self.session.commit()
+        self.session.refresh(memory)
+
+        # Get memory records
+        response = self.client.get(f"/api/memories/{memory.id}/records")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["memory_id"], "")
+        self.assertEqual(len(data["records"]), 0)
+
+
+class TestListMemoryRecordsService(unittest.TestCase):
+    """Unit tests for the list_memory_records service function."""
+
+    @patch("boto3.client")
+    def test_tagged_union_strategy_unwrapping(self, mock_boto3_client):
+        """Test that AWS tagged union strategy format is correctly unwrapped.
+
+        The AWS get_memory response returns strategies in tagged union format:
+        [{"userPreferenceMemoryStrategy": {"strategyId": "...", "namespaces": [...]}}]
+        The service must unwrap the inner dict to extract strategyId and namespaces.
+        """
+        from app.services.memory import list_memory_records
+
+        mock_client = MagicMock()
+        mock_boto3_client.return_value = mock_client
+        mock_client.list_memory_records.return_value = {"memoryRecords": []}
+
+        # AWS tagged union format (as stored in strategies_response)
+        strategies = [
+            {
+                "userPreferenceMemoryStrategy": {
+                    "name": "test_user_preference",
+                    "strategyId": "test_user_preference-NyV5t68Cuo",
+                    "namespaces": ["/strategy/{memoryStrategyId}/actor/{actorId}/"],
+                }
+            },
+            {
+                "summaryMemoryStrategy": {
+                    "name": "test_summary",
+                    "strategyId": "test_summary-abc123",
+                    "namespaces": ["/strategy/{memoryStrategyId}/actor/{actorId}/session/{sessionId}"],
+                }
+            },
+        ]
+
+        list_memory_records(
+            memory_id="test-abc",
+            actor_id="test-user",
+            strategies=strategies,
+            region="us-east-1",
+        )
+
+        # Verify it queried with correctly resolved namespaces
+        calls = mock_client.list_memory_records.call_args_list
+        queried_namespaces = [c[1]["namespace"] for c in calls]
+
+        self.assertIn("/strategy/test_user_preference-NyV5t68Cuo/actor/test-user/", queried_namespaces)
+        # Summary namespace should be truncated at {sessionId}
+        self.assertIn("/strategy/test_summary-abc123/actor/test-user/session/", queried_namespaces)
+
+    @patch("boto3.client")
+    def test_flat_strategy_format(self, mock_boto3_client):
+        """Test that flat strategy dicts (already unwrapped) still work."""
+        from app.services.memory import list_memory_records
+
+        mock_client = MagicMock()
+        mock_boto3_client.return_value = mock_client
+        mock_client.list_memory_records.return_value = {"memoryRecords": []}
+
+        # Flat format (strategyId at top level)
+        strategies = [
+            {
+                "strategyId": "strat-flat",
+                "namespaces": ["/strategy/{memoryStrategyId}/actor/{actorId}/"],
+            },
+        ]
+
+        list_memory_records(
+            memory_id="test-abc",
+            actor_id="test-user",
+            strategies=strategies,
+            region="us-east-1",
+        )
+
+        call_kwargs = mock_client.list_memory_records.call_args[1]
+        self.assertEqual(call_kwargs["namespace"], "/strategy/strat-flat/actor/test-user/")
+
 
 if __name__ == "__main__":
     unittest.main()
