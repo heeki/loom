@@ -10,6 +10,8 @@ from app.main import app
 from app.db import Base, get_db
 from app.models.agent import Agent
 from app.models.config_entry import ConfigEntry
+from app.models.mcp import McpServer, McpServerAccess
+from app.models.a2a import A2aAgent, A2aAgentAccess
 
 
 class TestAgentsDeployRouter(unittest.TestCase):
@@ -680,6 +682,184 @@ class TestAgentsDeployRouter(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("MCP server IDs not found", response.json()["detail"])
+
+    @patch("app.routers.agents.create_runtime")
+    @patch("app.routers.agents.build_agent_artifact")
+    @patch("app.routers.agents.create_execution_role")
+    def test_deploy_agent_with_mcp_server_auto_grants_access(
+        self, mock_create_role, mock_build_artifact, mock_create_runtime
+    ):
+        """Test that deploying agent with MCP server that has existing access rules auto-creates access."""
+        # Create an MCP server
+        mcp_server = McpServer(
+            name="test-mcp-server",
+            endpoint_url="http://test.example.com",
+            transport_type="sse",
+            auth_type="none",
+        )
+        self.session.add(mcp_server)
+        self.session.commit()
+        self.session.refresh(mcp_server)
+
+        # Create an existing access rule for a different agent (persona_id=999)
+        existing_access = McpServerAccess(
+            server_id=mcp_server.id,
+            persona_id=999,
+            access_level="all_tools",
+            allowed_tool_names=None
+        )
+        self.session.add(existing_access)
+        self.session.commit()
+
+        # Mock deployment services
+        mock_create_role.return_value = "arn:aws:iam::123456789012:role/loom-agent-autogrant-test"
+        mock_build_artifact.return_value = ("my-bucket", "artifacts/agent.zip")
+        mock_create_runtime.return_value = {
+            "agentRuntimeArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/rt-autogrant",
+            "agentRuntimeId": "rt-autogrant",
+            "status": "ACTIVE",
+        }
+
+        # Deploy agent with MCP server
+        response = self.client.post(
+            "/api/agents",
+            json={
+                "source": "deploy",
+                "name": "autogrant_test_agent",
+                "model_id": "us.anthropic.claude-sonnet-4-6",
+                "mcp_servers": [mcp_server.id],
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        # Check that the agent was created and access was auto-granted
+        agent = self.session.query(Agent).filter(Agent.name == "autogrant_test_agent").first()
+        self.assertIsNotNone(agent)
+
+        # Check that access rule was created for the new agent
+        new_access = self.session.query(McpServerAccess).filter(
+            McpServerAccess.server_id == mcp_server.id,
+            McpServerAccess.persona_id == agent.id
+        ).first()
+        self.assertIsNotNone(new_access)
+        self.assertEqual(new_access.access_level, "all_tools")
+        self.assertIsNone(new_access.allowed_tool_names)
+
+    @patch("app.routers.agents.create_runtime")
+    @patch("app.routers.agents.build_agent_artifact")
+    @patch("app.routers.agents.create_execution_role")
+    def test_deploy_agent_with_mcp_server_no_existing_rules_no_autogrant(
+        self, mock_create_role, mock_build_artifact, mock_create_runtime
+    ):
+        """Test that deploying agent with MCP server that has NO access rules does not auto-grant."""
+        # Create an MCP server WITHOUT any access rules
+        mcp_server = McpServer(
+            name="test-mcp-server-no-rules",
+            endpoint_url="http://test-no-rules.example.com",
+            transport_type="sse",
+            auth_type="none",
+        )
+        self.session.add(mcp_server)
+        self.session.commit()
+        self.session.refresh(mcp_server)
+
+        # Mock deployment services
+        mock_create_role.return_value = "arn:aws:iam::123456789012:role/loom-agent-no-autogrant"
+        mock_build_artifact.return_value = ("my-bucket", "artifacts/agent.zip")
+        mock_create_runtime.return_value = {
+            "agentRuntimeArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/rt-no-autogrant",
+            "agentRuntimeId": "rt-no-autogrant",
+            "status": "ACTIVE",
+        }
+
+        # Deploy agent with MCP server
+        response = self.client.post(
+            "/api/agents",
+            json={
+                "source": "deploy",
+                "name": "no_autogrant_test_agent",
+                "model_id": "us.anthropic.claude-sonnet-4-6",
+                "mcp_servers": [mcp_server.id],
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        # Check that the agent was created
+        agent = self.session.query(Agent).filter(Agent.name == "no_autogrant_test_agent").first()
+        self.assertIsNotNone(agent)
+
+        # Check that NO access rule was created (since there were no existing rules)
+        access_count = self.session.query(McpServerAccess).filter(
+            McpServerAccess.server_id == mcp_server.id,
+            McpServerAccess.persona_id == agent.id
+        ).count()
+        self.assertEqual(access_count, 0)
+
+    @patch("app.routers.agents.create_runtime")
+    @patch("app.routers.agents.build_agent_artifact")
+    @patch("app.routers.agents.create_execution_role")
+    def test_deploy_agent_with_a2a_agent_auto_grants_access(
+        self, mock_create_role, mock_build_artifact, mock_create_runtime
+    ):
+        """Test that deploying agent with A2A agent that has existing access rules auto-creates access."""
+        # Create an A2A agent
+        a2a_agent = A2aAgent(
+            name="test-a2a-agent",
+            base_url="http://a2a.example.com",
+            description="Test A2A agent",
+            agent_version="1.0.0",
+            auth_type="none",
+        )
+        self.session.add(a2a_agent)
+        self.session.commit()
+        self.session.refresh(a2a_agent)
+
+        # Create an existing access rule for a different agent (persona_id=888)
+        existing_access = A2aAgentAccess(
+            agent_id=a2a_agent.id,
+            persona_id=888,
+            access_level="all_skills",
+            allowed_skill_ids=None
+        )
+        self.session.add(existing_access)
+        self.session.commit()
+
+        # Mock deployment services
+        mock_create_role.return_value = "arn:aws:iam::123456789012:role/loom-agent-a2a-autogrant"
+        mock_build_artifact.return_value = ("my-bucket", "artifacts/agent.zip")
+        mock_create_runtime.return_value = {
+            "agentRuntimeArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/rt-a2a-autogrant",
+            "agentRuntimeId": "rt-a2a-autogrant",
+            "status": "ACTIVE",
+        }
+
+        # Deploy agent with A2A agent
+        response = self.client.post(
+            "/api/agents",
+            json={
+                "source": "deploy",
+                "name": "a2a_autogrant_test_agent",
+                "model_id": "us.anthropic.claude-sonnet-4-6",
+                "a2a_agents": [a2a_agent.id],
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        # Check that the agent was created and access was auto-granted
+        agent = self.session.query(Agent).filter(Agent.name == "a2a_autogrant_test_agent").first()
+        self.assertIsNotNone(agent)
+
+        # Check that access rule was created for the new agent
+        new_access = self.session.query(A2aAgentAccess).filter(
+            A2aAgentAccess.agent_id == a2a_agent.id,
+            A2aAgentAccess.persona_id == agent.id
+        ).first()
+        self.assertIsNotNone(new_access)
+        self.assertEqual(new_access.access_level, "all_skills")
+        self.assertIsNone(new_access.allowed_skill_ids)
 
 
 if __name__ == "__main__":

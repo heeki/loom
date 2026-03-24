@@ -603,7 +603,7 @@ Cognito client secrets are password-masked in forms. Secrets are sent to the bac
   - **Type groups**: `t-admin` (admin UI), `t-user` (user UI) — determine layout and default navigation
   - **Resource groups**:
     - `g-admins-super`: All 19 scopes (full access)
-    - `g-admins-demo`: Read-only to all pages + write to demo group resources + costs:write
+    - `g-admins-demo`: Read/write to most pages including MCP and A2A + demo group resources
     - `g-admins-security`, `g-admins-memory`, `g-admins-mcp`, `g-admins-a2a`: Domain-specific admin scopes
     - `g-users-demo`, `g-users-test`, `g-users-strategics`: invoke + group-filtered read access
 - Sidebar visibility is controlled by scopes — each persona item is rendered only when the user has the corresponding `*:read` or `*:write` scope. Platform Catalog, Tagging, and Settings are always visible.

@@ -1039,7 +1039,7 @@ Core authentication and authorization module. Provides:
   - **Type groups** (UI view): `t-admin`, `t-user` — no scopes, determine layout
   - **Resource groups** (access control):
     - `g-admins-super`: all 19 scopes (catalog:r/w, agent:r/w, memory:r/w, security:r/w, settings:r/w, tagging:r/w, costs:r/w, mcp:r/w, a2a:r/w, invoke)
-    - `g-admins-demo`: `catalog:read`, `agent:read`, `agent:write`, `memory:read`, `memory:write`, `security:read`, `settings:read`, `tagging:read`, `costs:read`, `costs:write`, `mcp:read`, `a2a:read`, `invoke` (can create/delete demo resources only)
+    - `g-admins-demo`: `catalog:read`, `agent:read`, `agent:write`, `memory:read`, `memory:write`, `security:read`, `settings:read`, `tagging:read`, `costs:read`, `costs:write`, `mcp:read`, `mcp:write`, `a2a:read`, `a2a:write`, `invoke` (can create/delete demo resources only)
     - `g-admins-security`: `security:read`, `security:write`, `settings:read`
     - `g-admins-memory`: `memory:read`, `memory:write`, `settings:read`
     - `g-admins-mcp`: `mcp:read`, `mcp:write`, `settings:read`
@@ -1151,6 +1151,7 @@ Deployment runs asynchronously via FastAPI `BackgroundTasks` with progressive `d
 
 1. User submits a deploy form with agent configuration (model and IAM role are required).
 2. Backend creates the agent record with `deployment_status="initializing"`, immediately applies resolved tags to the DB record (so tag-based resource filtering is active from the first poll), and returns immediately with HTTP 202.
+   - **Auto-grant access control:** After creating the agent record, for each associated MCP server and A2A agent, if access control rules already exist for that integration, the new agent is automatically added with `all_tools` (MCP) or `all_skills` (A2A) access. If no rules exist (access control disabled), no action is taken — the agent already has access by default. Existing rules are never modified, only new entries are added.
 3. Background task progresses through deployment phases:
    - **`creating_credentials`**: For each MCP server or A2A agent with OAuth2 auth, calls `create_oauth2_credential_provider` (vendor=`CustomOauth2`, using `discoveryUrl` from config) with exponential backoff retry. If the provider already exists (e.g., redeployment), automatically falls back to `update_oauth2_credential_provider` to apply the latest configuration. Stores credential provider names in `AGENT_CONFIG_JSON` under `integrations.mcp_servers[].auth.credential_provider_name` or `integrations.a2a_agents[].auth.credential_provider_name`. If credential provider creation fails after all retries, sets `deployment_status="credential_creation_failed"` and returns without deploying.
    - **`creating_role`**: Creates or validates the IAM execution role (if needed).

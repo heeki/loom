@@ -11,9 +11,9 @@
    - [Super-Admin Setup](#super-admin-setup)
      - [Step 1: Set Up Tag Policies and Profiles](#step-1-set-up-tag-policies-and-profiles)
      - [Step 2: Configure Security](#step-2-configure-security)
-     - [Step 3: Register MCP Servers (Optional)](#step-3-register-mcp-servers-optional)
-     - [Step 4: Register A2A Agents (Optional)](#step-4-register-a2a-agents-optional)
    - [Demo-Admin Setup](#demo-admin-setup)
+     - [Step 3: Register MCP Servers](#step-3-register-mcp-servers)
+     - [Step 4: Register A2A Agents](#step-4-register-a2a-agents)
      - [Step 5: Create Memory Resources](#step-5-create-memory-resources)
      - [Step 6: Deploy an Agent](#step-6-deploy-an-agent)
      - [Step 7: Test the Agent](#step-7-test-the-agent)
@@ -100,16 +100,16 @@ The left sidebar includes the following elements:
 
 This section walks through the complete administrative workflow in a logical sequence. It is divided into two subsections:
 
-- **Super-Admin Setup** (Steps 1–4): Foundational configuration for tagging, security, and integrations. Demo-admins can skip this section entirely.
-- **Demo-Admin Setup** (Steps 5–11): Creating memory, deploying agents, testing, and monitoring. This is where demo-admins begin.
+- **Super-Admin Setup** (Steps 1–2): Foundational configuration for tagging and security. Demo-admins can skip this section entirely.
+- **Demo-Admin Setup** (Steps 3–11): Registering integrations, creating memory, deploying agents, testing, and monitoring. This is where demo-admins begin.
 
 ---
 
 ### Super-Admin Setup
 
-Steps 1–4 configure the foundational elements that all other resources depend on. These steps are performed by super-admins only.
+Steps 1–2 configure the foundational elements that all other resources depend on. These steps are performed by super-admins only.
 
-> **Demo-admins:** Skip ahead to [Demo-Admin Setup](#demo-admin-setup). Steps 1–4 have already been completed for you. Use the pre-configured **demo** tag profile when creating resources.
+> **Demo-admins:** Skip ahead to [Demo-Admin Setup](#demo-admin-setup). Steps 1–2 have already been completed for you. Use the pre-configured **demo** tag profile when creating resources.
 
 ---
 
@@ -205,6 +205,12 @@ These credentials can later be selected when invoking an agent, allowing the age
 
 ---
 
+### Demo-Admin Setup
+
+Steps 3–11 cover registering integrations, creating memory, deploying agents, testing, reviewing results, and monitoring costs. Demo-admins start here using the pre-configured **demo** tag profile.
+
+---
+
 ### Step 3: Register MCP Servers
 
 Navigate to the **MCP Servers** persona. Model Context Protocol (MCP) servers provide agents with access to external tools and data sources through a standardized protocol.
@@ -243,13 +249,15 @@ Each tool shows its name, description, and the JSON schema for its expected inpu
 
 #### 3.4 Configure Access Control
 
-Access control is **disabled by default**, meaning all MCP tools are available to all personas. To restrict access:
+Access control is **disabled by default**, meaning all MCP tools are available to all agents. To restrict access:
 
 1. Click the **Access Control** tab on the server card.
-2. For each persona (user group), choose:
-   - **All Tools**: The persona can use all tools from this server.
-   - **Selected Tools**: Choose specific tools the persona can use.
+2. For each agent, choose:
+   - **All Tools**: The agent can use all tools from this server.
+   - **Selected Tools**: Choose specific tools the agent can use.
 3. Save the access rules.
+
+> **Auto-grant behavior:** When a new agent is deployed with an MCP server association and access control rules already exist for that server, the new agent is automatically granted "All Tools" access. If access control is disabled (no rules configured), all agents already have access by default.
 
 ---
 
@@ -288,17 +296,13 @@ After registration, click the server card to view the agent's skills. Each skill
 
 #### 4.4 Configure Access Control
 
-Access control is **disabled by default**, meaning all A2A skills are available to all personas. To restrict access:
+Access control is **disabled by default**, meaning all A2A skills are available to all agents. To restrict access:
 
 1. Click the **Access Control** tab.
-2. Choose **All Skills** or **Selected Skills** for each persona.
+2. Choose **All Skills** or **Selected Skills** for each agent.
 3. Save the access rules.
 
----
-
-### Demo-Admin Setup
-
-Steps 5–11 cover creating memory, deploying agents, testing, reviewing results, and monitoring costs. Demo-admins start here using the pre-configured **demo** tag profile.
+> **Auto-grant behavior:** When a new agent is deployed with an A2A agent association and access control rules already exist for that A2A agent, the new agent is automatically granted "All Skills" access. If access control is disabled (no rules configured), all agents already have access by default.
 
 ---
 
@@ -775,7 +779,7 @@ Loom uses a group-based permission model managed through AWS Cognito. Users are 
 | Group | Access Level |
 |-------|-------------|
 | g-admins-super | Full access to all features and all resources |
-| g-admins-demo | Admin access scoped to demo resources |
+| g-admins-demo | Admin access scoped to demo resources (includes MCP and A2A read/write) |
 | g-admins-security | Security management only (IAM roles, authorizers) |
 | g-admins-memory | Memory resource management only |
 | g-admins-mcp | MCP server management only |
