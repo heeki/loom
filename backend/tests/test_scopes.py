@@ -32,9 +32,7 @@ class TestDeriveScopes(unittest.TestCase):
     def test_users_group_only_has_invoke(self) -> None:
         scopes = derive_scopes(["t-user", "g-users-demo"])
         self.assertEqual(scopes, {
-            "catalog:read", "agent:read", "agent:write",
-            "memory:read", "memory:write",
-            "mcp:read", "a2a:read", "invoke",
+            "agent:read", "memory:read", "invoke",
         })
 
     def test_multiple_groups_union(self) -> None:
