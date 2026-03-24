@@ -223,6 +223,9 @@ Resources:
       Subnets: !Ref pPublicSubnetIds
       SecurityGroups:
         - !GetAtt AlbSecurityGroup.GroupId
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: "300"
       Tags:
         - Key: loom:application
           Value: !Ref pTagApplication
@@ -297,6 +300,9 @@ Resources:
       HealthyThresholdCount: 2
       UnhealthyThresholdCount: 3
       HealthCheckTimeoutSeconds: 5
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: "300"
       Tags:
         - Key: loom:application
           Value: !Ref pTagApplication

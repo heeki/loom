@@ -426,7 +426,7 @@ A2A agents are registered by base URL. On registration, the backend fetches `<ba
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/agents/{agent_id}/invoke` | Invoke agent, stream response via SSE |
-| `GET` | `/api/agents/{agent_id}/sessions` | List sessions with invocations |
+| `GET` | `/api/agents/{agent_id}/sessions` | List sessions with invocations (optional `user_id` query param for server-side filtering) |
 | `GET` | `/api/agents/{agent_id}/sessions/{session_id}` | Get a specific session |
 
 The invoke endpoint uses a priority-based token selection: (0) `bearer_token` from request body, (1) `credential_id` for M2M token, (2) user access token (forwarded when agent has authorizer), (3) agent config M2M flow, (4) SigV4. The `session_start` SSE event includes `has_token` and `token_source` fields when a token is used.

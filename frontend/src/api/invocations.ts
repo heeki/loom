@@ -9,8 +9,9 @@ import type {
   SSEError,
 } from "./types";
 
-export function listSessions(agentId: number): Promise<SessionResponse[]> {
-  return apiFetch<SessionResponse[]>(`/api/agents/${agentId}/sessions`);
+export function listSessions(agentId: number, userId?: string): Promise<SessionResponse[]> {
+  const params = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
+  return apiFetch<SessionResponse[]>(`/api/agents/${agentId}/sessions${params}`);
 }
 
 export function getInvocation(

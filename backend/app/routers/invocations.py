@@ -6,8 +6,8 @@ import os
 import time
 import uuid
 from datetime import datetime
-from typing import Any, List, AsyncGenerator
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from typing import Any, List, AsyncGenerator, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func
@@ -962,6 +962,7 @@ def get_agent_token(
 @router.get("/{agent_id}/sessions", response_model=List[SessionResponse])
 def list_sessions(
     agent_id: int,
+    user_id: Optional[str] = Query(None, description="Filter sessions by user_id"),
     user: UserInfo = Depends(require_scopes("agent:read")),
     db: Session = Depends(get_db),
 ) -> List[SessionResponse]:
@@ -973,9 +974,15 @@ def list_sessions(
             detail=f"Agent with ID {agent_id} not found"
         )
 
-    sessions = db.query(InvocationSession).filter(
+    filters = [
         InvocationSession.agent_id == agent_id,
         InvocationSession.hidden_at.is_(None),
+    ]
+    if user_id:
+        filters.append(InvocationSession.user_id == user_id)
+
+    sessions = db.query(InvocationSession).filter(
+        *filters,
     ).order_by(InvocationSession.created_at.desc()).all()
 
     from app.routers.settings import get_cpu_io_wait_discount
