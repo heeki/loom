@@ -34,7 +34,6 @@ class TestDeriveScopes(unittest.TestCase):
         self.assertEqual(scopes, {
             "catalog:read", "agent:read", "agent:write",
             "memory:read", "memory:write",
-            "costs:read", "costs:write",
             "mcp:read", "a2a:read", "invoke",
         })
 
