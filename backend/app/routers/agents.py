@@ -18,9 +18,9 @@ from app.dependencies.auth import UserInfo, require_scopes
 from app.models.agent import Agent
 from app.models.authorizer_config import AuthorizerConfig
 from app.models.config_entry import ConfigEntry
-from app.models.a2a import A2aAgent as A2aAgentModel
+from app.models.a2a import A2aAgent as A2aAgentModel, A2aAgentAccess
 from app.models.memory import Memory
-from app.models.mcp import McpServer
+from app.models.mcp import McpServer, McpServerAccess
 from app.models.session import InvocationSession
 from app.models.invocation import Invocation
 from app.models.tag_policy import TagPolicy
@@ -748,6 +748,57 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
 
     agent_id = agent.id
     response_data = AgentResponse(**agent.to_dict(), active_session_count=0)
+
+    # Auto-grant access control for MCP servers and A2A agents with existing rules
+    for mcp_server_id in request.mcp_servers:
+        # Check if any access rules exist for this MCP server
+        existing_rules = db.query(McpServerAccess).filter(
+            McpServerAccess.server_id == mcp_server_id
+        ).first()
+
+        if existing_rules:
+            # Check if a rule already exists for the new agent
+            agent_rule = db.query(McpServerAccess).filter(
+                McpServerAccess.server_id == mcp_server_id,
+                McpServerAccess.persona_id == agent_id
+            ).first()
+
+            if not agent_rule:
+                # Create new access rule for this agent
+                new_rule = McpServerAccess(
+                    server_id=mcp_server_id,
+                    persona_id=agent_id,
+                    access_level="all_tools",
+                    allowed_tool_names=None
+                )
+                db.add(new_rule)
+
+    for a2a_agent_id in request.a2a_agents:
+        # Check if any access rules exist for this A2A agent
+        existing_rules = db.query(A2aAgentAccess).filter(
+            A2aAgentAccess.agent_id == a2a_agent_id
+        ).first()
+
+        if existing_rules:
+            # Check if a rule already exists for the new agent
+            agent_rule = db.query(A2aAgentAccess).filter(
+                A2aAgentAccess.agent_id == a2a_agent_id,
+                A2aAgentAccess.persona_id == agent_id
+            ).first()
+
+            if not agent_rule:
+                # Create new access rule for this agent
+                new_rule = A2aAgentAccess(
+                    agent_id=a2a_agent_id,
+                    persona_id=agent_id,
+                    access_level="all_skills",
+                    allowed_skill_ids=None
+                )
+                db.add(new_rule)
+
+    # Commit all auto-granted access rules
+    if request.mcp_servers or request.a2a_agents:
+        db.commit()
 
     # Schedule heavy deployment work in the background
     background_tasks.add_task(

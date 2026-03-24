@@ -37,7 +37,7 @@ GROUP_SCOPES: dict[str, list[str]] = {
     "g-admins-demo": [
         "catalog:read", "agent:read", "agent:write", "memory:read", "memory:write",
         "security:read", "settings:read", "settings:write", "tagging:read", "costs:read", "costs:write",
-        "mcp:read", "a2a:read", "invoke",
+        "mcp:read", "mcp:write", "a2a:read", "a2a:write", "invoke",
     ],
     "g-admins-security": [
         "security:read", "security:write", "settings:read", "settings:write", "tagging:read",

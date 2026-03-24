@@ -68,13 +68,13 @@ class TestDeriveScopes(unittest.TestCase):
         self.assertIn("costs:read", scopes)
         self.assertIn("costs:write", scopes)
         self.assertIn("mcp:read", scopes)
+        self.assertIn("mcp:write", scopes)
         self.assertIn("a2a:read", scopes)
+        self.assertIn("a2a:write", scopes)
         # Assert other write scopes are NOT present
         self.assertNotIn("catalog:write", scopes)
         self.assertNotIn("security:write", scopes)
         self.assertNotIn("tagging:write", scopes)
-        self.assertNotIn("mcp:write", scopes)
-        self.assertNotIn("a2a:write", scopes)
         # settings:write is intentionally granted to g-admins-demo
 
     def test_group_scopes_consistency(self) -> None:

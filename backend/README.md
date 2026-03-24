@@ -106,7 +106,7 @@ Scopes are derived from Cognito group membership via `GROUP_SCOPES`. The system 
 
 **Resource Groups** (access control):
 - `g-admins-super` — All 19 scopes (catalog:r/w, agent:r/w, memory:r/w, security:r/w, settings:r/w, tagging:r/w, costs:r/w, mcp:r/w, a2a:r/w, invoke)
-- `g-admins-demo` — Read-only to all pages (`catalog:read`, `agent:read`, `memory:read`, `security:read`, `settings:read`, `tagging:read`, `costs:read`, `mcp:read`, `a2a:read`) + write to demo resources (`agent:write`, `memory:write`, `costs:write`) + `invoke`
+- `g-admins-demo` — Read/write to most pages (`catalog:read`, `agent:read/write`, `memory:read/write`, `security:read`, `settings:read/write`, `tagging:read`, `costs:read/write`, `mcp:read/write`, `a2a:read/write`) + `invoke`. Write operations restricted to `loom:group=demo` resources.
 - `g-admins-security` — `security:read`, `security:write`, `settings:read`
 - `g-admins-memory` — `memory:read`, `memory:write`, `settings:read`
 - `g-admins-mcp` — `mcp:read`, `mcp:write`, `settings:read`
@@ -128,7 +128,7 @@ Demo-admin write restrictions: `g-admins-demo` can only create/delete resources 
 
 The system includes demo user personas with different access levels:
 
-1. **demo-admin** (Type: `t-admin`, Groups: `g-admins-demo`): Can create and manage agents/memories within the demo group only. Has read access to all pages and write access to demo resources. Restricted by backend validation to `loom:group=demo` on create/delete operations.
+1. **demo-admin** (Type: `t-admin`, Groups: `g-admins-demo`): Can create and manage agents, memories, MCP servers, and A2A agents within the demo group. Has read access to all pages and write access to demo resources. Restricted by backend validation to `loom:group=demo` on create/delete operations.
 2. **demo-user** (Type: `t-user`, Groups: `g-users-demo`): Read-only access to demo resources. Can only invoke agents. Filtered to see only `loom:group=demo` resources.
 
 Demo users cannot see or interact with resources tagged for other groups (e.g., test, strategics).

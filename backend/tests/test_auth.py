@@ -12,6 +12,7 @@ from app.main import app
 from app.db import Base, get_db
 from app.models.agent import Agent
 from app.services.jwt_validator import validate_cognito_token
+from app.dependencies.auth import derive_scopes
 
 
 class TestAuthConfigEndpoint(unittest.TestCase):
@@ -41,6 +42,26 @@ class TestAuthConfigEndpoint(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["user_pool_id"], "")
         self.assertEqual(data["region"], "us-east-1")
+
+
+class TestDeriveScopes(unittest.TestCase):
+    """Test cases for derive_scopes function."""
+
+    def test_derive_scopes_for_admins_demo_includes_mcp_and_a2a_write(self) -> None:
+        """Test that g-admins-demo group includes mcp:write and a2a:write scopes."""
+        scopes = derive_scopes(["g-admins-demo"])
+        self.assertIn("mcp:read", scopes)
+        self.assertIn("mcp:write", scopes)
+        self.assertIn("a2a:read", scopes)
+        self.assertIn("a2a:write", scopes)
+
+    def test_derive_scopes_for_users_demo_has_only_read_scopes(self) -> None:
+        """Test that g-users-demo group has only read scopes for mcp and a2a."""
+        scopes = derive_scopes(["g-users-demo"])
+        self.assertIn("mcp:read", scopes)
+        self.assertIn("a2a:read", scopes)
+        self.assertNotIn("mcp:write", scopes)
+        self.assertNotIn("a2a:write", scopes)
 
 
 class TestJWTValidator(unittest.TestCase):
