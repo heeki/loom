@@ -188,6 +188,59 @@ class TestInvocationsRouter(unittest.TestCase):
         response = self.client.get("/api/agents/999/sessions")
         self.assertEqual(response.status_code, 404)
 
+    def test_list_sessions_with_user_id_filter(self):
+        """Test that list_sessions filters by user_id query parameter."""
+        # Create sessions with different user_ids directly in the database
+        session_a = InvocationSession(
+            agent_id=self.agent.id,
+            session_id="sess-user-a",
+            qualifier="DEFAULT",
+            user_id="user-a",
+        )
+        session_b = InvocationSession(
+            agent_id=self.agent.id,
+            session_id="sess-user-b",
+            qualifier="DEFAULT",
+            user_id="user-b",
+        )
+        session_none = InvocationSession(
+            agent_id=self.agent.id,
+            session_id="sess-no-user",
+            qualifier="DEFAULT",
+            user_id=None,
+        )
+        self.session.add_all([session_a, session_b, session_none])
+        self.session.commit()
+
+        # Without filter: returns all sessions (including any from prior tests)
+        response = self.client.get(f"/api/agents/{self.agent.id}/sessions")
+        self.assertEqual(response.status_code, 200)
+        all_ids = {s["session_id"] for s in response.json()}
+        self.assertIn("sess-user-a", all_ids)
+        self.assertIn("sess-user-b", all_ids)
+        self.assertIn("sess-no-user", all_ids)
+
+        # With user_id=user-a: returns only user-a's session
+        response = self.client.get(f"/api/agents/{self.agent.id}/sessions?user_id=user-a")
+        self.assertEqual(response.status_code, 200)
+        filtered_ids = {s["session_id"] for s in response.json()}
+        self.assertIn("sess-user-a", filtered_ids)
+        self.assertNotIn("sess-user-b", filtered_ids)
+        self.assertNotIn("sess-no-user", filtered_ids)
+
+        # With user_id=user-b: returns only user-b's session
+        response = self.client.get(f"/api/agents/{self.agent.id}/sessions?user_id=user-b")
+        self.assertEqual(response.status_code, 200)
+        filtered_ids = {s["session_id"] for s in response.json()}
+        self.assertNotIn("sess-user-a", filtered_ids)
+        self.assertIn("sess-user-b", filtered_ids)
+        self.assertNotIn("sess-no-user", filtered_ids)
+
+        # With non-existent user_id: returns empty
+        response = self.client.get(f"/api/agents/{self.agent.id}/sessions?user_id=nobody")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 0)
+
     @patch("app.routers.invocations.get_log_events")
     @patch("app.routers.invocations.parse_agent_start_time")
     @patch("app.routers.invocations.compute_cold_start")

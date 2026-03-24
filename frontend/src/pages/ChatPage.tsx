@@ -87,6 +87,10 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     Map<number, { messages: ChatMessage[]; pendingPrompt: string | null; currentSessionId: string | null }>
   >(new Map());
 
+  const { streamedText, sessionStart, sessionEnd, isStreaming, error, invoke, cancel } = useInvoke(
+    selectedAgentId ?? 0,
+  );
+
   // Load and filter agents by group
   useEffect(() => {
     setAgentsLoading(true);
@@ -106,22 +110,19 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
       .finally(() => setAgentsLoading(false));
   }, []);
 
-  // Load sessions for selected agent (user-scoped)
+  // Load sessions for selected agent (server-side user scoping)
   useEffect(() => {
     if (selectedAgentId === null) {
       setSessions([]);
       return;
     }
-    listSessions(selectedAgentId)
+    if (isStreaming) return;
+    listSessions(selectedAgentId, currentUserId ?? undefined)
       .then((data) => {
-        // Filter to current user's sessions only
-        const userSessions = data.filter(
-          (s) => !s.user_id || !currentUserId || s.user_id === currentUserId,
-        );
-        setSessions(userSessions);
+        setSessions(data);
       })
       .catch(() => {});
-  }, [selectedAgentId, currentUserId]);
+  }, [selectedAgentId, currentUserId, isStreaming]);
 
   // Load memories for selected agent
   useEffect(() => {
@@ -192,22 +193,15 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
 
   const selectedAgent = agents.find((a) => a.id === selectedAgentId);
 
-  const { streamedText, sessionStart, sessionEnd, isStreaming, error, invoke, cancel } = useInvoke(
-    selectedAgentId ?? 0,
-  );
-
   // When a session starts, immediately refresh the sessions list so the tab appears in the sidebar
   const lastSessionStartRef = useRef<typeof sessionStart>(null);
   useEffect(() => {
     if (sessionStart && sessionStart !== lastSessionStartRef.current && selectedAgentId !== null) {
       lastSessionStartRef.current = sessionStart;
       setCurrentSessionId(sessionStart.session_id);
-      listSessions(selectedAgentId)
+      listSessions(selectedAgentId, currentUserId ?? undefined)
         .then((data) => {
-          const userSessions = data.filter(
-            (s) => !s.user_id || !currentUserId || s.user_id === currentUserId,
-          );
-          setSessions(userSessions);
+          setSessions(data);
         })
         .catch(() => {});
     }
@@ -261,12 +255,9 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
             }
           });
 
-        listSessions(selectedAgentId)
+        listSessions(selectedAgentId, currentUserId ?? undefined)
           .then((data) => {
-            const userSessions = data.filter(
-              (s) => !s.user_id || !currentUserId || s.user_id === currentUserId,
-            );
-            setSessions(userSessions);
+            setSessions(data);
           })
           .catch(() => {});
       } else {

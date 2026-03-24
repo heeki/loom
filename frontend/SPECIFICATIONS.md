@@ -814,7 +814,8 @@ Accessible via the "My Memory" sidebar button when the selected agent has memory
 - No memory IDs, ARNs, namespaces, strategy types, or configuration objects exposed
 
 **User isolation:**
-- Session list filtered server-side; frontend additionally filters sessions by `user_id` matching the authenticated user
+- Session list filtered server-side via the `user_id` query parameter passed to the `list_sessions` API; the frontend passes `currentUserId` from Cognito auth to scope sessions per user
+- Session list refresh is suppressed while an invocation is actively streaming (`isStreaming` guard) to prevent race conditions between auth resolution and session state
 - Memory content is managed by the agent; the panel shows strategy metadata only
 
 ---

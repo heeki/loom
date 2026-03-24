@@ -867,7 +867,7 @@ Replaces all existing access rules for the agent. Personas not listed have no ac
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/agents/{agent_id}/invoke` | Invoke the agent and stream the response via SSE. |
-| `GET` | `/api/agents/{agent_id}/sessions` | List all invocation sessions with their invocations. |
+| `GET` | `/api/agents/{agent_id}/sessions` | List invocation sessions with their invocations. Accepts optional `user_id` query parameter for server-side filtering. |
 | `GET` | `/api/agents/{agent_id}/sessions/{session_id}` | Get a specific session with its invocations. |
 | `GET` | `/api/agents/{agent_id}/sessions/{session_id}/invocations/{invocation_id}` | Get a specific invocation. |
 
