@@ -1,20 +1,15 @@
 # Copy this file to environment.sh and update all values marked with <...>
 # cp etc/environment.sh.example etc/environment.sh
 
-# AWS Configurations
-AWS_PROFILE=<your-aws-profile>
-AWS_REGION=us-east-1
-
-PROFILE=${AWS_PROFILE}
-REGION=${AWS_REGION}
-ACCOUNTID=<your-aws-account-id>
-BUCKET=<your-s3-bucket-for-sam-deployments>
+# Resource tagging
+P_TAG_APPLICATION=backend
+P_TAG_GROUP=loom
+P_TAG_OWNER=<your-owner-alias-or-email>
 
 # General configurations
 LOG_LEVEL=info
 
 # Loom configurations
-LOOM_ARTIFACT_BUCKET=<your-s3-bucket-for-deployments>
 # SQLite for local development:
 LOOM_DATABASE_URL=sqlite:///./loom.db
 # PostgreSQL via RDS Proxy for cloud deployments (comment out SQLite line above and uncomment below):
@@ -44,16 +39,6 @@ export LOOM_COGNITO_USER_CLIENT_ID
 export LOOM_COGNITO_REGION
 export LOOM_ALLOWED_ORIGINS
 
-# AgentCore memory queries (used by make agentcore.memory.* targets)
-P_MEMORY_ID=<your-memory-id>
-P_MEMORY_ACTOR_ID=<cognito-username-or-sub>
-P_MEMORY_NAMESPACE=<namespace-e.g.-/strategy/strat-id/actor/actor-id/>
-
-# Resource tagging
-P_TAG_APPLICATION=<your-application-name>
-P_TAG_GROUP=<your-group-or-team>
-P_TAG_OWNER=<your-owner-alias-or-email>
-
 # RDS stack configuration
 P_RDS_STACK=loom-rds
 P_RDS_TEMPLATE=iac/rds.yaml
@@ -62,23 +47,23 @@ P_RDS_OUTPUT=iac/rds_output.yaml
 # RDS instance parameters
 P_RDS_DB_NAME=loom
 P_RDS_USERNAME=loom
-P_RDS_PASSWORD=<your-secure-db-password>
+P_RDS_PASSWORD=$(RDS_PASSWORD)
 P_RDS_INSTANCE_CLASS=db.t3.small
 P_RDS_ALLOCATED_STORAGE=20
 P_RDS_MULTI_AZ=true
 P_RDS_ENABLE_PROXY=true
 
 # RDS networking (from your VPC)
-P_RDS_VPC_ID=<your-vpc-id>
-P_RDS_PRIVATE_SUBNET_IDS=<subnet-id-1>,<subnet-id-2>
-P_RDS_ALLOWED_CIDR=10.0.0.0/8
+P_RDS_VPC_ID=$(VPC_ID)
+P_RDS_PRIVATE_SUBNET_IDS=$(PRIVATE_SUBNET_IDS)
+P_RDS_ALLOWED_CIDR=$(RDS_ALLOWED_CIDR)
 
 # EC2 stack configuration (SSM tunnel)
 P_EC2_STACK=loom-ec2
 P_EC2_TEMPLATE=iac/ec2.yaml
 P_EC2_OUTPUT=iac/ec2_output.yaml
 P_EC2_INSTANCE_TYPE=t3.micro
-P_EC2_PUBLIC_SUBNET_ID=<your-public-subnet-id>
+P_EC2_PUBLIC_SUBNET_ID=$(shell echo "$(PUBLIC_SUBNET_IDS)" | cut -d, -f1)
 
 # ECS backend stack configuration
 P_ECS_BACKEND_STACK=loom-ecs-backend
@@ -86,16 +71,23 @@ P_ECS_BACKEND_TEMPLATE=iac/ecs.yaml
 P_ECS_BACKEND_OUTPUT=iac/ecs_output.yaml
 
 # ECS backend parameters
-P_ECS_PRIVATE_SUBNET_IDS=<private-subnet-id-1>,<private-subnet-id-2>
+P_ECS_PRIVATE_SUBNET_IDS=$(PRIVATE_SUBNET_IDS)
 P_ECS_BACKEND_CPU=1024
 P_ECS_BACKEND_MEMORY=2048
-P_ECS_BACKEND_DESIRED_COUNT=1
+P_ECS_BACKEND_DESIRED_COUNT=3
 P_ECS_BACKEND_MAX_COUNT=4
 
 # Loom configurations (passed to ECS task environment)
-P_LOOM_ARTIFACT_BUCKET=<your-s3-bucket-for-deployments>
 P_LOOM_COGNITO_REGION=$(REGION)
-P_LOOM_ALLOWED_ORIGINS=
+P_LOOM_ALLOWED_ORIGINS=$(LOOM_ALLOWED_ORIGINS)
 
-# Stack outputs — reads from shared/etc/outputs_<account>.sh
-include ../shared/etc/outputs_<account>.sh
+# AgentCore memory queries (used by make agentcore.memory.* targets)
+P_MEMORY_ID=<your-memory-id>
+P_MEMORY_ACTOR_ID=<cognito-username-or-sub>
+P_MEMORY_NAMESPACE=<namespace-e.g.-/strategy/strat-id/actor/actor-id/>
+
+# Common configurations
+include ../shared/etc/common.sh
+
+# Stack outputs
+include ../shared/etc/outputs.sh

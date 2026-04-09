@@ -1,15 +1,9 @@
 # Copy this file to environment.sh and update all values marked with <...>
 # cp etc/environment.sh.example etc/environment.sh
 
-# AWS configuration
-PROFILE=<your-aws-profile>
-REGION=us-east-1
-ACCOUNTID=<your-aws-account-id>
-BUCKET=<your-s3-bucket-for-sam-deployments>
-
 # Resource tagging
-P_TAG_APPLICATION=<your-application-name>
-P_TAG_GROUP=<your-group-or-team>
+P_TAG_APPLICATION=frontend
+P_TAG_GROUP=loom
 P_TAG_OWNER=<your-owner-alias-or-email>
 
 # Frontend port (for local development)
@@ -21,10 +15,13 @@ P_ECS_FRONTEND_TEMPLATE=iac/ecs.yaml
 P_ECS_FRONTEND_OUTPUT=iac/ecs_output.yaml
 
 # ECS frontend parameters
-P_ECS_PUBLIC_SUBNET_IDS=<public-subnet-id-1>,<public-subnet-id-2>
+P_ECS_PUBLIC_SUBNET_IDS=$(PUBLIC_SUBNET_IDS)
 P_ECS_FRONTEND_CPU=256
 P_ECS_FRONTEND_MEMORY=512
-P_ECS_FRONTEND_DESIRED_COUNT=1
+P_ECS_FRONTEND_DESIRED_COUNT=2
 
-# Stack outputs — reads from shared/etc/outputs_<account>.sh
-include ../shared/etc/outputs_<account>.sh
+# Common configurations
+include ../shared/etc/common.sh
+
+# Stack outputs
+include ../shared/etc/outputs.sh
