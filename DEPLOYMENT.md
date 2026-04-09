@@ -49,7 +49,7 @@ Copy environment file templates:
 ```bash
 # Copy environment files from examples
 cp backend/etc/environment.sh.example backend/etc/environment.sh
-cp frontend/etc/.env.example frontend/etc/.env
+cp frontend/.env.example frontend/.env
 cp frontend/etc/environment.sh.example frontend/etc/environment.sh
 cp shared/etc/common.sh.example shared/etc/common.sh
 cp shared/etc/environment.sh.example shared/etc/environment.sh
