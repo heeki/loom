@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Loom shared infrastructure — S3 artifact bucket, ECR repositories, ACM certificate, ALB, and networking
+Description: Shared infrastructure S3 artifact bucket, ECR repositories, ACM certificate, ALB, and networking
 
 Parameters:
   pArtifactBucketName:

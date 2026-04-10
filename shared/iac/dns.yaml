@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Loom DNS — Route 53 hosted zone for subdomain delegation
+Description: Route 53 hosted zone for subdomain delegation
 
 Parameters:
   pDomainName:
