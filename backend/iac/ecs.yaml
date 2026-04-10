@@ -225,6 +225,8 @@ Resources:
                   - iam:GetRole
                   - iam:ListRolePolicies
                   - iam:GetRolePolicy
+                  - iam:ListRoleTags
+                  - iam:ListAttachedRolePolicies
                 Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/loom-*"
         - PolicyName: SecretsManagerPolicy
           PolicyDocument:
@@ -248,6 +250,10 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
+              - Effect: Allow
+                Action:
+                  - cognito-idp:ListUserPools
+                Resource: "*"
               - Effect: Allow
                 Action:
                   - cognito-idp:AdminListGroupsForUser
