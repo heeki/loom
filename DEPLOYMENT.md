@@ -219,6 +219,7 @@ This phase deploys the rest of the stack (frontend, backend) to AWS ECS Fargate 
 
 ```bash
 cd shared
+make agentcore.init    # Create Bedrock AgentCore service-linked role, once per account (~1 min)
 make ecs.init          # Create ECS service-linked role, once per account (~1 min)
 make dns               # Route 53 hosted zone for subdomain (~1 min)
 make dns.outputs       # Capture oHostedZoneId → O_INFRA_HOSTED_ZONE_ID, oNameServers → NS delegation
@@ -303,6 +304,7 @@ cd backend && make ecs                # Backend ECS service only
 ```
 Phase 3.0        Phase 3.1                        Phase 3.3
 ---------        ----------------------           ------------------
+agentcore.init
 ecs.init --+     infra    (~3 min)  --+
            |     cognito  (~1 min)  --|
 dns -------+     role*    (~1 min)  --+--------> loom-ecs-frontend (~3 min)

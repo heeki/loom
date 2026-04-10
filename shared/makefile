@@ -218,6 +218,12 @@ infra.delete:
 		--stack-name $(P_INFRA_STACK) \
 		--no-prompts
 
+# Bedrock AgentCore service-linked role (run once per account before first agent deployment)
+agentcore.init:
+	aws iam create-service-linked-role \
+		--profile $(PROFILE) \
+		--aws-service-name runtime-identity.bedrock-agentcore.amazonaws.com || true
+
 # ECS service-linked role (run once per account before first ECS deployment)
 ecs.init:
 	aws iam create-service-linked-role \

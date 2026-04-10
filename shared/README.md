@@ -25,6 +25,7 @@ Shared infrastructure-as-code and deployment orchestration for Loom. This direct
 | `make cognito` | Deploy Cognito User Pool, groups, scopes |
 | `make role` | Deploy IAM execution role (per agent prefix) |
 | `make ecs` | Deploy ECS Fargate cluster |
+| `make agentcore.init` | Create Bedrock AgentCore service-linked role (once per account) |
 | `make ecs.init` | Create ECS service-linked role (once per account) |
 
 ### Output Centralization
