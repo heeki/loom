@@ -49,10 +49,10 @@ Copy environment file templates:
 ```bash
 # Copy environment files from examples
 cp backend/etc/environment.sh.example backend/etc/environment.sh
-cp frontend/.env.example frontend/.env
 cp frontend/etc/environment.sh.example frontend/etc/environment.sh
 cp shared/etc/common.sh.example shared/etc/common.sh
 cp shared/etc/environment.sh.example shared/etc/environment.sh
+touch shared/etc/outputs.sh
 ```
 
 **Step 3: Configure `shared/etc/common.sh`**
@@ -69,6 +69,7 @@ Environment configuration is centralized in `shared/etc/common.sh`. Update the f
 | `PRIVATE_SUBNET_IDS` | Comma-separated list of private subnet IDs (at least 2 in different AZs) |
 | `PUBLIC_SUBNET_IDS` | Comma-separated list of public subnet IDs (at least 1) |
 | `PUBLIC_FQDN` | Public endpoint FQDN (e.g., `loom.example.com`) |
+| `RDS_ALLOWED_CIDR` | CIDR block allowed to connect to RDS instance on port 5432, e.g., `10.0.0.0/16` |
 | `COGNITO_POOL_NAME` | Desired Cognito User Pool name |
 | `COGNITO_DOMAIN` | Globally unique Cognito domain prefix |
 | `LOOM_ARTIFACT_BUCKET` | S3 bucket for Loom deployment artifacts |
@@ -86,7 +87,7 @@ Update `P_TAG_OWNER` in each environment file:
 ## Phase 1: Local Testing with Cognito
 
 This phase runs the backend and frontend locally using SQLite (zero-config database), with Cognito User Pool for authentication.  
-**In this phase, you can** develop and test the full Loom UI locally, deploy and invoke agents, manage memory and MCP servers, and iterate quickly with hot-reload on both frontend and backend — all without deploying any compute infrastructure to AWS.
+**In this phase, you can** develop and test the full Loom UI locally, deploy and invoke agents, manage memory and MCP servers, and iterate quickly with hot-reload on both frontend and backend.
 
 ![Phase 1: Local Testing](assets/loom_p1_local.png)
 
@@ -99,6 +100,7 @@ The backend defaults to SQLite (`sqlite:///./loom.db`) — no database setup req
 ```bash
 cd shared
 make cognito                   # Deploy Cognito User Pool, groups, scopes, and clients (~1 min)
+make outputs                   # Capture outputs
 make cognito.set-passwords     # Set permanent passwords for demo users
 ```
 
@@ -125,7 +127,6 @@ Users are assigned both a type group and one or more resource groups. Resource f
 cd backend
 uv venv .venv && source .venv/bin/activate
 make install
-make test       # Run unit tests
 make run        # Start FastAPI dev server on LOOM_BACKEND_PORT (default 8000)
 ```
 
@@ -135,11 +136,11 @@ The backend uses SQLite by default (`sqlite:///./loom.db`). Tables are auto-crea
 
 ```bash
 cd frontend
-npm install
-npm run dev     # Start Vite dev server on LOOM_FRONTEND_PORT (default 5173)
+make install
+make dev        # Start Vite dev server on LOOM_FRONTEND_PORT (default 5173)
 ```
 
-Open `http://localhost:5173` and log in with a Cognito user.
+Open `http://localhost:5173` and log in with a Cognito user with the password you configured in `shared/etc/common.sh`.
 
 ## Phase 2: Hybrid Deployment with RDS in AWS
 
@@ -169,16 +170,21 @@ LOOM_DATABASE_HOST="localhost"
 LOOM_DATABASE_URL="postgresql+psycopg2://${P_RDS_USERNAME}:${P_RDS_PASSWORD}@${LOOM_DATABASE_HOST}:${O_RDS_PORT}/${P_RDS_DB_NAME}"
 ```
 
-**Step 3: Open SSM tunnel and start backend**
+**Step 3: Capture deployment outputs**
+```bash
+cd shared
+make outputs                   # Capture outputs
+```
+
+**Step 4: Open SSM tunnel and start backend**
 
 ```bash
 cd backend
 make tunnel              # Port forwards localhost:5432 → RDS via EC2 bastion
-uv pip install ".[postgres]"  # Install PostgreSQL driver
 make run                 # Start backend (connects to RDS via tunnel)
 ```
 
-**Step 4: Migrate SQLite data to PostgreSQL (optional)**
+**Step 5: Migrate SQLite data to PostgreSQL (optional)**
 
 If you have existing data in SQLite:
 
@@ -212,9 +218,11 @@ This phase deploys the rest of the stack (frontend, backend) to AWS ECS Fargate 
 ### Phase 3.0 — Deploy prerequisites
 
 ```bash
-cd shared && make ecs.init    # Create ECS service-linked role, once per account (~1 min)
-cd shared && make dns         # Route 53 hosted zone for subdomain (~1 min)
-cd shared && make dns.outputs # Capture oHostedZoneId → O_INFRA_HOSTED_ZONE_ID, oNameServers → NS delegation
+cd shared
+make ecs.init          # Create ECS service-linked role, once per account (~1 min)
+make dns               # Route 53 hosted zone for subdomain (~1 min)
+make dns.outputs       # Capture oHostedZoneId → O_INFRA_HOSTED_ZONE_ID, oNameServers → NS delegation
+make outputs           # Capture outputs
 ```
 
 **DNS prerequisite:** If your domain's parent hosted zone is in a different AWS account, you must add NS delegation records in the parent account before deploying the infra stack. See [Cross-Account DNS Delegation](#cross-account-dns-delegation) below.
@@ -223,19 +231,26 @@ Update root domain with the nameserver records displayed by `dns.outputs`.
 
 ### Phase 3.1 — Deploy foundation stacks
 
-All foundation stacks are independent and can run in parallel:
+**Step 1: Deploy infrastructure stack**
 
 ```bash
-cd shared && make infra       # S3, ECR, ACM, ALB (~3 min)
-cd shared && make role        # IAM execution roles (~1 min)
-cd shared && make ecs         # ECS Fargate cluster (~1 min)
+cd shared
+make infra       # S3, ECR, ACM, ALB (~3 min)
+make outputs     # Capture ECR repository URIs (required for ECS cluster)
 ```
 
-If you did not already deploy RDS and EC2 in Phase 2:
+**Step 2: Deploy ECS cluster** (depends on ECR repository from infra stack)
 
 ```bash
-cd backend && make rds        # RDS PostgreSQL + optional RDS Proxy (~25 min)
-cd backend && make ec2        # EC2 bastion for SSM tunneling, optional (~3 min)
+cd shared
+make ecs         # ECS Fargate cluster (~1 min)
+```
+
+**Step 3: Deploy IAM execution roles** (can be done in parallel with infra)
+
+```bash
+cd shared
+make role        # IAM execution roles (~1 min)
 ```
 
 **Note on `role` stacks:** A separate role stack must be created for each application prefix. For example, deploying a role with the prefix `demo` creates an execution role shared by all `demo_*` agents. If you add agents with a different prefix (e.g., `finance_*`), you must deploy an additional role stack for that prefix.
@@ -247,7 +262,8 @@ Create IAM roles as needed for your agents.
 All stack outputs are stored in `shared/etc/outputs.sh` and automatically sourced by environment files.
 
 ```bash
-cd shared && make outputs     # Query all stacks, write to shared/etc/outputs.sh
+cd shared
+make outputs     # Query all stacks, write to shared/etc/outputs.sh
 ```
 
 This writes all `O_*` variables (Cognito IDs, ECR URIs, ECS cluster ARN, ALB target group ARNs, etc.) to one file. No manual copy-paste needed.
@@ -306,7 +322,8 @@ The DNS stack (`loom-dns`) creates a Route 53 hosted zone for `P_INFRA_DOMAIN_NA
 **After deploying the DNS stack**, retrieve the NS records:
 
 ```bash
-cd shared && make dns.outputs    # Look for oNameServers (comma-separated list of 4 NS records)
+cd shared
+make dns.outputs    # Look for oNameServers (comma-separated list of 4 NS records)
 ```
 
 **In the parent account** (where the domain's hosted zone lives):
@@ -335,3 +352,5 @@ aws route53 change-resource-record-sets --hosted-zone-id <parent-hosted-zone-id>
 Replace the 4 NS values with the actual name servers from `oNameServers`. Once delegation is active, the ACM certificate will validate automatically and the ALB alias record will resolve through the delegation from the parent zone.
 
 If your domain's hosted zone is already in the deployment account, no delegation is needed — DNS resolution works directly.
+
+**Important:** If doing this in the console, ensure that each record is entered on a separate line, rather than as a comma-separated list. This will cause delegation and certificate validation to fail.

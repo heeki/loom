@@ -14,6 +14,7 @@ VPC_ID=<your-vpc-id>
 PRIVATE_SUBNET_IDS=<comma-separated-list-of-private-subnet-ids>
 PUBLIC_SUBNET_IDS=<comma-separated-list-of-public-subnet-ids>
 PUBLIC_FQDN=<public-endpoint-fqdn>
+RDS_ALLOWED_CIDR=<cidr-block-allowed-to-connect-to-rds>
 
 # Security configurations
 COGNITO_POOL_NAME=<your-desired-cognito-pool-name>
