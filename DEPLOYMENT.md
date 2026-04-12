@@ -3,7 +3,7 @@
 The deployment model has three phases:
 1. **Local testing** with Cognito authentication (SQLite database)
 2. **Hybrid deployment** with RDS PostgreSQL in AWS, accessed via SSM tunnel for local development
-3. **Full deployment** with all components (frontend, backend, database) running on AWS ECS Fargate
+3. **Full deployment** with all components (frontend, backend, database) running on Amazon ECS Fargate
 
 ## Prerequisites
 
@@ -196,7 +196,7 @@ The frontend continues to run locally (same as Phase 1).
 
 ## Phase 3: Full Deployment to AWS
 
-This phase deploys the rest of the stack (frontend, backend) to AWS ECS Fargate behind an Application Load Balancer.  
+This phase deploys the rest of the stack (frontend, backend) to Amazon ECS Fargate behind an Application Load Balancer.
 **In this phase, you can** run Loom as a production-ready, fully managed service accessible via HTTPS with custom domain, enable your team to access Loom from anywhere without local setup, leverage auto-scaling for the backend, and operate with enterprise-grade security, observability, and high availability.
 
 ![Phase 3: Full AWS Deployment](assets/loom_p3_aws.png)
