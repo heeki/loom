@@ -73,6 +73,7 @@ def main() -> None:
     if len(sys.argv) < 3:
         print(f"Usage: {sys.argv[0]} <profile> <region> [suffix]")
         print(f"  suffix: account suffix for output file (e.g., 9582 → outputs_9582.sh)")
+        print(f"  If suffix is empty string, writes to outputs.sh")
         print(f"  If omitted, outputs are printed to stdout only.")
         sys.exit(1)
 
@@ -143,10 +144,11 @@ def main() -> None:
             print(f"#   {ns.strip()}")
         print()
 
-    # Write to file if suffix provided
-    if suffix:
+    # Write to file
+    if suffix is not None:
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        output_file = os.path.join(script_dir, "..", "etc", f"outputs_{suffix}.sh")
+        filename = f"outputs_{suffix}.sh" if suffix else "outputs.sh"
+        output_file = os.path.join(script_dir, "..", "etc", filename)
         output_file = os.path.normpath(output_file)
         with open(output_file, "w") as f:
             f.write(content)
