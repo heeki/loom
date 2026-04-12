@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capture CloudFormation stack outputs and write to shared/etc/outputs_<suffix>.sh."""
+"""Capture CloudFormation stack outputs and write to shared/etc/outputs[_<suffix>].sh."""
 
 import json
 import os
@@ -73,13 +73,12 @@ def main() -> None:
     if len(sys.argv) < 3:
         print(f"Usage: {sys.argv[0]} <profile> <region> [suffix]")
         print(f"  suffix: account suffix for output file (e.g., 9582 → outputs_9582.sh)")
-        print(f"  If suffix is empty string, writes to outputs.sh")
-        print(f"  If omitted, outputs are printed to stdout only.")
+        print(f"  If omitted, writes to outputs.sh")
         sys.exit(1)
 
     profile = sys.argv[1]
     region = sys.argv[2]
-    suffix = sys.argv[3] if len(sys.argv) > 3 else None
+    suffix = sys.argv[3] if len(sys.argv) > 3 else ""
 
     # Collect all outputs from all stacks
     all_outputs: dict[str, dict[str, str]] = {}
@@ -145,22 +144,21 @@ def main() -> None:
         print()
 
     # Write to file
-    if suffix is not None:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        filename = f"outputs_{suffix}.sh" if suffix else "outputs.sh"
-        output_file = os.path.join(script_dir, "..", "etc", filename)
-        output_file = os.path.normpath(output_file)
-        with open(output_file, "w") as f:
-            f.write(content)
-        print(f"Written to: {output_file}")
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    filename = f"outputs_{suffix}.sh" if suffix else "outputs.sh"
+    output_file = os.path.join(script_dir, "..", "etc", filename)
+    output_file = os.path.normpath(output_file)
+    with open(output_file, "w") as f:
+        f.write(content)
+    print(f"Written to: {output_file}")
 
-        # Also write VITE_COGNITO_USER_CLIENT_ID to frontend/.env if cognito deployed
-        if "loom-cognito" in all_outputs and "oUserClientId" in all_outputs["loom-cognito"]:
-            client_id = all_outputs["loom-cognito"]["oUserClientId"]
-            frontend_env = os.path.normpath(os.path.join(script_dir, "..", "..", "frontend", ".env"))
-            with open(frontend_env, "w") as f:
-                f.write(f"VITE_COGNITO_USER_CLIENT_ID={client_id}\n")
-            print(f"Written to: {frontend_env}")
+    # Also write VITE_COGNITO_USER_CLIENT_ID to frontend/.env if cognito deployed
+    if "loom-cognito" in all_outputs and "oUserClientId" in all_outputs["loom-cognito"]:
+        client_id = all_outputs["loom-cognito"]["oUserClientId"]
+        frontend_env = os.path.normpath(os.path.join(script_dir, "..", "..", "frontend", ".env"))
+        with open(frontend_env, "w") as f:
+            f.write(f"VITE_COGNITO_USER_CLIENT_ID={client_id}\n")
+        print(f"Written to: {frontend_env}")
 
 
 if __name__ == "__main__":
