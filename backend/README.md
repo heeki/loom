@@ -1,6 +1,6 @@
 # Loom Backend
 
-FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, paginated CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, tag policy management, tag profile management, cost estimation dashboard, actual runtime cost retrieval from CloudWatch usage logs, and admin audit tracking (login events, user actions, page views, per-session aggregation). Agent deploy applies resolved tags to the DB record immediately on creation so tag-based resource filtering (e.g., demo user group restrictions) is effective from CREATING status.
+FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, paginated CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, AWS Agent Registry integration (governance and discovery), security administration, tag policy management, tag profile management, cost estimation dashboard, actual runtime cost retrieval from CloudWatch usage logs, and admin audit tracking (login events, user actions, page views, per-session aggregation). Agent deploy applies resolved tags to the DB record immediately on creation so tag-based resource filtering (e.g., demo user group restrictions) is effective from CREATING status.
 
 ## Technology Stack
 
@@ -63,6 +63,7 @@ Runtime configuration is sourced from `etc/environment.sh`:
 | `LOOM_COGNITO_REGION` | Region of the Cognito pool | `AWS_REGION` |
 | `LOOM_COGNITO_USER_CLIENT_ID` | Cognito user app client ID (auto-included in agent `allowedClients` on deploy) | — |
 | `LOOM_ALLOWED_ORIGINS` | Comma-separated additional CORS origins for deployed environments | — |
+| `LOOM_REGISTRY_ID` | AWS Agent Registry ID for governance and discovery | — |
 
 AWS credentials use the standard boto3 credential chain (environment variables, AWS profile, instance metadata).
 
@@ -94,6 +95,8 @@ The backend uses a fine-grained scope model for access control:
 | `mcp:write` | Manage MCP servers and access rules |
 | `a2a:read` | View A2A agents and skills |
 | `a2a:write` | Manage A2A agents and access rules |
+| `registry:read` | View registry records (uses mcp:read) |
+| `registry:write` | Manage registry records (uses mcp:write) |
 | `invoke` | Invoke agents |
 
 ### Group-to-Scope Mapping (Two-Dimensional Architecture)
@@ -175,6 +178,7 @@ backend/
 │   │   ├── costs.py          # Cost dashboard: estimates + runtime/memory actuals from CloudWatch
 │   │   ├── traces.py         # Trace retrieval: OTEL log parsing for trace summaries and span detail
 │   │   ├── admin.py          # Admin audit API: login/action/pageview tracking, sessions, summary
+│   │   ├── registry.py      # Agent Registry: record CRUD, lifecycle management, search
 │   │   └── utils.py         # Shared router utilities
 │   └── services/
 │       ├── agentcore.py     # boto3 wrapper: describe, list endpoints, invoke
@@ -192,6 +196,7 @@ backend/
 │       ├── memory.py        # boto3 wrapper: AgentCore Memory CRUD + LTM record queries
 │       ├── secrets.py       # Secrets Manager wrapper with caching
 │       ├── tokens.py        # Bedrock CountTokens API with provider guard
+│       ├── registry.py      # AWS Agent Registry: control/data plane wrapper, descriptor builders
 │       └── usage_poller.py  # Background poller: estimated → actual costs
 ├── scripts/
 │   ├── stream.py            # CLI streaming client (httpx-based)
@@ -204,6 +209,7 @@ backend/
 ├── tests/
 │   ├── test_agents_deploy.py
 │   ├── test_a2a.py          # A2A agent CRUD, Agent Card, skills, access
+│   ├── test_registry.py     # Registry record CRUD, lifecycle, search, visibility
 ├── Dockerfile               # Backend container image (Python 3.13 slim + uvicorn + agent source)
 ├── makefile                 # Build, test, and manual testing targets
 ├── pyproject.toml

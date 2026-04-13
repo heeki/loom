@@ -349,6 +349,8 @@ Tag profiles are named presets of tag values that satisfy required tag policies.
 | `oauth2_client_secret` | TEXT | OAuth2 client secret (write-only, never returned in GET responses) |
 | `oauth2_scopes` | TEXT | Space-separated OAuth2 scopes |
 | `created_at` | DATETIME | Creation timestamp |
+| `registry_record_id` | TEXT | AWS Agent Registry record ID (nullable) |
+| `registry_status` | TEXT | Registry lifecycle status: DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, DEPRECATED (nullable) |
 | `updated_at` | DATETIME | Last update timestamp |
 
 ### `mcp_tools` table
@@ -857,6 +859,25 @@ When `auth_type` is `oauth2`, `oauth2_well_known_url` and `oauth2_client_id` are
 
 Replaces all existing access rules for the agent. Personas not listed have no access (deny by default).
 
+### Agent Registry Management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/registry/records` | List all registry records. Optional query params: `status` (filter by record status), `descriptor_type` (filter by MCP or A2A). |
+| `GET` | `/api/registry/records/{record_id}` | Get full detail for a registry record including descriptors. |
+| `POST` | `/api/registry/records` | Create a registry record from a Loom MCP server or A2A agent. Body: `{resource_type: "mcp"|"a2a", resource_id: int}`. |
+| `POST` | `/api/registry/records/{record_id}/submit` | Submit a registry record for approval. Updates linked resource status to PENDING_APPROVAL. |
+| `POST` | `/api/registry/records/{record_id}/approve` | Approve a registry record. Updates linked resource status to APPROVED. |
+| `POST` | `/api/registry/records/{record_id}/reject` | Reject a registry record. Body: `{reason: str}`. Updates linked resource status to REJECTED. |
+| `DELETE` | `/api/registry/records/{record_id}` | Delete a registry record and clear the linked resource's registry fields. |
+| `GET` | `/api/registry/search` | Semantic search over registry records. Query params: `q` (search query), `max_results` (default 10). |
+
+**Record lifecycle:** CREATING → DRAFT → PENDING_APPROVAL → APPROVED | REJECTED (also DEPRECATED)
+
+**Visibility filtering:** When listing MCP servers or A2A agents, users in the `t-user` role only see resources with `registry_status` of APPROVED or NULL (unregistered). Admin users see all resources regardless of registry status.
+
+**Scope enforcement:** `mcp:read` for GET endpoints, `mcp:write` for POST/PUT/DELETE endpoints.
+
 **Data model:**
 - `A2aAgent`: stores base URL, Agent Card fields (name, description, version, provider, capabilities, auth schemes, I/O modes), raw card JSON, OAuth2 config, status, and timestamps.
 - `A2aAgentSkill`: stores skill ID, name, description, tags, examples, and I/O mode overrides. Foreign key to `A2aAgent` with cascade delete.
@@ -1136,6 +1157,23 @@ Bedrock token counting via the CountTokens API:
 Background poller that updates estimated compute costs with actual USAGE_LOGS data:
 
 - `start_usage_poller() -> None` — async task that runs every 10 minutes (`POLL_INTERVAL_SECONDS = 600`). Finds invocations with `cost_source="estimated"` and `status="complete"`, groups them by runtime, polls CloudWatch USAGE_LOGS, matches events by timestamp (within 5 seconds of `client_invoke_time`), and updates `compute_cpu_cost`, `compute_memory_cost`, `compute_cost`, and `cost_source` from `"estimated"` to `"usage_logs"`.
+
+### `services/registry.py`
+
+Wraps `boto3.client('bedrock-agentcore-control')` (control plane) and `boto3.client('bedrock-agentcore')` (data plane) for AWS Agent Registry operations:
+
+- `RegistryClient(registry_id, region)` — lazy singleton via `get_registry_client()`. Gracefully returns empty results when `LOOM_REGISTRY_ID` is not set.
+- `list_records() -> dict` — lists all records in the registry.
+- `get_record(record_id) -> dict` — gets full record detail including descriptors.
+- `create_record(name, descriptor_type, descriptors, record_version, description) -> dict` — creates a new registry record.
+- `wait_for_record(record_id) -> dict` — polls until the record leaves the CREATING state.
+- `submit_for_approval(record_id) -> dict` — submits a record for approval review.
+- `approve_record(record_id) -> dict` — approves a record (sets status to APPROVED).
+- `reject_record(record_id, reason) -> dict` — rejects a record with a reason.
+- `delete_record(record_id) -> dict` — deletes a registry record.
+- `search_records(query, max_results) -> dict` — semantic search over registry records (data plane).
+- `build_mcp_descriptors(server, tools) -> list[dict]` — builds MCP-type descriptors from a Loom McpServer and its tools (server manifest + tool definitions).
+- `build_a2a_descriptors(agent) -> list[dict]` — builds A2A-type descriptors from a Loom A2aAgent (agent card).
 
 ### `services/observability.py`
 

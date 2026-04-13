@@ -1,6 +1,6 @@
 # Loom Frontend
 
-Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, security administration, resource tag management, tag profile management, cost estimation dashboard, actual runtime cost analysis, an admin dashboard with platform usage analytics, and an end-user chat interface.
+Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, AWS Agent Registry integration, security administration, resource tag management, tag profile management, cost estimation dashboard, actual runtime cost analysis, an admin dashboard with platform usage analytics, and an end-user chat interface.
 
 ## Prerequisites
 
@@ -62,6 +62,7 @@ The sidebar provides access to persona-based workflows:
 | **Security Admin** | Shield | Manage IAM roles, authorizer configs, credentials, permission requests |
 | **MCP Servers** | Network | Register and manage MCP servers with OAuth2 auth, tool discovery, and access control |
 | **A2A Agents** | Users | Register and manage A2A agents with OAuth2 auth, Agent Card display, and access control |
+| **Registry** | Library | Browse and manage AWS Agent Registry records for governance and discovery |
 | **Tags** | Tags | Manage tag policies and tag profiles with collapsible groups and JSON import |
 | **Costs** | DollarSign | Cost dashboard with estimated costs, actual runtime costs from CloudWatch, and cost settings |
 | **Settings** | Settings | Manage display preferences (theme, timezone) and cost estimation settings (CPU I/O wait discount) |
@@ -95,11 +96,13 @@ src/
 │   ├── security.ts    # Roles, authorizers, credentials, permissions
 │   ├── settings.ts    # Tag policy CRUD operations
 │   ├── audit.ts       # Admin audit API: login/action/pageview recording, session/summary queries, trackAction utility
+│   ├── registry.ts    # Agent Registry API: record CRUD, lifecycle, search
 │   └── types.ts       # TypeScript interfaces mirroring backend models
 ├── contexts/     # React contexts (auth, timezone preference)
 │   ├── ThemeContext.tsx   # Theme provider with 10 themes and localStorage persistence
 ├── hooks/        # Custom React hooks for data fetching
 │   ├── useA2aAgents.ts   # A2A agent list with auto-fetch, CRUD
+│   ├── useRegistry.ts    # Registry records with filtering and search
 ├── components/   # Application components + shadcn ui/ primitives
 │   ├── AgentCard.tsx              # Agent card with refresh + eraser icon deletion + overlay confirmation
 │   ├── SortableCardGrid.tsx       # Drag-to-reorder card grid with @dnd-kit, alphabetical sort, SortButton
@@ -115,6 +118,8 @@ src/
 │   ├── A2aAgentCardView.tsx      # Agent Card display with capabilities and skills
 │   ├── A2aSkillList.tsx          # Expandable skill cards
 │   ├── A2aAccessControl.tsx      # Per-persona access to A2A agent skills
+│   ├── RegistryStatusBadge.tsx   # Registry status badge with color-coded variants
+│   ├── RegistryActions.tsx       # Contextual registry action buttons per lifecycle state
 │   ├── MemoryManagementPanel.tsx  # Memory resource create form + card/table list + tag filters
 │   ├── ResourceTagFields.tsx      # Shared tag profile selector + tag resolution
 │   ├── InvokePanel.tsx            # Qualifier, credential selector, model badge, prompt
@@ -130,6 +135,7 @@ src/
 │   ├── MemoryManagementPage.tsx # Memory resource management
 │   ├── McpServersPage.tsx      # MCP server management with tool/access tabs
 │   ├── A2aAgentsPage.tsx      # A2A agent management with card/access tabs
+│   ├── RegistryPage.tsx       # Agent Registry browse page with status/type filters, search, detail panel
 │   ├── SettingsPage.tsx        # Display preferences + cost estimation settings
 │   ├── SessionDetailPage.tsx   # Session metadata, invocations, logs
 │   └── AdminDashboardPage.tsx  # Admin-only: global user filter, summary cards, charts, Sessions/Actions/Page Views tabs
@@ -164,6 +170,7 @@ The `AuthContext` also provides scope-based authorization using a two-dimensiona
 - `api/settings.ts` — Tag policy and tag profile operations: list, create, update, delete
 - `api/costs.ts` — Cost dashboard API: `fetchCostDashboard` (estimated costs), `fetchCostActuals` (actual runtime + memory costs from CloudWatch logs), `fetchModelPricing`
 - `api/traces.ts` — Trace API: `getSessionTraces` (list traces for a session), `getTraceDetail` (full trace with spans)
+- `api/registry.ts` — Registry operations: list records, get record, create record, submit/approve/reject, delete, search
 - `api/types.ts` — TypeScript interfaces including AgentResponse (with `model_id`, `tags`), SSESessionStart (with `has_token`, `token_source`), AuthorizerCredential, ManagedRole, PermissionRequestResponse, MemoryResponse (with `tags`), MemoryCreateRequest (with `tags`), MemoryStrategyRequest, McpServer, McpTool, McpServerAccess, TagPolicy, TagPolicyCreateRequest, TagPolicyUpdateRequest, TagProfile, TagProfileCreateRequest
 
 ### Hooks
@@ -175,6 +182,7 @@ The `AuthContext` also provides scope-based authorization using a two-dimensiona
 - `useTraces()` — Trace list and detail state management with lazy loading
 - `useA2aAgents()` — A2A agent list with auto-fetch, CRUD callbacks, toast notifications
 - `useMcpServers()` — MCP server list with auto-fetch, CRUD callbacks, toast notifications
+- `useRegistry()` — Registry records with status/type filtering and semantic search
 - `useDeployment()` — Agent config, credential providers, and integrations
 
 ### Key Components
@@ -212,6 +220,7 @@ The `AuthContext` also provides scope-based authorization using a two-dimensiona
 | MemoryManagementPage | Memory | Memory resource create/import form (with tag profile selector), card/table list with tag badges and multi-select tag filters |
 | McpServersPage | MCP Servers | MCP server CRUD, server detail with Tools and Access tabs, card/table views |
 | A2aAgentsPage | A2A Agents | A2A agent CRUD, Agent Card detail, Access control tabs |
+| RegistryPage | Registry | Registry record browse, status/type filters, semantic search, record detail with JSON descriptors |
 | CostDashboardPage | Costs | Estimated costs table (per-agent breakdown with methodology formulas), actual costs with Runtime (collapsible agent groups, per-session detail) and Memory (consolidated per-resource) sub-sections, summary cards, time-range selector, sortable columns |
 | SettingsPage | Settings | Display preferences (theme, timezone), cost estimation settings (CPU I/O wait discount) |
 | AdminDashboardPage | Admin | Global multi-select user filter; summary cards (total logins, page views, actions, duration, most active page); recharts bar charts (logins over time, actions over time, page views by page); tabbed tables: Sessions (with timeline drill-down), Actions (category/type filters), Page Views (page filter); all data filtered by selected users when filter is active |

@@ -22,6 +22,7 @@ The frontend is organized around persona-based workflows, accessible via a sideb
 - **Settings** — Manage display preferences (theme, timezone). Accessible to all scopes.
 - **MCP Servers** — Register and manage MCP servers, view available tools, and control persona access.
 - **A2A Agents** — Register and manage A2A (Agent-to-Agent) protocol integrations, view Agent Cards, and control persona access to skills.
+- **Registry** — Browse and manage AWS Agent Registry records for governance and discovery. Supports full record lifecycle (create, submit, approve, reject, delete) and semantic search.
 - **Admin Dashboard** — Platform usage analytics for super-admins. Tracks user logins, user actions, and page navigation at the browser session level. Includes summary cards, charts, and per-session drill-down.
 
 ---

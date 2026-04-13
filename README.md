@@ -1,6 +1,6 @@
 # Loom
 
-Loom is an enterprise-grade platform for building, deploying, and operating AI agents on Amazon Bedrock AgentCore Runtime and AWS Strands Agents. It provides a unified management UI with Cognito-based authentication, scope-based authorization, multi-persona navigation, and full lifecycle management for agents, memory, MCP servers, and A2A integrations.
+Loom is an enterprise-grade platform for building, deploying, and operating AI agents on Amazon Bedrock AgentCore Runtime and AWS Strands Agents. It provides a unified management UI with Cognito-based authentication, scope-based authorization, multi-persona navigation, and full lifecycle management for agents, memory, MCP servers, A2A integrations, and AWS Agent Registry governance.
 
 ## Features
 
@@ -32,6 +32,13 @@ Loom seamlessly stitches together agents, memory stores, MCP servers, and agent-
 - A2A runtime client with OAuth2 Bearer token injection via AgentCore Identity service
 - Handles both SSE streaming and plain JSON responses with automatic method fallback
 - Credential provider creation with exponential backoff retry for reliable deployment
+
+### Agent Registry
+- AWS Agent Registry integration for governance and discovery
+- Full record lifecycle: create, submit for approval, approve, reject, delete
+- MCP and A2A descriptor builders for registry record creation
+- Semantic search over registry records via data plane API
+- Visibility filtering: end-users see only APPROVED or unregistered resources
 
 ### Security and Access Control
 - Cognito user authentication with automatic token refresh
