@@ -29,16 +29,17 @@ import { SettingsPage } from "@/pages/SettingsPage";
 import { TaggingPage } from "@/pages/TaggingPage";
 import { McpServersPage } from "@/pages/McpServersPage";
 import { A2aAgentsPage } from "@/pages/A2aAgentsPage";
+import { RegistryPage } from "@/pages/RegistryPage";
 import { CostDashboardPage } from "@/pages/CostDashboardPage";
 import type { SessionResponse, InvocationResponse } from "@/api/types";
 import { AuthProvider, useAuth, type Scope } from "@/contexts/AuthContext";
 import { LoginPage } from "@/pages/LoginPage";
-import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings, Eye, Tags, DollarSign, BarChart3, Palette } from "lucide-react";
+import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings, Eye, Tags, DollarSign, BarChart3, Palette, Library } from "lucide-react";
 import { AdminDashboardPage } from "./pages/AdminDashboardPage";
 import { ChatPage } from "./pages/ChatPage";
 import { recordPageView, sendBeaconPageView, trackAction } from "./api/audit";
 
-type Persona = "catalog" | "security" | "builder" | "memory" | "tagging" | "settings" | "mcp" | "a2a" | "costs" | "admin";
+type Persona = "catalog" | "security" | "builder" | "memory" | "tagging" | "settings" | "mcp" | "a2a" | "costs" | "admin" | "registry";
 
 const GROUP_SCOPES: Record<string, Scope[]> = {
   // Type groups (for UI routing - don't grant scopes directly)
@@ -513,6 +514,14 @@ function AppContent() {
               onClick={() => setActivePersona("a2a")}
             />
           )}
+          {(effectiveHasScope("mcp:read") || effectiveHasScope("a2a:read")) && (
+            <SidebarItem
+              icon={Library}
+              label="Registry"
+              active={activePersona === "registry"}
+              onClick={() => setActivePersona("registry")}
+            />
+          )}
           {(effectiveHasScope("agent:write") || effectiveHasScope("security:write") || effectiveHasScope("memory:write")) && (
             <SidebarItem
               icon={Tags}
@@ -752,6 +761,7 @@ function AppContent() {
           {activePersona === "tagging" && <TaggingPage readOnly={!effectiveHasScope("tagging:write")} userGroups={user?.groups || []} />}
           {activePersona === "mcp" && <McpServersPage viewMode={mcpViewMode} onViewModeChange={setMcpViewMode} readOnly={!effectiveHasScope("mcp:write")} />}
           {activePersona === "a2a" && <A2aAgentsPage viewMode={a2aViewMode} onViewModeChange={setA2aViewMode} readOnly={!effectiveHasScope("a2a:write")} />}
+          {activePersona === "registry" && <RegistryPage readOnly={!effectiveHasScope("mcp:write")} isEndUserRole={effectiveUserGroups.includes("t-user") && !effectiveUserGroups.includes("t-admin")} />}
           {activePersona === "settings" && <SettingsPage />}
           {activePersona === "costs" && (
             <CostDashboardPage

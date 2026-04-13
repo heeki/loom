@@ -1,4 +1,4 @@
-type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
+export type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
 
 export function statusVariant(status: string | null): BadgeVariant {
   switch (status) {
@@ -33,6 +33,22 @@ export function deploymentStatusVariant(status: string | null): BadgeVariant {
     case "credential_creation_failed":
       return "destructive";
     case "removing":
+      return "outline";
+    default:
+      return "outline";
+  }
+}
+
+export function registryStatusVariant(status: string | null): BadgeVariant {
+  switch (status) {
+    case "APPROVED":
+      return "default";
+    case "PENDING_APPROVAL":
+      return "secondary";
+    case "REJECTED":
+      return "destructive";
+    case "DRAFT":
+    case "DEPRECATED":
       return "outline";
     default:
       return "outline";

@@ -22,6 +22,8 @@ import { A2aAgentCardView } from "@/components/A2aAgentCardView";
 import { A2aAccessControl } from "@/components/A2aAccessControl";
 import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "@/components/SortableCardGrid";
 import { SortableTableHead, sortRows } from "@/components/SortableTableHead";
+import { RegistryStatusBadge } from "@/components/RegistryStatusBadge";
+import { RegistryActions } from "@/components/RegistryActions";
 import type { A2aAgent, A2aAgentCreateRequest } from "@/api/types";
 
 interface A2aAgentsPageProps {
@@ -33,7 +35,7 @@ interface A2aAgentsPageProps {
 export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgentsPageProps) {
   const { timezone } = useTimezone();
   const { user, browserSessionId } = useAuth();
-  const { agents, loading, createAgent, updateAgent, deleteAgent, refreshCard } = useA2aAgents();
+  const { agents, loading, fetchAgents, createAgent, updateAgent, deleteAgent, refreshCard } = useA2aAgents();
   const [showAddForm, setShowAddForm] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
   const [detailTab, setDetailTab] = useState<"card" | "access">("card");
@@ -270,8 +272,18 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
                     <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
                       v{agent.agent_version}
                     </Badge>
+                    <RegistryStatusBadge status={agent.registry_status} />
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
+                    {!readOnly && (
+                      <RegistryActions
+                        resourceType="a2a"
+                        resourceId={agent.id}
+                        registryRecordId={agent.registry_record_id}
+                        registryStatus={agent.registry_status}
+                        onAction={() => void fetchAgents()}
+                      />
+                    )}
                     {!readOnly && (
                       <>
                         <button
@@ -341,9 +353,10 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
             <TableHeader>
               <TableRow className="bg-card hover:bg-card">
                 <SortableTableHead column="name" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[18%]">Name</SortableTableHead>
-                <SortableTableHead column="url" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[46%]">URL</SortableTableHead>
-                <SortableTableHead column="version" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[10%]">Version</SortableTableHead>
-                <SortableTableHead column="auth" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[10%]">Auth</SortableTableHead>
+                <SortableTableHead column="url" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[38%]">URL</SortableTableHead>
+                <SortableTableHead column="version" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[8%]">Version</SortableTableHead>
+                <SortableTableHead column="auth" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[8%]">Auth</SortableTableHead>
+                <SortableTableHead column="registry" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[12%]">Registry</SortableTableHead>
                 <SortableTableHead column="created" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[16%]">Created</SortableTableHead>
               </TableRow>
             </TableHeader>
@@ -353,6 +366,7 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
                 url: (a) => a.base_url,
                 version: (a) => a.agent_version,
                 auth: (a) => a.auth_type,
+                registry: (a) => a.registry_status ?? "",
                 created: (a) => a.created_at ?? "",
               }).map((agent) => (
                 <TableRow
@@ -364,6 +378,9 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
                   <TableCell className="text-xs text-muted-foreground truncate">{agent.base_url}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{agent.agent_version}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{agent.auth_type === "oauth2" ? "OAuth2" : "None"}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    <RegistryStatusBadge status={agent.registry_status} showUnregistered />
+                  </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {formatTimestamp(agent.created_at, timezone)}
                   </TableCell>

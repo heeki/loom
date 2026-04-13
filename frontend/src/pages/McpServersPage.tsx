@@ -21,6 +21,8 @@ import { McpToolList } from "@/components/McpToolList";
 import { McpAccessControl } from "@/components/McpAccessControl";
 import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "@/components/SortableCardGrid";
 import { SortableTableHead, sortRows } from "@/components/SortableTableHead";
+import { RegistryStatusBadge } from "@/components/RegistryStatusBadge";
+import { RegistryActions } from "@/components/RegistryActions";
 import type { McpServer, McpServerCreateRequest } from "@/api/types";
 
 interface McpServersPageProps {
@@ -32,7 +34,7 @@ interface McpServersPageProps {
 export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServersPageProps) {
   const { timezone } = useTimezone();
   const { user, browserSessionId } = useAuth();
-  const { servers, loading, createServer, updateServer, deleteServer } = useMcpServers();
+  const { servers, loading, fetchServers, createServer, updateServer, deleteServer } = useMcpServers();
   const [showAddForm, setShowAddForm] = useState(false);
   const [selectedServerId, setSelectedServerId] = useState<number | null>(null);
   const [detailTab, setDetailTab] = useState<"tools" | "access">("tools");
@@ -246,10 +248,22 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
             >
               <CardHeader className="gap-1 pb-2">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm font-medium truncate min-w-0" title={server.name}>
-                    {server.name}
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="text-sm font-medium truncate min-w-0" title={server.name}>
+                      {server.name}
+                    </div>
+                    <RegistryStatusBadge status={server.registry_status} />
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
+                    {!readOnly && (
+                      <RegistryActions
+                        resourceType="mcp"
+                        resourceId={server.id}
+                        registryRecordId={server.registry_record_id}
+                        registryStatus={server.registry_status}
+                        onAction={() => void fetchServers()}
+                      />
+                    )}
                     {!readOnly && (
                       <>
                         <button
@@ -317,9 +331,10 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
             <TableHeader>
               <TableRow className="bg-card hover:bg-card">
                 <SortableTableHead column="name" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[18%]">Name</SortableTableHead>
-                <SortableTableHead column="endpoint" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[46%]">Endpoint</SortableTableHead>
+                <SortableTableHead column="endpoint" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[38%]">Endpoint</SortableTableHead>
                 <SortableTableHead column="transport" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[10%]">Transport</SortableTableHead>
-                <SortableTableHead column="auth" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[10%]">Auth</SortableTableHead>
+                <SortableTableHead column="auth" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[8%]">Auth</SortableTableHead>
+                <SortableTableHead column="registry" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[10%]">Registry</SortableTableHead>
                 <SortableTableHead column="created" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[16%]">Created</SortableTableHead>
               </TableRow>
             </TableHeader>
@@ -329,6 +344,7 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
                 endpoint: (s) => s.endpoint_url,
                 transport: (s) => s.transport_type,
                 auth: (s) => s.auth_type,
+                registry: (s) => s.registry_status ?? "",
                 created: (s) => s.created_at ?? "",
               }).map((server) => (
                 <TableRow
@@ -340,6 +356,9 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
                   <TableCell className="text-xs text-muted-foreground truncate">{server.endpoint_url}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{server.transport_type === "streamable_http" ? "Streamable HTTP" : "SSE"}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{server.auth_type === "oauth2" ? "OAuth2" : "None"}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    <RegistryStatusBadge status={server.registry_status} showUnregistered />
+                  </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {formatTimestamp(server.created_at, timezone)}
                   </TableCell>
