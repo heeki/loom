@@ -300,7 +300,8 @@ podman.push.frontend:
 
 # Capture all stack outputs and write to shared/etc/outputs_<profile>.sh
 outputs:
-	@python3 scripts/capture_outputs.py $(PROFILE) $(REGION) $(PROFILE)
+	#@python3 scripts/capture_outputs.py $(PROFILE) $(REGION) $(PROFILE)
+	@python3 scripts/capture_outputs.py $(PROFILE) $(REGION)
 
 # Full deployment
 deploy: podman.build podman.push
