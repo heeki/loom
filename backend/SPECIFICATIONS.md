@@ -349,6 +349,8 @@ Tag profiles are named presets of tag values that satisfy required tag policies.
 | `oauth2_client_secret` | TEXT | OAuth2 client secret (write-only, never returned in GET responses) |
 | `oauth2_scopes` | TEXT | Space-separated OAuth2 scopes |
 | `created_at` | DATETIME | Creation timestamp |
+| `registry_record_id` | TEXT | AWS Agent Registry record ID (nullable) |
+| `registry_status` | TEXT | Registry lifecycle status: DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, DEPRECATED (nullable) |
 | `updated_at` | DATETIME | Last update timestamp |
 
 ### `mcp_tools` table
@@ -857,6 +859,33 @@ When `auth_type` is `oauth2`, `oauth2_well_known_url` and `oauth2_client_id` are
 
 Replaces all existing access rules for the agent. Personas not listed have no access (deny by default).
 
+### Agent Registry Management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/registry/records` | List all registry records. Optional query params: `status` (filter by record status), `descriptor_type` (filter by MCP or A2A). |
+| `GET` | `/api/registry/records/{record_id}` | Get full detail for a registry record including descriptors. |
+| `POST` | `/api/registry/records` | Create a registry record from a Loom MCP server or A2A agent. Body: `{resource_type: "mcp"|"a2a", resource_id: int}`. |
+| `POST` | `/api/registry/records/{record_id}/submit` | Submit a registry record for approval. Updates linked resource status to PENDING_APPROVAL. |
+| `POST` | `/api/registry/records/{record_id}/approve` | Approve a registry record. Updates linked resource status to APPROVED. |
+| `POST` | `/api/registry/records/{record_id}/reject` | Reject a registry record. Body: `{reason: str}`. Updates linked resource status to REJECTED. |
+| `DELETE` | `/api/registry/records/{record_id}` | Delete a registry record and clear the linked resource's registry fields. |
+| `GET` | `/api/registry/search` | Semantic search over registry records. Query params: `q` (search query), `max_results` (default 10). |
+
+**Record lifecycle:** CREATING → DRAFT → PENDING_APPROVAL → APPROVED | REJECTED (also DEPRECATED)
+
+**Registry is opt-in:** The registry is configured via the Settings page by entering a registry ARN (validated format: `arn:aws:bedrock-agentcore:<region>:<account>:registry/<id>`). The ARN is stored in `site_settings` and loaded into memory on startup. When enabled, it provides additional governance mechanisms: agents, MCP servers, and A2A agents must be approved in the registry before they can be used. When not configured, all resources are available without registry approval. The `LOOM_REGISTRY_ID` env var is supported as a bootstrap fallback.
+
+**Supported resource types:** `mcp` (MCP servers), `a2a` (A2A agents), `agent` (deployed agents). Agents are auto-registered in DRAFT status when deployment completes (if registry is configured).
+
+**Visibility filtering:** When listing agents, MCP servers, or A2A agents, users in the `t-user` role only see resources with `registry_status` of APPROVED or NULL (unregistered). Admin users see all resources regardless of registry status.
+
+**Integration gating:** When registry is configured, only APPROVED MCP servers and A2A agents can be selected for agent deployment. Non-approved integrations are rejected with a descriptive error.
+
+**Scope enforcement:** `registry:read` for GET endpoints, `registry:write` for POST/PUT/DELETE endpoints.
+
+**Registry status sync on re-enable:** When the registry ARN is updated via `PUT /api/settings/registry` and the new ARN is non-empty, the backend calls `_sync_registry_statuses()` to validate all stored `registry_record_id` values across Agent, McpServer, and A2aAgent models against the live registry. Records that no longer exist in the registry have their `registry_record_id` and `registry_status` cleared. Status mismatches are updated to match the live registry state. This prevents stale governance data after a disable/re-enable cycle.
+
 **Data model:**
 - `A2aAgent`: stores base URL, Agent Card fields (name, description, version, provider, capabilities, auth schemes, I/O modes), raw card JSON, OAuth2 config, status, and timestamps.
 - `A2aAgentSkill`: stores skill ID, name, description, tags, examples, and I/O mode overrides. Foreign key to `A2aAgent` with cascade delete.
@@ -935,9 +964,12 @@ The `has_token` and `token_source` fields in `session_start` indicate whether an
 |--------|------|-------------|
 | `GET` | `/api/settings/site` | List all site settings (includes defaults for unset keys). |
 | `PUT` | `/api/settings/site/{key}` | Create or update a site setting. |
+| `GET` | `/api/settings/registry` | Get current registry configuration (ARN, ID, enabled status). |
+| `PUT` | `/api/settings/registry` | Update registry configuration. Validates ARN format before saving. Empty ARN disables. |
 
 Current site settings:
 - `cpu_io_wait_discount` (default: `75`) — CPU I/O wait discount percentage (0–99). Applied universally to runtime CPU costs.
+- `loom_registry_id` (default: `""`) — AWS Agent Registry ARN. Stored in `site_settings`, loaded into memory on startup. Validated format: `arn:aws:bedrock-agentcore:<region>:<account>:registry/<id>`.
 
 ### CloudWatch Logs
 
@@ -1038,17 +1070,18 @@ Core authentication and authorization module. Provides:
 - `GROUP_SCOPES: dict[str, list[str]]` — maps Cognito group names to scope lists. Must match the frontend `GROUP_SCOPES` exactly. Uses two-dimensional group architecture:
   - **Type groups** (UI view): `t-admin`, `t-user` — no scopes, determine layout
   - **Resource groups** (access control):
-    - `g-admins-super`: all 19 scopes (catalog:r/w, agent:r/w, memory:r/w, security:r/w, settings:r/w, tagging:r/w, costs:r/w, mcp:r/w, a2a:r/w, invoke)
+    - `g-admins-super`: all 21 scopes (catalog:r/w, agent:r/w, memory:r/w, security:r/w, settings:r/w, tagging:r/w, costs:r/w, mcp:r/w, a2a:r/w, registry:r/w, invoke)
     - `g-admins-demo`: `catalog:read`, `agent:read`, `agent:write`, `memory:read`, `memory:write`, `security:read`, `settings:read`, `tagging:read`, `costs:read`, `costs:write`, `mcp:read`, `mcp:write`, `a2a:read`, `a2a:write`, `invoke` (can create/delete demo resources only)
     - `g-admins-security`: `security:read`, `security:write`, `settings:read`
     - `g-admins-memory`: `memory:read`, `memory:write`, `settings:read`
     - `g-admins-mcp`: `mcp:read`, `mcp:write`, `settings:read`
     - `g-admins-a2a`: `a2a:read`, `a2a:write`, `settings:read`
+    - `g-admins-registry`: `mcp:read`, `a2a:read`, `registry:read`, `registry:write`, `settings:read`, `settings:write`, `tagging:read`
     - `g-users-demo`, `g-users-test`, `g-users-strategics`: `invoke` + read access to resources tagged with matching group
 - `UserInfo` dataclass — `sub`, `username`, `groups`, `scopes` (derived from groups).
 - `get_current_user(request: Request) -> UserInfo` — validates JWT, extracts `cognito:groups`, derives scopes. In bypass mode (no `LOOM_COGNITO_USER_POOL_ID`), returns a super-admin with all scopes. Raises 401 on missing/invalid token.
 - `require_scopes(*required: str)` — factory returning a FastAPI dependency that checks the user has ALL required scopes. Raises 403 on missing scope. Used as `Depends(require_scopes("scope:name"))` on all guarded endpoints.
-- `oauth2_scheme` — `OAuth2AuthorizationCodeBearer` for OpenAPI docs with all 15 scopes.
+- `oauth2_scheme` — `OAuth2AuthorizationCodeBearer` for OpenAPI docs with all 21 scopes.
 - `get_current_user_token(request: Request) -> str | None` — legacy helper for token forwarding to AgentCore invocations.
 - `get_token_claims(request: Request) -> dict | None` — legacy helper for decoded claims extraction.
 
@@ -1068,6 +1101,7 @@ Core authentication and authorization module. Provides:
 | `costs.py` | `costs:read` | `costs:write` (actuals endpoint) |
 | `mcp.py` | `mcp:read` | `mcp:write` |
 | `a2a.py` | `a2a:read` | `a2a:write` |
+| `registry.py` | `registry:read` | `registry:write` |
 | `auth.py` | Public (no guard) | — |
 
 **Tag-based resource isolation:** Resources are filtered by the `loom:group` tag. The two-dimensional group architecture determines filtering:
@@ -1136,6 +1170,24 @@ Bedrock token counting via the CountTokens API:
 Background poller that updates estimated compute costs with actual USAGE_LOGS data:
 
 - `start_usage_poller() -> None` — async task that runs every 10 minutes (`POLL_INTERVAL_SECONDS = 600`). Finds invocations with `cost_source="estimated"` and `status="complete"`, groups them by runtime, polls CloudWatch USAGE_LOGS, matches events by timestamp (within 5 seconds of `client_invoke_time`), and updates `compute_cpu_cost`, `compute_memory_cost`, `compute_cost`, and `cost_source` from `"estimated"` to `"usage_logs"`.
+
+### `services/registry.py`
+
+Wraps `boto3.client('bedrock-agentcore-control')` (control plane) and `boto3.client('bedrock-agentcore')` (data plane) for AWS Agent Registry operations:
+
+- `RegistryClient(registry_id, region)` — lazy singleton via `get_registry_client()`. Gracefully returns empty results when `LOOM_REGISTRY_ID` is not set.
+- `list_records() -> dict` — lists all records in the registry.
+- `get_record(record_id) -> dict` — gets full record detail including descriptors.
+- `create_record(name, descriptor_type, descriptors, record_version, description) -> dict` — creates a new registry record.
+- `wait_for_record(record_id) -> dict` — polls until the record leaves the CREATING state.
+- `submit_for_approval(record_id) -> dict` — submits a record for approval review.
+- `approve_record(record_id) -> dict` — approves a record (sets status to APPROVED).
+- `reject_record(record_id, reason) -> dict` — rejects a record with a reason.
+- `delete_record(record_id) -> dict` — deletes a registry record.
+- `search_records(query, max_results) -> dict` — semantic search over registry records (data plane).
+- `build_mcp_descriptors(server, tools) -> list[dict]` — builds MCP-type descriptors from a Loom McpServer and its tools (server manifest + tool definitions).
+- `build_a2a_descriptors(agent) -> list[dict]` — builds A2A-type descriptors from a Loom A2aAgent (agent card).
+- `build_agent_descriptors(agent) -> list[dict]` — builds AGENT-type descriptors from a Loom Agent (agent manifest with name, ARN, runtime ID, region, protocol, network mode).
 
 ### `services/observability.py`
 

@@ -1,4 +1,5 @@
 """Settings endpoints for managing tag policies and site settings."""
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -12,6 +13,8 @@ from app.models.tag_policy import TagPolicy
 from app.models.tag_profile import TagProfile
 from app.models.site_setting import SiteSetting
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
@@ -20,6 +23,7 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 # ---------------------------------------------------------------------------
 SITE_SETTING_DEFAULTS: dict[str, str] = {
     "cpu_io_wait_discount": "75",
+    "loom_registry_id": "",
 }
 
 
@@ -308,3 +312,119 @@ def update_site_setting(
     db.commit()
     db.refresh(setting)
     return SiteSettingResponse(**setting.to_dict())
+
+
+# ---------------------------------------------------------------------------
+# Registry Configuration
+# ---------------------------------------------------------------------------
+class RegistryConfigResponse(BaseModel):
+    """Response for registry configuration."""
+    registry_arn: str
+    registry_id: str
+    enabled: bool
+
+
+@router.get("/registry", response_model=RegistryConfigResponse)
+def get_registry_config(
+    user: UserInfo = Depends(require_scopes("settings:read")),
+    db: Session = Depends(get_db),
+) -> RegistryConfigResponse:
+    """Get the current registry configuration."""
+    arn = get_site_setting(db, "loom_registry_id")
+    from app.services.registry import get_registry_client
+    client = get_registry_client()
+    return RegistryConfigResponse(
+        registry_arn=arn,
+        registry_id=client.registry_id,
+        enabled=bool(client.registry_id),
+    )
+
+
+class RegistryConfigRequest(BaseModel):
+    """Request to update registry configuration."""
+    registry_arn: str = Field(..., description="Registry ARN (empty string to disable)")
+
+
+@router.put("/registry", response_model=RegistryConfigResponse)
+def update_registry_config(
+    request: RegistryConfigRequest,
+    user: UserInfo = Depends(require_scopes("settings:write")),
+    db: Session = Depends(get_db),
+) -> RegistryConfigResponse:
+    """Update the registry configuration. Validates the ARN before saving."""
+    from app.services.registry import validate_registry_arn, configure_registry, parse_registry_id_from_arn
+
+    registry_id = ""
+    if request.registry_arn:
+        try:
+            registry_id = validate_registry_arn(request.registry_arn)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            )
+
+    # Save to DB
+    setting = db.query(SiteSetting).filter(SiteSetting.key == "loom_registry_id").first()
+    if setting:
+        setting.value = request.registry_arn
+        setting.updated_at = datetime.utcnow()
+    else:
+        setting = SiteSetting(key="loom_registry_id", value=request.registry_arn)
+        db.add(setting)
+    db.commit()
+
+    # Reconfigure the in-memory singleton
+    client = configure_registry(registry_id)
+
+    # When (re-)enabling, sync stored registry statuses against the actual registry
+    if registry_id:
+        _sync_registry_statuses(client, db)
+
+    return RegistryConfigResponse(
+        registry_arn=request.registry_arn,
+        registry_id=registry_id,
+        enabled=bool(registry_id),
+    )
+
+
+def _sync_registry_statuses(client, db: Session) -> None:  # noqa: ANN001
+    """Validate stored registry_record_id / registry_status against the live registry."""
+    from app.models.mcp import McpServer
+    from app.models.a2a import A2aAgent
+    from app.models.agent import Agent
+
+    models = [McpServer, A2aAgent, Agent]
+    updated = 0
+    cleared = 0
+
+    for model in models:
+        resources = db.query(model).filter(model.registry_record_id.isnot(None)).all()
+        for resource in resources:
+            record_id = resource.registry_record_id
+            try:
+                rec = client.get_record(record_id)
+                if not rec or not rec.get("recordId"):
+                    logger.info("Registry record %s no longer exists; clearing from %s id=%s",
+                                record_id, model.__tablename__, resource.id)
+                    resource.registry_record_id = None
+                    resource.registry_status = None
+                    cleared += 1
+                else:
+                    new_status = rec.get("status")
+                    if new_status and new_status != resource.registry_status:
+                        logger.info("Registry record %s status changed: %s -> %s for %s id=%s",
+                                    record_id, resource.registry_status, new_status,
+                                    model.__tablename__, resource.id)
+                        resource.registry_status = new_status
+                        updated += 1
+            except Exception:
+                logger.warning("Failed to fetch registry record %s for %s id=%s; clearing stale link",
+                               record_id, model.__tablename__, resource.id, exc_info=True)
+                resource.registry_record_id = None
+                resource.registry_status = None
+                cleared += 1
+
+    if updated or cleared:
+        db.commit()
+        logger.info("Registry sync complete: %d updated, %d cleared", updated, cleared)

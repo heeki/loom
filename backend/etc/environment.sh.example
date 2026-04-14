@@ -27,6 +27,9 @@ LOOM_COGNITO_REGION=${AWS_REGION}
 # CORS allowed origins for deployed environments (comma-separated, e.g. https://loom.example.com)
 LOOM_ALLOWED_ORIGINS=
 
+# Agent Registry (from bedrock-agentcore-control list-registries output)
+LOOM_REGISTRY_ID=
+
 # Exports
 export AWS_PROFILE
 export AWS_REGION
@@ -38,6 +41,7 @@ export LOOM_COGNITO_USER_POOL_ID
 export LOOM_COGNITO_USER_CLIENT_ID
 export LOOM_COGNITO_REGION
 export LOOM_ALLOWED_ORIGINS
+export LOOM_REGISTRY_ID
 
 # RDS stack configuration
 P_RDS_STACK=loom-rds

@@ -8,7 +8,7 @@ Shared infrastructure-as-code and deployment orchestration for Loom. This direct
 |-------|----------|-------------|
 | `loom-dns` | `iac/dns.yaml` | Route 53 hosted zone for subdomain delegation |
 | `loom-infra` | `iac/infra.yaml` | S3 artifact bucket, ECR repos, ACM certificate, ALB, security groups |
-| `loom-cognito` | `iac/cognito.yaml` | Cognito User Pool, groups, scopes, demo users, app clients |
+| `loom-cognito` | `iac/cognito.yaml` | Cognito User Pool, groups (including g-admins-registry), 21 scopes, users, app clients |
 | `loom-role-*` | `iac/role.yaml` | IAM execution roles for AgentCore agents |
 | `loom-ecs-cluster` | `iac/ecs.yaml` | ECS Fargate cluster (shared by frontend and backend services) |
 

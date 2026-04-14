@@ -31,13 +31,16 @@ GROUP_SCOPES: dict[str, list[str]] = {
         "memory:read", "memory:write", "security:read", "security:write",
         "settings:read", "settings:write", "tagging:read", "tagging:write",
         "costs:read", "costs:write",
-        "mcp:read", "mcp:write", "a2a:read", "a2a:write", "invoke",
-        "admin:read", "admin:write",
+        "mcp:read", "mcp:write", "a2a:read", "a2a:write",
+        "registry:read", "registry:write",
+        "invoke", "admin:read", "admin:write",
     ],
     "g-admins-demo": [
         "catalog:read", "agent:read", "agent:write", "memory:read", "memory:write",
         "security:read", "settings:read", "settings:write", "tagging:read", "costs:read", "costs:write",
-        "mcp:read", "mcp:write", "a2a:read", "a2a:write", "invoke",
+        "mcp:read", "mcp:write", "a2a:read", "a2a:write",
+        "registry:read", "registry:write",
+        "invoke",
     ],
     "g-admins-security": [
         "security:read", "security:write", "settings:read", "settings:write", "tagging:read",
@@ -50,6 +53,9 @@ GROUP_SCOPES: dict[str, list[str]] = {
     ],
     "g-admins-a2a": [
         "a2a:read", "a2a:write", "settings:read", "settings:write", "tagging:read",
+    ],
+    "g-admins-registry": [
+        "mcp:read", "a2a:read", "registry:read", "registry:write", "settings:read", "settings:write", "tagging:read",
     ],
 
     # User groups (t-user users - can have multiple)
@@ -85,6 +91,8 @@ oauth2_scheme = OAuth2AuthorizationCodeBearer(
         "mcp:write": "Write MCP",
         "a2a:read": "Read A2A",
         "a2a:write": "Write A2A",
+        "registry:read": "View registry records",
+        "registry:write": "Manage registry records",
         "admin:read": "View admin dashboard",
         "admin:write": "Manage admin settings",
         "invoke": "Invoke agents",

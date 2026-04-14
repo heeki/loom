@@ -8,7 +8,8 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { useTimezone, type TimezonePreference } from "@/contexts/TimezoneContext";
-import { listSiteSettings, updateSiteSetting } from "@/api/settings";
+import { Button } from "@/components/ui/button";
+import { listSiteSettings, updateSiteSetting, getRegistryConfig, updateRegistryConfig } from "@/api/settings";
 
 export function SettingsPage() {
   const { timezone, setTimezone } = useTimezone();
@@ -16,6 +17,12 @@ export function SettingsPage() {
 
   const [cpuIdleDiscount, setCpuIdleDiscount] = useState("75");
   const [cpuIdleSaved, setCpuIdleSaved] = useState(false);
+
+  const [registryArn, setRegistryArn] = useState("");
+  const [registryId, setRegistryId] = useState("");
+  const [registryEnabled, setRegistryEnabled] = useState(false);
+  const [registrySaved, setRegistrySaved] = useState(false);
+  const [registryError, setRegistryError] = useState("");
 
   const loadSiteSettings = useCallback(async () => {
     try {
@@ -27,7 +34,48 @@ export function SettingsPage() {
     }
   }, []);
 
+  const loadRegistryConfig = useCallback(async () => {
+    try {
+      const config = await getRegistryConfig();
+      setRegistryArn(config.registry_arn);
+      setRegistryId(config.registry_id);
+      setRegistryEnabled(config.enabled);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   useEffect(() => { void loadSiteSettings(); }, [loadSiteSettings]);
+  useEffect(() => { void loadRegistryConfig(); }, [loadRegistryConfig]);
+
+  const saveRegistryConfig = async () => {
+    setRegistryError("");
+    try {
+      const config = await updateRegistryConfig(registryArn);
+      setRegistryId(config.registry_id);
+      setRegistryEnabled(config.enabled);
+      setRegistrySaved(true);
+      setTimeout(() => setRegistrySaved(false), 2000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to save";
+      setRegistryError(msg);
+    }
+  };
+
+  const disableRegistry = async () => {
+    setRegistryArn("");
+    setRegistryError("");
+    try {
+      const config = await updateRegistryConfig("");
+      setRegistryId(config.registry_id);
+      setRegistryEnabled(config.enabled);
+      setRegistrySaved(true);
+      setTimeout(() => setRegistrySaved(false), 2000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to disable";
+      setRegistryError(msg);
+    }
+  };
 
   const saveCpuIdleDiscount = async (value: string) => {
     const num = Math.max(0, Math.min(99, parseInt(value, 10) || 0));
@@ -98,6 +146,50 @@ export function SettingsPage() {
             </div>
             <p className="text-[10px] text-muted-foreground">
               Assumed % of CPU time spent waiting on I/O (e.g., model API calls). Applied as a discount to runtime CPU cost across estimates and actuals. Range: 0–99.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Registry Configuration section */}
+      <div className="space-y-4">
+        <div>
+          <h3 className="text-sm font-medium">Agent Registry</h3>
+          <p className="text-xs text-muted-foreground mt-1">
+            Configure AWS Agent Registry for governance and discovery. When enabled, agents, MCP servers, and A2A agents must be approved in the registry before they can be used by end users.
+          </p>
+        </div>
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Registry ARN</label>
+            <div className="flex items-center gap-2">
+              <Input
+                type="text"
+                className="h-8 w-[500px] text-xs font-mono"
+                placeholder="arn:aws:bedrock-agentcore:us-east-1:123456789012:registry/loom-registry"
+                value={registryArn}
+                onChange={(e) => setRegistryArn(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") void saveRegistryConfig(); }}
+              />
+              <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => void saveRegistryConfig()}>
+                Save
+              </Button>
+              {registryEnabled && (
+                <Button size="sm" variant="ghost" className="h-8 text-xs text-destructive" onClick={() => void disableRegistry()}>
+                  Disable
+                </Button>
+              )}
+              {registrySaved && (
+                <span className="text-xs text-green-600 dark:text-green-400">Saved</span>
+              )}
+            </div>
+            {registryError && (
+              <p className="text-xs text-destructive">{registryError}</p>
+            )}
+            <p className="text-[10px] text-muted-foreground">
+              {registryEnabled
+                ? `Registry enabled (ID: ${registryId}). Governance workflows are active.`
+                : "No registry configured. All resources are available without registry approval."}
             </p>
           </div>
         </div>

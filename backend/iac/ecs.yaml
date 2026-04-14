@@ -55,6 +55,10 @@ Parameters:
     Type: String
     Description: Comma-separated CORS origins
     Default: ""
+  pRegistryId:
+    Type: String
+    Description: Agent Registry ID (from bedrock-agentcore-control list-registries)
+    Default: ""
   pTagApplication:
     Type: String
     Description: Value for the loom:application tag
@@ -173,6 +177,21 @@ Resources:
                 Action:
                   - bedrock-agentcore:*
                 Resource: !Sub "arn:aws:bedrock-agentcore:*:${AWS::AccountId}:*"
+        - PolicyName: BedrockAgentCoreControlPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock-agentcore-control:GetRegistry
+                  - bedrock-agentcore-control:CreateRegistryRecord
+                  - bedrock-agentcore-control:GetRegistryRecord
+                  - bedrock-agentcore-control:ListRegistryRecords
+                  - bedrock-agentcore-control:SubmitRegistryRecordForApproval
+                  - bedrock-agentcore-control:UpdateRegistryRecordStatus
+                  - bedrock-agentcore-control:UpdateRegistryRecord
+                  - bedrock-agentcore-control:DeleteRegistryRecord
+                Resource: !Sub "arn:aws:bedrock-agentcore-control:*:${AWS::AccountId}:registry/*"
         - PolicyName: S3ArtifactPolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -325,6 +344,8 @@ Resources:
                 - !Ref pCognitoRegion
             - Name: LOOM_ALLOWED_ORIGINS
               Value: !Ref pAllowedOrigins
+            - Name: LOOM_REGISTRY_ID
+              Value: !Ref pRegistryId
             - Name: LOG_LEVEL
               Value: info
           Secrets:

@@ -113,7 +113,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
   const [selectedAuthConfigId, setSelectedAuthConfigId] = useState<string>("");
 
   // Permission request state
-  const [showRolePerms, setShowRolePerms] = useState(true);
+  const [showRolePerms, setShowRolePerms] = useState(false);
   const [showPermRequest, setShowPermRequest] = useState(false);
   const [permActions, setPermActions] = useState<string[]>([]);
   const [permResources, setPermResources] = useState<string[]>([]);
@@ -272,8 +272,13 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
   };
 
   // Filter resources by group if restricted
-  const filteredMcpServers = mcpServers; // MCP servers are shared (no group tag)
-  const filteredA2aAgents = a2aAgents; // A2A agents are shared (no group tag)
+  const registryActive = mcpServers.some(s => s.registry_status) || a2aAgents.some(a => a.registry_status);
+  const filteredMcpServers = registryActive
+    ? mcpServers.filter(s => !s.registry_status || s.registry_status === "APPROVED")
+    : mcpServers;
+  const filteredA2aAgents = registryActive
+    ? a2aAgents.filter(a => !a.registry_status || a.registry_status === "APPROVED")
+    : a2aAgents;
   const filteredMemories = groupRestriction
     ? memories.filter((m) => m.tags?.["loom:group"] === groupRestriction)
     : memories;

@@ -1,6 +1,6 @@
 # Loom
 
-Loom is an enterprise-grade platform for building, deploying, and operating AI agents on Amazon Bedrock AgentCore Runtime and AWS Strands Agents. It provides a unified management UI with Cognito-based authentication, scope-based authorization, multi-persona navigation, and full lifecycle management for agents, memory, MCP servers, and A2A integrations.
+Loom is an enterprise-grade platform for building, deploying, and operating AI agents on Amazon Bedrock AgentCore Runtime and AWS Strands Agents. It provides a unified management UI with Cognito-based authentication, scope-based authorization, multi-persona navigation, and full lifecycle management for agents, memory, MCP servers, A2A integrations, and AWS Agent Registry governance.
 
 ## Features
 
@@ -33,9 +33,19 @@ Loom seamlessly stitches together agents, memory stores, MCP servers, and agent-
 - Handles both SSE streaming and plain JSON responses with automatic method fallback
 - Credential provider creation with exponential backoff retry for reliable deployment
 
+### Agent Registry (Opt-In Governance)
+- AWS Agent Registry integration for governance and discovery — opt-in via Settings page (ARN configuration)
+- When enabled, provides additional governance: agents, MCP servers, and A2A agents must be approved before use
+- Agents auto-registered in DRAFT status on deployment; admins manage approval workflow
+- Full record lifecycle: create, submit for approval, approve, reject, delete
+- Descriptor builders for agents, MCP servers, and A2A agents
+- Semantic search over registry records via data plane API
+- Visibility filtering: end-users see only APPROVED or unregistered resources
+- Integration gating: only APPROVED MCP servers and A2A agents can be selected for agent deployments
+
 ### Security and Access Control
 - Cognito user authentication with automatic token refresh
-- Two-dimensional group-based authorization: Type groups (t-admin, t-user) for UI view and Resource groups (g-admins-*, g-users-*) for access control (19 scopes total)
+- Two-dimensional group-based authorization: Type groups (t-admin, t-user) for UI view and Resource groups (g-admins-*, g-users-*) for access control (21 scopes total)
 - IAM role, authorizer, and credential management
 - Admin user view switching to preview scoped experiences
 

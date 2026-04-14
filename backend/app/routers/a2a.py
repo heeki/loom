@@ -9,6 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
+from sqlalchemy import or_
+
 from app.db import get_db
 from app.dependencies.auth import UserInfo, require_scopes
 from app.models.a2a import A2aAgent, A2aAgentSkill, A2aAgentAccess
@@ -80,6 +82,8 @@ class A2aAgentResponse(BaseModel):
     oauth2_scopes: str | None = None
     has_oauth2_secret: bool = False
     agentcore_session_id: str | None = None
+    registry_record_id: str | None = None
+    registry_status: str | None = None
     last_fetched_at: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
@@ -230,7 +234,11 @@ def list_a2a_agents(
     user: UserInfo = Depends(require_scopes("a2a:read")),
     db: Session = Depends(get_db),
 ) -> list[A2aAgentResponse]:
-    agents = db.query(A2aAgent).order_by(A2aAgent.created_at.desc()).all()
+    query = db.query(A2aAgent)
+    # t-user (without t-admin) can only see APPROVED or unregistered agents
+    if "t-user" in user.groups and "t-admin" not in user.groups:
+        query = query.filter(or_(A2aAgent.registry_status == "APPROVED", A2aAgent.registry_status.is_(None)))
+    agents = query.order_by(A2aAgent.created_at.desc()).all()
     return [A2aAgentResponse(**a.to_dict()) for a in agents]
 
 

@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
+from sqlalchemy import or_
+
 from app.db import get_db
 from app.dependencies.auth import UserInfo, require_scopes
 from app.models.mcp import McpServer, McpTool, McpServerAccess
@@ -69,6 +71,8 @@ class McpServerResponse(BaseModel):
     oauth2_client_id: str | None = None
     oauth2_scopes: str | None = None
     has_oauth2_secret: bool = False
+    registry_record_id: str | None = None
+    registry_status: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -163,7 +167,11 @@ def list_mcp_servers(
     user: UserInfo = Depends(require_scopes("mcp:read")),
     db: Session = Depends(get_db),
 ) -> list[McpServerResponse]:
-    servers = db.query(McpServer).order_by(McpServer.created_at.desc()).all()
+    query = db.query(McpServer)
+    # t-user (without t-admin) can only see APPROVED or unregistered servers
+    if "t-user" in user.groups and "t-admin" not in user.groups:
+        query = query.filter(or_(McpServer.registry_status == "APPROVED", McpServer.registry_status.is_(None)))
+    servers = query.order_by(McpServer.created_at.desc()).all()
     return [McpServerResponse(**s.to_dict()) for s in servers]
 
 

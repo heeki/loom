@@ -22,6 +22,7 @@ The frontend is organized around persona-based workflows, accessible via a sideb
 - **Settings** — Manage display preferences (theme, timezone). Accessible to all scopes.
 - **MCP Servers** — Register and manage MCP servers, view available tools, and control persona access.
 - **A2A Agents** — Register and manage A2A (Agent-to-Agent) protocol integrations, view Agent Cards, and control persona access to skills.
+- **Registry** (opt-in) — Browse and manage AWS Agent Registry records for governance and discovery. When enabled, agents are auto-registered on deployment and must be approved before end-users can access them. MCP servers and A2A agents must also be approved before they can be used in agent deployments. Supports full record lifecycle (create, submit, approve, reject, delete) and semantic search.
 - **Admin Dashboard** — Platform usage analytics for super-admins. Tracks user logins, user actions, and page navigation at the browser session level. Includes summary cards, charts, and per-session drill-down.
 
 ---
@@ -128,12 +129,12 @@ Detailed specifications for each component are maintained in their respective di
 The Cognito User Pool is managed via CloudFormation (`shared/iac/cognito.yaml`) and includes:
 
 - **Password policy:** Minimum 12 characters, uppercase, lowercase, numbers required; symbols not required.
-- **Resource server scopes (19 total):** `invoke`, `catalog:read`, `catalog:write`, `agent:read`, `agent:write`, `memory:read`, `memory:write`, `security:read`, `security:write`, `settings:read`, `settings:write`, `tagging:read`, `tagging:write`, `costs:read`, `costs:write`, `mcp:read`, `mcp:write`, `a2a:read`, `a2a:write`.
+- **Resource server scopes (21 total):** `invoke`, `catalog:read`, `catalog:write`, `agent:read`, `agent:write`, `memory:read`, `memory:write`, `security:read`, `security:write`, `settings:read`, `settings:write`, `tagging:read`, `tagging:write`, `costs:read`, `costs:write`, `mcp:read`, `mcp:write`, `a2a:read`, `a2a:write`, `registry:read`, `registry:write`.
 - **Two-dimensional group architecture:**
   - **Type groups** (UI view): `t-admin` (admin UI with all pages), `t-user` (user UI with Catalog, Agents, Memory, Costs only)
-  - **Admin groups** (t-admin users, single group): `g-admins-super` (all scopes), `g-admins-demo` (read/write to most pages including MCP and A2A + demo group resources), `g-admins-security` (security:read/write, settings:read, tagging:read/write), `g-admins-memory` (memory:read/write, settings:read, tagging:read/write), `g-admins-mcp` (mcp:read/write, settings:read, tagging:read/write), `g-admins-a2a` (a2a:read/write, settings:read, tagging:read/write)
+  - **Admin groups** (t-admin users, single group): `g-admins-super` (all scopes), `g-admins-demo` (read/write to most pages including MCP and A2A + demo group resources), `g-admins-security` (security:read/write, settings:read, tagging:read/write), `g-admins-memory` (memory:read/write, settings:read, tagging:read/write), `g-admins-mcp` (mcp:read/write, settings:read, tagging:read/write), `g-admins-a2a` (a2a:read/write, settings:read, tagging:read/write), `g-admins-registry` (mcp:read, a2a:read, registry:read/write, settings:read/write, tagging:read)
   - **User groups** (t-user users, can have multiple): `g-users-demo`, `g-users-test`, `g-users-strategics` (each grants: catalog:read, agent:read, memory:read, costs:read, costs:write, invoke)
-- **Users:** `admin` (t-admin + g-admins-super), `demo-admin` (t-admin + g-admins-demo), `security-admin` (t-admin + g-admins-security), `integration-admin` (t-admin + g-admins-memory + g-admins-mcp + g-admins-a2a), `demo-user` (t-user + g-users-demo) — each assigned to both type and group via `UserPoolUserToGroupAttachment`.
+- **Users:** `admin` (t-admin + g-admins-super), `demo-admin` (t-admin + g-admins-demo), `security-admin` (t-admin + g-admins-security), `integration-admin` (t-admin + g-admins-memory + g-admins-mcp + g-admins-a2a), `registry-admin` (t-admin + g-admins-registry), `demo-user` (t-user + g-users-demo) — each assigned to both type and group via `UserPoolUserToGroupAttachment`.
 - **Clients:**
   - **M2MClient** — `client_credentials` flow with secret, scoped to `invoke`.
   - **UserClient** — `USER_PASSWORD_AUTH` + `REFRESH_TOKEN_AUTH` flows without secret, scoped to all custom scopes plus `openid`, `email`, `profile`.
@@ -145,12 +146,13 @@ The frontend enforces scope-based access control derived from Cognito group memb
 
 | Group | Scopes | Sidebar Access | Write Access |
 |-------|--------|----------------|--------------|
-| `g-admins-super` | All 19 scopes | All pages (including Admin Dashboard) | All actions |
+| `g-admins-super` | All 21 scopes | All pages (including Admin Dashboard) | All actions |
 | `g-admins-demo` | catalog:read, agent:read, agent:write, memory:read, memory:write, security:read, settings:read, settings:write, tagging:read, costs:read, costs:write, mcp:read, mcp:write, a2a:read, a2a:write, invoke | All admin pages | Read/write restricted to demo group resources only |
 | `g-admins-security` | security:read, security:write, settings:read, tagging:read, tagging:write | Security, Settings, Tagging | Security + tag policy/profile management |
 | `g-admins-memory` | memory:read, memory:write, settings:read, tagging:read, tagging:write | Memory, Settings, Tagging | Memory + tag policy/profile management |
 | `g-admins-mcp` | mcp:read, mcp:write, settings:read, tagging:read, tagging:write | MCP Servers, Settings, Tagging | MCP + tag policy/profile management |
 | `g-admins-a2a` | a2a:read, a2a:write, settings:read, tagging:read, tagging:write | A2A Agents, Settings, Tagging | A2A + tag policy/profile management |
+| `g-admins-registry` | mcp:read, a2a:read, registry:read, registry:write, settings:read, settings:write, tagging:read | Registry, Settings, Tagging | Registry governance + settings management |
 | `g-users-*` | catalog:read, agent:read, memory:read, costs:read, costs:write, invoke | Catalog, Agents, Memory, Costs | No write access; costs:write for cost settings only |
 
 - **Sidebar visibility:** Each sidebar item is shown only when the user has the corresponding `*:read` or `*:write` scope. The Platform Catalog is always visible. Type groups determine the overall UI view (t-admin sees all admin pages, t-user sees only Catalog/Agents/Memory/Costs).
@@ -247,7 +249,7 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - Graceful fallback to existing M2M client credentials flow when no user token is present.
 - `GET /api/auth/config` endpoint returns pool ID and region; user client ID is configured on the frontend via `VITE_COGNITO_USER_CLIENT_ID`.
 - Tokens stored in memory only (not localStorage); authentication does not persist across page reloads.
-- Cognito User Pool IaC: resource server with custom scopes (15 scopes: `invoke`, `catalog:read/write`, `agent:read/write`, `memory:read/write`, `security:read/write`, `settings:read/write`, `mcp:read/write`, `a2a:read/write`), user groups (7 groups: `super-admins`, `demo-admins`, `security-admins`, `memory-admins`, `mcp-admins`, `a2a-admins`, `users`), users with group assignments, password policy (12+ chars, no symbols required).
+- Cognito User Pool IaC: resource server with custom scopes (15 initial scopes, later expanded to 21: `invoke`, `catalog:read/write`, `agent:read/write`, `memory:read/write`, `security:read/write`, `settings:read/write`, `tagging:read/write`, `costs:read/write`, `mcp:read/write`, `a2a:read/write`, `registry:read/write`), user groups, users with group assignments, password policy (12+ chars, no symbols required).
 - Security makefile with `cognito.set-passwords` target for setting permanent user passwords.
 - Scope-based frontend authorization: `AuthContext` extracts `cognito:groups` from the ID token, maps groups to scopes, and exposes `hasScope()`. Sidebar items are conditionally rendered based on user scopes. Write operations (add, edit, delete buttons) are disabled or hidden via a `readOnly` prop when the user lacks `*:write` scopes. When auth is not configured, all scopes are granted.
 
@@ -297,7 +299,7 @@ Model selectors in the UI are searchable by both display name and model ID, with
 
 ### Phase 10 — Fine-Grained Permissions Scoping *(Complete)*
 - Two-dimensional group architecture: Type groups (`t-admin`, `t-user`) define UI view; Group membership (`g-admins-*`, `g-users-*`) grants scopes. Users belong to both a type group and one or more resource groups.
-- Expanded scope model from 15 to 19 scopes: added `tagging:read/write` for tag policy/profile management, `costs:read/write` for cost dashboard access. Total scopes: `invoke`, `catalog:read/write`, `agent:read/write`, `memory:read/write`, `security:read/write`, `settings:read/write`, `tagging:read/write`, `costs:read/write`, `mcp:read/write`, `a2a:read/write`.
+- Expanded scope model from 15 to 19 scopes: added `tagging:read/write` for tag policy/profile management, `costs:read/write` for cost dashboard access. Scopes at this phase: `invoke`, `catalog:read/write`, `agent:read/write`, `memory:read/write`, `security:read/write`, `settings:read/write`, `tagging:read/write`, `costs:read/write`, `mcp:read/write`, `a2a:read/write`. (Later expanded to 21 in Phase 22 with `registry:read/write`.)
 - Updated Cognito group structure:
   - Type groups: `t-admin` (admin UI), `t-user` (user UI)
   - Admin groups: `g-admins-super` (all scopes), `g-admins-demo` (read/write to most pages including MCP/A2A + demo group resources), `g-admins-security`, `g-admins-memory`, `g-admins-mcp`, `g-admins-a2a`
@@ -474,7 +476,17 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - **Database URL injection:** `LOOM_DATABASE_URL` injected via ECS Secrets (ValueFrom) referencing the RDS stack's Secrets Manager ARN with JSON key extraction.
 - **Cross-account DNS delegation:** DNS stack creates a Route 53 hosted zone; if the parent domain is in a different account, NS delegation records must be added in the parent account before deploying the infra stack.
 
-### Phase 21 — Advanced Operations
+### Phase 22 — AWS Agent Registry Integration *(Complete)*
+- **Scope expansion from 19 to 21:** Added `registry:read` and `registry:write` scopes for Agent Registry governance. Registry endpoints use `mcp:read` for GET and `mcp:write` for POST/PUT/DELETE as the underlying scope enforcement.
+- **New Cognito group:** `g-admins-registry` with scopes `mcp:read`, `a2a:read`, `registry:read`, `registry:write`, `settings:read`, `settings:write`, `tagging:read`. Enables dedicated registry governance administrators.
+- **Registry sidebar visibility gating:** The Registry sidebar entry is visible only when the user has `registry:read` or `registry:write` scope, ensuring non-registry users do not see the governance UI.
+- **`registryEnabled` prop pattern:** All frontend pages that display registry UI elements (RegistryStatusBadge, RegistryActions) fetch `getRegistryConfig()` on mount and thread a `registryEnabled` boolean through their components. When registry is disabled, all registry badges and action buttons are hidden — RegistryStatusBadge returns null when `registryEnabled=false`, and RegistryActions rendering is gated by `registryEnabled &&` at all render sites.
+- **Registry status badges across all pages:** RegistryStatusBadge added to CatalogPage (agents, MCP servers, A2A agents sections), AgentListPage, McpServersPage, and A2aAgentsPage in both card and table views. All instances pass `registryEnabled={registryEnabled}` to hide when disabled.
+- **AgentCard `registryEnabled` prop:** AgentCard accepts `registryEnabled` (default true) and passes it to its embedded RegistryStatusBadge, allowing the catalog and agent list pages to control badge visibility.
+- **Collapsible catalog sections:** CatalogPage sections (Agents, Memory Resources, MCP Servers, A2A Agents) are collapsible via ChevronRight/ChevronDown toggles. Collapse state persisted to `localStorage` under `loom:collapsedSections:catalog`.
+- **Backend registry status sync:** When registry is re-enabled via the Settings page, `_sync_registry_statuses()` validates all stored `registry_record_id` values across Agent, McpServer, and A2aAgent models against the live registry. Records that no longer exist are cleared; status mismatches are updated. This prevents stale governance data after a disable/re-enable cycle.
+
+### Phase 23 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

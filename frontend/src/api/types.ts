@@ -38,6 +38,8 @@ export interface AgentResponse {
   memory_names: string[];
   mcp_names: string[];
   a2a_names: string[];
+  registry_record_id: string | null;
+  registry_status: string | null;
 }
 
 export interface AgentRegisterRequest {
@@ -563,6 +565,8 @@ export interface McpServer {
   has_oauth2_secret: boolean;
   created_at: string | null;
   updated_at: string | null;
+  registry_record_id: string | null;
+  registry_status: string | null;
 }
 
 export interface McpServerCreateRequest {
@@ -663,6 +667,8 @@ export interface A2aAgent {
   last_fetched_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+  registry_record_id: string | null;
+  registry_status: string | null;
 }
 
 export interface A2aAgentCreateRequest {
@@ -822,4 +828,32 @@ export interface CostActualsResponse {
   agents: CostActualAgent[];
   memory: CostActualMemory[];
   summary: { total_events: number };
+}
+
+// Registry types
+export type RegistryStatus = "DRAFT" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED" | "DEPRECATED";
+
+export interface RegistryRecord {
+  record_id: string;
+  name: string;
+  descriptor_type: string;
+  status: string;
+  description: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface RegistryRecordDetail extends RegistryRecord {
+  descriptors: Record<string, unknown>;
+  record_version: string | null;
+  status_reason: string | null;
+}
+
+export interface RegistryRecordCreateRequest {
+  resource_type: "mcp" | "a2a" | "agent";
+  resource_id: number;
+}
+
+export interface RegistrySearchResult {
+  results: Array<Record<string, unknown>>;
 }

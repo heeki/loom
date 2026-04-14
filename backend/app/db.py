@@ -104,6 +104,12 @@ def _migrate_add_columns(eng) -> None:
         ("invocation_sessions", "user_id", "VARCHAR"),
         ("invocation_sessions", "hidden_at", "DATETIME"),
         ("agents", "description", "TEXT"),
+        ("mcp_servers", "registry_record_id", "VARCHAR"),
+        ("mcp_servers", "registry_status", "VARCHAR"),
+        ("a2a_agents", "registry_record_id", "VARCHAR"),
+        ("a2a_agents", "registry_status", "VARCHAR"),
+        ("agents", "registry_record_id", "VARCHAR"),
+        ("agents", "registry_status", "VARCHAR"),
     ]
 
     is_postgres = eng.dialect.name == "postgresql"

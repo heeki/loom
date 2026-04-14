@@ -16,7 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { LayoutGrid, TableIcon, X, Eye, EyeOff } from "lucide-react";
+import { LayoutGrid, TableIcon, X, Eye, EyeOff, ChevronRight, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
@@ -24,8 +24,9 @@ import { statusVariant } from "@/lib/status";
 import { listMemories, refreshMemory, deleteMemory, purgeMemory } from "@/api/memories";
 import { listMcpServers } from "@/api/mcp";
 import { listA2aAgents } from "@/api/a2a";
-import { listTagPolicies } from "@/api/settings";
+import { listTagPolicies, getRegistryConfig } from "@/api/settings";
 import { ApiError } from "@/api/client";
+import { RegistryStatusBadge } from "@/components/RegistryStatusBadge";
 import type { AgentResponse, MemoryResponse, McpServer, A2aAgent, TagPolicy } from "@/api/types";
 
 interface CatalogPageProps {
@@ -65,6 +66,7 @@ export function CatalogPage({
 }: CatalogPageProps) {
   const { timezone } = useTimezone();
   // Tag filter state
+  const [registryEnabled, setRegistryEnabled] = useState(false);
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
   const [tagFilters, setTagFilters] = useState<Record<string, string[]>>(() => {
     try { return JSON.parse(localStorage.getItem("loom:tagFilters:catalog") || "{}") as Record<string, string[]>; } catch { return {}; }
@@ -76,6 +78,10 @@ export function CatalogPage({
       void listTagPolicies().then(setTagPolicies).catch(() => {});
     }
   }, [canViewAgents, canViewMemories, canViewMcp, canViewA2a]);
+
+  useEffect(() => {
+    getRegistryConfig().then((c) => setRegistryEnabled(c.enabled)).catch(() => {});
+  }, []);
 
   const showOnCardPolicies = tagPolicies.filter(tp => tp.show_on_card);
   const showOnCardKeys = showOnCardPolicies.map(tp => tp.key);
@@ -95,6 +101,21 @@ export function CatalogPage({
   const [showCustomTags, setShowCustomTags] = useState(() => localStorage.getItem("loom:showCustomTags") !== "false");
   const requiredKeySet = new Set(requiredPolicies.map(tp => tp.key));
   const effectiveShowOnCardKeys = showCustomTags ? showOnCardKeys : showOnCardKeys.filter(k => requiredKeySet.has(k));
+
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem("loom:collapsedSections:catalog") || "[]") as string[];
+      return new Set(stored);
+    } catch { return new Set(); }
+  });
+  const toggleSection = (section: string) => {
+    setCollapsedSections(prev => {
+      const next = new Set(prev);
+      if (next.has(section)) next.delete(section); else next.add(section);
+      localStorage.setItem("loom:collapsedSections:catalog", JSON.stringify([...next]));
+      return next;
+    });
+  };
 
   const matchesFilters = (tags: Record<string, string> | undefined) => {
     return Object.entries(tagFilters).every(([key, values]) => {
@@ -456,11 +477,14 @@ export function CatalogPage({
       {canViewAgents && (
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium">Agents</h3>
-          <SortButton direction={agentSortDir} onClick={() => setAgentSortDir(toggleSortDirection("catalog-agents", agentSortDir))} />
+          <button type="button" className="flex items-center gap-1 text-sm font-medium hover:text-foreground/80" onClick={() => toggleSection("agents")}>
+            {collapsedSections.has("agents") ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            Agents
+          </button>
+          {!collapsedSections.has("agents") && <SortButton direction={agentSortDir} onClick={() => setAgentSortDir(toggleSortDirection("catalog-agents", agentSortDir))} />}
         </div>
 
-        {loading ? (
+        {!collapsedSections.has("agents") && (loading ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 3 }).map((_, i) => (
               <Skeleton key={i} className="h-48" />
@@ -492,6 +516,7 @@ export function CatalogPage({
                     showOnCardKeys={effectiveShowOnCardKeys}
                     deleteStartTime={agentDeleteStartTimes?.[agent.id]}
                     userGroups={userGroups}
+                    registryEnabled={registryEnabled}
                   />
                 )}
               />
@@ -505,8 +530,9 @@ export function CatalogPage({
                       <SortableTableHead column="cost" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Cost</SortableTableHead>
                       <SortableTableHead column="protocol" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Protocol</SortableTableHead>
                       <SortableTableHead column="network" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Network</SortableTableHead>
-                      <SortableTableHead column="region" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Region</SortableTableHead>
-                      <SortableTableHead column="registered" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[16%]">Registered</SortableTableHead>
+                      <SortableTableHead column="registry" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[10%]">Registry</SortableTableHead>
+                      <SortableTableHead column="region" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[10%]">Region</SortableTableHead>
+                      <SortableTableHead column="registered" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[14%]">Registered</SortableTableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -516,6 +542,7 @@ export function CatalogPage({
                       cost: (a) => a.cost_summary?.total_cost ?? 0,
                       protocol: (a) => a.protocol ?? "",
                       network: (a) => a.network_mode ?? "",
+                      registry: (a) => a.registry_status ?? "",
                       region: (a) => a.region ?? "",
                       registered: (a) => a.registered_at ?? "",
                     }).map((agent) => (
@@ -525,7 +552,10 @@ export function CatalogPage({
                         onClick={() => onSelectAgent(agent.id)}
                       >
                         <TableCell className="font-medium text-sm">
-                          {agent.name ?? agent.runtime_id}
+                          <div className="flex items-center gap-2">
+                            {agent.name ?? agent.runtime_id}
+                            {agent.registry_status && <RegistryStatusBadge status={agent.registry_status} registryEnabled={registryEnabled} />}
+                          </div>
                         </TableCell>
                         <TableCell>
                           <Badge variant={statusVariant(agent.status)} className="text-[10px] px-1.5 py-0">
@@ -545,6 +575,9 @@ export function CatalogPage({
                         <TableCell className="text-xs text-muted-foreground">
                           {agent.network_mode ?? "\u2014"}
                         </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {agent.registry_status ? <RegistryStatusBadge status={agent.registry_status} registryEnabled={registryEnabled} /> : "\u2014"}
+                        </TableCell>
                         <TableCell className="text-xs text-muted-foreground">{agent.region}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {formatTimestamp(agent.registered_at, timezone)}
@@ -556,7 +589,7 @@ export function CatalogPage({
               </div>
             )}
           </>
-        )}
+        ))}
       </section>
       )}
 
@@ -564,11 +597,14 @@ export function CatalogPage({
       {canViewMemories && (
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium">Memory Resources</h3>
-          <SortButton direction={memorySortDir} onClick={() => setMemorySortDir(toggleSortDirection("catalog-memories", memorySortDir))} />
+          <button type="button" className="flex items-center gap-1 text-sm font-medium hover:text-foreground/80" onClick={() => toggleSection("memories")}>
+            {collapsedSections.has("memories") ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            Memory Resources
+          </button>
+          {!collapsedSections.has("memories") && <SortButton direction={memorySortDir} onClick={() => setMemorySortDir(toggleSortDirection("catalog-memories", memorySortDir))} />}
         </div>
 
-        {memoriesLoading ? (
+        {!collapsedSections.has("memories") && (memoriesLoading ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 2 }).map((_, i) => (
               <Skeleton key={i} className="h-40" />
@@ -656,7 +692,7 @@ export function CatalogPage({
               </TableBody>
             </Table>
           </div>
-        )}
+        ))}
       </section>
       )}
 
@@ -664,11 +700,14 @@ export function CatalogPage({
       {canViewMcp && (
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium">MCP Servers</h3>
-          <SortButton direction={mcpSortDir} onClick={() => setMcpSortDir(toggleSortDirection("catalog-mcp", mcpSortDir))} />
+          <button type="button" className="flex items-center gap-1 text-sm font-medium hover:text-foreground/80" onClick={() => toggleSection("mcp")}>
+            {collapsedSections.has("mcp") ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            MCP Servers
+          </button>
+          {!collapsedSections.has("mcp") && <SortButton direction={mcpSortDir} onClick={() => setMcpSortDir(toggleSortDirection("catalog-mcp", mcpSortDir))} />}
         </div>
 
-        {mcpLoading ? (
+        {!collapsedSections.has("mcp") && (mcpLoading ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 2 }).map((_, i) => (
               <Skeleton key={i} className="h-32" />
@@ -689,8 +728,11 @@ export function CatalogPage({
             renderItem={(server) => (
               <Card className="py-3 gap-1 transition-colors hover:bg-accent/50">
                 <CardHeader className="gap-0 pb-2">
-                  <div className="text-sm font-medium truncate" title={server.name}>
-                    {server.name}
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-medium truncate" title={server.name}>
+                      {server.name}
+                    </div>
+                    <RegistryStatusBadge status={server.registry_status} showUnregistered={registryEnabled} registryEnabled={registryEnabled} />
                   </div>
                 </CardHeader>
                 <CardContent className="text-xs text-muted-foreground">
@@ -727,7 +769,12 @@ export function CatalogPage({
                   created: (s) => s.created_at ?? "",
                 }).map((server) => (
                   <TableRow key={server.id} className="bg-input-bg hover:bg-input-bg/80">
-                    <TableCell className="font-medium text-sm">{server.name}</TableCell>
+                    <TableCell className="font-medium text-sm">
+                      <div className="flex items-center gap-2">
+                        {server.name}
+                        <RegistryStatusBadge status={server.registry_status} showUnregistered={registryEnabled} registryEnabled={registryEnabled} />
+                      </div>
+                    </TableCell>
                     <TableCell className="text-xs text-muted-foreground truncate">{server.endpoint_url}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{server.transport_type === "streamable_http" ? "Streamable HTTP" : "SSE"}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{server.auth_type === "oauth2" ? "OAuth2" : "None"}</TableCell>
@@ -739,7 +786,7 @@ export function CatalogPage({
               </TableBody>
             </Table>
           </div>
-        )}
+        ))}
       </section>
       )}
 
@@ -747,11 +794,14 @@ export function CatalogPage({
       {canViewA2a && (
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium">A2A Agents</h3>
-          <SortButton direction={a2aSortDir} onClick={() => setA2aSortDir(toggleSortDirection("catalog-a2a", a2aSortDir))} />
+          <button type="button" className="flex items-center gap-1 text-sm font-medium hover:text-foreground/80" onClick={() => toggleSection("a2a")}>
+            {collapsedSections.has("a2a") ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            A2A Agents
+          </button>
+          {!collapsedSections.has("a2a") && <SortButton direction={a2aSortDir} onClick={() => setA2aSortDir(toggleSortDirection("catalog-a2a", a2aSortDir))} />}
         </div>
 
-        {a2aLoading ? (
+        {!collapsedSections.has("a2a") && (a2aLoading ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 2 }).map((_, i) => (
               <Skeleton key={i} className="h-32" />
@@ -776,9 +826,7 @@ export function CatalogPage({
                     <div className="text-sm font-medium truncate" title={agent.name}>
                       {agent.name}
                     </div>
-                    <Badge variant={statusVariant(agent.status)} className="text-[10px] px-1.5 py-0 shrink-0">
-                      {agent.status}
-                    </Badge>
+                    <RegistryStatusBadge status={agent.registry_status} showUnregistered={registryEnabled} registryEnabled={registryEnabled} />
                   </div>
                 </CardHeader>
                 <CardContent className="text-xs text-muted-foreground">
@@ -821,7 +869,12 @@ export function CatalogPage({
                   created: (a) => a.created_at ?? "",
                 }).map((agent) => (
                   <TableRow key={agent.id} className="bg-input-bg hover:bg-input-bg/80">
-                    <TableCell className="font-medium text-sm">{agent.name}</TableCell>
+                    <TableCell className="font-medium text-sm">
+                      <div className="flex items-center gap-2">
+                        {agent.name}
+                        <RegistryStatusBadge status={agent.registry_status} showUnregistered={registryEnabled} registryEnabled={registryEnabled} />
+                      </div>
+                    </TableCell>
                     <TableCell className="text-xs text-muted-foreground truncate">{agent.base_url}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{agent.agent_version}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{agent.auth_type === "oauth2" ? "OAuth2" : "None"}</TableCell>
@@ -833,7 +886,7 @@ export function CatalogPage({
               </TableBody>
             </Table>
           </div>
-        )}
+        ))}
       </section>
       )}
     </div>

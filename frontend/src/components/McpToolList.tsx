@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+
+
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, RefreshCw, ChevronRight, ChevronDown, Play, ArrowLeft } from "lucide-react";
@@ -410,25 +411,17 @@ export function McpToolList({ serverId, readOnly }: McpToolListProps) {
           storageKey={`mcp-tools-${serverId}`}
           sortDirection={sortDir}
           onSortDirectionChange={(d) => { if (d) { setSortDir(d); saveSortDirection(`mcp-tools-${serverId}`, d); } }}
-          className="grid gap-4 md:grid-cols-2"
+          className="grid gap-2 grid-cols-1"
           renderItem={(tool) => (
-            <Card
-              className="cursor-pointer transition-colors hover:bg-accent/50 py-3 gap-1"
+            <div
+              className="rounded border bg-input-bg px-3 py-2 cursor-pointer transition-colors hover:bg-accent/50"
               onClick={() => handleSelectTool(tool)}
             >
-              <CardHeader className="gap-0 pb-1">
-                <div className="text-sm font-medium truncate" title={tool.tool_name}>
-                  {tool.tool_name}
-                </div>
-              </CardHeader>
-              <CardContent className="text-xs text-muted-foreground">
-                {tool.description ? (
-                  <p className="line-clamp-2">{tool.description}</p>
-                ) : (
-                  <p className="italic">No description</p>
-                )}
-              </CardContent>
-            </Card>
+              <span className="text-sm font-medium">{tool.tool_name}</span>
+              {tool.description && (
+                <span className="text-xs text-muted-foreground"> — {tool.description}</span>
+              )}
+            </div>
           )}
         />
       )}

@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import init_db
-from app.routers import a2a, admin, agents, auth, costs, credentials, integrations, invocations, logs, mcp, memories, security, settings, traces
+from app.routers import a2a, admin, agents, auth, costs, credentials, integrations, invocations, logs, mcp, memories, registry, security, settings, traces
 
 # Configure logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "info").upper()
@@ -40,6 +40,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
         raise
+
+    # Initialize registry client from site_settings (or env var fallback)
+    try:
+        from app.services.registry import init_registry_from_db
+        from app.db import SessionLocal
+        db_session = SessionLocal()
+        try:
+            init_registry_from_db(db_session)
+        finally:
+            db_session.close()
+    except Exception as e:
+        logger.warning("Failed to initialize registry client: %s", e)
 
     yield
 
@@ -86,6 +98,7 @@ app.include_router(invocations.router)
 app.include_router(logs.router)
 app.include_router(mcp.router)
 app.include_router(memories.router)
+app.include_router(registry.router)
 app.include_router(security.router)
 app.include_router(settings.router)
 app.include_router(traces.router)

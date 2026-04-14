@@ -134,6 +134,7 @@ The app uses a persona-based single-page architecture with a sidebar for workflo
 | Settings | Settings | Manage display preferences | Always visible | |
 | MCP Servers | Network | Register and manage MCP servers, tools, and access control | `mcp:read` or `mcp:write` | |
 | A2A Agents | Users | Register and manage A2A agents, view Agent Cards, and control access | `a2a:read` or `a2a:write` | |
+| Registry | Library | Browse and manage AWS Agent Registry records for governance and discovery | `registry:read` or `registry:write` | |
 | Costs | DollarSign | Cost dashboard with estimated costs, actual runtime costs from CloudWatch, and cost estimation settings | `catalog:read` | |
 | Admin Dashboard | BarChart3 | Platform usage analytics: login tracking, action tracking, page navigation, per-session drill-down, summary cards and charts | `isAdmin` (super-admins only) | |
 
@@ -168,7 +169,7 @@ Catalog  >  [Agent Name]  >  [Session ID]
 **Content:**
 - Page description: "Browse and manage registered agents and resources." with estimates disclaimer: "Costs for agents and memory resources are *estimates*."
 - Page header: "Platform Catalog" with card/table view toggle (top-right)
-- Organized into sections: Agents, Memory Resources, MCP Servers, A2A Agents
+- Organized into collapsible sections: Agents, Memory Resources, MCP Servers, A2A Agents. Each section header has a ChevronRight/ChevronDown toggle. Collapse state persisted to `localStorage` under `loom:collapsedSections:catalog`.
 - Tag-based filter bar above the agents grid, with multi-select dropdowns (checkbox-based) for each tag policy with `show_on_card=true`. Client-side AND filtering with "Clear filters" button and agent count display (e.g., "Showing 3 of 12 agents")
 - Card/table view toggle applies to all sections on the page
 - Agents section: responsive grid of `AgentCard` components (3 columns on large screens) or table view
@@ -566,6 +567,13 @@ Light theme card backgrounds are set to significantly darker surface values (e.g
 
 **Applied to all card grids:** CatalogPage (agents, memories), AgentListPage (agents), MemoryManagementPanel (memories), TaggingPage (policies, profiles), RoleManagementPanel (roles, full-width single-column), AuthorizerManagementPanel (authorizers), PermissionRequestsPanel (permissions).
 
+### Registry `registryEnabled` Pattern
+All pages displaying registry UI elements (RegistryStatusBadge, RegistryActions) fetch `getRegistryConfig()` on mount and maintain a `registryEnabled` boolean state. When registry is disabled (no ARN configured in Settings), all registry badges and action buttons are hidden:
+- `RegistryStatusBadge` accepts a `registryEnabled` prop (default `true`). When `false`, returns `null` regardless of status.
+- `RegistryActions` rendering is gated at each render site via `{registryEnabled && <RegistryActions ... />}`.
+- `AgentCard` accepts `registryEnabled` (default `true`) and passes it to its embedded `RegistryStatusBadge`.
+- Applied consistently across CatalogPage, AgentListPage, McpServersPage, and A2aAgentsPage in both card and table views.
+
 ### Tailwind CSS v4 (Vite Plugin)
 Using the `@tailwindcss/vite` plugin instead of PostCSS. Configuration is handled via CSS `@theme` blocks in `index.css`.
 
@@ -598,13 +606,14 @@ Cognito client secrets are password-masked in forms. Secrets are sent to the bac
 
 ### Scope-Based Authorization
 - `AuthContext` extracts `cognito:groups` from the decoded ID token and maps them to scopes using a `GROUP_SCOPES` lookup table (must match the backend `GROUP_SCOPES` exactly). The `hasScope(scope)` function is exposed to the entire app.
-- Scopes (19 total): `invoke`, `catalog:read`, `catalog:write`, `agent:read`, `agent:write`, `memory:read`, `memory:write`, `security:read`, `security:write`, `settings:read`, `settings:write`, `tagging:read`, `tagging:write`, `costs:read`, `costs:write`, `mcp:read`, `mcp:write`, `a2a:read`, `a2a:write`.
+- Scopes (21 total): `invoke`, `catalog:read`, `catalog:write`, `agent:read`, `agent:write`, `memory:read`, `memory:write`, `security:read`, `security:write`, `settings:read`, `settings:write`, `tagging:read`, `tagging:write`, `costs:read`, `costs:write`, `mcp:read`, `mcp:write`, `a2a:read`, `a2a:write`, `registry:read`, `registry:write`.
 - Two-dimensional group architecture:
   - **Type groups**: `t-admin` (admin UI), `t-user` (user UI) — determine layout and default navigation
   - **Resource groups**:
-    - `g-admins-super`: All 19 scopes (full access)
+    - `g-admins-super`: All 21 scopes (full access)
     - `g-admins-demo`: Read/write to most pages including MCP and A2A + demo group resources
     - `g-admins-security`, `g-admins-memory`, `g-admins-mcp`, `g-admins-a2a`: Domain-specific admin scopes
+    - `g-admins-registry`: `mcp:read`, `a2a:read`, `registry:read`, `registry:write`, `settings:read`, `settings:write`, `tagging:read`
     - `g-users-demo`, `g-users-test`, `g-users-strategics`: invoke + group-filtered read access
 - Sidebar visibility is controlled by scopes — each persona item is rendered only when the user has the corresponding `*:read` or `*:write` scope. Platform Catalog, Tagging, and Settings are always visible.
 - Write operations are gated by a `readOnly` prop propagated from `App.tsx` through page components to individual UI elements. When `readOnly` is true, add/edit/delete buttons are disabled or hidden.

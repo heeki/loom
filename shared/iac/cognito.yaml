@@ -100,6 +100,10 @@ Resources:
           ScopeDescription: Read A2A agents
         - ScopeName: a2a:write
           ScopeDescription: Write A2A agents
+        - ScopeName: registry:read
+          ScopeDescription: View registry records
+        - ScopeName: registry:write
+          ScopeDescription: Manage registry records
         - ScopeName: admin:read
           ScopeDescription: View admin dashboard and audit data
         - ScopeName: admin:write
@@ -161,6 +165,13 @@ Resources:
     Properties:
       GroupName: g-admins-a2a
       Description: Manage A2A agents
+      UserPoolId: !Ref CognitoUserPool
+
+  GroupAdminsRegistryGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: g-admins-registry
+      Description: Manage registry governance
       UserPoolId: !Ref CognitoUserPool
 
   # User Groups (t-user users - can have multiple)
@@ -768,6 +779,8 @@ Resources:
         - !Sub "${pResourceServerIdentifier}/mcp:write"
         - !Sub "${pResourceServerIdentifier}/a2a:read"
         - !Sub "${pResourceServerIdentifier}/a2a:write"
+        - !Sub "${pResourceServerIdentifier}/registry:read"
+        - !Sub "${pResourceServerIdentifier}/registry:write"
         - !Sub "${pResourceServerIdentifier}/admin:read"
         - !Sub "${pResourceServerIdentifier}/admin:write"
       CallbackURLs: !Ref pCallbackUrls
