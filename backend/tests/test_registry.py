@@ -485,12 +485,18 @@ class TestRegistryService(unittest.TestCase):
         mcp = descriptors["mcp"]
         self.assertIn("server", mcp)
         self.assertIn("tools", mcp)
-        manifest = json.loads(mcp["server"]["inlineContent"])
-        self.assertEqual(manifest["name"], "test-server")
-        tools = json.loads(mcp["tools"]["inlineContent"])
-        self.assertEqual(len(tools), 1)
-        self.assertEqual(tools[0]["name"], "hello")
-        self.assertIn("inputSchema", tools[0])
+        server_info = json.loads(mcp["server"]["inlineContent"])
+        self.assertEqual(server_info["name"], "aws.agentcore/test-server")
+        self.assertEqual(server_info["description"], "A test server")
+        self.assertEqual(server_info["version"], "1.0.0")
+        self.assertNotIn("protocolVersion", server_info)
+        self.assertNotIn("url", server_info)
+        self.assertNotIn("transport", server_info)
+        tools_wrapper = json.loads(mcp["tools"]["inlineContent"])
+        self.assertIn("tools", tools_wrapper)
+        self.assertEqual(len(tools_wrapper["tools"]), 1)
+        self.assertEqual(tools_wrapper["tools"][0]["name"], "hello")
+        self.assertIn("inputSchema", tools_wrapper["tools"][0])
 
     def test_build_agent_descriptors(self):
         from app.services.registry import RegistryClient
@@ -509,19 +515,21 @@ class TestRegistryService(unittest.TestCase):
 
         descriptors = RegistryClient.build_agent_descriptors(agent)
         self.assertIn("a2a", descriptors)
-        card = json.loads(descriptors["a2a"]["agentCard"]["inlineContent"])
+        agent_card_wrapper = descriptors["a2a"]["agentCard"]
+        self.assertEqual(agent_card_wrapper["schemaVersion"], "0.3")
+        card = json.loads(agent_card_wrapper["inlineContent"])
         self.assertEqual(card["name"], "Test Agent")
         self.assertEqual(card["description"], "A test agent")
         self.assertEqual(card["version"], "1.0.0")
-        self.assertEqual(card["protocolVersion"], "0.3.0")
+        self.assertEqual(card["protocolVersion"], "0.3")
         self.assertIn("capabilities", card)
         self.assertIn("skills", card)
         self.assertEqual(len(card["skills"]), 1)
         self.assertEqual(card["skills"][0]["id"], "default")
-        self.assertEqual(card["provider"]["organization"], "Loom")
-        self.assertEqual(card["_meta"]["loom"]["source"], "loom")
-        self.assertEqual(card["_meta"]["loom"]["runtime_id"], "test-runtime")
-        self.assertEqual(card["_meta"]["loom"]["protocol"], "HTTP")
+        self.assertIn("defaultInputModes", card)
+        self.assertIn("defaultOutputModes", card)
+        self.assertNotIn("provider", card)
+        self.assertNotIn("_meta", card)
 
     def test_build_a2a_descriptors(self):
         from app.services.registry import RegistryClient
@@ -536,8 +544,13 @@ class TestRegistryService(unittest.TestCase):
 
         descriptors = RegistryClient.build_a2a_descriptors(agent)
         self.assertIn("a2a", descriptors)
-        card = json.loads(descriptors["a2a"]["agentCard"]["inlineContent"])
+        agent_card_wrapper = descriptors["a2a"]["agentCard"]
+        self.assertEqual(agent_card_wrapper["schemaVersion"], "0.3")
+        card = json.loads(agent_card_wrapper["inlineContent"])
         self.assertEqual(card["name"], "Test Agent")
+        self.assertEqual(card["protocolVersion"], "0.3")
+        self.assertNotIn("provider", card)
+        self.assertNotIn("_meta", card)
 
     def test_client_without_registry_id(self):
         from app.services.registry import RegistryClient

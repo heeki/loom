@@ -88,7 +88,7 @@ export function RegistryActions({ resourceType, resourceId, registryRecordId, re
               value={approveReason}
               onChange={(e) => setApproveReason(e.target.value)}
               placeholder="Reason..."
-              className="h-6 text-xs border rounded px-1.5 bg-input-bg w-32"
+              className="h-6 text-xs border rounded px-1.5 bg-input-bg w-[30rem]"
             />
             <Button
               size="sm"
@@ -126,7 +126,7 @@ export function RegistryActions({ resourceType, resourceId, registryRecordId, re
               value={rejectReason}
               onChange={(e) => setRejectReason(e.target.value)}
               placeholder="Reason..."
-              className="h-6 text-xs border rounded px-1.5 bg-input-bg w-32"
+              className="h-6 text-xs border rounded px-1.5 bg-input-bg w-[30rem]"
             />
             <Button
               size="sm"

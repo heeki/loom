@@ -198,11 +198,12 @@ def create_record(
             detail="resource_type must be 'mcp', 'a2a', or 'agent'",
         )
 
+    rv = "1.0"
     result = client.create_record(
         name=name,
         descriptor_type=descriptor_type,
         descriptors=descriptors,
-        record_version="1",
+        record_version=rv,
         description=description,
     )
 

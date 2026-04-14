@@ -268,7 +268,8 @@ function DescriptorView({ descriptors, descriptorType, metadataSlot }: { descrip
     const serverRaw = (mcp?.server as Record<string, unknown>)?.inlineContent;
     const toolsRaw = (mcp?.tools as Record<string, unknown>)?.inlineContent;
     const server = tryParseJson(serverRaw) as Record<string, unknown> | null;
-    const tools = tryParseJson(toolsRaw) as Array<Record<string, unknown>> | null;
+    const toolsParsed = tryParseJson(toolsRaw);
+    const tools = (Array.isArray(toolsParsed) ? toolsParsed : Array.isArray((toolsParsed as Record<string, unknown>)?.tools) ? (toolsParsed as Record<string, unknown>).tools : null) as Array<Record<string, unknown>> | null;
 
     return (
       <Card className="py-3 gap-1">
@@ -282,8 +283,10 @@ function DescriptorView({ descriptors, descriptorType, metadataSlot }: { descrip
               <div className="rounded border bg-input-bg p-3 space-y-0.5">
                 <div>Name: <span className="text-foreground">{String(server.name ?? "")}</span></div>
                 {server.description ? <div>Description: <span className="text-foreground">{String(server.description)}</span></div> : null}
-                {server.endpoint_url ? <div>Endpoint: <span className="text-foreground">{String(server.endpoint_url)}</span></div> : null}
-                {server.transport_type ? <div>Transport: <span className="text-foreground">{String(server.transport_type)}</span></div> : null}
+                {(server.url || server.endpoint_url) ? <div>Endpoint: <span className="text-foreground">{String(server.url ?? server.endpoint_url)}</span></div> : null}
+                {(server.transport || server.transport_type) ? <div>Transport: <span className="text-foreground">{String(server.transport ?? server.transport_type)}</span></div> : null}
+                {server.version ? <div>Version: <span className="text-foreground">{String(server.version)}</span></div> : null}
+                {server.protocolVersion ? <div>Protocol Version: <span className="text-foreground">{String(server.protocolVersion)}</span></div> : null}
               </div>
             </div>
           )}
@@ -291,9 +294,9 @@ function DescriptorView({ descriptors, descriptorType, metadataSlot }: { descrip
           {Array.isArray(tools) && tools.length > 0 && (
             <div>
               <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70 mb-1">Tools ({tools.length})</div>
-              <div className="rounded border bg-input-bg p-3 space-y-1">
+              <div className="space-y-1">
                 {tools.map((tool, i) => (
-                  <div key={String(tool.name ?? i)} className="rounded border bg-background/50 px-2 py-1">
+                  <div key={String(tool.name ?? i)} className="rounded border bg-input-bg px-3 py-2">
                     <span className="font-medium text-foreground">{String(tool.name)}</span>
                     {tool.description ? <span className="ml-1">&mdash; {String(tool.description)}</span> : null}
                   </div>
@@ -503,7 +506,8 @@ export function RegistryPage({ readOnly, isEndUserRole }: RegistryPageProps) {
   const STATUS_GROUPS: Array<{ key: string; label: string; statuses: string[] }> = [
     { key: "draft", label: "Draft", statuses: ["DRAFT"] },
     { key: "pending", label: "Pending", statuses: ["PENDING_APPROVAL"] },
-    { key: "resolved", label: "Approved / Rejected", statuses: ["APPROVED", "REJECTED", "DEPRECATED"] },
+    { key: "approved", label: "Approved", statuses: ["APPROVED"] },
+    { key: "rejected", label: "Rejected", statuses: ["REJECTED", "DEPRECATED"] },
   ];
 
   const groupedRecords = useMemo(() => {

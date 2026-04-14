@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { getRegistryConfig } from "@/api/settings";
 import { LayoutGrid, TableIcon, Plus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -42,6 +43,11 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | null>(null);
   const [editingAgent, setEditingAgent] = useState<A2aAgent | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [registryEnabled, setRegistryEnabled] = useState(false);
+
+  useEffect(() => {
+    getRegistryConfig().then((c) => setRegistryEnabled(c.enabled)).catch(() => {});
+  }, []);
 
   const [cardSortDir, setCardSortDir] = useState<SortDirection>(() => loadSortDirection("a2a-agents"));
   const [tableCol, setTableCol] = useState<string | null>("name");
@@ -113,6 +119,7 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
           </Button>
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-semibold">{selectedAgent.name}</h2>
+            <RegistryStatusBadge status={selectedAgent.registry_status} showUnregistered={registryEnabled} />
             {!readOnly && (
               <button
                 type="button"
@@ -125,6 +132,17 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
             )}
           </div>
           {selectedAgent.description && <p className="text-sm text-muted-foreground">{selectedAgent.description}</p>}
+          {!readOnly && (
+            <div className="mt-1">
+              <RegistryActions
+                resourceType="a2a"
+                resourceId={selectedAgent.id}
+                registryRecordId={selectedAgent.registry_record_id}
+                registryStatus={selectedAgent.registry_status}
+                onAction={() => void fetchAgents()}
+              />
+            </div>
+          )}
         </div>
 
         {editingAgent && (
@@ -269,21 +287,9 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
                     <div className="text-sm font-medium truncate" title={agent.name}>
                       {agent.name}
                     </div>
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
-                      v{agent.agent_version}
-                    </Badge>
-                    <RegistryStatusBadge status={agent.registry_status} />
+                    <RegistryStatusBadge status={agent.registry_status} showUnregistered={registryEnabled} />
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    {!readOnly && (
-                      <RegistryActions
-                        resourceType="a2a"
-                        resourceId={agent.id}
-                        registryRecordId={agent.registry_record_id}
-                        registryStatus={agent.registry_status}
-                        onAction={() => void fetchAgents()}
-                      />
-                    )}
                     {!readOnly && (
                       <>
                         <button
@@ -379,7 +385,7 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
                   <TableCell className="text-xs text-muted-foreground">{agent.agent_version}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{agent.auth_type === "oauth2" ? "OAuth2" : "None"}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    <RegistryStatusBadge status={agent.registry_status} showUnregistered />
+                    <RegistryStatusBadge status={agent.registry_status} showUnregistered={registryEnabled} />
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {formatTimestamp(agent.created_at, timezone)}

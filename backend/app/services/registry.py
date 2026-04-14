@@ -126,6 +126,7 @@ class RegistryClient:
         )
         if description:
             kwargs["description"] = description
+        logger.info("create_record payload: %s", json.dumps(kwargs, indent=2, default=str))
         result = self.control.create_registry_record(**kwargs)
         # create response may only have recordArn; extract recordId from it
         if "recordId" not in result and "recordArn" in result:
@@ -219,12 +220,18 @@ class RegistryClient:
     # -- descriptor builders -------------------------------------------------
     @staticmethod
     def build_mcp_descriptors(server: McpServer, tools: list[McpTool]) -> dict[str, Any]:
-        """Build MCP-type descriptors from a Loom McpServer and its tools."""
-        server_manifest = {
-            "name": server.name,
+        """Build MCP-type descriptors conforming to the MCP protocol spec."""
+        namespaced_name = f"aws.agentcore/{server.name}"
+        server_info = {
+            "name": namespaced_name,
             "description": server.description or "",
-            "endpoint_url": server.endpoint_url,
-            "transport_type": server.transport_type,
+            "version": "1.0.0",
+            "packages": [{
+                "registryType": "npm",
+                "identifier": namespaced_name,
+                "version": "1.0.0",
+                "transport": {"type": "stdio"},
+            }],
         }
 
         tool_definitions = []
@@ -236,12 +243,14 @@ class RegistryClient:
             schema = tool.get_input_schema()
             if schema:
                 tool_def["inputSchema"] = schema
+            else:
+                tool_def["inputSchema"] = {"type": "object", "properties": {}}
             tool_definitions.append(tool_def)
 
         return {
             "mcp": {
-                "server": {"inlineContent": json.dumps(server_manifest)},
-                "tools": {"inlineContent": json.dumps(tool_definitions)},
+                "server": {"inlineContent": json.dumps(server_info)},
+                "tools": {"inlineContent": json.dumps({"tools": tool_definitions})},
             }
         }
 
@@ -249,17 +258,12 @@ class RegistryClient:
     def build_agent_descriptors(agent) -> dict[str, Any]:
         """Build A2A-type descriptors from a Loom Agent."""
         agent_card = {
+            "protocolVersion": "0.3",
             "name": agent.name or agent.runtime_id,
             "description": agent.description or "",
-            "version": "1.0.0",
             "url": agent.endpoint_arn or agent.arn,
-            "protocolVersion": "0.3.0",
-            "capabilities": {
-                "streaming": False,
-                "pushNotifications": False,
-            },
-            "defaultInputModes": ["text/plain"],
-            "defaultOutputModes": ["text/plain"],
+            "version": "1.0.0",
+            "capabilities": {"streaming": False},
             "skills": [
                 {
                     "id": "default",
@@ -268,34 +272,62 @@ class RegistryClient:
                     "tags": ["loom"],
                 }
             ],
-            "provider": {
-                "organization": "Loom",
-                "url": agent.arn,
-            },
-            "_meta": {
-                "loom": {
-                    "source": "loom",
-                    "runtime_id": agent.runtime_id,
-                    "arn": agent.arn,
-                    "region": agent.region,
-                    "protocol": agent.protocol or "HTTP",
-                    "network_mode": agent.network_mode or "PUBLIC",
-                }
-            },
+            "defaultInputModes": ["text/plain"],
+            "defaultOutputModes": ["text/plain"],
         }
         return {
             "a2a": {
-                "agentCard": {"inlineContent": json.dumps(agent_card)},
+                "agentCard": {
+                    "schemaVersion": "0.3",
+                    "inlineContent": json.dumps(agent_card),
+                },
             }
         }
 
     @staticmethod
     def build_a2a_descriptors(agent: A2aAgent) -> dict[str, Any]:
-        """Build A2A-type descriptors from a Loom A2aAgent."""
-        agent_card = agent.agent_card_raw or "{}"
-        card_str = agent_card if isinstance(agent_card, str) else json.dumps(agent_card)
+        """Build A2A-type descriptors conforming to the A2A AgentCard spec."""
+        raw = agent.agent_card_raw or "{}"
+        source = json.loads(raw) if isinstance(raw, str) else raw
+
+        raw_caps = source.get("capabilities", {})
+        capabilities: dict[str, Any] = {}
+        if "streaming" in raw_caps:
+            capabilities["streaming"] = raw_caps["streaming"]
+        if not capabilities:
+            capabilities["streaming"] = False
+
+        raw_skills = source.get("skills", [])
+        skills = []
+        for s in raw_skills:
+            skills.append({
+                "id": s.get("id", "default"),
+                "name": s.get("name", ""),
+                "description": s.get("description", ""),
+                "tags": s.get("tags", []),
+            })
+        if not skills:
+            skills = [{"id": "default", "name": agent.name, "description": agent.description or "Default skill", "tags": ["loom"]}]
+
+        card: dict[str, Any] = {
+            "protocolVersion": source.get("protocolVersion", "0.3"),
+            "name": source.get("name", agent.name),
+            "description": source.get("description", agent.description or ""),
+            "version": source.get("version", "1.0.0"),
+            "url": source.get("url", agent.base_url or ""),
+            "capabilities": capabilities,
+            "skills": skills,
+            "defaultInputModes": source.get("defaultInputModes", ["text/plain"]),
+            "defaultOutputModes": source.get("defaultOutputModes", ["text/plain"]),
+        }
+
+        logger.info("build_a2a_descriptors card: %s", json.dumps(card, indent=2))
+
         return {
             "a2a": {
-                "agentCard": {"inlineContent": card_str},
+                "agentCard": {
+                    "schemaVersion": "0.3",
+                    "inlineContent": json.dumps(card),
+                },
             }
         }
