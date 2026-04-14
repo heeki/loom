@@ -119,7 +119,7 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
           </Button>
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-semibold">{selectedAgent.name}</h2>
-            <RegistryStatusBadge status={selectedAgent.registry_status} showUnregistered={registryEnabled} />
+            <RegistryStatusBadge status={selectedAgent.registry_status} showUnregistered={registryEnabled} registryEnabled={registryEnabled} />
             {!readOnly && (
               <button
                 type="button"
@@ -132,7 +132,7 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
             )}
           </div>
           {selectedAgent.description && <p className="text-sm text-muted-foreground">{selectedAgent.description}</p>}
-          {!readOnly && (
+          {!readOnly && registryEnabled && (
             <div className="mt-1">
               <RegistryActions
                 resourceType="a2a"
@@ -287,7 +287,7 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
                     <div className="text-sm font-medium truncate" title={agent.name}>
                       {agent.name}
                     </div>
-                    <RegistryStatusBadge status={agent.registry_status} showUnregistered={registryEnabled} />
+                    <RegistryStatusBadge status={agent.registry_status} showUnregistered={registryEnabled} registryEnabled={registryEnabled} />
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     {!readOnly && (
@@ -385,7 +385,7 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
                   <TableCell className="text-xs text-muted-foreground">{agent.agent_version}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{agent.auth_type === "oauth2" ? "OAuth2" : "None"}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    <RegistryStatusBadge status={agent.registry_status} showUnregistered={registryEnabled} />
+                    <RegistryStatusBadge status={agent.registry_status} showUnregistered={registryEnabled} registryEnabled={registryEnabled} />
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {formatTimestamp(agent.created_at, timezone)}

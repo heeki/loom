@@ -45,7 +45,7 @@ Loom seamlessly stitches together agents, memory stores, MCP servers, and agent-
 
 ### Security and Access Control
 - Cognito user authentication with automatic token refresh
-- Two-dimensional group-based authorization: Type groups (t-admin, t-user) for UI view and Resource groups (g-admins-*, g-users-*) for access control (19 scopes total)
+- Two-dimensional group-based authorization: Type groups (t-admin, t-user) for UI view and Resource groups (g-admins-*, g-users-*) for access control (21 scopes total)
 - IAM role, authorizer, and credential management
 - Admin user view switching to preview scoped experiences
 

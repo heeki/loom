@@ -108,12 +108,13 @@ Scopes are derived from Cognito group membership via `GROUP_SCOPES`. The system 
 - `t-user` — No scopes directly, but determines UI layout
 
 **Resource Groups** (access control):
-- `g-admins-super` — All 19 scopes (catalog:r/w, agent:r/w, memory:r/w, security:r/w, settings:r/w, tagging:r/w, costs:r/w, mcp:r/w, a2a:r/w, invoke)
+- `g-admins-super` — All 21 scopes (catalog:r/w, agent:r/w, memory:r/w, security:r/w, settings:r/w, tagging:r/w, costs:r/w, mcp:r/w, a2a:r/w, registry:r/w, invoke)
 - `g-admins-demo` — Read/write to most pages (`catalog:read`, `agent:read/write`, `memory:read/write`, `security:read`, `settings:read/write`, `tagging:read`, `costs:read/write`, `mcp:read/write`, `a2a:read/write`) + `invoke`. Write operations restricted to `loom:group=demo` resources.
 - `g-admins-security` — `security:read`, `security:write`, `settings:read`
 - `g-admins-memory` — `memory:read`, `memory:write`, `settings:read`
 - `g-admins-mcp` — `mcp:read`, `mcp:write`, `settings:read`
 - `g-admins-a2a` — `a2a:read`, `a2a:write`, `settings:read`
+- `g-admins-registry` — `mcp:read`, `a2a:read`, `registry:read`, `registry:write`, `settings:read`, `settings:write`, `tagging:read`
 - `g-users-demo`, `g-users-test`, `g-users-strategics` — `invoke` + read access to resources tagged with matching group
 
 ### Resource Filtering by Group Tag

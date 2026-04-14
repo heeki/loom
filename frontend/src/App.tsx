@@ -52,13 +52,16 @@ const GROUP_SCOPES: Record<string, Scope[]> = {
     "memory:read", "memory:write", "security:read", "security:write",
     "settings:read", "settings:write", "tagging:read", "tagging:write",
     "costs:read", "costs:write",
-    "mcp:read", "mcp:write", "a2a:read", "a2a:write", "invoke",
-    "admin:read", "admin:write",
+    "mcp:read", "mcp:write", "a2a:read", "a2a:write",
+    "registry:read", "registry:write",
+    "invoke", "admin:read", "admin:write",
   ],
   "g-admins-demo": [
     "catalog:read", "agent:read", "agent:write", "memory:read", "memory:write",
     "security:read", "settings:read", "settings:write", "tagging:read", "costs:read", "costs:write",
-    "mcp:read", "mcp:write", "a2a:read", "a2a:write", "invoke",
+    "mcp:read", "mcp:write", "a2a:read", "a2a:write",
+    "registry:read", "registry:write",
+    "invoke",
   ],
   "g-admins-security": [
     "security:read", "security:write", "settings:read", "settings:write", "tagging:read",
@@ -71,6 +74,9 @@ const GROUP_SCOPES: Record<string, Scope[]> = {
   ],
   "g-admins-a2a": [
     "a2a:read", "a2a:write", "settings:read", "settings:write", "tagging:read",
+  ],
+  "g-admins-registry": [
+    "mcp:read", "a2a:read", "registry:read", "registry:write", "settings:read", "settings:write", "tagging:read",
   ],
 
   // User groups (t-user users - can have multiple)
@@ -86,6 +92,7 @@ const USER_GROUPS: Record<string, string[]> = {
   "memory-admin": ["t-admin", "g-admins-memory"],
   "mcp-admin": ["t-admin", "g-admins-mcp"],
   "a2a-admin": ["t-admin", "g-admins-a2a"],
+  "registry-admin": ["t-admin", "g-admins-registry"],
   "demo-user-1": ["t-user", "g-users-demo"],
   "demo-user-2": ["t-user", "g-users-demo"],
   "demo-user-3": ["t-user", "g-users-demo"],
@@ -498,7 +505,7 @@ function AppContent() {
               onClick={() => setActivePersona("security")}
             />
           )}
-          {(effectiveHasScope("mcp:read") || effectiveHasScope("a2a:read")) && (
+          {effectiveHasScope("registry:read") && (
             <SidebarItem
               icon={Library}
               label="Registry"
@@ -761,7 +768,7 @@ function AppContent() {
           {activePersona === "tagging" && <TaggingPage readOnly={!effectiveHasScope("tagging:write")} userGroups={user?.groups || []} />}
           {activePersona === "mcp" && <McpServersPage viewMode={mcpViewMode} onViewModeChange={setMcpViewMode} readOnly={!effectiveHasScope("mcp:write")} />}
           {activePersona === "a2a" && <A2aAgentsPage viewMode={a2aViewMode} onViewModeChange={setA2aViewMode} readOnly={!effectiveHasScope("a2a:write")} />}
-          {activePersona === "registry" && <RegistryPage readOnly={!effectiveHasScope("mcp:write")} isEndUserRole={effectiveUserGroups.includes("t-user") && !effectiveUserGroups.includes("t-admin")} />}
+          {activePersona === "registry" && <RegistryPage readOnly={!effectiveHasScope("registry:write")} isEndUserRole={effectiveUserGroups.includes("t-user") && !effectiveUserGroups.includes("t-admin")} />}
           {activePersona === "settings" && <SettingsPage />}
           {activePersona === "costs" && (
             <CostDashboardPage

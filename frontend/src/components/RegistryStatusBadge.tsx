@@ -27,9 +27,11 @@ function registryLabel(status: RegistryStatus): string {
 interface RegistryStatusBadgeProps {
   status: string | null;
   showUnregistered?: boolean;
+  registryEnabled?: boolean;
 }
 
-export function RegistryStatusBadge({ status, showUnregistered = false }: RegistryStatusBadgeProps) {
+export function RegistryStatusBadge({ status, showUnregistered = false, registryEnabled = true }: RegistryStatusBadgeProps) {
+  if (!registryEnabled) return null;
   if (!status && !showUnregistered) return null;
 
   const variant = registryVariant(status as RegistryStatus);

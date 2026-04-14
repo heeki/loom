@@ -882,7 +882,9 @@ Replaces all existing access rules for the agent. Personas not listed have no ac
 
 **Integration gating:** When registry is configured, only APPROVED MCP servers and A2A agents can be selected for agent deployment. Non-approved integrations are rejected with a descriptive error.
 
-**Scope enforcement:** `mcp:read` for GET endpoints, `mcp:write` for POST/PUT/DELETE endpoints.
+**Scope enforcement:** `registry:read` for GET endpoints, `registry:write` for POST/PUT/DELETE endpoints.
+
+**Registry status sync on re-enable:** When the registry ARN is updated via `PUT /api/settings/registry` and the new ARN is non-empty, the backend calls `_sync_registry_statuses()` to validate all stored `registry_record_id` values across Agent, McpServer, and A2aAgent models against the live registry. Records that no longer exist in the registry have their `registry_record_id` and `registry_status` cleared. Status mismatches are updated to match the live registry state. This prevents stale governance data after a disable/re-enable cycle.
 
 **Data model:**
 - `A2aAgent`: stores base URL, Agent Card fields (name, description, version, provider, capabilities, auth schemes, I/O modes), raw card JSON, OAuth2 config, status, and timestamps.
@@ -1068,17 +1070,18 @@ Core authentication and authorization module. Provides:
 - `GROUP_SCOPES: dict[str, list[str]]` — maps Cognito group names to scope lists. Must match the frontend `GROUP_SCOPES` exactly. Uses two-dimensional group architecture:
   - **Type groups** (UI view): `t-admin`, `t-user` — no scopes, determine layout
   - **Resource groups** (access control):
-    - `g-admins-super`: all 19 scopes (catalog:r/w, agent:r/w, memory:r/w, security:r/w, settings:r/w, tagging:r/w, costs:r/w, mcp:r/w, a2a:r/w, invoke)
+    - `g-admins-super`: all 21 scopes (catalog:r/w, agent:r/w, memory:r/w, security:r/w, settings:r/w, tagging:r/w, costs:r/w, mcp:r/w, a2a:r/w, registry:r/w, invoke)
     - `g-admins-demo`: `catalog:read`, `agent:read`, `agent:write`, `memory:read`, `memory:write`, `security:read`, `settings:read`, `tagging:read`, `costs:read`, `costs:write`, `mcp:read`, `mcp:write`, `a2a:read`, `a2a:write`, `invoke` (can create/delete demo resources only)
     - `g-admins-security`: `security:read`, `security:write`, `settings:read`
     - `g-admins-memory`: `memory:read`, `memory:write`, `settings:read`
     - `g-admins-mcp`: `mcp:read`, `mcp:write`, `settings:read`
     - `g-admins-a2a`: `a2a:read`, `a2a:write`, `settings:read`
+    - `g-admins-registry`: `mcp:read`, `a2a:read`, `registry:read`, `registry:write`, `settings:read`, `settings:write`, `tagging:read`
     - `g-users-demo`, `g-users-test`, `g-users-strategics`: `invoke` + read access to resources tagged with matching group
 - `UserInfo` dataclass — `sub`, `username`, `groups`, `scopes` (derived from groups).
 - `get_current_user(request: Request) -> UserInfo` — validates JWT, extracts `cognito:groups`, derives scopes. In bypass mode (no `LOOM_COGNITO_USER_POOL_ID`), returns a super-admin with all scopes. Raises 401 on missing/invalid token.
 - `require_scopes(*required: str)` — factory returning a FastAPI dependency that checks the user has ALL required scopes. Raises 403 on missing scope. Used as `Depends(require_scopes("scope:name"))` on all guarded endpoints.
-- `oauth2_scheme` — `OAuth2AuthorizationCodeBearer` for OpenAPI docs with all 15 scopes.
+- `oauth2_scheme` — `OAuth2AuthorizationCodeBearer` for OpenAPI docs with all 21 scopes.
 - `get_current_user_token(request: Request) -> str | None` — legacy helper for token forwarding to AgentCore invocations.
 - `get_token_claims(request: Request) -> dict | None` — legacy helper for decoded claims extraction.
 
@@ -1098,6 +1101,7 @@ Core authentication and authorization module. Provides:
 | `costs.py` | `costs:read` | `costs:write` (actuals endpoint) |
 | `mcp.py` | `mcp:read` | `mcp:write` |
 | `a2a.py` | `a2a:read` | `a2a:write` |
+| `registry.py` | `registry:read` | `registry:write` |
 | `auth.py` | Public (no guard) | — |
 
 **Tag-based resource isolation:** Resources are filtered by the `loom:group` tag. The two-dimensional group architecture determines filtering:

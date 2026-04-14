@@ -1,4 +1,5 @@
 """Settings endpoints for managing tag policies and site settings."""
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -11,6 +12,8 @@ from app.dependencies.auth import UserInfo, get_current_user, require_scopes
 from app.models.tag_policy import TagPolicy
 from app.models.tag_profile import TagProfile
 from app.models.site_setting import SiteSetting
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -374,8 +377,54 @@ def update_registry_config(
     # Reconfigure the in-memory singleton
     client = configure_registry(registry_id)
 
+    # When (re-)enabling, sync stored registry statuses against the actual registry
+    if registry_id:
+        _sync_registry_statuses(client, db)
+
     return RegistryConfigResponse(
         registry_arn=request.registry_arn,
         registry_id=registry_id,
         enabled=bool(registry_id),
     )
+
+
+def _sync_registry_statuses(client, db: Session) -> None:  # noqa: ANN001
+    """Validate stored registry_record_id / registry_status against the live registry."""
+    from app.models.mcp import McpServer
+    from app.models.a2a import A2aAgent
+    from app.models.agent import Agent
+
+    models = [McpServer, A2aAgent, Agent]
+    updated = 0
+    cleared = 0
+
+    for model in models:
+        resources = db.query(model).filter(model.registry_record_id.isnot(None)).all()
+        for resource in resources:
+            record_id = resource.registry_record_id
+            try:
+                rec = client.get_record(record_id)
+                if not rec or not rec.get("recordId"):
+                    logger.info("Registry record %s no longer exists; clearing from %s id=%s",
+                                record_id, model.__tablename__, resource.id)
+                    resource.registry_record_id = None
+                    resource.registry_status = None
+                    cleared += 1
+                else:
+                    new_status = rec.get("status")
+                    if new_status and new_status != resource.registry_status:
+                        logger.info("Registry record %s status changed: %s -> %s for %s id=%s",
+                                    record_id, resource.registry_status, new_status,
+                                    model.__tablename__, resource.id)
+                        resource.registry_status = new_status
+                        updated += 1
+            except Exception:
+                logger.warning("Failed to fetch registry record %s for %s id=%s; clearing stale link",
+                               record_id, model.__tablename__, resource.id, exc_info=True)
+                resource.registry_record_id = None
+                resource.registry_status = None
+                cleared += 1
+
+    if updated or cleared:
+        db.commit()
+        logger.info("Registry sync complete: %d updated, %d cleared", updated, cleared)

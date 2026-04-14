@@ -103,7 +103,7 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
           </Button>
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-semibold">{selectedServer.name}</h2>
-            <RegistryStatusBadge status={selectedServer.registry_status} showUnregistered={registryEnabled} />
+            <RegistryStatusBadge status={selectedServer.registry_status} showUnregistered={registryEnabled} registryEnabled={registryEnabled} />
             {!readOnly && (
               <button
                 type="button"
@@ -116,7 +116,7 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
             )}
           </div>
           {selectedServer.description && <p className="text-sm text-muted-foreground">{selectedServer.description}</p>}
-          {!readOnly && (
+          {!readOnly && registryEnabled && (
             <div className="mt-1">
               <RegistryActions
                 resourceType="mcp"
@@ -270,7 +270,7 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
                     <div className="text-sm font-medium truncate min-w-0" title={server.name}>
                       {server.name}
                     </div>
-                    <RegistryStatusBadge status={server.registry_status} showUnregistered={registryEnabled} />
+                    <RegistryStatusBadge status={server.registry_status} showUnregistered={registryEnabled} registryEnabled={registryEnabled} />
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     {!readOnly && (
@@ -366,7 +366,7 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
                   <TableCell className="text-xs text-muted-foreground">{server.transport_type === "streamable_http" ? "Streamable HTTP" : "SSE"}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{server.auth_type === "oauth2" ? "OAuth2" : "None"}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    <RegistryStatusBadge status={server.registry_status} showUnregistered={registryEnabled} />
+                    <RegistryStatusBadge status={server.registry_status} showUnregistered={registryEnabled} registryEnabled={registryEnabled} />
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {formatTimestamp(server.created_at, timezone)}

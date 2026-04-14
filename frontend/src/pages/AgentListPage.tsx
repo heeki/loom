@@ -23,7 +23,7 @@ import { trackAction } from "@/api/audit";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { statusVariant } from "@/lib/status";
-import { listTagPolicies } from "@/api/settings";
+import { listTagPolicies, getRegistryConfig } from "@/api/settings";
 import { RegistryStatusBadge } from "@/components/RegistryStatusBadge";
 import type { AgentDeployRequest, AgentResponse, TagPolicy } from "@/api/types";
 
@@ -72,8 +72,11 @@ export function AgentListPage({
     try { return JSON.parse(localStorage.getItem("loom:tagFilters:agents") || "{}") as Record<string, string[]>; } catch { return {}; }
   });
 
+  const [registryEnabled, setRegistryEnabled] = useState(false);
+
   useEffect(() => {
     void listTagPolicies().then(setTagPolicies).catch(() => {});
+    getRegistryConfig().then((c) => setRegistryEnabled(c.enabled)).catch(() => {});
   }, []);
 
 
@@ -365,6 +368,7 @@ export function AgentListPage({
                     showOnCardKeys={effectiveShowOnCardKeys}
                     deleteStartTime={deleteStartTimes?.[agent.id]}
                     userGroups={userGroups}
+                    registryEnabled={registryEnabled}
                   />
                 )}
               />
@@ -402,7 +406,7 @@ export function AgentListPage({
                         <TableCell className="font-medium text-sm">
                           <div className="flex items-center gap-2">
                             {agent.name ?? agent.runtime_id}
-                            {agent.registry_status && <RegistryStatusBadge status={agent.registry_status} />}
+                            {agent.registry_status && <RegistryStatusBadge status={agent.registry_status} registryEnabled={registryEnabled} />}
                           </div>
                         </TableCell>
                         <TableCell>
@@ -424,7 +428,7 @@ export function AgentListPage({
                           {agent.network_mode ?? "\u2014"}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
-                          {agent.registry_status ? <RegistryStatusBadge status={agent.registry_status} /> : "\u2014"}
+                          {agent.registry_status ? <RegistryStatusBadge status={agent.registry_status} registryEnabled={registryEnabled} /> : "\u2014"}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">{agent.region}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">

@@ -110,7 +110,7 @@ def _record_to_detail_response(rec: dict) -> RegistryRecordDetailResponse:
 def list_records(
     status_filter: str | None = Query(None, alias="status", description="Filter by record status"),
     descriptor_type: str | None = Query(None, description="Filter by descriptor type"),
-    user: UserInfo = Depends(require_scopes("mcp:read")),
+    user: UserInfo = Depends(require_scopes("registry:read")),
 ) -> list[RegistryRecordResponse]:
     """List all registry records, optionally filtered by status or descriptor type."""
     client = get_registry_client()
@@ -130,7 +130,7 @@ def list_records(
 @router.get("/records/{record_id}", response_model=RegistryRecordDetailResponse)
 def get_record(
     record_id: str,
-    user: UserInfo = Depends(require_scopes("mcp:read")),
+    user: UserInfo = Depends(require_scopes("registry:read")),
 ) -> RegistryRecordDetailResponse:
     """Get full detail for a single registry record."""
     client = get_registry_client()
@@ -146,7 +146,7 @@ def get_record(
 @router.post("/records", response_model=RegistryRecordDetailResponse, status_code=status.HTTP_201_CREATED)
 def create_record(
     request: RegistryRecordCreateRequest,
-    user: UserInfo = Depends(require_scopes("mcp:write")),
+    user: UserInfo = Depends(require_scopes("registry:write")),
     db: Session = Depends(get_db),
 ) -> RegistryRecordDetailResponse:
     """Create a registry record from a Loom MCP server or A2A agent."""
@@ -222,7 +222,7 @@ def create_record(
 @router.post("/records/{record_id}/submit", response_model=RegistryRecordResponse)
 def submit_for_approval(
     record_id: str,
-    user: UserInfo = Depends(require_scopes("mcp:write")),
+    user: UserInfo = Depends(require_scopes("registry:write")),
     db: Session = Depends(get_db),
 ) -> RegistryRecordResponse:
     """Submit a registry record for approval."""
@@ -243,7 +243,7 @@ def submit_for_approval(
 def approve_record(
     record_id: str,
     body: StatusReasonRequest,
-    user: UserInfo = Depends(require_scopes("mcp:write")),
+    user: UserInfo = Depends(require_scopes("registry:write")),
     db: Session = Depends(get_db),
 ) -> RegistryRecordResponse:
     """Approve a registry record."""
@@ -264,7 +264,7 @@ def approve_record(
 def reject_record(
     record_id: str,
     body: StatusReasonRequest,
-    user: UserInfo = Depends(require_scopes("mcp:write")),
+    user: UserInfo = Depends(require_scopes("registry:write")),
     db: Session = Depends(get_db),
 ) -> RegistryRecordResponse:
     """Reject a registry record with a reason."""
@@ -284,7 +284,7 @@ def reject_record(
 @router.delete("/records/{record_id}", response_model=dict)
 def delete_record(
     record_id: str,
-    user: UserInfo = Depends(require_scopes("mcp:write")),
+    user: UserInfo = Depends(require_scopes("registry:write")),
     db: Session = Depends(get_db),
 ) -> dict:
     """Delete a registry record and clear the Loom resource link."""
@@ -304,7 +304,7 @@ def delete_record(
 def search_records(
     q: str = Query(..., description="Semantic search query"),
     max_results: int = Query(10, description="Maximum number of results"),
-    user: UserInfo = Depends(require_scopes("mcp:read")),
+    user: UserInfo = Depends(require_scopes("registry:read")),
 ) -> SearchResponse:
     """Semantic search over registry records."""
     client = get_registry_client()
