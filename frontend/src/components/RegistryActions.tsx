@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import * as registryApi from "@/api/registry";
 
 interface RegistryActionsProps {
-  resourceType: "mcp" | "a2a";
+  resourceType: "mcp" | "a2a" | "agent";
   resourceId: number;
   registryRecordId: string | null;
   registryStatus: string | null;

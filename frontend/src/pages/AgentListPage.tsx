@@ -406,7 +406,7 @@ export function AgentListPage({
                         <TableCell className="font-medium text-sm">
                           <div className="flex items-center gap-2">
                             {agent.name ?? agent.runtime_id}
-                            {agent.registry_status && <RegistryStatusBadge status={agent.registry_status} registryEnabled={registryEnabled} />}
+                            <RegistryStatusBadge status={agent.registry_status} showUnregistered={registryEnabled} registryEnabled={registryEnabled} />
                           </div>
                         </TableCell>
                         <TableCell>
@@ -428,7 +428,7 @@ export function AgentListPage({
                           {agent.network_mode ?? "\u2014"}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
-                          {agent.registry_status ? <RegistryStatusBadge status={agent.registry_status} registryEnabled={registryEnabled} /> : "\u2014"}
+                          <RegistryStatusBadge status={agent.registry_status} showUnregistered={registryEnabled} registryEnabled={registryEnabled} />
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">{agent.region}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">

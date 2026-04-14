@@ -12,6 +12,8 @@ import { InvokePanel } from "@/components/InvokePanel";
 import { LatencySummary } from "@/components/LatencySummary";
 import { SessionTable } from "@/components/SessionTable";
 import { DeploymentPanel } from "@/components/DeploymentPanel";
+import { RegistryStatusBadge } from "@/components/RegistryStatusBadge";
+import { RegistryActions } from "@/components/RegistryActions";
 import { useInvoke } from "@/hooks/useInvoke";
 import { useAuth } from "@/contexts/AuthContext";
 import { trackAction } from "@/api/audit";
@@ -25,7 +27,10 @@ interface AgentDetailPageProps {
   onSessionsRefresh: () => void;
   onRedeploy?: (id: number) => Promise<void>;
   onPatchAgent?: (id: number, updates: { description?: string | null }) => Promise<AgentResponse>;
+  onRefreshAgents?: () => void;
   canInvoke?: boolean;
+  readOnly?: boolean;
+  registryEnabled?: boolean;
   userGroups?: string[];
 }
 
@@ -37,7 +42,10 @@ export function AgentDetailPage({
   onSessionsRefresh,
   onRedeploy,
   onPatchAgent,
+  onRefreshAgents,
   canInvoke = true,
+  readOnly,
+  registryEnabled = false,
   userGroups = [],
 }: AgentDetailPageProps) {
   const [editingDescription, setEditingDescription] = useState(false);
@@ -105,12 +113,24 @@ export function AgentDetailPage({
         <CardHeader className="pb-0">
           <div className="flex items-center gap-2">
             <CardTitle className="text-sm font-medium">Description</CardTitle>
+            <RegistryStatusBadge status={agent.registry_status} showUnregistered={registryEnabled} registryEnabled={registryEnabled} />
             {!editingDescription && onPatchAgent && (
               <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleEditDescription}>
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
             )}
           </div>
+          {!readOnly && registryEnabled && (
+            <div className="mt-1">
+              <RegistryActions
+                resourceType="agent"
+                resourceId={agent.id}
+                registryRecordId={agent.registry_record_id}
+                registryStatus={agent.registry_status}
+                onAction={() => onRefreshAgents?.()}
+              />
+            </div>
+          )}
         </CardHeader>
         <CardContent className="pt-2">
           {editingDescription ? (

@@ -32,6 +32,7 @@ import { A2aAgentsPage } from "@/pages/A2aAgentsPage";
 import { RegistryPage } from "@/pages/RegistryPage";
 import { CostDashboardPage } from "@/pages/CostDashboardPage";
 import type { SessionResponse, InvocationResponse } from "@/api/types";
+import { getRegistryConfig } from "@/api/settings";
 import { AuthProvider, useAuth, type Scope } from "@/contexts/AuthContext";
 import { LoginPage } from "@/pages/LoginPage";
 import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings, Eye, Tags, DollarSign, BarChart3, Palette, Library } from "lucide-react";
@@ -290,6 +291,11 @@ function AppContent() {
       void fetchAgents();
     }
   }, [activePersona, isAuthenticated, fetchAgents]);
+
+  const [registryEnabled, setRegistryEnabled] = useState(false);
+  useEffect(() => {
+    if (isAuthenticated) void getRegistryConfig().then((c) => setRegistryEnabled(c.enabled)).catch(() => {});
+  }, [isAuthenticated]);
 
   type ViewMode = "cards" | "table";
   const [catalogViewMode, setCatalogViewMode] = useState<ViewMode>("cards");
@@ -718,7 +724,10 @@ function AppContent() {
                     await redeployAgent(id);
                   }}
                   onPatchAgent={patchAgent}
+                  onRefreshAgents={() => void fetchAgents()}
                   canInvoke={effectiveHasScope("invoke")}
+                  readOnly={!effectiveHasScope("agent:write")}
+                  registryEnabled={registryEnabled}
                   userGroups={viewAsUser ? (USER_GROUPS[viewAsUser] ?? []) : (user?.groups ?? [])}
                 />
               )}

@@ -109,7 +109,7 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
             <CardTitle className="text-sm font-medium truncate">
               {agent.name ?? agent.runtime_id}
             </CardTitle>
-            {agent.registry_status && <RegistryStatusBadge status={agent.registry_status} registryEnabled={registryEnabled} />}
+            <RegistryStatusBadge status={agent.registry_status} showUnregistered={registryEnabled} registryEnabled={registryEnabled} />
             {agent.status && agent.status !== "READY" && (
               <Badge variant={statusVariant(agent.status)} className="text-[10px] px-1.5 py-0 shrink-0">
                 {agent.status}

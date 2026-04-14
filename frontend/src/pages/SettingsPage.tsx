@@ -23,6 +23,7 @@ export function SettingsPage() {
   const [registryEnabled, setRegistryEnabled] = useState(false);
   const [registrySaved, setRegistrySaved] = useState(false);
   const [registryError, setRegistryError] = useState("");
+  const [confirmingDisable, setConfirmingDisable] = useState(false);
 
   const loadSiteSettings = useCallback(async () => {
     try {
@@ -174,10 +175,21 @@ export function SettingsPage() {
               <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => void saveRegistryConfig()}>
                 Save
               </Button>
-              {registryEnabled && (
-                <Button size="sm" variant="ghost" className="h-8 text-xs text-destructive" onClick={() => void disableRegistry()}>
+              {registryEnabled && !confirmingDisable && (
+                <Button size="sm" variant="ghost" className="h-8 text-xs text-destructive" onClick={() => setConfirmingDisable(true)}>
                   Disable
                 </Button>
+              )}
+              {confirmingDisable && (
+                <>
+                  <span className="text-xs text-destructive">Disable registry?</span>
+                  <Button size="sm" variant="destructive" className="h-6 text-xs" onClick={() => { setConfirmingDisable(false); void disableRegistry(); }}>
+                    Confirm
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setConfirmingDisable(false)}>
+                    Cancel
+                  </Button>
+                </>
               )}
               {registrySaved && (
                 <span className="text-xs text-green-600 dark:text-green-400">Saved</span>
