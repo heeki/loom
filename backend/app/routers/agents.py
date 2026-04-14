@@ -170,6 +170,8 @@ class AgentResponse(BaseModel):
     authorizer_config: dict | None = None
     model_id: str | None = None
     deployed_at: str | None = None
+    registry_record_id: str | None = None
+    registry_status: str | None = None
     registered_at: str | None
     last_refreshed_at: str | None
     active_session_count: int
@@ -658,6 +660,17 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
                 detail=f"MCP server IDs not found: {sorted(missing)}"
             )
 
+        # If registry is configured, only allow APPROVED MCP servers
+        from app.services.registry import get_registry_client
+        reg_client = get_registry_client()
+        if reg_client.registry_id:
+            for srv in mcp_records:
+                if srv.registry_status and srv.registry_status != "APPROVED":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"MCP server '{srv.name}' is not approved in the registry (status: {srv.registry_status}). Only approved servers can be used in agent deployments.",
+                    )
+
     # Validate A2A agent IDs early
     a2a_records: list[A2aAgentModel] = []
     if request.a2a_agents:
@@ -669,6 +682,17 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"A2A agent IDs not found: {sorted(missing)}"
             )
+
+        # If registry is configured, only allow APPROVED A2A agents
+        from app.services.registry import get_registry_client as _get_reg_client
+        _reg_client = _get_reg_client()
+        if _reg_client.registry_id:
+            for a2a in a2a_records:
+                if a2a.registry_status and a2a.registry_status != "APPROVED":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"A2A agent '{a2a.name}' is not approved in the registry (status: {a2a.registry_status}). Only approved agents can be used in agent deployments.",
+                    )
 
     # Validate Memory IDs early
     memory_records: list[Memory] = []
@@ -1161,6 +1185,15 @@ def _deploy_agent_background(
         db.close()
 
 
+def _is_resource_not_found(e: Exception) -> bool:
+    """Return True if an AWS error indicates the resource no longer exists."""
+    from botocore.exceptions import ClientError
+    if isinstance(e, ClientError):
+        code = e.response.get("Error", {}).get("Code", "")
+        return code in ("ResourceNotFoundException", "NotFoundException")
+    return False
+
+
 def _is_permanent_error(e: Exception) -> bool:
     """Return True if an AWS error is permanent and polling should stop."""
     from botocore.exceptions import ClientError
@@ -1196,6 +1229,10 @@ def list_agents(
         allowed_tags = [g.replace("g-users-", "", 1) for g in user_groups]
         agents = [a for a in agents if a.get_tags().get("loom:group") in allowed_tags]
 
+    # Registry visibility: t-user only sees APPROVED or unregistered agents
+    if "t-admin" not in user.groups:
+        agents = [a for a in agents if not a.registry_status or a.registry_status == "APPROVED"]
+
     return [_agent_response(agent, db) for agent in agents]
 
 
@@ -1230,8 +1267,8 @@ def get_agent_status(agent_id: int, user: UserInfo = Depends(require_scopes("age
             agent.last_refreshed_at = datetime.utcnow()
         except Exception as e:
             logger.warning("Failed to poll runtime status for %s: %s", agent.runtime_id, e)
-            # If the agent was DELETING and the runtime is gone, purge from DB
-            if agent.status == "DELETING":
+            # If the agent was DELETING and the runtime is confirmed gone, purge from DB
+            if agent.status == "DELETING" and _is_resource_not_found(e):
                 logger.info("Runtime %s no longer exists; purging agent %s", agent.runtime_id, agent.id)
                 db.delete(agent)
                 db.flush()
@@ -1259,6 +1296,29 @@ def get_agent_status(agent_id: int, user: UserInfo = Depends(require_scopes("age
                     agent.deployment_status = "READY"
             except Exception as e:
                 logger.warning("Failed to poll endpoint status for %s: %s", agent.endpoint_name, e)
+
+        # Auto-register in Agent Registry once deployment is fully READY
+        if agent.deployment_status == "READY" and not agent.registry_record_id:
+            try:
+                from app.services.registry import get_registry_client
+                reg_client = get_registry_client()
+                if reg_client.registry_id:
+                    descriptors = reg_client.build_agent_descriptors(agent)
+                    reg_result = reg_client.create_record(
+                        name=agent.name or agent.runtime_id,
+                        descriptor_type="A2A",
+                        descriptors=descriptors,
+                        record_version="1",
+                        description=agent.description,
+                    )
+                    reg_record_id = reg_result.get("recordId", "")
+                    if reg_record_id:
+                        rec = reg_client.wait_for_record(reg_record_id)
+                        agent.registry_record_id = reg_record_id
+                        agent.registry_status = rec.get("status", "DRAFT")
+                        logger.info("Auto-registered agent %s in registry: %s", agent.id, reg_record_id)
+            except Exception as reg_err:
+                logger.warning("Failed to auto-register agent %s in registry: %s", agent.id, reg_err)
 
     db.commit()
     db.refresh(agent)
@@ -1330,6 +1390,18 @@ def delete_agent(
         db.flush()
         db.commit()
         return result
+
+    # Delete registry record if one exists
+    if agent.registry_record_id:
+        try:
+            from app.services.registry import get_registry_client
+            reg_client = get_registry_client()
+            reg_client.delete_record(agent.registry_record_id)
+            logger.info("Deleted registry record %s for agent %s", agent.registry_record_id, agent.id)
+            agent.registry_record_id = None
+            agent.registry_status = None
+        except Exception as reg_err:
+            logger.warning("Failed to delete registry record for agent %s: %s", agent.id, reg_err)
 
     # Capture values needed by the background task before the request session closes
     _agent_id = agent.id

@@ -68,3 +68,21 @@ export function deleteTagProfile(id: number): Promise<void> {
     method: "DELETE",
   });
 }
+
+// Registry Configuration API
+export interface RegistryConfig {
+  registry_arn: string;
+  registry_id: string;
+  enabled: boolean;
+}
+
+export function getRegistryConfig(): Promise<RegistryConfig> {
+  return apiFetch<RegistryConfig>("/api/settings/registry");
+}
+
+export function updateRegistryConfig(registry_arn: string): Promise<RegistryConfig> {
+  return apiFetch<RegistryConfig>("/api/settings/registry", {
+    method: "PUT",
+    body: JSON.stringify({ registry_arn }),
+  });
+}

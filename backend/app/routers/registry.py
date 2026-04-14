@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.dependencies.auth import UserInfo, require_scopes
 from app.models.a2a import A2aAgent
+from app.models.agent import Agent
 from app.models.mcp import McpServer, McpTool
 from app.services.registry import get_registry_client
 
@@ -21,8 +22,8 @@ router = APIRouter(prefix="/api/registry", tags=["registry"])
 # Pydantic models
 # ---------------------------------------------------------------------------
 class RegistryRecordCreateRequest(BaseModel):
-    resource_type: str = Field(..., description="Resource type: 'mcp' or 'a2a'")
-    resource_id: int = Field(..., description="ID of the MCP server or A2A agent")
+    resource_type: str = Field(..., description="Resource type: 'mcp', 'a2a', or 'agent'")
+    resource_id: int = Field(..., description="ID of the MCP server, A2A agent, or agent")
 
 
 class RegistryRecordResponse(BaseModel):
@@ -38,10 +39,11 @@ class RegistryRecordResponse(BaseModel):
 class RegistryRecordDetailResponse(RegistryRecordResponse):
     descriptors: dict = {}
     record_version: str | None = None
+    status_reason: str | None = None
 
 
-class RejectRequest(BaseModel):
-    reason: str = Field(..., description="Reason for rejecting the record")
+class StatusReasonRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=1000, description="Reason for the status change")
 
 
 class SearchResponse(BaseModel):
@@ -51,13 +53,25 @@ class SearchResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def _find_resource_by_record_id(record_id: str, db: Session) -> McpServer | A2aAgent | None:
-    """Look up an McpServer or A2aAgent by its registry_record_id."""
+def _find_resource_by_record_id(record_id: str, db: Session) -> McpServer | A2aAgent | Agent | None:
+    """Look up an McpServer, A2aAgent, or Agent by its registry_record_id."""
     server = db.query(McpServer).filter(McpServer.registry_record_id == record_id).first()
     if server:
         return server
-    agent = db.query(A2aAgent).filter(A2aAgent.registry_record_id == record_id).first()
+    agent_a2a = db.query(A2aAgent).filter(A2aAgent.registry_record_id == record_id).first()
+    if agent_a2a:
+        return agent_a2a
+    agent = db.query(Agent).filter(Agent.registry_record_id == record_id).first()
     return agent
+
+
+def _to_str(val) -> str:
+    """Coerce a value to string — handles datetime objects from boto3."""
+    if val is None:
+        return ""
+    if hasattr(val, "isoformat"):
+        return val.isoformat()
+    return str(val)
 
 
 def _record_to_response(rec: dict) -> RegistryRecordResponse:
@@ -68,8 +82,8 @@ def _record_to_response(rec: dict) -> RegistryRecordResponse:
         descriptor_type=rec.get("descriptorType", ""),
         status=rec.get("status", ""),
         description=rec.get("description"),
-        created_at=rec.get("createdAt", ""),
-        updated_at=rec.get("updatedAt", ""),
+        created_at=_to_str(rec.get("createdAt")),
+        updated_at=_to_str(rec.get("updatedAt")),
     )
 
 
@@ -81,10 +95,11 @@ def _record_to_detail_response(rec: dict) -> RegistryRecordDetailResponse:
         descriptor_type=rec.get("descriptorType", ""),
         status=rec.get("status", ""),
         description=rec.get("description"),
-        created_at=rec.get("createdAt", ""),
-        updated_at=rec.get("updatedAt", ""),
+        created_at=_to_str(rec.get("createdAt")),
+        updated_at=_to_str(rec.get("updatedAt")),
         descriptors=rec.get("descriptors", {}),
         record_version=rec.get("recordVersion"),
+        status_reason=rec.get("statusReason"),
     )
 
 
@@ -164,10 +179,23 @@ def create_record(
         descriptor_type = "A2A"
         resource = agent
 
+    elif request.resource_type == "agent":
+        agent_record = db.query(Agent).filter(Agent.id == request.resource_id).first()
+        if not agent_record:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Agent with id {request.resource_id} not found",
+            )
+        descriptors = client.build_agent_descriptors(agent_record)
+        name = agent_record.name or agent_record.runtime_id
+        description = agent_record.description
+        descriptor_type = "A2A"
+        resource = agent_record
+
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="resource_type must be 'mcp' or 'a2a'",
+            detail="resource_type must be 'mcp', 'a2a', or 'agent'",
         )
 
     result = client.create_record(
@@ -213,12 +241,13 @@ def submit_for_approval(
 @router.post("/records/{record_id}/approve", response_model=RegistryRecordResponse)
 def approve_record(
     record_id: str,
+    body: StatusReasonRequest,
     user: UserInfo = Depends(require_scopes("mcp:write")),
     db: Session = Depends(get_db),
 ) -> RegistryRecordResponse:
     """Approve a registry record."""
     client = get_registry_client()
-    result = client.approve_record(record_id)
+    result = client.approve_record(record_id, reason=body.reason)
 
     resource = _find_resource_by_record_id(record_id, db)
     if resource:
@@ -233,7 +262,7 @@ def approve_record(
 @router.post("/records/{record_id}/reject", response_model=RegistryRecordResponse)
 def reject_record(
     record_id: str,
-    body: RejectRequest,
+    body: StatusReasonRequest,
     user: UserInfo = Depends(require_scopes("mcp:write")),
     db: Session = Depends(get_db),
 ) -> RegistryRecordResponse:

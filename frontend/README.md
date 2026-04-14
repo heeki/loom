@@ -65,7 +65,7 @@ The sidebar provides access to persona-based workflows:
 | **Registry** | Library | Browse and manage AWS Agent Registry records for governance and discovery |
 | **Tags** | Tags | Manage tag policies and tag profiles with collapsible groups and JSON import |
 | **Costs** | DollarSign | Cost dashboard with estimated costs, actual runtime costs from CloudWatch, and cost settings |
-| **Settings** | Settings | Manage display preferences (theme, timezone) and cost estimation settings (CPU I/O wait discount) |
+| **Settings** | Settings | Manage display preferences (theme, timezone), cost estimation settings (CPU I/O wait discount), and Agent Registry configuration (ARN-based, opt-in governance) |
 | **Admin Dashboard** | BarChart3 | Platform usage analytics with custom tooltips on all charts, login tracking, action tracking, page navigation, per-session drill-down (super-admins only) |
 
 **End-user chat layout:** Users in the `t-user` Cognito group (without `t-admin`) see a dedicated `ChatPage` instead of the admin sidebar. The chat layout provides a focused chat interface with agent selection, conversation history with immediate tab creation on `session_start`, streaming responses scoped to the active conversation, queued prompt support (single-slot, last-write-wins, auto-sends on stream completion), markdown rendering for all bubbles (user, assistant, queued) with collapsible JSON blocks, and a memory panel — with no admin navigation items exposed.
@@ -222,7 +222,7 @@ The `AuthContext` also provides scope-based authorization using a two-dimensiona
 | A2aAgentsPage | A2A Agents | A2A agent CRUD, Agent Card detail, Access control tabs |
 | RegistryPage | Registry | Registry record browse, status/type filters, semantic search, record detail with JSON descriptors |
 | CostDashboardPage | Costs | Estimated costs table (per-agent breakdown with methodology formulas), actual costs with Runtime (collapsible agent groups, per-session detail) and Memory (consolidated per-resource) sub-sections, summary cards, time-range selector, sortable columns |
-| SettingsPage | Settings | Display preferences (theme, timezone), cost estimation settings (CPU I/O wait discount) |
+| SettingsPage | Settings | Display preferences (theme, timezone), cost estimation settings (CPU I/O wait discount), Agent Registry configuration (ARN input, enable/disable) |
 | AdminDashboardPage | Admin | Global multi-select user filter; summary cards (total logins, page views, actions, duration, most active page); recharts bar charts (logins over time, actions over time, page views by page); tabbed tables: Sessions (with timeline drill-down), Actions (category/type filters), Page Views (page filter); all data filtered by selected users when filter is active |
 | ChatPage | End-user | Chat interface for `t-user` group: agent picker (multi-agent) or auto-selected (single agent), conversation history sidebar with immediate tab creation on `session_start` and auto-selection, streaming bubbles scoped to the active conversation (`isCurrentlyStreaming`), queued prompt support (enqueue one message during streaming, auto-sends on completion with correct ordering), markdown rendering for all bubbles (user, assistant, queued) with collapsible JSON blocks, session management, conversation removal with audit tracking, memory panel with refresh button, strategy-based labels, and error state display (toast notifications on API failure, inline error message in panel) |
 

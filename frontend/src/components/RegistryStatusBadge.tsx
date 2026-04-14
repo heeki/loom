@@ -5,9 +5,9 @@ type RegistryStatus = "DRAFT" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED" | "
 function registryVariant(status: RegistryStatus): "default" | "secondary" | "destructive" | "outline" {
   switch (status) {
     case "APPROVED": return "default";
-    case "PENDING_APPROVAL": return "secondary";
+    case "PENDING_APPROVAL": return "default";
     case "REJECTED": return "destructive";
-    case "DRAFT": return "outline";
+    case "DRAFT": return "default";
     case "DEPRECATED": return "outline";
     default: return "outline";
   }
@@ -15,12 +15,12 @@ function registryVariant(status: RegistryStatus): "default" | "secondary" | "des
 
 function registryLabel(status: RegistryStatus): string {
   switch (status) {
-    case "PENDING_APPROVAL": return "Pending";
-    case "APPROVED": return "Approved";
-    case "REJECTED": return "Rejected";
-    case "DRAFT": return "Draft";
-    case "DEPRECATED": return "Deprecated";
-    default: return "Unregistered";
+    case "PENDING_APPROVAL": return "PENDING";
+    case "APPROVED": return "APPROVED";
+    case "REJECTED": return "REJECTED";
+    case "DRAFT": return "DRAFT";
+    case "DEPRECATED": return "DEPRECATED";
+    default: return "UNREGISTERED";
   }
 }
 

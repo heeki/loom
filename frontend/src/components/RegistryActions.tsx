@@ -15,6 +15,8 @@ export function RegistryActions({ resourceType, resourceId, registryRecordId, re
   const [loading, setLoading] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [showRejectInput, setShowRejectInput] = useState(false);
+  const [approveReason, setApproveReason] = useState("");
+  const [showApproveInput, setShowApproveInput] = useState(false);
 
   const handleAction = async (action: () => Promise<void>, successMsg: string) => {
     setLoading(true);
@@ -69,22 +71,51 @@ export function RegistryActions({ resourceType, resourceId, registryRecordId, re
   if (registryStatus === "PENDING_APPROVAL" && registryRecordId) {
     return (
       <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-6 text-xs"
-          disabled={loading}
-          onClick={() => handleAction(() => registryApi.approveRecord(registryRecordId), "Record approved")}
-        >
-          Approve
-        </Button>
+        {!showApproveInput ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 text-xs"
+            disabled={loading}
+            onClick={() => { setShowApproveInput(true); setShowRejectInput(false); }}
+          >
+            Approve
+          </Button>
+        ) : (
+          <div className="flex items-center gap-1">
+            <input
+              type="text"
+              value={approveReason}
+              onChange={(e) => setApproveReason(e.target.value)}
+              placeholder="Reason..."
+              className="h-6 text-xs border rounded px-1.5 bg-input-bg w-32"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 text-xs"
+              disabled={loading || !approveReason.trim()}
+              onClick={() => handleAction(() => registryApi.approveRecord(registryRecordId, approveReason.trim()), "Record approved")}
+            >
+              Confirm
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 text-xs"
+              onClick={() => { setShowApproveInput(false); setApproveReason(""); }}
+            >
+              Cancel
+            </Button>
+          </div>
+        )}
         {!showRejectInput ? (
           <Button
             size="sm"
             variant="outline"
             className="h-6 text-xs text-destructive"
             disabled={loading}
-            onClick={() => setShowRejectInput(true)}
+            onClick={() => { setShowRejectInput(true); setShowApproveInput(false); }}
           >
             Reject
           </Button>

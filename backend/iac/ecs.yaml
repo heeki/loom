@@ -183,7 +183,7 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - bedrock-agentcore-control:ListRegistries
+                  - bedrock-agentcore-control:GetRegistry
                   - bedrock-agentcore-control:CreateRegistryRecord
                   - bedrock-agentcore-control:GetRegistryRecord
                   - bedrock-agentcore-control:ListRegistryRecords

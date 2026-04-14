@@ -6,6 +6,7 @@ import { Loader2, Trash2, RefreshCw } from "lucide-react";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { statusVariant } from "@/lib/status";
+import { RegistryStatusBadge } from "@/components/RegistryStatusBadge";
 import type { AgentResponse } from "@/api/types";
 
 interface AgentCardProps {
@@ -107,6 +108,7 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
             <CardTitle className="text-sm font-medium truncate">
               {agent.name ?? agent.runtime_id}
             </CardTitle>
+            {agent.registry_status && <RegistryStatusBadge status={agent.registry_status} />}
             {agent.status && agent.status !== "READY" && (
               <Badge variant={statusVariant(agent.status)} className="text-[10px] px-1.5 py-0 shrink-0">
                 {agent.status}

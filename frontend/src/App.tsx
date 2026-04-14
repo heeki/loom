@@ -498,6 +498,14 @@ function AppContent() {
               onClick={() => setActivePersona("security")}
             />
           )}
+          {(effectiveHasScope("mcp:read") || effectiveHasScope("a2a:read")) && (
+            <SidebarItem
+              icon={Library}
+              label="Registry"
+              active={activePersona === "registry"}
+              onClick={() => setActivePersona("registry")}
+            />
+          )}
           {(effectiveHasScope("mcp:read") || effectiveHasScope("mcp:write")) && (
             <SidebarItem
               icon={Network}
@@ -512,14 +520,6 @@ function AppContent() {
               label="A2A Agents"
               active={activePersona === "a2a"}
               onClick={() => setActivePersona("a2a")}
-            />
-          )}
-          {(effectiveHasScope("mcp:read") || effectiveHasScope("a2a:read")) && (
-            <SidebarItem
-              icon={Library}
-              label="Registry"
-              active={activePersona === "registry"}
-              onClick={() => setActivePersona("registry")}
             />
           )}
           {(effectiveHasScope("agent:write") || effectiveHasScope("security:write") || effectiveHasScope("memory:write")) && (

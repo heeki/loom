@@ -10,7 +10,7 @@ export function listRegistryRecords(params?: { status?: string; descriptorType?:
 }
 
 export function getRegistryRecord(recordId: string): Promise<RegistryRecordDetail> {
-  return apiFetch<RegistryRecordDetail>(`/api/registry/records/${recordId}`);
+  return apiFetch<RegistryRecordDetail>(`/api/registry/records/${encodeURIComponent(recordId)}`);
 }
 
 export function createRegistryRecord(request: RegistryRecordCreateRequest): Promise<RegistryRecordDetail> {
@@ -21,22 +21,25 @@ export function createRegistryRecord(request: RegistryRecordCreateRequest): Prom
 }
 
 export function submitForApproval(recordId: string): Promise<void> {
-  return apiFetch<void>(`/api/registry/records/${recordId}/submit`, { method: "POST" });
+  return apiFetch<void>(`/api/registry/records/${encodeURIComponent(recordId)}/submit`, { method: "POST" });
 }
 
-export function approveRecord(recordId: string): Promise<void> {
-  return apiFetch<void>(`/api/registry/records/${recordId}/approve`, { method: "POST" });
+export function approveRecord(recordId: string, reason: string): Promise<void> {
+  return apiFetch<void>(`/api/registry/records/${encodeURIComponent(recordId)}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
 }
 
 export function rejectRecord(recordId: string, reason: string): Promise<void> {
-  return apiFetch<void>(`/api/registry/records/${recordId}/reject`, {
+  return apiFetch<void>(`/api/registry/records/${encodeURIComponent(recordId)}/reject`, {
     method: "POST",
     body: JSON.stringify({ reason }),
   });
 }
 
 export function deleteRegistryRecord(recordId: string): Promise<void> {
-  return apiFetch<void>(`/api/registry/records/${recordId}`, { method: "DELETE" });
+  return apiFetch<void>(`/api/registry/records/${encodeURIComponent(recordId)}`, { method: "DELETE" });
 }
 
 export function searchRegistry(query: string): Promise<RegistrySearchResult> {

@@ -24,6 +24,7 @@ import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { statusVariant } from "@/lib/status";
 import { listTagPolicies } from "@/api/settings";
+import { RegistryStatusBadge } from "@/components/RegistryStatusBadge";
 import type { AgentDeployRequest, AgentResponse, TagPolicy } from "@/api/types";
 
 type BuilderTab = "register" | "deploy";
@@ -377,8 +378,9 @@ export function AgentListPage({
                       <SortableTableHead column="cost" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Cost</SortableTableHead>
                       <SortableTableHead column="protocol" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Protocol</SortableTableHead>
                       <SortableTableHead column="network" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Network</SortableTableHead>
-                      <SortableTableHead column="region" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Region</SortableTableHead>
-                      <SortableTableHead column="registered" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[16%]">Registered</SortableTableHead>
+                      <SortableTableHead column="registry" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[10%]">Registry</SortableTableHead>
+                      <SortableTableHead column="region" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[10%]">Region</SortableTableHead>
+                      <SortableTableHead column="registered" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[14%]">Registered</SortableTableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -388,6 +390,7 @@ export function AgentListPage({
                       cost: (a) => a.cost_summary?.total_cost ?? 0,
                       protocol: (a) => a.protocol ?? "",
                       network: (a) => a.network_mode ?? "",
+                      registry: (a) => a.registry_status ?? "",
                       region: (a) => a.region ?? "",
                       registered: (a) => a.registered_at ?? "",
                     }).map((agent) => (
@@ -397,7 +400,10 @@ export function AgentListPage({
                         onClick={() => onSelectAgent(agent.id)}
                       >
                         <TableCell className="font-medium text-sm">
-                          {agent.name ?? agent.runtime_id}
+                          <div className="flex items-center gap-2">
+                            {agent.name ?? agent.runtime_id}
+                            {agent.registry_status && <RegistryStatusBadge status={agent.registry_status} />}
+                          </div>
                         </TableCell>
                         <TableCell>
                           <Badge variant={statusVariant(agent.status)} className="text-[10px] px-1.5 py-0">
@@ -416,6 +422,9 @@ export function AgentListPage({
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {agent.network_mode ?? "\u2014"}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {agent.registry_status ? <RegistryStatusBadge status={agent.registry_status} /> : "\u2014"}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">{agent.region}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">

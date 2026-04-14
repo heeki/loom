@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.main import app
 from app.db import Base, get_db
+from app.models.agent import Agent
 from app.models.mcp import McpServer, McpTool
 from app.models.a2a import A2aAgent
 
@@ -74,6 +75,24 @@ class TestRegistryRouter(unittest.TestCase):
         self.session.commit()
         self.session.refresh(server)
         return server
+
+    def _create_agent(self, **overrides) -> Agent:
+        agent = Agent(
+            arn=overrides.get("arn", "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/test-runtime"),
+            runtime_id=overrides.get("runtime_id", "test-runtime"),
+            name=overrides.get("name", "test-agent"),
+            description=overrides.get("description", "A test agent"),
+            status="READY",
+            region="us-east-1",
+            account_id="123456789012",
+            source="deploy",
+            protocol=overrides.get("protocol", "HTTP"),
+            network_mode=overrides.get("network_mode", "PUBLIC"),
+        )
+        self.session.add(agent)
+        self.session.commit()
+        self.session.refresh(agent)
+        return agent
 
     def _create_a2a_agent(self, **overrides) -> A2aAgent:
         agent = A2aAgent(
@@ -173,7 +192,7 @@ class TestRegistryRouter(unittest.TestCase):
             "recordId": "rec-new",
             "status": "DRAFT",
         }
-        mock_client.build_mcp_descriptors = MagicMock(return_value=[{"descriptorType": "MCP"}])
+        mock_client.build_mcp_descriptors = MagicMock(return_value={"mcp": {"server": {"inlineContent": "{}"}, "tools": {"inlineContent": "[]"}}})
         mock_get_client.return_value = mock_client
 
         response = self.client.post("/api/registry/records", json={
@@ -199,7 +218,7 @@ class TestRegistryRouter(unittest.TestCase):
             "descriptorType": "A2A",
             "status": "DRAFT",
         }
-        mock_client.build_a2a_descriptors = MagicMock(return_value=[{"descriptorType": "A2A"}])
+        mock_client.build_a2a_descriptors = MagicMock(return_value={"a2a": {"agentCard": {"inlineContent": "{}"}}})
         mock_get_client.return_value = mock_client
 
         response = self.client.post("/api/registry/records", json={
@@ -275,7 +294,10 @@ class TestRegistryRouter(unittest.TestCase):
         }
         mock_get_client.return_value = mock_client
 
-        response = self.client.post("/api/registry/records/rec-123/approve")
+        response = self.client.post(
+            "/api/registry/records/rec-123/approve",
+            json={"reason": "Meets all requirements"},
+        )
         self.assertEqual(response.status_code, 200)
 
         self.session.refresh(server)
@@ -347,6 +369,70 @@ class TestRegistryRouter(unittest.TestCase):
         response = self.client.get("/api/registry/search")
         self.assertEqual(response.status_code, 422)
 
+    # ----- CREATE RECORD (AGENT) -----
+    @patch("app.routers.registry.get_registry_client")
+    def test_create_record_agent(self, mock_get_client):
+        agent = self._create_agent()
+        mock_client = MagicMock()
+        mock_client.create_record.return_value = {"recordId": "rec-agent"}
+        mock_client.wait_for_record.return_value = {
+            **SAMPLE_REGISTRY_RECORD,
+            "recordId": "rec-agent",
+            "descriptorType": "A2A",
+            "status": "DRAFT",
+        }
+        mock_client.build_agent_descriptors = MagicMock(return_value={"a2a": {"agentCard": {"inlineContent": "{}"}}})
+        mock_get_client.return_value = mock_client
+
+        response = self.client.post("/api/registry/records", json={
+            "resource_type": "agent",
+            "resource_id": agent.id,
+        })
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+        self.assertEqual(data["record_id"], "rec-agent")
+
+        self.session.refresh(agent)
+        self.assertEqual(agent.registry_record_id, "rec-agent")
+        self.assertEqual(agent.registry_status, "DRAFT")
+
+    @patch("app.routers.registry.get_registry_client")
+    def test_create_record_agent_not_found(self, mock_get_client):
+        mock_get_client.return_value = MagicMock()
+        response = self.client.post("/api/registry/records", json={
+            "resource_type": "agent",
+            "resource_id": 999,
+        })
+        self.assertEqual(response.status_code, 404)
+
+    def test_agent_registry_columns_in_response(self):
+        agent = self._create_agent()
+        agent.registry_record_id = "rec-agent-test"
+        agent.registry_status = "APPROVED"
+        self.session.commit()
+
+        response = self.client.get(f"/api/agents/{agent.id}")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["registry_record_id"], "rec-agent-test")
+        self.assertEqual(data["registry_status"], "APPROVED")
+
+    # ----- DELETE AGENT WITH REGISTRY CLEANUP -----
+    @patch("app.services.registry.get_registry_client")
+    def test_delete_agent_cleans_up_registry_record(self, mock_get_reg_client):
+        agent = self._create_agent()
+        agent.registry_record_id = "rec-to-delete"
+        agent.registry_status = "DRAFT"
+        self.session.commit()
+
+        mock_reg_client = MagicMock()
+        mock_reg_client.delete_record.return_value = {}
+        mock_get_reg_client.return_value = mock_reg_client
+
+        response = self.client.delete(f"/api/agents/{agent.id}?cleanup_aws=true")
+        self.assertIn(response.status_code, [200, 202])
+        mock_reg_client.delete_record.assert_called_once_with("rec-to-delete")
+
     # ----- VISIBILITY FILTERING -----
     def test_mcp_registry_columns_in_response(self):
         server = self._create_mcp_server()
@@ -395,14 +481,47 @@ class TestRegistryService(unittest.TestCase):
         tool.set_input_schema({"type": "object", "properties": {"name": {"type": "string"}}})
 
         descriptors = RegistryClient.build_mcp_descriptors(server, [tool])
-        self.assertEqual(len(descriptors), 1)
-        self.assertEqual(descriptors[0]["descriptorType"], "MCP")
-        manifest = json.loads(descriptors[0]["serverManifest"])
+        self.assertIn("mcp", descriptors)
+        mcp = descriptors["mcp"]
+        self.assertIn("server", mcp)
+        self.assertIn("tools", mcp)
+        manifest = json.loads(mcp["server"]["inlineContent"])
         self.assertEqual(manifest["name"], "test-server")
-        tools = json.loads(descriptors[0]["toolDefinitions"])
+        tools = json.loads(mcp["tools"]["inlineContent"])
         self.assertEqual(len(tools), 1)
         self.assertEqual(tools[0]["name"], "hello")
         self.assertIn("inputSchema", tools[0])
+
+    def test_build_agent_descriptors(self):
+        from app.services.registry import RegistryClient
+
+        agent = Agent(
+            arn="arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/test-runtime",
+            runtime_id="test-runtime",
+            name="Test Agent",
+            description="A test agent",
+            status="READY",
+            region="us-east-1",
+            account_id="123456789012",
+            protocol="HTTP",
+            network_mode="PUBLIC",
+        )
+
+        descriptors = RegistryClient.build_agent_descriptors(agent)
+        self.assertIn("a2a", descriptors)
+        card = json.loads(descriptors["a2a"]["agentCard"]["inlineContent"])
+        self.assertEqual(card["name"], "Test Agent")
+        self.assertEqual(card["description"], "A test agent")
+        self.assertEqual(card["version"], "1.0.0")
+        self.assertEqual(card["protocolVersion"], "0.3.0")
+        self.assertIn("capabilities", card)
+        self.assertIn("skills", card)
+        self.assertEqual(len(card["skills"]), 1)
+        self.assertEqual(card["skills"][0]["id"], "default")
+        self.assertEqual(card["provider"]["organization"], "Loom")
+        self.assertEqual(card["_meta"]["loom"]["source"], "loom")
+        self.assertEqual(card["_meta"]["loom"]["runtime_id"], "test-runtime")
+        self.assertEqual(card["_meta"]["loom"]["protocol"], "HTTP")
 
     def test_build_a2a_descriptors(self):
         from app.services.registry import RegistryClient
@@ -416,9 +535,8 @@ class TestRegistryService(unittest.TestCase):
         )
 
         descriptors = RegistryClient.build_a2a_descriptors(agent)
-        self.assertEqual(len(descriptors), 1)
-        self.assertEqual(descriptors[0]["descriptorType"], "A2A")
-        card = json.loads(descriptors[0]["agentCard"])
+        self.assertIn("a2a", descriptors)
+        card = json.loads(descriptors["a2a"]["agentCard"]["inlineContent"])
         self.assertEqual(card["name"], "Test Agent")
 
     def test_client_without_registry_id(self):
@@ -429,6 +547,159 @@ class TestRegistryService(unittest.TestCase):
         self.assertEqual(client.list_records(), {"registryRecords": []})
         self.assertEqual(client.search_records("test"), {"results": []})
         self.assertEqual(client.get_record("rec-123"), {})
+
+
+class TestRegistryConfigFunctions(unittest.TestCase):
+    """Test cases for registry ARN validation and singleton management."""
+
+    def test_validate_registry_arn_valid(self):
+        from app.services.registry import validate_registry_arn
+        arn = "arn:aws:bedrock-agentcore:us-east-1:123456789012:registry/loom-prod"
+        result = validate_registry_arn(arn)
+        self.assertEqual(result, "loom-prod")
+
+    def test_validate_registry_arn_invalid(self):
+        from app.services.registry import validate_registry_arn
+        with self.assertRaises(ValueError):
+            validate_registry_arn("not-an-arn")
+        with self.assertRaises(ValueError):
+            validate_registry_arn("arn:aws:bedrock-agentcore:us-east-1:short:registry/id")
+        with self.assertRaises(ValueError):
+            validate_registry_arn("")
+
+    def test_configure_registry(self):
+        import app.services.registry as reg_module
+        from app.services.registry import configure_registry
+        old_client = reg_module._client
+        try:
+            client = configure_registry("test-registry-id", region="us-west-2")
+            self.assertEqual(client.registry_id, "test-registry-id")
+            self.assertEqual(client.region, "us-west-2")
+            self.assertIs(reg_module._client, client)
+        finally:
+            reg_module._client = old_client
+
+    def test_parse_registry_id_from_arn(self):
+        from app.services.registry import parse_registry_id_from_arn
+        self.assertEqual(
+            parse_registry_id_from_arn(
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:registry/my-reg"
+            ),
+            "my-reg",
+        )
+        self.assertEqual(parse_registry_id_from_arn("no-slash"), "")
+
+    def test_init_registry_from_db(self):
+        import app.services.registry as reg_module
+        from app.services.registry import init_registry_from_db
+        from app.models.site_setting import SiteSetting
+
+        engine = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(bind=engine)
+        TestSession = sessionmaker(bind=engine)
+        session = TestSession()
+
+        # Insert a registry ARN into site_settings
+        setting = SiteSetting(
+            key="loom_registry_id",
+            value="arn:aws:bedrock-agentcore:us-east-1:123456789012:registry/loom-test",
+        )
+        session.add(setting)
+        session.commit()
+
+        old_client = reg_module._client
+        try:
+            reg_module._client = None
+            init_registry_from_db(session)
+            self.assertIsNotNone(reg_module._client)
+            self.assertEqual(reg_module._client.registry_id, "loom-test")
+        finally:
+            reg_module._client = old_client
+            session.close()
+
+
+class TestRegistryConfigEndpoints(unittest.TestCase):
+    """Test cases for /api/settings/registry endpoints."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.engine = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(bind=cls.engine)
+        cls.TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=cls.engine)
+
+    def setUp(self):
+        self.session = self.TestingSessionLocal()
+
+        def override_get_db():
+            try:
+                yield self.session
+            finally:
+                pass
+
+        app.dependency_overrides[get_db] = override_get_db
+        self.client = TestClient(app)
+
+        # Reset the registry singleton to a known state
+        import app.services.registry as reg_module
+        self._old_client = reg_module._client
+        reg_module._client = None
+
+    def tearDown(self):
+        import app.services.registry as reg_module
+        reg_module._client = self._old_client
+        self.session.rollback()
+        self.session.close()
+        Base.metadata.drop_all(bind=self.engine)
+        Base.metadata.create_all(bind=self.engine)
+
+    def test_get_registry_config_default(self):
+        response = self.client.get("/api/settings/registry")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["registry_arn"], "")
+        self.assertEqual(data["registry_id"], "")
+        self.assertFalse(data["enabled"])
+
+    def test_update_registry_config_valid(self):
+        arn = "arn:aws:bedrock-agentcore:us-east-1:123456789012:registry/loom-prod"
+        response = self.client.put("/api/settings/registry", json={"registry_arn": arn})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["registry_arn"], arn)
+        self.assertEqual(data["registry_id"], "loom-prod")
+        self.assertTrue(data["enabled"])
+
+        # Verify persisted in DB
+        from app.models.site_setting import SiteSetting
+        row = self.session.query(SiteSetting).filter(SiteSetting.key == "loom_registry_id").first()
+        self.assertIsNotNone(row)
+        self.assertEqual(row.value, arn)
+
+    def test_update_registry_config_invalid(self):
+        response = self.client.put("/api/settings/registry", json={"registry_arn": "bad-arn"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid registry ARN", response.json()["detail"])
+
+    def test_update_registry_config_disable(self):
+        # First enable
+        arn = "arn:aws:bedrock-agentcore:us-east-1:123456789012:registry/loom-prod"
+        self.client.put("/api/settings/registry", json={"registry_arn": arn})
+
+        # Then disable
+        response = self.client.put("/api/settings/registry", json={"registry_arn": ""})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["registry_arn"], "")
+        self.assertEqual(data["registry_id"], "")
+        self.assertFalse(data["enabled"])
 
 
 if __name__ == "__main__":

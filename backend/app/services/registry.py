@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import re
 import time
 from typing import Any
 
@@ -11,6 +12,11 @@ from app.models.a2a import A2aAgent
 from app.models.mcp import McpServer, McpTool
 
 logger = logging.getLogger(__name__)
+
+# ARN pattern: arn:aws:bedrock-agentcore:{region}:{account}:registry/{id}
+_REGISTRY_ARN_PATTERN = re.compile(
+    r"^arn:aws:bedrock-agentcore:[a-z0-9-]+:\d{12}:registry/[a-zA-Z0-9_-]+$"
+)
 
 # ---------------------------------------------------------------------------
 # Singleton client
@@ -26,6 +32,46 @@ def get_registry_client() -> "RegistryClient":
         region = os.getenv("AWS_REGION", "us-east-1")
         _client = RegistryClient(registry_id=registry_id, region=region)
     return _client
+
+
+def configure_registry(registry_id: str, region: str | None = None) -> "RegistryClient":
+    """Reconfigure the singleton with a new registry ID. Called on settings update."""
+    global _client
+    rgn = region or os.getenv("AWS_REGION", "us-east-1")
+    _client = RegistryClient(registry_id=registry_id, region=rgn)
+    return _client
+
+
+def init_registry_from_db(db_session) -> None:
+    """Load registry config from site_settings on startup. Falls back to env var."""
+    from app.models.site_setting import SiteSetting
+    setting = db_session.query(SiteSetting).filter(SiteSetting.key == "loom_registry_id").first()
+    registry_id = ""
+    if setting and setting.value:
+        registry_id = parse_registry_id_from_arn(setting.value)
+    if not registry_id:
+        registry_id = os.getenv("LOOM_REGISTRY_ID", "")
+    if registry_id:
+        configure_registry(registry_id)
+        logger.info("Registry client initialized with registry_id=%s", registry_id)
+    else:
+        logger.info("No registry configured; governance features disabled")
+
+
+def validate_registry_arn(arn: str) -> str:
+    """Validate a registry ARN and return the registry ID, or raise ValueError."""
+    if not _REGISTRY_ARN_PATTERN.match(arn):
+        raise ValueError(
+            f"Invalid registry ARN: {arn}. "
+            "Expected format: arn:aws:bedrock-agentcore:<region>:<account>:registry/<id>"
+        )
+    return parse_registry_id_from_arn(arn)
+
+
+def parse_registry_id_from_arn(arn: str) -> str:
+    """Extract registry ID from an ARN string. Returns empty string if not parseable."""
+    parts = arn.split("/")
+    return parts[-1] if len(parts) >= 2 else ""
 
 
 # ---------------------------------------------------------------------------
@@ -56,16 +102,16 @@ class RegistryClient:
         return True
 
     # -- control-plane -------------------------------------------------------
-    def list_registries(self) -> dict[str, Any]:
+    def get_registry(self) -> dict[str, Any]:
         if not self._require_registry():
-            return {"registries": []}
-        return self.control.list_registries()
+            return {}
+        return self.control.get_registry(registryId=self.registry_id)
 
     def create_record(
         self,
         name: str,
         descriptor_type: str,
-        descriptors: list[dict[str, Any]],
+        descriptors: dict[str, Any],
         record_version: str,
         description: str | None = None,
     ) -> dict[str, Any]:
@@ -80,7 +126,13 @@ class RegistryClient:
         )
         if description:
             kwargs["description"] = description
-        return self.control.create_registry_record(**kwargs)
+        result = self.control.create_registry_record(**kwargs)
+        # create response may only have recordArn; extract recordId from it
+        if "recordId" not in result and "recordArn" in result:
+            arn_parts = result["recordArn"].split("/")
+            if len(arn_parts) >= 2:
+                result["recordId"] = arn_parts[-1]
+        return result
 
     def get_record(self, record_id: str) -> dict[str, Any]:
         if not self._require_registry():
@@ -116,14 +168,14 @@ class RegistryClient:
             recordId=record_id,
         )
 
-    def approve_record(self, record_id: str) -> dict[str, Any]:
+    def approve_record(self, record_id: str, reason: str = "Approved via Loom") -> dict[str, Any]:
         if not self._require_registry():
             return {}
         return self.control.update_registry_record_status(
             registryId=self.registry_id,
             recordId=record_id,
             status="APPROVED",
-            statusReason="Approved via Loom",
+            statusReason=reason,
         )
 
     def reject_record(self, record_id: str, reason: str) -> dict[str, Any]:
@@ -166,7 +218,7 @@ class RegistryClient:
 
     # -- descriptor builders -------------------------------------------------
     @staticmethod
-    def build_mcp_descriptors(server: McpServer, tools: list[McpTool]) -> list[dict[str, Any]]:
+    def build_mcp_descriptors(server: McpServer, tools: list[McpTool]) -> dict[str, Any]:
         """Build MCP-type descriptors from a Loom McpServer and its tools."""
         server_manifest = {
             "name": server.name,
@@ -186,27 +238,64 @@ class RegistryClient:
                 tool_def["inputSchema"] = schema
             tool_definitions.append(tool_def)
 
-        return [
-            {
-                "descriptorType": "MCP",
-                "serverManifest": json.dumps(server_manifest),
-                "toolDefinitions": json.dumps(tool_definitions),
+        return {
+            "mcp": {
+                "server": {"inlineContent": json.dumps(server_manifest)},
+                "tools": {"inlineContent": json.dumps(tool_definitions)},
             }
-        ]
+        }
 
     @staticmethod
-    def build_a2a_descriptors(agent: A2aAgent) -> list[dict[str, Any]]:
+    def build_agent_descriptors(agent) -> dict[str, Any]:
+        """Build A2A-type descriptors from a Loom Agent."""
+        agent_card = {
+            "name": agent.name or agent.runtime_id,
+            "description": agent.description or "",
+            "version": "1.0.0",
+            "url": agent.endpoint_arn or agent.arn,
+            "protocolVersion": "0.3.0",
+            "capabilities": {
+                "streaming": False,
+                "pushNotifications": False,
+            },
+            "defaultInputModes": ["text/plain"],
+            "defaultOutputModes": ["text/plain"],
+            "skills": [
+                {
+                    "id": "default",
+                    "name": agent.name or agent.runtime_id,
+                    "description": agent.description or "Default skill",
+                    "tags": ["loom"],
+                }
+            ],
+            "provider": {
+                "organization": "Loom",
+                "url": agent.arn,
+            },
+            "_meta": {
+                "loom": {
+                    "source": "loom",
+                    "runtime_id": agent.runtime_id,
+                    "arn": agent.arn,
+                    "region": agent.region,
+                    "protocol": agent.protocol or "HTTP",
+                    "network_mode": agent.network_mode or "PUBLIC",
+                }
+            },
+        }
+        return {
+            "a2a": {
+                "agentCard": {"inlineContent": json.dumps(agent_card)},
+            }
+        }
+
+    @staticmethod
+    def build_a2a_descriptors(agent: A2aAgent) -> dict[str, Any]:
         """Build A2A-type descriptors from a Loom A2aAgent."""
         agent_card = agent.agent_card_raw or "{}"
-        if isinstance(agent_card, str):
-            # Already a JSON string
-            card_str = agent_card
-        else:
-            card_str = json.dumps(agent_card)
-
-        return [
-            {
-                "descriptorType": "A2A",
-                "agentCard": card_str,
+        card_str = agent_card if isinstance(agent_card, str) else json.dumps(agent_card)
+        return {
+            "a2a": {
+                "agentCard": {"inlineContent": card_str},
             }
-        ]
+        }

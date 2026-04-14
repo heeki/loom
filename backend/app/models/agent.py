@@ -47,6 +47,8 @@ class Agent(Base):
     deployed_at = Column(DateTime, nullable=True)
     registered_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     last_refreshed_at = Column(DateTime, nullable=True)
+    registry_record_id = Column(String, nullable=True)
+    registry_status = Column(String, nullable=True)
 
     # Relationships
     sessions = relationship("InvocationSession", back_populates="agent", cascade="all, delete-orphan")
@@ -133,4 +135,6 @@ class Agent(Base):
             "deployed_at": (self.deployed_at.isoformat() + "Z") if self.deployed_at else None,
             "registered_at": (self.registered_at.isoformat() + "Z") if self.registered_at else None,
             "last_refreshed_at": (self.last_refreshed_at.isoformat() + "Z") if self.last_refreshed_at else None,
+            "registry_record_id": self.registry_record_id,
+            "registry_status": self.registry_status,
         }

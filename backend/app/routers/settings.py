@@ -20,6 +20,7 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 # ---------------------------------------------------------------------------
 SITE_SETTING_DEFAULTS: dict[str, str] = {
     "cpu_io_wait_discount": "75",
+    "loom_registry_id": "",
 }
 
 
@@ -308,3 +309,73 @@ def update_site_setting(
     db.commit()
     db.refresh(setting)
     return SiteSettingResponse(**setting.to_dict())
+
+
+# ---------------------------------------------------------------------------
+# Registry Configuration
+# ---------------------------------------------------------------------------
+class RegistryConfigResponse(BaseModel):
+    """Response for registry configuration."""
+    registry_arn: str
+    registry_id: str
+    enabled: bool
+
+
+@router.get("/registry", response_model=RegistryConfigResponse)
+def get_registry_config(
+    user: UserInfo = Depends(require_scopes("settings:read")),
+    db: Session = Depends(get_db),
+) -> RegistryConfigResponse:
+    """Get the current registry configuration."""
+    arn = get_site_setting(db, "loom_registry_id")
+    from app.services.registry import get_registry_client
+    client = get_registry_client()
+    return RegistryConfigResponse(
+        registry_arn=arn,
+        registry_id=client.registry_id,
+        enabled=bool(client.registry_id),
+    )
+
+
+class RegistryConfigRequest(BaseModel):
+    """Request to update registry configuration."""
+    registry_arn: str = Field(..., description="Registry ARN (empty string to disable)")
+
+
+@router.put("/registry", response_model=RegistryConfigResponse)
+def update_registry_config(
+    request: RegistryConfigRequest,
+    user: UserInfo = Depends(require_scopes("settings:write")),
+    db: Session = Depends(get_db),
+) -> RegistryConfigResponse:
+    """Update the registry configuration. Validates the ARN before saving."""
+    from app.services.registry import validate_registry_arn, configure_registry, parse_registry_id_from_arn
+
+    registry_id = ""
+    if request.registry_arn:
+        try:
+            registry_id = validate_registry_arn(request.registry_arn)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            )
+
+    # Save to DB
+    setting = db.query(SiteSetting).filter(SiteSetting.key == "loom_registry_id").first()
+    if setting:
+        setting.value = request.registry_arn
+        setting.updated_at = datetime.utcnow()
+    else:
+        setting = SiteSetting(key="loom_registry_id", value=request.registry_arn)
+        db.add(setting)
+    db.commit()
+
+    # Reconfigure the in-memory singleton
+    client = configure_registry(registry_id)
+
+    return RegistryConfigResponse(
+        registry_arn=request.registry_arn,
+        registry_id=registry_id,
+        enabled=bool(registry_id),
+    )

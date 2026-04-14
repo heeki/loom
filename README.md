@@ -33,12 +33,15 @@ Loom seamlessly stitches together agents, memory stores, MCP servers, and agent-
 - Handles both SSE streaming and plain JSON responses with automatic method fallback
 - Credential provider creation with exponential backoff retry for reliable deployment
 
-### Agent Registry
-- AWS Agent Registry integration for governance and discovery
+### Agent Registry (Opt-In Governance)
+- AWS Agent Registry integration for governance and discovery — opt-in via Settings page (ARN configuration)
+- When enabled, provides additional governance: agents, MCP servers, and A2A agents must be approved before use
+- Agents auto-registered in DRAFT status on deployment; admins manage approval workflow
 - Full record lifecycle: create, submit for approval, approve, reject, delete
-- MCP and A2A descriptor builders for registry record creation
+- Descriptor builders for agents, MCP servers, and A2A agents
 - Semantic search over registry records via data plane API
 - Visibility filtering: end-users see only APPROVED or unregistered resources
+- Integration gating: only APPROVED MCP servers and A2A agents can be selected for agent deployments
 
 ### Security and Access Control
 - Cognito user authentication with automatic token refresh

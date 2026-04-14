@@ -63,7 +63,7 @@ Runtime configuration is sourced from `etc/environment.sh`:
 | `LOOM_COGNITO_REGION` | Region of the Cognito pool | `AWS_REGION` |
 | `LOOM_COGNITO_USER_CLIENT_ID` | Cognito user app client ID (auto-included in agent `allowedClients` on deploy) | — |
 | `LOOM_ALLOWED_ORIGINS` | Comma-separated additional CORS origins for deployed environments | — |
-| `LOOM_REGISTRY_ID` | AWS Agent Registry ID for governance and discovery | — |
+| `LOOM_REGISTRY_ID` | AWS Agent Registry ID (bootstrap fallback; prefer Settings page configuration) | — |
 
 AWS credentials use the standard boto3 credential chain (environment variables, AWS profile, instance metadata).
 
@@ -220,7 +220,7 @@ backend/
 
 ### `agents`
 
-Stores registered and deployed AgentCore Runtime agents. Uses an auto-incrementing integer PK for internal references; `arn` and `runtime_id` are stored as indexed columns for AWS lookups. Includes columns for: `source`, `deployment_status`, `execution_role_arn`, `endpoint_name`, `endpoint_arn`, `endpoint_status`, `protocol`, `network_mode`, `authorizer_config`, `credential_providers`, `deployed_at`, and `tags` (JSON dict of resolved tag key-value pairs).
+Stores registered and deployed AgentCore Runtime agents. Uses an auto-incrementing integer PK for internal references; `arn` and `runtime_id` are stored as indexed columns for AWS lookups. Includes columns for: `source`, `deployment_status`, `execution_role_arn`, `endpoint_name`, `endpoint_arn`, `endpoint_status`, `protocol`, `network_mode`, `authorizer_config`, `credential_providers`, `deployed_at`, `tags` (JSON dict of resolved tag key-value pairs), `registry_record_id` (AWS Agent Registry record ID), and `registry_status` (registry lifecycle status). Agents are auto-registered in DRAFT status on deployment when registry is configured.
 
 ### `agent_config_entries`
 

@@ -38,6 +38,8 @@ export interface AgentResponse {
   memory_names: string[];
   mcp_names: string[];
   a2a_names: string[];
+  registry_record_id: string | null;
+  registry_status: string | null;
 }
 
 export interface AgentRegisterRequest {
@@ -844,10 +846,11 @@ export interface RegistryRecord {
 export interface RegistryRecordDetail extends RegistryRecord {
   descriptors: Record<string, unknown>;
   record_version: string | null;
+  status_reason: string | null;
 }
 
 export interface RegistryRecordCreateRequest {
-  resource_type: "mcp" | "a2a";
+  resource_type: "mcp" | "a2a" | "agent";
   resource_id: number;
 }
 

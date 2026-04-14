@@ -874,7 +874,13 @@ Replaces all existing access rules for the agent. Personas not listed have no ac
 
 **Record lifecycle:** CREATING → DRAFT → PENDING_APPROVAL → APPROVED | REJECTED (also DEPRECATED)
 
-**Visibility filtering:** When listing MCP servers or A2A agents, users in the `t-user` role only see resources with `registry_status` of APPROVED or NULL (unregistered). Admin users see all resources regardless of registry status.
+**Registry is opt-in:** The registry is configured via the Settings page by entering a registry ARN (validated format: `arn:aws:bedrock-agentcore:<region>:<account>:registry/<id>`). The ARN is stored in `site_settings` and loaded into memory on startup. When enabled, it provides additional governance mechanisms: agents, MCP servers, and A2A agents must be approved in the registry before they can be used. When not configured, all resources are available without registry approval. The `LOOM_REGISTRY_ID` env var is supported as a bootstrap fallback.
+
+**Supported resource types:** `mcp` (MCP servers), `a2a` (A2A agents), `agent` (deployed agents). Agents are auto-registered in DRAFT status when deployment completes (if registry is configured).
+
+**Visibility filtering:** When listing agents, MCP servers, or A2A agents, users in the `t-user` role only see resources with `registry_status` of APPROVED or NULL (unregistered). Admin users see all resources regardless of registry status.
+
+**Integration gating:** When registry is configured, only APPROVED MCP servers and A2A agents can be selected for agent deployment. Non-approved integrations are rejected with a descriptive error.
 
 **Scope enforcement:** `mcp:read` for GET endpoints, `mcp:write` for POST/PUT/DELETE endpoints.
 
@@ -956,9 +962,12 @@ The `has_token` and `token_source` fields in `session_start` indicate whether an
 |--------|------|-------------|
 | `GET` | `/api/settings/site` | List all site settings (includes defaults for unset keys). |
 | `PUT` | `/api/settings/site/{key}` | Create or update a site setting. |
+| `GET` | `/api/settings/registry` | Get current registry configuration (ARN, ID, enabled status). |
+| `PUT` | `/api/settings/registry` | Update registry configuration. Validates ARN format before saving. Empty ARN disables. |
 
 Current site settings:
 - `cpu_io_wait_discount` (default: `75`) — CPU I/O wait discount percentage (0–99). Applied universally to runtime CPU costs.
+- `loom_registry_id` (default: `""`) — AWS Agent Registry ARN. Stored in `site_settings`, loaded into memory on startup. Validated format: `arn:aws:bedrock-agentcore:<region>:<account>:registry/<id>`.
 
 ### CloudWatch Logs
 
@@ -1174,6 +1183,7 @@ Wraps `boto3.client('bedrock-agentcore-control')` (control plane) and `boto3.cli
 - `search_records(query, max_results) -> dict` — semantic search over registry records (data plane).
 - `build_mcp_descriptors(server, tools) -> list[dict]` — builds MCP-type descriptors from a Loom McpServer and its tools (server manifest + tool definitions).
 - `build_a2a_descriptors(agent) -> list[dict]` — builds A2A-type descriptors from a Loom A2aAgent (agent card).
+- `build_agent_descriptors(agent) -> list[dict]` — builds AGENT-type descriptors from a Loom Agent (agent manifest with name, ARN, runtime ID, region, protocol, network mode).
 
 ### `services/observability.py`
 
