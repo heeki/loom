@@ -871,10 +871,10 @@ export function RegistryPage({ readOnly, isEndUserRole }: RegistryPageProps) {
                     <Table className="table-fixed">
                       <TableHeader>
                         <TableRow className="bg-card hover:bg-card">
-                          <SortableTableHead column="name" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[30%]">Name</SortableTableHead>
-                          <SortableTableHead column="status" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[14%]">Status</SortableTableHead>
-                          <SortableTableHead column="type" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[12%]">Type</SortableTableHead>
-                          <SortableTableHead column="description" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[24%]">Description</SortableTableHead>
+                          <SortableTableHead column="name" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[20%]">Name</SortableTableHead>
+                          <SortableTableHead column="status" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[10%]">Status</SortableTableHead>
+                          <SortableTableHead column="type" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[10%]">Type</SortableTableHead>
+                          <SortableTableHead column="description" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[40%]">Description</SortableTableHead>
                           <SortableTableHead column="created" activeColumn={tableCol} direction={tableDir} onSort={handleTableSort} className="w-[20%]">Created</SortableTableHead>
                         </TableRow>
                       </TableHeader>

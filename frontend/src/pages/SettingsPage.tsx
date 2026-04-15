@@ -166,7 +166,7 @@ export function SettingsPage() {
             <div className="flex items-center gap-2">
               <Input
                 type="text"
-                className="h-8 w-[500px] text-xs font-mono"
+                className="h-8 w-[625px] text-xs font-mono"
                 placeholder="arn:aws:bedrock-agentcore:us-east-1:123456789012:registry/loom-registry"
                 value={registryArn}
                 onChange={(e) => setRegistryArn(e.target.value)}
