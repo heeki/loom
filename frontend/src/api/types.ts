@@ -509,6 +509,10 @@ export interface SSESessionEnd {
   ltm_cost: number | null;
 }
 
+export interface SSEToolUse {
+  name: string;
+}
+
 export interface SSEError {
   message: string;
 }

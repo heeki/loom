@@ -14,6 +14,7 @@ interface InvokeSnapshot {
   sessionStart: SSESessionStart | null;
   sessionEnd: SSESessionEnd | null;
   isStreaming: boolean;
+  currentToolName: string | null;
   error: string | null;
   rawError: string | null;
 }
@@ -23,6 +24,7 @@ const EMPTY: InvokeSnapshot = {
   sessionStart: null,
   sessionEnd: null,
   isStreaming: false,
+  currentToolName: null,
   error: null,
   rawError: null,
 };
@@ -71,6 +73,7 @@ async function _startInvoke(
     sessionStart: null,
     sessionEnd: null,
     isStreaming: true,
+    currentToolName: null,
     error: null,
     rawError: null,
   });
@@ -90,23 +93,27 @@ async function _startInvoke(
         onSessionStart: (data) => _update(agentId, { sessionStart: data }),
         onChunk: (data) => {
           const cur = _get(agentId);
-          _update(agentId, { streamedText: cur.streamedText + data.text });
+          _update(agentId, { streamedText: cur.streamedText + data.text, currentToolName: null });
+        },
+        onToolUse: (data) => {
+          _update(agentId, { currentToolName: data.name });
         },
         onSessionEnd: (data) => {
-          _update(agentId, { sessionEnd: data, isStreaming: false });
+          _update(agentId, { sessionEnd: data, isStreaming: false, currentToolName: null });
         },
         onError: (data) => {
           _update(agentId, {
             error: friendlyInvokeError(data.message, authorizerName),
             rawError: data.message,
             isStreaming: false,
+            currentToolName: null,
           });
         },
       },
       controller.signal,
     );
     // Stream finished — clear isStreaming even if no session_end was received
-    _update(agentId, { isStreaming: false });
+    _update(agentId, { isStreaming: false, currentToolName: null });
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") return;
     const msg = e instanceof Error ? e.message : "Invocation failed";
@@ -168,6 +175,7 @@ export function useInvoke(agentId: number, authorizerName?: string) {
     sessionStart: snapshot.sessionStart,
     sessionEnd: snapshot.sessionEnd,
     isStreaming: snapshot.isStreaming,
+    currentToolName: snapshot.currentToolName,
     error: snapshot.error,
     rawError: snapshot.rawError,
     invoke,

@@ -1,19 +1,19 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Send, Plus, Brain, LogOut, Bot, User, X, Loader2, Palette, RefreshCw } from "lucide-react";
+import { Send, Plus, Brain, LogOut, Bot, User, X, Loader2, Palette, RefreshCw, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import ReactMarkdown from "react-markdown";
 import { CollapsibleJsonBlock } from "@/components/CollapsibleJsonBlock";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
-import { listAgents } from "@/api/agents";
+import { listAgents, fetchModels } from "@/api/agents";
 import { listSessions, getSession, hideSession } from "@/api/invocations";
 import { listMemories, getMemoryRecords } from "@/api/memories";
 import { trackAction } from "@/api/audit";
 import { useInvoke, clearInvokeState } from "@/hooks/useInvoke";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, isLightTheme, THEME_LABELS, type Theme } from "@/contexts/ThemeContext";
-import type { AgentResponse, SessionResponse, MemoryResponse, MemoryRecordItem } from "@/api/types";
+import type { AgentResponse, SessionResponse, MemoryResponse, MemoryRecordItem, ModelOption } from "@/api/types";
 
 interface ChatMessage {
   id: string;
@@ -80,6 +80,27 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
   const [memoryRecordsError, setMemoryRecordsError] = useState<string | null>(null);
   const [memoryRefreshCounter, setMemoryRefreshCounter] = useState(0);
 
+  // Model selection state
+  const [allModels, setAllModels] = useState<ModelOption[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
+  const [showModelPicker, setShowModelPicker] = useState(false);
+  const modelPickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetchModels().then(setAllModels).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!showModelPicker) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (modelPickerRef.current && !modelPickerRef.current.contains(e.target as Node)) {
+        setShowModelPicker(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showModelPicker]);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Per-agent chat state preservation (enables background streaming)
@@ -87,7 +108,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     Map<number, { messages: ChatMessage[]; pendingPrompt: string | null; currentSessionId: string | null }>
   >(new Map());
 
-  const { streamedText, sessionStart, sessionEnd, isStreaming, error, invoke, cancel } = useInvoke(
+  const { streamedText, sessionStart, sessionEnd, isStreaming, currentToolName, error, invoke, cancel } = useInvoke(
     selectedAgentId ?? 0,
   );
 
@@ -193,6 +214,18 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
 
   const selectedAgent = agents.find((a) => a.id === selectedAgentId);
 
+  const availableModels = useMemo(() => {
+    if (!selectedAgent) return [];
+    const allowed = selectedAgent.allowed_model_ids;
+    if (allowed.length > 0) return allModels.filter((m) => allowed.includes(m.model_id));
+    if (selectedAgent.model_id) return allModels.filter((m) => m.model_id === selectedAgent.model_id);
+    return [];
+  }, [selectedAgent, allModels]);
+
+  useEffect(() => {
+    setSelectedModelId(null);
+  }, [selectedAgentId]);
+
   // When a session starts, immediately refresh the sessions list so the tab appears in the sidebar
   const lastSessionStartRef = useRef<typeof sessionStart>(null);
   useEffect(() => {
@@ -281,9 +314,11 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
       setPendingPrompt(prompt);
       const agentName = agents.find((a) => a.id === selectedAgentId)?.name ?? String(selectedAgentId ?? 0);
       if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "agent", "invoke", agentName);
-      invoke(prompt, "DEFAULT", currentSessionId ?? undefined);
+      const agent = agents.find((a) => a.id === selectedAgentId);
+      const rtModel = selectedModelId && agent && selectedModelId !== agent.model_id ? selectedModelId : undefined;
+      invoke(prompt, "DEFAULT", currentSessionId ?? undefined, undefined, undefined, rtModel);
     }
-  }, [isStreaming, queuedPrompt, error]);
+  }, [isStreaming, queuedPrompt, error, selectedModelId, selectedAgentId, agents]);
 
   // Scroll to bottom on new messages or streaming updates
   useEffect(() => {
@@ -303,8 +338,9 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     setPendingPrompt(prompt);
     const agentName = agents.find((a) => a.id === selectedAgentId)?.name ?? String(selectedAgentId);
     if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "agent", "invoke", agentName);
-    await invoke(prompt, "DEFAULT", currentSessionId ?? undefined);
-  }, [input, isStreaming, selectedAgentId, currentSessionId, invoke, agents, user, browserSessionId]);
+    const runtimeModelId = selectedModelId && selectedAgent && selectedModelId !== selectedAgent.model_id ? selectedModelId : undefined;
+    await invoke(prompt, "DEFAULT", currentSessionId ?? undefined, undefined, undefined, runtimeModelId);
+  }, [input, isStreaming, selectedAgentId, currentSessionId, invoke, agents, user, browserSessionId, selectedModelId, selectedAgent]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -735,7 +771,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                     )}
 
                     {/* Thinking indicator — shown while waiting for first response chunk */}
-                    {isCurrentlyStreaming && !streamedText && <ThinkingBubble />}
+                    {isCurrentlyStreaming && !streamedText && <ThinkingBubble toolName={currentToolName} />}
 
                     {/* Streaming bubble — switches on once text starts arriving */}
                     {((isCurrentlyStreaming && !!streamedText) ||
@@ -787,29 +823,79 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
               </div>
 
               {/* Input area */}
-              <div className="p-4 shrink-0">
-                <div className="flex gap-3 items-end max-w-3xl mx-auto">
+              <div className="px-4 pt-2 pb-4 shrink-0">
+                <div className="max-w-3xl mx-auto rounded-xl border bg-background shadow-sm">
                   <Textarea
                     placeholder="Message..."
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
                     rows={1}
-                    className="resize-none flex-1"
+                    className="resize-none border-0 shadow-none focus-visible:ring-0 rounded-none rounded-t-xl"
                   />
-                  <Button
-                    size="icon"
-                    onClick={() => void handleSend()}
-                    disabled={!input.trim()}
-                    title={isStreaming ? "Enqueue message" : "Send"}
-                  >
-                    <Send className="h-4 w-4" />
-                  </Button>
-                  {isStreaming && (
-                    <Button variant="outline" size="icon" onClick={cancel} title="Cancel stream">
-                      <X className="h-4 w-4" />
-                    </Button>
-                  )}
+                  <div className="flex items-center justify-between px-3 py-2 bg-background rounded-b-xl">
+                    <div>
+                      {/* Left side — reserved for future '+' connectors button */}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {availableModels.length > 0 && (
+                        <div className="relative" ref={modelPickerRef}>
+                          <button
+                            onClick={() => { if (availableModels.length > 1) setShowModelPicker((v) => !v); }}
+                            className={`flex items-center gap-1 text-xs text-muted-foreground rounded-md border px-2 py-1 ${
+                              availableModels.length > 1 ? "hover:text-foreground hover:border-foreground/30 cursor-pointer" : "cursor-default"
+                            }`}
+                          >
+                            <span>
+                              {selectedModelId
+                                ? (availableModels.find((m) => m.model_id === selectedModelId)?.display_name ?? selectedModelId)
+                                : (availableModels.find((m) => m.model_id === selectedAgent?.model_id)?.display_name ?? selectedAgent?.model_id ?? "Model")}
+                            </span>
+                            {availableModels.length > 1 && <ChevronDown className="h-3 w-3" />}
+                          </button>
+                          {showModelPicker && (
+                            <div className="absolute bottom-7 right-0 z-50 w-52 rounded-lg border bg-white shadow-md py-1">
+                              {availableModels.map((m) => {
+                                const isDefault = m.model_id === selectedAgent?.model_id;
+                                const isSelected = selectedModelId ? m.model_id === selectedModelId : isDefault;
+                                return (
+                                  <button
+                                    key={m.model_id}
+                                    onClick={() => {
+                                      setSelectedModelId(isDefault ? null : m.model_id);
+                                      setShowModelPicker(false);
+                                    }}
+                                    className={`w-full text-left px-3 py-1.5 text-xs transition-colors hover:bg-accent ${
+                                      isSelected ? "font-semibold text-foreground" : "text-muted-foreground"
+                                    }`}
+                                  >
+                                    {m.display_name}
+                                    {isDefault && <span className="text-[10px] opacity-60 ml-1">(default)</span>}
+                                    {isSelected && !isDefault && <span className="text-[10px] opacity-60 ml-1">(selected)</span>}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        onClick={() => void handleSend()}
+                        disabled={!input.trim()}
+                        title={isStreaming ? "Enqueue message" : "Send"}
+                      >
+                        <Send className="h-4 w-4" />
+                      </Button>
+                      {isStreaming && (
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={cancel} title="Cancel stream">
+                          <X className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
                 </div>
                 <p className="text-center text-xs text-muted-foreground mt-2 max-w-3xl mx-auto">
                   Be mindful of personal information you enter into conversations.
@@ -837,7 +923,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
   );
 }
 
-function ThinkingBubble() {
+function ThinkingBubble({ toolName }: { toolName?: string | null }) {
   const [dots, setDots] = useState(".");
 
   useEffect(() => {
@@ -852,7 +938,11 @@ function ThinkingBubble() {
       <div className="bg-muted rounded-2xl px-4 py-3 flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
         <span>
-          thinking<span className="inline-block w-5 text-left">{dots}</span>
+          {toolName
+            ? <>using <span className="font-medium">{toolName}</span></>
+            : "thinking"
+          }
+          <span className="inline-block w-5 text-left">{dots}</span>
         </span>
       </div>
     </div>

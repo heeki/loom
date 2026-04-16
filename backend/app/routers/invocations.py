@@ -542,6 +542,11 @@ async def invoke_agent_stream(
             elif chunk.get("type") == "structured":
                 structured = chunk["content"]
                 if isinstance(structured, dict):
+                    # Tool use event forwarded from the agent handler
+                    tool_use = structured.get("tool_use")
+                    if isinstance(tool_use, dict) and tool_use.get("name"):
+                        yield format_sse_event("tool_use", {"name": tool_use["name"]})
+                        continue
                     # Strands SDK text delta: {"data": "token"}
                     data = structured.get("data")
                     if isinstance(data, str) and data:

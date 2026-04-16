@@ -120,6 +120,8 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
                         text = event["delta"].get("text")
                     if text:
                         yield text
+                    elif isinstance(data, dict) and data.get("name") and data.get("id"):
+                        yield {"tool_use": {"name": data["name"], "id": data["id"]}}
         except MaxTokensReachedException:
             logger.warning("Max tokens reached for session_id=%s", session_id)
             yield "\n\n[Response truncated: the model reached its maximum output token limit. Try a shorter prompt or a model with a higher token limit.]"

@@ -5,6 +5,7 @@ import type {
   SessionResponse,
   SSESessionStart,
   SSEChunk,
+  SSEToolUse,
   SSESessionEnd,
   SSEError,
 } from "./types";
@@ -42,6 +43,7 @@ export function hideSession(agentId: number, sessionId: string): Promise<void> {
 export interface StreamCallbacks {
   onSessionStart?: (data: SSESessionStart) => void;
   onChunk?: (data: SSEChunk) => void;
+  onToolUse?: (data: SSEToolUse) => void;
   onSessionEnd?: (data: SSESessionEnd) => void;
   onError?: (data: SSEError) => void;
 }
@@ -122,6 +124,9 @@ export async function invokeAgentStream(
               break;
             case "chunk":
               callbacks.onChunk?.(parsed as SSEChunk);
+              break;
+            case "tool_use":
+              callbacks.onToolUse?.(parsed as SSEToolUse);
               break;
             case "session_end":
               callbacks.onSessionEnd?.(parsed as SSESessionEnd);
