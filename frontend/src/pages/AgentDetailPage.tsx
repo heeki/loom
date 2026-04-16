@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Key, Pencil, Check, X } from "lucide-react";
 import { fetchModels } from "@/api/agents";
 import type { ModelOption } from "@/api/types";
+import { groupModels } from "@/lib/models";
 import ReactMarkdown from "react-markdown";
 import { CollapsibleJsonBlock } from "@/components/CollapsibleJsonBlock";
 import remarkGfm from "remark-gfm";
@@ -28,7 +29,7 @@ interface AgentDetailPageProps {
   onSelectSession: (sessionId: string) => void;
   onSessionsRefresh: () => void;
   onRedeploy?: (id: number) => Promise<void>;
-  onPatchAgent?: (id: number, updates: { description?: string | null; allowed_model_ids?: string[] }) => Promise<AgentResponse>;
+  onPatchAgent?: (id: number, updates: { description?: string | null; model_id?: string; allowed_model_ids?: string[] }) => Promise<AgentResponse>;
   onRefreshAgents?: () => void;
   canInvoke?: boolean;
   registryReadOnly?: boolean;
@@ -334,10 +335,11 @@ export function AgentDetailPage({
 
 function RegisteredAgentModelConfig({ agent, onPatchAgent }: {
   agent: AgentResponse;
-  onPatchAgent: (id: number, updates: { allowed_model_ids?: string[] }) => Promise<AgentResponse>;
+  onPatchAgent: (id: number, updates: { model_id?: string; allowed_model_ids?: string[] }) => Promise<AgentResponse>;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<string[]>([]);
+  const [defaultDraft, setDefaultDraft] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [allModels, setAllModels] = useState<ModelOption[]>([]);
 
@@ -350,13 +352,20 @@ function RegisteredAgentModelConfig({ agent, onPatchAgent }: {
 
   const handleEdit = () => {
     setDraft([...agent.allowed_model_ids]);
+    setDefaultDraft(agent.model_id ?? "");
     setEditing(true);
   };
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await onPatchAgent(agent.id, { allowed_model_ids: draft });
+      const updates: { model_id?: string; allowed_model_ids: string[] } = {
+        allowed_model_ids: draft,
+      };
+      if (defaultDraft && defaultDraft !== agent.model_id) {
+        updates.model_id = defaultDraft;
+      }
+      await onPatchAgent(agent.id, updates);
       setEditing(false);
     } finally {
       setSaving(false);
@@ -364,7 +373,7 @@ function RegisteredAgentModelConfig({ agent, onPatchAgent }: {
   };
 
   const toggle = (modelId: string) => {
-    if (modelId === agent.model_id) return;
+    if (modelId === defaultDraft) return;
     setDraft((prev) =>
       prev.includes(modelId) ? prev.filter((id) => id !== modelId) : [...prev, modelId]
     );
@@ -386,21 +395,40 @@ function RegisteredAgentModelConfig({ agent, onPatchAgent }: {
         {editing ? (
           <div className="space-y-2">
             <p className="text-xs">Select which models users may choose at invoke time:</p>
-            <div className="flex flex-wrap gap-x-4 gap-y-1">
-              {allModels.map((m) => (
-                <label key={m.model_id} className="flex items-center gap-1.5 text-xs cursor-pointer">
-                  <input
-                    type="checkbox"
-                    className="h-3.5 w-3.5 shrink-0"
-                    checked={draft.includes(m.model_id)}
-                    disabled={m.model_id === agent.model_id}
-                    onChange={() => toggle(m.model_id)}
-                  />
-                  <span>{m.display_name}</span>
-                  {m.model_id === agent.model_id && (
-                    <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded">default</span>
-                  )}
-                </label>
+            <div className="space-y-1.5">
+              {groupModels(allModels).map(([group, models]) => (
+                <div key={group} className="flex flex-wrap gap-x-4 gap-y-1 items-center">
+                  <span className="text-[10px] font-medium text-muted-foreground w-16 shrink-0">{group}</span>
+                  {models.map((m) => {
+                    const isDefault = m.model_id === defaultDraft;
+                    const isChecked = draft.includes(m.model_id);
+                    return (
+                      <label key={m.model_id} className="flex items-center gap-1.5 text-xs cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 shrink-0"
+                          checked={isChecked}
+                          disabled={isDefault}
+                          onChange={() => toggle(m.model_id)}
+                        />
+                        <span>{m.display_name}</span>
+                        {isChecked && (
+                          <button
+                            type="button"
+                            onClick={() => setDefaultDraft(m.model_id)}
+                            className={`text-[10px] px-1 rounded ${
+                              isDefault
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-accent text-muted-foreground hover:bg-accent/80"
+                            }`}
+                          >
+                            {isDefault ? "default" : "set default"}
+                          </button>
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
               ))}
             </div>
             <div className="flex gap-2">

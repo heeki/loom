@@ -203,6 +203,7 @@ class ConfigUpdateRequest(BaseModel):
 class AgentUpdateRequest(BaseModel):
     """Request body for patching editable agent fields."""
     description: str | None = None
+    model_id: str | None = None
     allowed_model_ids: list[str] | None = None
 
 
@@ -1672,10 +1673,26 @@ def patch_agent(
     user: UserInfo = Depends(require_scopes("agent:write")),
     db: Session = Depends(get_db),
 ) -> AgentResponse:
-    """Update editable fields on an agent (e.g. description, allowed_model_ids)."""
+    """Update editable fields on an agent (e.g. description, model_id, allowed_model_ids)."""
     agent = get_agent_or_404(agent_id, db)
     if "description" in request.model_fields_set:
         agent.description = request.description
+    if "model_id" in request.model_fields_set and request.model_id is not None:
+        valid_ids = {m["model_id"] for m in SUPPORTED_MODELS}
+        if request.model_id not in valid_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid model ID: {request.model_id}",
+            )
+        for entry in agent.config_entries:
+            if entry.key == "AGENT_CONFIG_JSON":
+                try:
+                    config = json.loads(entry.value)
+                    config["model_id"] = request.model_id
+                    entry.value = json.dumps(config)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                break
     if "allowed_model_ids" in request.model_fields_set and request.allowed_model_ids is not None:
         valid_ids = {m["model_id"] for m in SUPPORTED_MODELS}
         invalid = [m for m in request.allowed_model_ids if m not in valid_ids]

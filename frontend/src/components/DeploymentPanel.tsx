@@ -8,11 +8,12 @@ import { formatTimestamp } from "@/lib/format";
 import { statusVariant } from "@/lib/status";
 import { fetchModels } from "@/api/agents";
 import type { AgentResponse, ModelOption } from "@/api/types";
+import { groupModels } from "@/lib/models";
 
 interface DeploymentPanelProps {
   agent: AgentResponse;
   onRedeploy: (id: number) => Promise<void>;
-  onPatchAgent?: (id: number, updates: { allowed_model_ids?: string[] }) => Promise<AgentResponse>;
+  onPatchAgent?: (id: number, updates: { model_id?: string; allowed_model_ids?: string[] }) => Promise<AgentResponse>;
 }
 
 const DEPLOY_IN_PROGRESS = new Set([
@@ -36,6 +37,7 @@ export function DeploymentPanel({ agent, onPatchAgent }: DeploymentPanelProps) {
   const { timezone } = useTimezone();
   const [editingModels, setEditingModels] = useState(false);
   const [modelsDraft, setModelsDraft] = useState<string[]>([]);
+  const [defaultModelDraft, setDefaultModelDraft] = useState<string>("");
   const [savingModels, setSavingModels] = useState(false);
   const [allModels, setAllModels] = useState<ModelOption[]>([]);
 
@@ -45,6 +47,7 @@ export function DeploymentPanel({ agent, onPatchAgent }: DeploymentPanelProps) {
 
   const handleEditModels = () => {
     setModelsDraft([...agent.allowed_model_ids]);
+    setDefaultModelDraft(agent.model_id ?? "");
     setEditingModels(true);
   };
 
@@ -52,7 +55,13 @@ export function DeploymentPanel({ agent, onPatchAgent }: DeploymentPanelProps) {
     if (!onPatchAgent) return;
     setSavingModels(true);
     try {
-      await onPatchAgent(agent.id, { allowed_model_ids: modelsDraft });
+      const updates: { model_id?: string; allowed_model_ids: string[] } = {
+        allowed_model_ids: modelsDraft,
+      };
+      if (defaultModelDraft && defaultModelDraft !== agent.model_id) {
+        updates.model_id = defaultModelDraft;
+      }
+      await onPatchAgent(agent.id, updates);
       setEditingModels(false);
     } finally {
       setSavingModels(false);
@@ -60,7 +69,7 @@ export function DeploymentPanel({ agent, onPatchAgent }: DeploymentPanelProps) {
   };
 
   const toggleModel = (modelId: string) => {
-    if (modelId === agent.model_id) return;
+    if (modelId === defaultModelDraft) return;
     setModelsDraft((prev) =>
       prev.includes(modelId) ? prev.filter((id) => id !== modelId) : [...prev, modelId]
     );
@@ -105,21 +114,40 @@ export function DeploymentPanel({ agent, onPatchAgent }: DeploymentPanelProps) {
           </div>
           {editingModels ? (
             <div className="space-y-2 mt-1">
-              <div className="flex flex-wrap gap-x-4 gap-y-1">
-                {allModels.map((m) => (
-                  <label key={m.model_id} className="flex items-center gap-1.5 text-xs cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="h-3.5 w-3.5 shrink-0"
-                      checked={modelsDraft.includes(m.model_id)}
-                      disabled={m.model_id === agent.model_id}
-                      onChange={() => toggleModel(m.model_id)}
-                    />
-                    <span>{m.display_name}</span>
-                    {m.model_id === agent.model_id && (
-                      <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded">default</span>
-                    )}
-                  </label>
+              <div className="space-y-1.5">
+                {groupModels(allModels).map(([group, models]) => (
+                  <div key={group} className="flex flex-wrap gap-x-4 gap-y-1 items-center">
+                    <span className="text-[10px] font-medium text-muted-foreground w-16 shrink-0">{group}</span>
+                    {models.map((m) => {
+                      const isDefault = m.model_id === defaultModelDraft;
+                      const isChecked = modelsDraft.includes(m.model_id);
+                      return (
+                        <label key={m.model_id} className="flex items-center gap-1.5 text-xs cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="h-3.5 w-3.5 shrink-0"
+                            checked={isChecked}
+                            disabled={isDefault}
+                            onChange={() => toggleModel(m.model_id)}
+                          />
+                          <span>{m.display_name}</span>
+                          {isChecked && (
+                            <button
+                              type="button"
+                              onClick={() => setDefaultModelDraft(m.model_id)}
+                              className={`text-[10px] px-1 rounded ${
+                                isDefault
+                                  ? "bg-primary text-primary-foreground"
+                                  : "bg-accent text-muted-foreground hover:bg-accent/80"
+                              }`}
+                            >
+                              {isDefault ? "default" : "set default"}
+                            </button>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
                 ))}
               </div>
               <div className="flex gap-2">

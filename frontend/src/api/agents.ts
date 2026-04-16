@@ -81,7 +81,7 @@ export function updateAgentConfig(
 
 export function patchAgent(
   id: number,
-  updates: { description?: string | null; allowed_model_ids?: string[] },
+  updates: { description?: string | null; model_id?: string; allowed_model_ids?: string[] },
 ): Promise<AgentResponse> {
   return apiFetch<AgentResponse>(`/api/agents/${id}`, {
     method: "PATCH",
