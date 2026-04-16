@@ -105,6 +105,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
   const [behavioralGuidelines, setBehavioralGuidelines] = useState("");
   const [outputExpectations, setOutputExpectations] = useState("");
   const [modelId, setModelId] = useState("");
+  const [selectedAllowedModelIds, setSelectedAllowedModelIds] = useState<string[]>([]);
   const [selectedRoleId, setSelectedRoleId] = useState<string>("");
   const [protocol] = useState("HTTP");
   const [networkMode, setNetworkMode] = useState("PUBLIC");
@@ -230,6 +231,9 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
         behavioral_guidelines: behavioralGuidelines.trim(),
         output_expectations: outputExpectations.trim(),
         model_id: modelId,
+        allowed_model_ids: selectedAllowedModelIds.length > 0
+          ? (selectedAllowedModelIds.includes(modelId) ? selectedAllowedModelIds : [modelId, ...selectedAllowedModelIds])
+          : undefined,
         role_arn: roleArn,
         protocol,
         network_mode: networkMode,
@@ -257,6 +261,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
       setBehavioralGuidelines("");
       setOutputExpectations("");
       setModelId("");
+      setSelectedAllowedModelIds([]);
       setSelectedRoleId("");
       setNetworkMode("PUBLIC");
       setSelectedAuthConfigId("");
@@ -326,6 +331,10 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                     if (parsed.model) {
                       const match = models.find((m) => m.model_id === parsed.model || m.display_name === parsed.model);
                       if (match) setModelId(match.model_id);
+                    }
+                    if (Array.isArray(parsed.allowed_models)) {
+                      const validIds = models.map((m) => m.model_id);
+                      setSelectedAllowedModelIds(parsed.allowed_models.filter((id: string) => validIds.includes(id)));
                     }
                     if (parsed.role) {
                       const match = managedRoles.find((r) => r.role_name === parsed.role || r.role_arn === parsed.role);
@@ -526,6 +535,37 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                   />
                 </section>
               </div>
+
+              {/* Allowed Models for Runtime Selection */}
+              {modelId && models.length > 0 && (
+                <section className="space-y-2">
+                  <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Allowed Models (runtime selection)</h4>
+                  <p className="text-xs text-muted-foreground">Users can choose from these models when invoking the agent. The deploy model is always included.</p>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    {models.map((m) => (
+                      <label key={m.model_id} className="flex items-center gap-2 text-xs cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 shrink-0"
+                          checked={m.model_id === modelId || selectedAllowedModelIds.includes(m.model_id)}
+                          disabled={m.model_id === modelId}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedAllowedModelIds((prev) => [...prev, m.model_id]);
+                            } else {
+                              setSelectedAllowedModelIds((prev) => prev.filter((id) => id !== m.model_id));
+                            }
+                          }}
+                        />
+                        <span>{m.display_name}</span>
+                        {m.model_id === modelId && (
+                          <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded">default</span>
+                        )}
+                      </label>
+                    ))}
+                  </div>
+                </section>
+              )}
 
               {/* IAM Role Permissions (read-only) */}
               {selectedRole && (

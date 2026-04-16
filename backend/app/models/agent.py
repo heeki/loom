@@ -49,6 +49,7 @@ class Agent(Base):
     last_refreshed_at = Column(DateTime, nullable=True)
     registry_record_id = Column(String, nullable=True)
     registry_status = Column(String, nullable=True)
+    allowed_model_ids = Column(Text, nullable=True)  # JSON array of allowed model IDs
 
     # Relationships
     sessions = relationship("InvocationSession", back_populates="agent", cascade="all, delete-orphan")
@@ -95,6 +96,19 @@ class Agent(Base):
         """Serialize tags to JSON text."""
         self.tags = json.dumps(tags)
 
+    def get_allowed_model_ids(self) -> list[str]:
+        """Parse allowed_model_ids from JSON text."""
+        if not self.allowed_model_ids:
+            return []
+        try:
+            return json.loads(self.allowed_model_ids)
+        except json.JSONDecodeError:
+            return []
+
+    def set_allowed_model_ids(self, model_ids: list[str]) -> None:
+        """Serialize allowed_model_ids to JSON text."""
+        self.allowed_model_ids = json.dumps(model_ids) if model_ids else None
+
     def get_authorizer_config(self) -> dict | None:
         """Parse authorizer_config from JSON text."""
         if not self.authorizer_config:
@@ -137,4 +151,5 @@ class Agent(Base):
             "last_refreshed_at": (self.last_refreshed_at.isoformat() + "Z") if self.last_refreshed_at else None,
             "registry_record_id": self.registry_record_id,
             "registry_status": self.registry_status,
+            "allowed_model_ids": self.get_allowed_model_ids(),
         }

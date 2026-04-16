@@ -12,7 +12,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { listAuthorizerConfigs, listAuthorizerCredentials } from "@/api/security";
-import type { SessionResponse, AuthorizerCredential } from "@/api/types";
+import { fetchModels } from "@/api/agents";
+import type { SessionResponse, AuthorizerCredential, ModelOption } from "@/api/types";
 
 const NEW_SESSION = "__new__";
 const USER_TOKEN = "__user__";
@@ -25,13 +26,14 @@ interface InvokePanelProps {
   sessions: SessionResponse[];
   isStreaming: boolean;
   modelId?: string | null;
+  allowedModelIds?: string[];
   authorizerName?: string;
   currentUserId?: string;
-  onInvoke: (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string) => void;
+  onInvoke: (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string, modelId?: string) => void;
   onCancel: () => void;
 }
 
-export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelId, authorizerName, currentUserId, onInvoke, onCancel }: InvokePanelProps) {
+export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelId, allowedModelIds = [], authorizerName, currentUserId, onInvoke, onCancel }: InvokePanelProps) {
   const promptKey = `loom:invokePrompt:${agentId}`;
   const [prompt, setPrompt] = useState(() => sessionStorage.getItem(promptKey) ?? "");
 
@@ -47,6 +49,25 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
   const [selectedCredential, setSelectedCredential] = useState(authorizerName ? USER_TOKEN : NO_CREDENTIAL);
   const [bearerToken, setBearerToken] = useState("");
   const [allCredentials, setAllCredentials] = useState<(AuthorizerCredential & { authorizer_name: string })[]>([]);
+  const [selectedModel, setSelectedModel] = useState(modelId ?? "");
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
+
+  useEffect(() => {
+    setSelectedModel(modelId ?? "");
+  }, [modelId, agentId]);
+
+  useEffect(() => {
+    if (allowedModelIds.length <= 1) return;
+    let cancelled = false;
+    fetchModels().then((models) => {
+      if (!cancelled) setModelOptions(models);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [allowedModelIds.length]);
+
+  const filteredModels = allowedModelIds.length > 1
+    ? modelOptions.filter((m) => allowedModelIds.includes(m.model_id))
+    : [];
 
   useEffect(() => {
     let cancelled = false;
@@ -126,7 +147,8 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
       ? undefined : Number(selectedCredential);
     const token = selectedCredential === MANUAL_TOKEN && bearerToken.trim()
       ? bearerToken.trim() : undefined;
-    onInvoke(prompt.trim(), qualifier, sessionId, credentialId, token);
+    const runtimeModelId = selectedModel && selectedModel !== modelId ? selectedModel : undefined;
+    onInvoke(prompt.trim(), qualifier, sessionId, credentialId, token, runtimeModelId);
   };
 
   const handleQualifierChange = (value: string) => {
@@ -140,11 +162,24 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
       <CardHeader>
         <div className="flex items-center gap-2">
           <CardTitle className="text-sm font-medium">Invoke Agent</CardTitle>
-          {modelId && (
+          {filteredModels.length > 1 ? (
+            <Select value={selectedModel} onValueChange={setSelectedModel}>
+              <SelectTrigger className="w-56 h-7 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {filteredModels.map((m) => (
+                  <SelectItem key={m.model_id} value={m.model_id}>
+                    {m.display_name}{m.model_id === modelId ? " (default)" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : modelId ? (
             <Badge variant="outline" className="border-border bg-input-bg text-xs font-normal">
-              {modelId}
+              {modelOptions.find((m) => m.model_id === modelId)?.display_name ?? modelId}
             </Badge>
-          )}
+          ) : null}
         </div>
       </CardHeader>
       <CardContent>

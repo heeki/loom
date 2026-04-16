@@ -98,9 +98,9 @@ export function AgentDetailPage({
   const { streamedText, sessionStart, sessionEnd, isStreaming, error, rawError, invoke, cancel } =
     useInvoke(agent.id, agent.authorizer_config?.name ?? undefined);
 
-  const handleInvoke = async (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string) => {
+  const handleInvoke = async (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string, modelId?: string) => {
     if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'agent', 'invoke', agent.name ?? agent.runtime_id ?? String(agent.id));
-    await invoke(prompt, qualifier, sessionId, credentialId, bearerToken);
+    await invoke(prompt, qualifier, sessionId, credentialId, bearerToken, modelId);
     onSessionsRefresh();
   };
 
@@ -177,6 +177,7 @@ export function AgentDetailPage({
           sessions={sessions}
           isStreaming={isStreaming}
           modelId={agent.model_id}
+          allowedModelIds={agent.allowed_model_ids}
           authorizerName={agent.authorizer_config?.name}
           currentUserId={user?.username ?? user?.sub}
           onInvoke={handleInvoke}

@@ -126,6 +126,7 @@ class AgentCreateRequest(BaseModel):
     behavioral_guidelines: str = Field(default="", description="How it should behave")
     output_expectations: str = Field(default="", description="Output format/style")
     model_id: str | None = Field(None, description="Bedrock model ID (required for deploy)")
+    allowed_model_ids: list[str] | None = Field(None, description="Subset of models the user may select at invoke time")
     role_arn: str | None = Field(None, description="Existing IAM role ARN or null to create new")
     protocol: str = Field(default="HTTP", description="HTTP, MCP, or A2A")
     network_mode: str = Field(default="PUBLIC", description="PUBLIC or VPC")
@@ -169,6 +170,7 @@ class AgentResponse(BaseModel):
     tags: dict[str, str] = {}
     authorizer_config: dict | None = None
     model_id: str | None = None
+    allowed_model_ids: list[str] = []
     deployed_at: str | None = None
     registry_record_id: str | None = None
     registry_status: str | None = None
@@ -201,6 +203,7 @@ class ConfigUpdateRequest(BaseModel):
 class AgentUpdateRequest(BaseModel):
     """Request body for patching editable agent fields."""
     description: str | None = None
+    allowed_model_ids: list[str] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -339,9 +342,15 @@ def _agent_response(agent: Agent, db: Session) -> AgentResponse:
     mem_total = total_stm + total_ltm
     grand_total = total_est + rt_total + mem_total
 
+    # Derive allowed_model_ids: use agent column if set, else default to [model_id]
+    allowed_models = agent_dict.pop("allowed_model_ids", [])
+    if not allowed_models and model_id:
+        allowed_models = [model_id]
+
     result = AgentResponse(
         **agent_dict,
         model_id=model_id,
+        allowed_model_ids=allowed_models,
         active_session_count=compute_active_session_count(agent.id, db),
         memory_names=memory_names,
         mcp_names=mcp_names,
@@ -599,10 +608,16 @@ def _register_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
         )
         db.add(entry)
 
+    # Store allowed_model_ids (default to [model_id] if not specified)
+    if request.allowed_model_ids:
+        agent.set_allowed_model_ids(request.allowed_model_ids)
+    elif request.model_id:
+        agent.set_allowed_model_ids([request.model_id])
+
     db.commit()
     db.refresh(agent)
 
-    return AgentResponse(**agent.to_dict(), active_session_count=0)
+    return _agent_response(agent, db)
 
 
 def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: BackgroundTasks) -> AgentResponse:
@@ -745,6 +760,12 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
     placeholder_arn = f"pending-{uuid4()}"
 
     # Create agent record with CREATING status — returned to frontend immediately
+    # Resolve allowed models: use explicit list if provided, else default to [model_id]
+    effective_allowed = request.allowed_model_ids if request.allowed_model_ids else [request.model_id]
+    # Ensure the primary model_id is always in the allowed list
+    if request.model_id not in effective_allowed:
+        effective_allowed = [request.model_id] + effective_allowed
+
     agent = Agent(
         arn=placeholder_arn,
         runtime_id="",
@@ -759,6 +780,7 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
         network_mode=request.network_mode,
         registered_at=datetime.utcnow(),
     )
+    agent.set_allowed_model_ids(effective_allowed)
     db.add(agent)
     db.commit()
     db.refresh(agent)
@@ -1650,10 +1672,19 @@ def patch_agent(
     user: UserInfo = Depends(require_scopes("agent:write")),
     db: Session = Depends(get_db),
 ) -> AgentResponse:
-    """Update editable fields on an agent (e.g. description)."""
+    """Update editable fields on an agent (e.g. description, allowed_model_ids)."""
     agent = get_agent_or_404(agent_id, db)
     if "description" in request.model_fields_set:
         agent.description = request.description
+    if "allowed_model_ids" in request.model_fields_set and request.allowed_model_ids is not None:
+        valid_ids = {m["model_id"] for m in SUPPORTED_MODELS}
+        invalid = [m for m in request.allowed_model_ids if m not in valid_ids]
+        if invalid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid model IDs: {invalid}",
+            )
+        agent.set_allowed_model_ids(request.allowed_model_ids)
     db.commit()
     db.refresh(agent)
     return _agent_response(agent, db)

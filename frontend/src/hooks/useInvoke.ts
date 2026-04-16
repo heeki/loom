@@ -59,6 +59,7 @@ async function _startInvoke(
   sessionId?: string,
   credentialId?: number,
   bearerToken?: string,
+  modelId?: string,
 ) {
   // Abort any in-flight stream for this agent
   _controllers.get(agentId)?.abort();
@@ -83,6 +84,7 @@ async function _startInvoke(
         ...(sessionId ? { session_id: sessionId } : {}),
         ...(credentialId ? { credential_id: credentialId } : {}),
         ...(bearerToken ? { bearer_token: bearerToken } : {}),
+        ...(modelId ? { model_id: modelId } : {}),
       },
       {
         onSessionStart: (data) => _update(agentId, { sessionStart: data }),
@@ -151,8 +153,8 @@ export function useInvoke(agentId: number, authorizerName?: string) {
   }, [agentId]);
 
   const invoke = useCallback(
-    async (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string) => {
-      await _startInvoke(agentId, prompt, qualifier, authorizerRef.current, sessionId, credentialId, bearerToken);
+    async (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string, modelId?: string) => {
+      await _startInvoke(agentId, prompt, qualifier, authorizerRef.current, sessionId, credentialId, bearerToken, modelId);
     },
     [agentId],
   );
