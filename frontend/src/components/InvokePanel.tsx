@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -162,31 +161,7 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center gap-2">
-          <CardTitle className="text-sm font-medium">Invoke Agent</CardTitle>
-          {filteredModels.length > 1 ? (
-            <Select value={selectedModel} onValueChange={setSelectedModel}>
-              <SelectTrigger className="w-56 h-7 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {filteredModels.map((m) => (
-                  <SelectItem key={m.model_id} value={m.model_id}>
-                    {m.display_name}{m.model_id === modelId ? " (default)" : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : filteredModels.length === 1 ? (
-            <Badge variant="outline" className="border-border bg-input-bg text-xs font-normal">
-              {filteredModels[0]!.display_name}
-            </Badge>
-          ) : modelId ? (
-            <Badge variant="outline" className="border-border bg-input-bg text-xs font-normal">
-              {modelId}
-            </Badge>
-          ) : null}
-        </div>
+        <CardTitle className="text-sm font-medium">Invoke Agent</CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-3">
@@ -197,6 +172,20 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
             rows={3}
           />
           <div className="flex gap-3 flex-wrap">
+            {filteredModels.length > 0 && (
+              <Select value={selectedModel} onValueChange={setSelectedModel} disabled={filteredModels.length < 2}>
+                <SelectTrigger className="w-56">
+                  <SelectValue placeholder="Model" />
+                </SelectTrigger>
+                <SelectContent>
+                  {filteredModels.map((m) => (
+                    <SelectItem key={m.model_id} value={m.model_id}>
+                      {m.display_name}{m.model_id === modelId ? " (default)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             {qualifiers.length > 0 && (
               <Select value={qualifier} onValueChange={handleQualifierChange}>
                 <SelectTrigger className="w-48">
