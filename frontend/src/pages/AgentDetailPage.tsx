@@ -29,7 +29,7 @@ interface AgentDetailPageProps {
   onPatchAgent?: (id: number, updates: { description?: string | null }) => Promise<AgentResponse>;
   onRefreshAgents?: () => void;
   canInvoke?: boolean;
-  readOnly?: boolean;
+  registryReadOnly?: boolean;
   registryEnabled?: boolean;
   userGroups?: string[];
 }
@@ -44,7 +44,7 @@ export function AgentDetailPage({
   onPatchAgent,
   onRefreshAgents,
   canInvoke = true,
-  readOnly,
+  registryReadOnly,
   registryEnabled = false,
   userGroups = [],
 }: AgentDetailPageProps) {
@@ -119,9 +119,7 @@ export function AgentDetailPage({
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
             )}
-          </div>
-          {!readOnly && registryEnabled && (
-            <div className="mt-1">
+            {!registryReadOnly && registryEnabled && (
               <RegistryActions
                 resourceType="agent"
                 resourceId={agent.id}
@@ -129,8 +127,8 @@ export function AgentDetailPage({
                 registryStatus={agent.registry_status}
                 onAction={() => onRefreshAgents?.()}
               />
-            </div>
-          )}
+            )}
+          </div>
         </CardHeader>
         <CardContent className="pt-2">
           {editingDescription ? (

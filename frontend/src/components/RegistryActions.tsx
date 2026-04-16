@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import * as registryApi from "@/api/registry";
 
@@ -13,19 +14,57 @@ interface RegistryActionsProps {
 
 export function RegistryActions({ resourceType, resourceId, registryRecordId, registryStatus, onAction }: RegistryActionsProps) {
   const [loading, setLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [approveReason, setApproveReason] = useState("");
   const [showApproveInput, setShowApproveInput] = useState(false);
 
-  const handleAction = async (action: () => Promise<void>, successMsg: string) => {
+  const timerActive = creating || submitting || approving || rejecting;
+  useEffect(() => {
+    if (timerActive) {
+      setElapsed(0);
+      timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
+    } else {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    }
+    return () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
+  }, [timerActive]);
+
+  useEffect(() => {
+    if (creating && (registryRecordId || registryStatus)) {
+      setCreating(false);
+    }
+  }, [creating, registryRecordId, registryStatus]);
+
+  useEffect(() => {
+    if (submitting && registryStatus !== "DRAFT") {
+      setSubmitting(false);
+    }
+  }, [submitting, registryStatus]);
+
+  useEffect(() => {
+    if ((approving || rejecting) && registryStatus !== "PENDING_APPROVAL") {
+      setApproving(false);
+      setRejecting(false);
+    }
+  }, [approving, rejecting, registryStatus]);
+
+  const handleAction = async (action: () => Promise<void>, successMsg: string): Promise<boolean> => {
     setLoading(true);
     try {
       await action();
       toast.success(successMsg);
       onAction();
+      return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Registry action failed");
+      return false;
     } finally {
       setLoading(false);
     }
@@ -33,42 +72,73 @@ export function RegistryActions({ resourceType, resourceId, registryRecordId, re
 
   if (!registryRecordId && !registryStatus) {
     return (
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-6 text-xs"
-        disabled={loading}
-        onClick={(e) => {
-          e.stopPropagation();
-          handleAction(
-            () => registryApi.createRegistryRecord({ resource_type: resourceType, resource_id: resourceId }).then(() => {}),
-            "Registered in registry"
-          );
-        }}
-      >
-        Register
-      </Button>
+      <div className="flex items-center gap-1.5">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-6 text-xs w-[5.5rem] justify-center"
+          disabled={loading || creating}
+          onClick={(e) => {
+            e.stopPropagation();
+            setCreating(true);
+            void handleAction(
+              () => registryApi.createRegistryRecord({ resource_type: resourceType, resource_id: resourceId }).then(() => {}),
+              "Registered in registry"
+            ).then((ok) => { if (!ok) setCreating(false); });
+          }}
+        >
+          {creating ? <Loader2 className="h-3 w-3 animate-spin" /> : "Register"}
+        </Button>
+        {creating && (
+          <span className="text-[10px] text-muted-foreground tabular-nums">Registering ({elapsed}s)</span>
+        )}
+      </div>
     );
   }
 
   if (registryStatus === "DRAFT" && registryRecordId) {
     return (
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-6 text-xs"
-        disabled={loading}
-        onClick={(e) => {
-          e.stopPropagation();
-          handleAction(() => registryApi.submitForApproval(registryRecordId), "Submitted for approval");
-        }}
-      >
-        Submit for Approval
-      </Button>
+      <div className="flex items-center gap-1.5">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-6 text-xs w-[8.5rem] justify-center"
+          disabled={loading || submitting}
+          onClick={(e) => {
+            e.stopPropagation();
+            setSubmitting(true);
+            void handleAction(() => registryApi.submitForApproval(registryRecordId), "Submitted for approval")
+              .then((ok) => { if (!ok) setSubmitting(false); });
+          }}
+        >
+          {submitting ? <Loader2 className="h-3 w-3 animate-spin" /> : "Submit for Approval"}
+        </Button>
+        {submitting && (
+          <span className="text-[10px] text-muted-foreground tabular-nums">Submitting ({elapsed}s)</span>
+        )}
+      </div>
     );
   }
 
   if (registryStatus === "PENDING_APPROVAL" && registryRecordId) {
+    const actionInProgress = approving || rejecting;
+    if (actionInProgress) {
+      return (
+        <div className="flex items-center gap-1.5">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 text-xs w-[5rem] justify-center"
+            disabled
+          >
+            <Loader2 className="h-3 w-3 animate-spin" />
+          </Button>
+          <span className="text-[10px] text-muted-foreground tabular-nums">
+            {approving ? "Approving" : "Rejecting"} ({elapsed}s)
+          </span>
+        </div>
+      );
+    }
     return (
       <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
         {!showApproveInput ? (
@@ -95,7 +165,11 @@ export function RegistryActions({ resourceType, resourceId, registryRecordId, re
               variant="outline"
               className="h-6 text-xs"
               disabled={loading || !approveReason.trim()}
-              onClick={() => handleAction(() => registryApi.approveRecord(registryRecordId, approveReason.trim()), "Record approved")}
+              onClick={() => {
+                setApproving(true);
+                void handleAction(() => registryApi.approveRecord(registryRecordId, approveReason.trim()), "Record approved")
+                  .then((ok) => { if (!ok) setApproving(false); });
+              }}
             >
               Confirm
             </Button>
@@ -133,7 +207,11 @@ export function RegistryActions({ resourceType, resourceId, registryRecordId, re
               variant="destructive"
               className="h-6 text-xs"
               disabled={loading || !rejectReason.trim()}
-              onClick={() => handleAction(() => registryApi.rejectRecord(registryRecordId, rejectReason.trim()), "Record rejected")}
+              onClick={() => {
+                setRejecting(true);
+                void handleAction(() => registryApi.rejectRecord(registryRecordId, rejectReason.trim()), "Record rejected")
+                  .then((ok) => { if (!ok) setRejecting(false); });
+              }}
             >
               Confirm
             </Button>

@@ -130,10 +130,7 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
                 <Pencil className="h-3.5 w-3.5" />
               </button>
             )}
-          </div>
-          {selectedAgent.description && <p className="text-sm text-muted-foreground">{selectedAgent.description}</p>}
-          {!readOnly && registryEnabled && (
-            <div className="mt-1">
+            {!readOnly && registryEnabled && (
               <RegistryActions
                 resourceType="a2a"
                 resourceId={selectedAgent.id}
@@ -141,8 +138,9 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgent
                 registryStatus={selectedAgent.registry_status}
                 onAction={() => void fetchAgents()}
               />
-            </div>
-          )}
+            )}
+          </div>
+          {selectedAgent.description && <p className="text-sm text-muted-foreground">{selectedAgent.description}</p>}
         </div>
 
         {editingAgent && (

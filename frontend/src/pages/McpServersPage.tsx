@@ -114,10 +114,7 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
                 <Pencil className="h-3.5 w-3.5" />
               </button>
             )}
-          </div>
-          {selectedServer.description && <p className="text-sm text-muted-foreground">{selectedServer.description}</p>}
-          {!readOnly && registryEnabled && (
-            <div className="mt-1">
+            {!readOnly && registryEnabled && (
               <RegistryActions
                 resourceType="mcp"
                 resourceId={selectedServer.id}
@@ -125,8 +122,9 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
                 registryStatus={selectedServer.registry_status}
                 onAction={() => void fetchServers()}
               />
-            </div>
-          )}
+            )}
+          </div>
+          {selectedServer.description && <p className="text-sm text-muted-foreground">{selectedServer.description}</p>}
         </div>
 
         {editingServer && (

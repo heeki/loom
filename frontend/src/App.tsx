@@ -726,7 +726,7 @@ function AppContent() {
                   onPatchAgent={patchAgent}
                   onRefreshAgents={() => void fetchAgents()}
                   canInvoke={effectiveHasScope("invoke")}
-                  readOnly={!effectiveHasScope("agent:write")}
+                  registryReadOnly={!effectiveHasScope("registry:write")}
                   registryEnabled={registryEnabled}
                   userGroups={viewAsUser ? (USER_GROUPS[viewAsUser] ?? []) : (user?.groups ?? [])}
                 />
