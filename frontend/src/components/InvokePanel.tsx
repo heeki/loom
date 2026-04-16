@@ -57,17 +57,19 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
   }, [modelId, agentId]);
 
   useEffect(() => {
-    if (allowedModelIds.length <= 1) return;
+    if (!modelId) return;
     let cancelled = false;
     fetchModels().then((models) => {
       if (!cancelled) setModelOptions(models);
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [allowedModelIds.length]);
+  }, [modelId]);
 
-  const filteredModels = allowedModelIds.length > 1
+  const filteredModels = allowedModelIds.length > 0
     ? modelOptions.filter((m) => allowedModelIds.includes(m.model_id))
-    : [];
+    : modelId
+      ? modelOptions.filter((m) => m.model_id === modelId)
+      : [];
 
   useEffect(() => {
     let cancelled = false;
@@ -175,9 +177,13 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
                 ))}
               </SelectContent>
             </Select>
+          ) : filteredModels.length === 1 ? (
+            <Badge variant="outline" className="border-border bg-input-bg text-xs font-normal">
+              {filteredModels[0]!.display_name}
+            </Badge>
           ) : modelId ? (
             <Badge variant="outline" className="border-border bg-input-bg text-xs font-normal">
-              {modelOptions.find((m) => m.model_id === modelId)?.display_name ?? modelId}
+              {modelId}
             </Badge>
           ) : null}
         </div>
