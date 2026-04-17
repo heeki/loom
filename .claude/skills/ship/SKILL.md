@@ -1,13 +1,13 @@
 ---
 name: ship
-description: Finalize dev work on an issue branch — update docs, squash commits, push, and open a PR.
+description: Finalize dev work on an issue branch — update docs, push, and open a PR.
 argument-hint: "<issue-number>"
 allowed-tools: Agent Bash(git *) Bash(gh *) Bash(cd *) Bash(cat *) Bash(ls *) Bash(wc *) Read Edit Write Grep Glob
 ---
 
 # Ship Issue
 
-Finalize development work on a feature branch: update documentation, squash commits, push, and submit a pull request.
+Finalize development work on a feature branch: update documentation, push, and submit a pull request.
 
 ## Input
 
@@ -44,50 +44,9 @@ git commit -m "docs: update specifications and readme for issue #$ARGUMENTS
 Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 
-## Step 5: Squash Commits
+## Step 5: Push and Create Pull Request
 
-The goal is to end up with exactly **two commits** on the branch:
-
-1. The **first commit** — the original commit from the agent team (preserved as-is).
-2. A **squashed commit** — all subsequent commits combined into one.
-
-Determine the first commit on the branch:
-
-```
-FIRST_COMMIT=$(git log main..HEAD --reverse --format="%H" | head -1)
-```
-
-If there are only 1 or 2 commits total on the branch, skip squashing and inform the user.
-
-If there are 3 or more commits, perform an interactive-free squash:
-
-1. Get the hash of the second commit: `SECOND_COMMIT=$(git log main..HEAD --reverse --format="%H" | sed -n '2p')`
-2. Soft reset to the second commit: `git reset --soft $SECOND_COMMIT`
-3. Amend the second commit with all squashed changes and a descriptive message:
-
-```
-git commit --amend -m "$(cat <<'EOF'
-feat: implement issue #$ARGUMENTS — <brief summary of all changes>
-
-<bullet list summarizing the key changes from all squashed commits>
-
-Closes #$ARGUMENTS
-
-Co-Authored-By: Claude <noreply@anthropic.com>
-EOF
-)"
-```
-
-The squashed commit message should:
-- Start with an appropriate semantic prefix (`feat:`, `fix:`, etc.)
-- Include a brief summary of all the work done
-- Include a bullet list of key changes derived from the squashed commit messages
-- Include `Closes #<issue-number>` so the PR auto-closes the issue on merge
-- End with the co-author trailer
-
-Display the final two commits with `git log main..HEAD --oneline` for the user to review.
-
-## Step 6: Push and Create Pull Request
+Display the final commits with `git log main..HEAD --oneline` for the user to review.
 
 Push the branch to the remote:
 

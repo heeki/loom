@@ -120,10 +120,13 @@ backend/
 │   ├── test_scopes.py       # Scope enforcement and GROUP_SCOPES mapping tests
 │   ├── test_tags.py         # Tag policy, tag profile, and tag enforcement tests
 │   ├── test_traces.py       # Trace router + OTEL parsing tests (12 tests)
+│   ├── test_model_selection.py  # Runtime model selection tests (12 tests: allowed_model_ids, invoke validation, PATCH)
 │   └── test_admin_audit.py  # Admin audit router tests (14 tests: login, action, pageview, sessions, summary)
 ├── etc/
 │   ├── environment.sh           # Sources account-specific file + shared outputs
-│   └── environment.sh.example   # Example environment configuration template
+│   ├── environment.sh.example   # Example environment configuration template
+│   ├── models.json              # Supported model catalog (model_id, display_name, group, pricing)
+│   └── runtime_pricing.json     # AgentCore Runtime pricing constants (CPU, memory, defaults)
 ├── iac/
 │   ├── rds.yaml                 # RDS PostgreSQL with optional RDS Proxy
 │   ├── ec2.yaml                 # EC2 bastion for SSM tunnel to RDS
@@ -219,6 +222,7 @@ uv pip install ".[postgres]"
 | `network_mode` | TEXT | `PUBLIC` or `VPC` |
 | `authorizer_config` | TEXT | JSON: `{type, pool_id, discovery_url, allowed_clients, allowed_scopes}` |
 | `tags` | TEXT | JSON dict of resolved tags applied to this agent's AWS resources |
+| `allowed_model_ids` | TEXT | JSON array of model IDs the agent is allowed to use at invoke time (defaults to `[model_id]`) |
 | `registered_at` | DATETIME | Timestamp of local registration |
 | `deployed_at` | DATETIME | Deployment timestamp |
 | `last_refreshed_at` | DATETIME | Last time metadata was fetched from AWS |
@@ -537,6 +541,7 @@ The `/api/auth/config` endpoint returns only the pool ID and region. The user cl
 | `GET` | `/api/agents/models` | List supported foundation models (with display name and group). |
 | `GET` | `/api/agents/models/pricing` | List models with pricing metadata (input/output price per 1K tokens). |
 | `GET` | `/api/agents/defaults` | Get configurable defaults (idle timeout, max lifetime). |
+| `PATCH` | `/api/agents/{agent_id}` | Update editable agent fields (description, model_id, allowed_model_ids). Description changes propagated to AgentCore. |
 | `PUT` | `/api/agents/{agent_id}/config` | Update agent configuration entries. |
 | `GET` | `/api/agents/{agent_id}/config` | Get agent configuration entries. |
 
@@ -581,6 +586,7 @@ The `model_id` field is optional on registration and stored as an `AGENT_CONFIG_
 | `behavioral_guidelines` | Behavioral guidelines for the agent |
 | `output_expectations` | Expected output format/behavior |
 | `model_id` | Foundation model identifier (required) |
+| `allowed_model_ids` | Optional subset of model IDs the user may select at invoke time (defaults to `[model_id]`) |
 | `role_arn` | IAM execution role ARN (required) |
 | `protocol` | `HTTP`, `MCP`, or `A2A` |
 | `network_mode` | `PUBLIC` or `VPC` |
@@ -614,10 +620,14 @@ Memory resources are stored in `AGENT_CONFIG_JSON` under `integrations.memory.re
 **`GET /api/agents` response includes:**
 - `tags` — resolved tags (profile values + policy defaults) stored on the agent record
 - `model_id` — extracted from the agent's `AGENT_CONFIG_JSON` config entry
+- `allowed_model_ids` — list of model IDs the agent may use at invoke time. Derived from the `allowed_model_ids` column; defaults to `[model_id]` when not explicitly set.
 - `active_session_count` — computed at query time based on `LOOM_SESSION_IDLE_TIMEOUT_SECONDS`
 - `authorizer_config` — JSON object with `type`, `name`, `pool_id`, `discovery_url` fields (extracted from AgentCore `customJWTAuthorizer` on register/refresh); `null` when no authorizer is configured
 
 **`GET /api/agents/models` response:**
+
+Returns models filtered by the `enabled_model_ids` site setting. When no models are explicitly enabled, returns the full catalog. Models are loaded from `backend/etc/models.json`.
+
 ```json
 [
   {"model_id": "us.anthropic.claude-opus-4-6-v1", "display_name": "Claude Opus 4.6", "group": "Anthropic"},
@@ -906,13 +916,18 @@ Replaces all existing access rules for the agent. Personas not listed have no ac
   "prompt": "Hello, agent!",
   "qualifier": "DEFAULT",
   "credential_id": 1,
-  "bearer_token": "eyJraWQ..."
+  "bearer_token": "eyJraWQ...",
+  "model_id": "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 }
 ```
 
 The optional `credential_id` references an authorizer credential. When provided, the backend fetches the client secret from Secrets Manager and generates an OAuth token for authenticated invocation. The optional `bearer_token` allows passing a raw bearer token directly — it takes highest priority (Priority 0) in the token selection chain, above user tokens and credential-based tokens.
 
+The optional `model_id` specifies a runtime model override. When provided, it is validated against the agent's `allowed_model_ids`. If the model is not in the allowed list, the endpoint returns HTTP 400. If valid, the override is passed to `invoke_agent_stream()` which uses it instead of the agent's default model for that invocation.
+
 The invoke endpoint uses a priority-based token selection: (0) `bearer_token` from request body, (1) `credential_id` for M2M token, (2) user access token (forwarded when agent has authorizer), (3) agent config M2M flow, (4) SigV4 (no token).
+
+**Group-based invoke restriction:** Super-admins (`g-admins-super`) can invoke any agent. For other users, agents with a `loom:group` tag are restricted to users whose group matches. Agents with no `loom:group` tag are accessible to any authenticated user with invoke scope.
 
 **SSE event stream format:**
 
@@ -923,12 +938,17 @@ data: {"session_id": "uuid-...", "invocation_id": "uuid-...", "client_invoke_tim
 event: chunk
 data: {"text": "Hello! I am your agent."}
 
+event: tool_use
+data: {"name": "mcp_server___tool_name"}
+
 event: session_end
 data: {"session_id": "uuid-...", "invocation_id": "uuid-...", "qualifier": "DEFAULT", "client_invoke_time": 1708000000.123, "client_done_time": 1708000002.456, "client_duration_ms": 2333.0, "cold_start_latency_ms": 500.0, "agent_start_time": 1708000000.623, "input_tokens": 25, "output_tokens": 150, "estimated_cost": 0.001125}
 
 event: error
 data: {"message": "Invocation failed: ..."}
 ```
+
+The `tool_use` event is emitted when the agent invokes a tool during streaming. The `name` field contains the tool name as reported by the Strands SDK (may include MCP server prefix in `server___tool` format).
 
 The `has_token` and `token_source` fields in `session_start` indicate whether an OAuth token was used for the invocation.
 
@@ -941,7 +961,7 @@ The `has_token` and `token_source` fields in `session_start` indicate whether an
 
 **Token estimation:** AgentCore does not expose token counts. A heuristic of 4 characters per token is applied to both prompt and response text. Cost is computed as `(input_tokens / 1000 * input_price) + (output_tokens / 1000 * output_price)` using per-model pricing data from `SUPPORTED_MODELS`.
 
-**Model pricing:** Each entry in `SUPPORTED_MODELS` includes `input_price_per_1k_tokens`, `output_price_per_1k_tokens`, and `pricing_as_of` fields. `AGENTCORE_RUNTIME_PRICING` tracks CPU ($0.0895/vCPU-hour), Memory ($0.00945/GB-hour), default vCPU allocation (1), default memory allocation (0.5 GB), and default idle timeout (900 seconds).
+**Model pricing:** `SUPPORTED_MODELS` is loaded from `backend/etc/models.json` at startup. Each entry includes `model_id`, `display_name`, `group`, `max_tokens`, `input_price_per_1k_tokens`, `output_price_per_1k_tokens`, and `pricing_as_of` fields. `AGENTCORE_RUNTIME_PRICING` is loaded from `backend/etc/runtime_pricing.json` and tracks CPU ($0.0895/vCPU-hour), Memory ($0.00945/GB-hour), default vCPU allocation (1), default memory allocation (0.5 GB), and default idle timeout (900 seconds).
 
 **View-time cost recomputation:** Runtime CPU and memory costs are recomputed from `client_duration_ms` at view time using current pricing defaults, so changing defaults retroactively affects all historical data. The `_apply_view_time_costs()` function recalculates both CPU and memory from duration, applying the I/O wait discount to CPU only. `_backfill_idle_costs()` always recomputes idle costs from session gaps to correct stale values from old defaults.
 
@@ -964,11 +984,14 @@ The `has_token` and `token_source` fields in `session_start` indicate whether an
 |--------|------|-------------|
 | `GET` | `/api/settings/site` | List all site settings (includes defaults for unset keys). |
 | `PUT` | `/api/settings/site/{key}` | Create or update a site setting. |
+| `GET` | `/api/settings/models` | Get admin-enabled model IDs and full model catalog. |
+| `PUT` | `/api/settings/models` | Update the set of admin-enabled models. Validates model IDs against `SUPPORTED_MODELS`. |
 | `GET` | `/api/settings/registry` | Get current registry configuration (ARN, ID, enabled status). |
 | `PUT` | `/api/settings/registry` | Update registry configuration. Validates ARN format before saving. Empty ARN disables. |
 
 Current site settings:
 - `cpu_io_wait_discount` (default: `75`) — CPU I/O wait discount percentage (0–99). Applied universally to runtime CPU costs.
+- `enabled_model_ids` (default: `[]`) — JSON array of admin-enabled model IDs. When empty, all models are available. Filters the response of `GET /api/agents/models`.
 - `loom_registry_id` (default: `""`) — AWS Agent Registry ARN. Stored in `site_settings`, loaded into memory on startup. Validated format: `arn:aws:bedrock-agentcore:<region>:<account>:registry/<id>`.
 
 ### CloudWatch Logs
@@ -1043,6 +1066,7 @@ Handles agent artifact build and runtime lifecycle:
 
 - Builds agent artifacts by cross-compiling pip dependencies for ARM64 (`manylinux2014_aarch64`).
 - Creates, updates, and deletes AgentCore runtimes and endpoints.
+- `update_runtime()` accepts optional `description`, `env_vars`, `role_arn`, `authorizer_config`, and `region` parameters. Description updates are propagated from the `PATCH /api/agents/{id}` endpoint.
 - Updates agent runtime authorizer configuration (e.g., adding client IDs to `allowedClients`).
 - Validates configuration values for secrets, stores/updates/deletes secrets in AWS Secrets Manager.
 
@@ -1098,6 +1122,7 @@ Core authentication and authorization module. Provides:
 | `security.py` | `security:read` | `security:write` |
 | `settings.py` (tag policies/profiles) | `tagging:read` | `tagging:write` |
 | `settings.py` (site settings) | `settings:read` | `settings:write` |
+| `settings.py` (enabled models) | `settings:read` | `settings:write` |
 | `costs.py` | `costs:read` | `costs:write` (actuals endpoint) |
 | `mcp.py` | `mcp:read` | `mcp:write` |
 | `a2a.py` | `a2a:read` | `a2a:write` |

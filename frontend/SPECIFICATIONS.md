@@ -22,8 +22,8 @@
 frontend/
 ├── src/
 │   ├── api/
-│   │   ├── types.ts            # TypeScript interfaces mirroring backend models (A2aAgent, A2aAgentSkill, A2aAgentAccess, A2aAgentCard, CostDashboardResponse, CostActualsResponse, CostActualAgent, CostActualSession, AgentCostSummary, ModelPricing)
-│   │   ├── client.ts           # apiFetch<T>() wrapper + ApiError class, dynamic BASE_URL via VITE_API_BASE_URL, automatic auth token injection, and 401 auto-refresh via `setOnUnauthorized` callback
+│   │   ├── types.ts            # TypeScript interfaces mirroring backend models (A2aAgent, A2aAgentSkill, A2aAgentAccess, A2aAgentCard, CostDashboardResponse, CostActualsResponse, CostActualAgent, CostActualSession, AgentCostSummary, ModelPricing, SSEToolUse, StreamSegment)
+│   │   ├── client.ts           # apiFetch<T>() wrapper + ApiError class, dynamic BASE_URL via VITE_API_BASE_URL, automatic auth token injection, 401 auto-refresh via `setOnUnauthorized` callback, and `tryRefreshToken()` export for SSE retry
 │   │   ├── auth.ts             # Cognito auth API (initiateAuth, respondToChallenge, refreshTokens)
 │   │   ├── agents.ts           # Agent CRUD + fetchRoles(), fetchCognitoPools(), fetchModels(), fetchDefaults()
 │   │   ├── invocations.ts      # Session queries + SSE stream consumer (with auth header)
@@ -32,7 +32,7 @@ frontend/
 │   │   ├── a2a.ts              # A2A agent CRUD, test connection, card refresh, access
 │   │   ├── memories.ts         # Memory resource CRUD + refresh
 │   │   ├── security.ts         # Security admin: roles, authorizers, credentials, permissions
-│   │   ├── settings.ts        # Settings API: tag policy + tag profile CRUD
+│   │   ├── settings.ts        # Settings API: tag policy + tag profile CRUD + enabled models (getEnabledModels, updateEnabledModels)
 │   │   ├── costs.ts           # Cost dashboard (estimated + actuals) + model pricing API
 │   │   ├── traces.ts          # Trace API: `getSessionTraces`, `getTraceDetail`
 │   │   └── audit.ts           # Admin audit API: recordLogin, recordAction, recordPageView, fetchLogins, fetchActions, fetchPageViews, fetchSessions, fetchSessionTimeline, fetchAuditSummary, trackAction (fire-and-forget)
@@ -43,7 +43,7 @@ frontend/
 │   ├── hooks/
 │   │   ├── useAgents.ts        # Agent list state + CRUD actions
 │   │   ├── useSessions.ts      # Session list state per agent
-│   │   ├── useInvoke.ts        # Streaming invocation state + AbortController
+│   │   ├── useInvoke.ts        # Streaming invocation state + AbortController + StreamSegment tracking + tool_use events
 │   │   ├── useLogs.ts          # On-demand session and stream log fetching with optional cache-busting (`noCache` parameter appends `_t` timestamp)
 │   │   ├── useDeployment.ts    # Agent config, credential providers, integrations hooks
 │   │   ├── useMcpServers.ts   # MCP server list state + CRUD actions
@@ -68,7 +68,7 @@ frontend/
 │   │   ├── MemoryManagementPanel.tsx    # Memory resource create form + list table
 │   │   ├── ResourceTagFields.tsx       # Shared tag profile selector + tag resolution
 │   │   ├── DeploymentPanel.tsx # Deployment details panel
-│   │   ├── InvokePanel.tsx     # Qualifier select, credential select, prompt input, invoke/cancel
+│   │   ├── InvokePanel.tsx     # Qualifier select, credential select, model select, prompt input, invoke/cancel
 │   │   ├── LatencySummary.tsx  # Invocation metrics (timing + token usage + cost)
 │   │   ├── SessionTable.tsx    # Clickable session list
 │   │   ├── InvocationTable.tsx # Invocation timing data + token/cost columns
@@ -93,6 +93,7 @@ frontend/
 │   ├── lib/
 │   │   ├── utils.ts            # shadcn cn() utility
 │   │   ├── format.ts           # Timezone-aware timestamp + metric formatters
+│   │   ├── models.ts           # groupModels() utility — groups ModelOption[] by vendor, sorted alphabetically
 │   │   ├── status.ts           # Status badge variant mapping
 │   │   └── errors.ts           # Friendly invoke error message mapping
 │   ├── App.tsx                 # Auth gate + persona-based navigation + sidebar
@@ -230,7 +231,8 @@ Full deployment form with sections:
 - **JSON Import/Export**: Collapsible section (ChevronDown/ChevronRight toggle) via the shared `JsonConfigSection` component. Import maps `name`, `description`, `persona` (→ agent description), `instructions` (→ behavioral guidelines), `behavior` (→ output expectations), `model`, `role`, `network_mode`, `authorizer`, `tags` (tag profile name). Export serializes the current form state to JSON using human-readable identifiers (model ID, role name, authorizer name, tag profile name); empty/default fields are omitted. Apply/Export/Cancel buttons. Invalid JSON shows inline error without clearing existing fields.
 - **Agent Identity**: name (1/3 width) and description (2/3 width)
 - **System Prompt**: agent description, behavioral guidelines, output expectations — each with placeholder examples
-- **Model / Protocol / Network / IAM Role**: single flex row with explicit widths (20% / 10% / 10% / flex-1). Model uses `SearchableSelect` with grouped options, no default selection. Protocol offers HTTP as selectable; MCP and A2A shown as disabled. Network offers PUBLIC; VPC shown as disabled. IAM Role uses a `SearchableSelect` with searchable dropdown. Both model and IAM role are required — deploy button is disabled until both are selected.
+- **Default Model / Protocol / Network / IAM Role**: single flex row with explicit widths (20% / 10% / 10% / flex-1). Default Model uses `SearchableSelect` with grouped options, no default selection. Protocol offers HTTP as selectable; MCP and A2A shown as disabled. Network offers PUBLIC; VPC shown as disabled. IAM Role uses a `SearchableSelect` with searchable dropdown. Both model and IAM role are required — deploy button is disabled until both are selected.
+- **Allowed Models (runtime selection)**: shown after a default model is selected. Per-vendor grouped checkboxes via `groupModels()`. The default model is always checked and disabled. Additional models can be checked to allow runtime selection at invoke time. If no additional models are selected, only the default model is allowed. JSON import/export supports `allowed_models` array field.
 - **Role Permissions (read-only)**: collapsible section shown after IAM role selection, displays policy document. Clicking the header toggles visibility.
 - **Authorizer**: radio selection of None, Cognito, or Other. Authorizer dropdown is 25% width, shows just the authorizer config name. Fields show "Allowed Clients" and "Allowed Scopes".
   - Cognito: searchable Cognito pool select (30% width), auto-populated discovery URL, tag inputs for allowed clients and scopes, app client ID and client secret fields
@@ -254,8 +256,8 @@ Full deployment form with sections:
 - Clicking a row navigates to Session Detail
 
 ### Invoke Form
-- `InvokePanel` component: qualifier selector, credential selector, multi-line prompt textarea, invoke/cancel buttons
-- Model ID displayed as a badge in the panel header
+- `InvokePanel` component: qualifier selector, credential selector, model selector, multi-line prompt textarea, invoke/cancel buttons
+- Model dropdown (`Select`) shown when the agent has allowed models. Filters to `allowedModelIds` when available, otherwise shows only the agent's default model. Disabled when only one model is available. Default model marked with "(default)" suffix. Selected non-default model passed as `model_id` override in the invoke request.
 - Credential dropdown is context-aware:
   - **OAuth agents** (agent has authorizer): shows user's token (default), M2M credentials from authorizer configs, and manual token (always last)
   - **Non-OAuth agents** (no authorizer): shows "No credentials (SigV4)" only
@@ -274,13 +276,16 @@ Full deployment form with sections:
 - Error card styled with `border-destructive`
 
 ### Response Pane
-- Raw text display with `whitespace-pre-wrap` and monospace font
-- Expands dynamically with content (no fixed max-height)
-- Session ID badge, model ID badge, and animated "streaming" indicator in header
+- Segment-based rendering: the response pane renders an array of `StreamSegment` objects (text or tool_use) rather than raw text. Text segments are rendered as `MarkdownBlock` components; tool_use segments are rendered as `ToolUseBlock` components.
+- `ToolUseBlock`: displays tool calls with Wrench icon, counter (N/M format), `ElapsedTimer` with live seconds count, and animated bounce dots while active. Tool names listed below the counter with `formatToolName()` stripping MCP server prefixes (`server___tool` becomes `tool`).
+- Thinking indicator (bouncing dots + "Thinking...") shown when streaming has started but no segments have arrived yet.
+- Session ID badge and animated "streaming" indicator in header
 - Blinking cursor while streaming
+- Markdown rendering extracted to standalone `MarkdownBlock` component (shared `mdComponents` object) for reuse across response pane segments
 
 ### Deployment Section (deployed agents only)
-- Shows: runtime status badge, protocol, network mode, execution role, deployed timestamp
+- `DeploymentPanel` component restructured: "Allowed Models" section at top with inline edit mode (pencil icon triggers grouped checkbox editor with "set default" toggle per model, Save/Cancel buttons). "Deployed Configuration" section below with runtime status, protocol, network mode, execution role, deployed timestamp.
+- `RegisteredAgentModelConfig` card shown for non-deployed agents with model configuration. Same edit flow as `DeploymentPanel` allowed models.
 
 ---
 
@@ -466,11 +471,12 @@ Create/edit form with:
 
 ## 9. Settings View
 
-**Purpose:** Manage display preferences.
+**Purpose:** Manage display preferences and platform configuration.
 
 **Content:**
 - Page header: "Settings" with description "Manage display preferences."
 - **Preferences** section: Theme selector (grouped by Light/Dark using SelectGroup/SelectLabel, always drops down via `position="popper"`) and Timezone selector (local/UTC)
+- **Enabled Models** section (requires `settings:read`/`settings:write`): Per-vendor grouped checkboxes for selecting which models are available platform-wide. When none are selected, all models are available. Save button with confirmation indicator. Status text shows count (e.g., "8 of 22 models enabled"). Uses `groupModels()` utility for alphabetical vendor grouping. Configuration is saved via `PUT /api/settings/models`.
 - Always visible in the sidebar (no scope guard for visibility)
 
 ---
@@ -533,7 +539,7 @@ Both use plain `div` containers with no `max-height` or `ScrollArea` constraint,
 The delete confirmation uses absolute positioning (`absolute inset-x-0 bottom-0`) to overlay the card rather than expanding it, preventing layout shifts in the responsive grid.
 
 ### Grouped Searchable Model Selector
-Model selection uses `SearchableSelect` with group headers (Anthropic / Amazon). Search matches both display name and model ID value, allowing power users to search by inference profile ID. No default is pre-selected — the user must explicitly choose a model on both register and deploy forms.
+Model selection uses `SearchableSelect` with group headers sorted alphabetically by vendor (Anthropic, Amazon, DeepSeek, Google, Meta, MiniMax, Moonshot AI). The `groupModels()` utility in `src/lib/models.ts` groups `ModelOption[]` by `group` field and returns sorted `[string, ModelOption[]][]` tuples. Search matches both display name and model ID value, allowing power users to search by inference profile ID. No default is pre-selected — the user must explicitly choose a model on both register and deploy forms.
 
 ### Theme System
 10 themes organized into Light and Dark groups:
@@ -645,6 +651,7 @@ Custom dropdown for adding custom tag filters to the filter bar. Uses a plain `<
 
 ### API Layer Design
 - `apiFetch<T>()` is a thin wrapper around `fetch` with JSON parsing, `ApiError` class, automatic auth token injection, and 401 auto-refresh (intercepts unauthorized responses, refreshes the token, and retries once)
+- `tryRefreshToken()` is exported from `client.ts` for use by `invokeAgentStream()` to retry SSE connections on 401, since SSE streaming bypasses `apiFetch`
 - Each API domain (agents, auth, invocations, logs, security) is a separate module with typed functions
 - `api/a2a.ts` — A2A agent operations: CRUD, test connection, card retrieval/refresh, skills, access rules
 
@@ -658,7 +665,10 @@ Card/table view mode state is lifted to `App.tsx` with separate state variables 
 Agent deployment uses a fire-and-forget pattern. The form collapses immediately on deploy, the backend creates a DB record before starting the AWS call, and `fetchAgents()` picks up the new record. The `useAgents` hook polls transitional agents (deploying/CREATING/endpoint CREATING) at 2-second intervals using a `watchIds` effect dependency. Smart polling: during local build phases (`creating_credentials`, `creating_role`, `building_artifact`, `deploying`), the backend returns DB state without AWS API calls. An `initialLoadDone` ref prevents skeleton flash on subsequent fetches. Agent cards show two-phase creation status: deploying → completing deployment → finalizing endpoint, with a timer using `registered_at` to avoid resets on phase transitions. Agent deletion with AWS cleanup follows a matching async pattern: the DELETE endpoint marks the agent as DELETING, the hook polls at 2-second intervals, detects 404 when the runtime is fully deleted, uses a background task for DB purge after runtime is confirmed deleted, and shows a success toast.
 
 ### SSE Stream Consumer
-`invokeAgentStream()` uses `ReadableStream` to consume POST-based SSE responses with buffer-based line parsing, typed callback dispatch, and `AbortSignal` for cancellation.
+`invokeAgentStream()` uses `ReadableStream` to consume POST-based SSE responses with buffer-based line parsing, typed callback dispatch, and `AbortSignal` for cancellation. Supports `onToolUse` callback for `event: tool_use` SSE events. On 401 response, calls `tryRefreshToken()` (exported from `client.ts`) to refresh the auth token and retries the SSE request once, mirroring the `apiFetch` 401 retry pattern.
+
+### StreamSegment Architecture
+The `useInvoke` hook tracks streaming responses as an array of `StreamSegment` objects rather than a flat text string. Segments are either `{ type: "text", content: string }` or `{ type: "tool_use", name: string, index: number, total: number, timestamp: number }`. Text chunks are appended to the last text segment; tool_use events create new segments. The `segments` array, `currentToolName`, and `toolNames` are exposed alongside `streamedText` for backward compatibility. `StreamingBubble` (ChatPage) and the response pane (AgentDetailPage) render segments inline, interleaving `MarkdownBlock` and `ToolUseBlock` components. Tool names from the completed stream are persisted on `ChatMessage.toolNames` and displayed in finalized `MessageBubble` components.
 
 ### Queued Prompt (ChatPage)
 The input textarea remains enabled during streaming. Sending a message while a response is streaming enqueues it (single slot, last-write-wins). The queued message appears as a dimmed bubble (`bg-primary/50`) with a cancel (X) button and full markdown rendering. It auto-sends when streaming completes (skipped on error). Switching agents or starting a new conversation discards the queued message. Send and cancel-stream buttons are independent (both visible during streaming).
@@ -673,7 +683,7 @@ When a deploy starts, `AgentListPage` records the deploying agent name and trigg
 `friendlyInvokeError()` accepts an optional `authorizerName` parameter (from the agent's `authorizer_config`). On 401/403 errors, if the agent has a configured authorizer, the error message includes a hint like: 'This agent uses the "authorizer-name" authorizer — make sure you select a credential from that authorizer.' This helps users identify the correct credential without trial and error.
 
 ### Authorizer Display on Agent Cards
-Agent cards show the configured authorizer in the metadata section. The backend extracts `customJWTAuthorizer` configuration from the AgentCore `describe_runtime` response on import and refresh, stores it as JSON in the `authorizer_config` column, and returns it in the agent response. The frontend renders: "Cognito" for cognito type, the authorizer name if available, "external" for unknown types, or muted "None" when absent.
+Agent cards show the configured authorizer in the metadata section as a single outline badge. The backend extracts `customJWTAuthorizer` configuration from the AgentCore `describe_runtime` response on import and refresh, stores it as JSON in the `authorizer_config` column, and returns it in the agent response. The frontend renders the authorizer name (falling back to type, then "external") as a badge, or muted "None" when absent. Endpoint qualifiers are shown as comma-separated text (individual badges removed for cleaner display).
 
 ### Manual Bearer Token Input
 The invoke panel's credential dropdown includes a "Manual token" sentinel value. Selecting it reveals a password input for pasting a raw bearer token. The token is passed in the invoke request body as `bearer_token` and takes highest priority (Priority 0) in the backend's token selection chain — above user tokens, credential-based tokens, and agent config tokens.
@@ -784,10 +794,15 @@ A "Previewing end-user experience as [user]" banner is shown to admins when in v
 **Chat area:**
 - Header with agent name and "responding..." indicator while streaming (scoped to the active conversation)
 - Scrollable message history with alternating user (right-aligned, primary color) and assistant (left-aligned, muted) bubbles
-- In-flight messages displayed during streaming: user prompt bubble immediately, streaming assistant bubble with animated cursor and thinking spinner
+- In-flight messages displayed during streaming: user prompt bubble immediately, `StreamingBubble` with segment-based rendering (interleaved `MarkdownBlock` and `ChatToolUseBlock` components) and animated cursor
+- Thinking indicator (bouncing dots + "thinking...") shown while streaming with no segments
+- Inline tool-call indicators in `ChatToolUseBlock`: Wrench icon, counter (N/M), `ChatElapsedTimer` with live seconds, bounce animation while active. Tool names displayed with `formatToolName()` stripping MCP server prefixes. Tool names from completed streams persist on `ChatMessage.toolNames` and are shown in finalized `MessageBubble` components.
 - Markdown rendering for all message bubbles (user, assistant, and queued) via `react-markdown` + `remark-gfm`: paragraphs, headings (h1–h3), ordered/unordered lists, tables, blockquotes, inline code, fenced code blocks, bold, links. Assistant responses additionally render JSON code blocks as collapsible `CollapsibleJsonBlock` components (click to expand/collapse).
 - Error display as styled text in the chat area
-- Text input at the bottom (Enter to send, Shift+Enter for newline), with Send/Cancel buttons
+- Input area with rounded border container: Textarea at top (borderless), footer row with model picker (left of Send) and Send/Cancel buttons (right)
+
+**Model selection:**
+- Model picker button in the input area footer, shown when the agent has multiple allowed models. Displays the current model's display name (or agent default). Click to open a dropdown of available models; click-outside-to-close behavior via `mousedown` listener. Default model marked with "(default)" suffix. Selecting a model sets `selectedModelId`; selecting the default clears it to `null`. Model selection resets when switching agents. The selected non-default model ID is passed as `model_id` in the invoke request.
 
 **Session management:**
 - New conversations start with no session ID; a new `InvocationSession` is created automatically on first invocation

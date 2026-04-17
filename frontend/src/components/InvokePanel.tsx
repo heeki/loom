@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -12,7 +11,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { listAuthorizerConfigs, listAuthorizerCredentials } from "@/api/security";
-import type { SessionResponse, AuthorizerCredential } from "@/api/types";
+import { fetchModels } from "@/api/agents";
+import type { SessionResponse, AuthorizerCredential, ModelOption } from "@/api/types";
 
 const NEW_SESSION = "__new__";
 const USER_TOKEN = "__user__";
@@ -25,13 +25,14 @@ interface InvokePanelProps {
   sessions: SessionResponse[];
   isStreaming: boolean;
   modelId?: string | null;
+  allowedModelIds?: string[];
   authorizerName?: string;
   currentUserId?: string;
-  onInvoke: (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string) => void;
+  onInvoke: (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string, modelId?: string) => void;
   onCancel: () => void;
 }
 
-export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelId, authorizerName, currentUserId, onInvoke, onCancel }: InvokePanelProps) {
+export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelId, allowedModelIds = [], authorizerName, currentUserId, onInvoke, onCancel }: InvokePanelProps) {
   const promptKey = `loom:invokePrompt:${agentId}`;
   const [prompt, setPrompt] = useState(() => sessionStorage.getItem(promptKey) ?? "");
 
@@ -47,6 +48,27 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
   const [selectedCredential, setSelectedCredential] = useState(authorizerName ? USER_TOKEN : NO_CREDENTIAL);
   const [bearerToken, setBearerToken] = useState("");
   const [allCredentials, setAllCredentials] = useState<(AuthorizerCredential & { authorizer_name: string })[]>([]);
+  const [selectedModel, setSelectedModel] = useState(modelId ?? "");
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
+
+  useEffect(() => {
+    setSelectedModel(modelId ?? "");
+  }, [modelId, agentId]);
+
+  useEffect(() => {
+    if (!modelId) return;
+    let cancelled = false;
+    fetchModels().then((models) => {
+      if (!cancelled) setModelOptions(models);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [modelId]);
+
+  const filteredModels = allowedModelIds.length > 0
+    ? modelOptions.filter((m) => allowedModelIds.includes(m.model_id))
+    : modelId
+      ? modelOptions.filter((m) => m.model_id === modelId)
+      : [];
 
   useEffect(() => {
     let cancelled = false;
@@ -126,7 +148,8 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
       ? undefined : Number(selectedCredential);
     const token = selectedCredential === MANUAL_TOKEN && bearerToken.trim()
       ? bearerToken.trim() : undefined;
-    onInvoke(prompt.trim(), qualifier, sessionId, credentialId, token);
+    const runtimeModelId = selectedModel && selectedModel !== modelId ? selectedModel : undefined;
+    onInvoke(prompt.trim(), qualifier, sessionId, credentialId, token, runtimeModelId);
   };
 
   const handleQualifierChange = (value: string) => {
@@ -138,14 +161,7 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center gap-2">
-          <CardTitle className="text-sm font-medium">Invoke Agent</CardTitle>
-          {modelId && (
-            <Badge variant="outline" className="border-border bg-input-bg text-xs font-normal">
-              {modelId}
-            </Badge>
-          )}
-        </div>
+        <CardTitle className="text-sm font-medium">Invoke Agent</CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-3">
@@ -156,6 +172,20 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
             rows={3}
           />
           <div className="flex gap-3 flex-wrap">
+            {filteredModels.length > 0 && (
+              <Select value={selectedModel} onValueChange={setSelectedModel} disabled={filteredModels.length < 2}>
+                <SelectTrigger className="w-56">
+                  <SelectValue placeholder="Model" />
+                </SelectTrigger>
+                <SelectContent>
+                  {filteredModels.map((m) => (
+                    <SelectItem key={m.model_id} value={m.model_id}>
+                      {m.display_name}{m.model_id === modelId ? " (default)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             {qualifiers.length > 0 && (
               <Select value={qualifier} onValueChange={handleQualifierChange}>
                 <SelectTrigger className="w-48">

@@ -346,6 +346,7 @@ def delete_runtime(runtime_id: str, region: str) -> None:
 
 def update_runtime(
     runtime_id: str,
+    description: str | None = None,
     env_vars: dict[str, str] | None = None,
     role_arn: str | None = None,
     authorizer_config: dict[str, Any] | None = None,
@@ -356,6 +357,7 @@ def update_runtime(
 
     Args:
         runtime_id: AgentCore Runtime ID to update
+        description: Optional updated description
         env_vars: Optional updated environment variables
         role_arn: Optional updated role ARN
         authorizer_config: Optional authorizer configuration (e.g., {"customJWTAuthorizer": {...}})
@@ -369,6 +371,8 @@ def update_runtime(
     client = boto3.client("bedrock-agentcore-control", region_name=region)
 
     params: dict[str, Any] = {"agentRuntimeId": runtime_id}
+    if description is not None:
+        params["description"] = description
     if env_vars is not None:
         params["environmentVariables"] = env_vars
     if role_arn is not None:

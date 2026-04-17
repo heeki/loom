@@ -120,6 +120,19 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
                         text = event["delta"].get("text")
                     if text:
                         yield text
+                        continue
+                    # Log non-text event keys for diagnostics
+                    event_keys = list(event.keys())
+                    logger.info("Stream event keys: %s", event_keys)
+                    # Check for tool_use in contentBlockStart (Strands SDK stream event)
+                    chunk = event.get("event")
+                    if isinstance(chunk, dict):
+                        if "contentBlockStart" in chunk:
+                            start = chunk["contentBlockStart"].get("start", {})
+                            tool_use = start.get("toolUse")
+                            if isinstance(tool_use, dict) and tool_use.get("name"):
+                                logger.info("Tool call detected: %s", tool_use["name"])
+                                yield {"tool_use": {"name": tool_use["name"], "id": tool_use.get("toolUseId", "")}}
         except MaxTokensReachedException:
             logger.warning("Max tokens reached for session_id=%s", session_id)
             yield "\n\n[Response truncated: the model reached its maximum output token limit. Try a shorter prompt or a model with a higher token limit.]"

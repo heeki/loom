@@ -49,6 +49,7 @@ class InvokeRequest(BaseModel):
     session_id: str | None = Field(default=None, description="Existing session ID to reuse (runtimeSessionId)")
     credential_id: int | None = Field(default=None, description="Authorizer credential ID for token generation")
     bearer_token: str | None = Field(default=None, description="Manual bearer token for agent invocation")
+    model_id: str | None = Field(default=None, description="Runtime model override (must be in agent's allowed_model_ids)")
 
 
 class InvocationResponse(BaseModel):
@@ -447,6 +448,7 @@ async def invoke_agent_stream(
     access_token: str | None = None,
     token_source: str | None = None,
     actor_id: str | None = None,
+    runtime_model_id: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Invoke the agent and yield SSE events as the response streams.
@@ -471,6 +473,11 @@ async def invoke_agent_stream(
             agent_model_id = _json.loads(config_json_str).get("model_id")
         except (json.JSONDecodeError, TypeError):
             pass
+
+    # Override with runtime model selection (already validated by caller)
+    if runtime_model_id:
+        logger.info("Runtime model override: %s (default: %s)", runtime_model_id, agent_model_id)
+        agent_model_id = runtime_model_id
 
     runtime_id = agent.runtime_id
     qualifier = session.qualifier
@@ -535,6 +542,12 @@ async def invoke_agent_stream(
             elif chunk.get("type") == "structured":
                 structured = chunk["content"]
                 if isinstance(structured, dict):
+                    # Tool use event forwarded from the agent handler
+                    tool_use = structured.get("tool_use")
+                    if isinstance(tool_use, dict) and tool_use.get("name"):
+                        logger.info("Tool use event: %s", tool_use["name"])
+                        yield format_sse_event("tool_use", {"name": tool_use["name"]})
+                        continue
                     # Strands SDK text delta: {"data": "token"}
                     data = structured.get("data")
                     if isinstance(data, str) and data:
@@ -752,26 +765,41 @@ async def invoke_agent_endpoint(
 
     # ---- Group-based invoke restriction ----
     # Super-admins (g-admins-super) can invoke any agent.
+    # Agents with no loom:group tag are accessible to any authenticated user with invoke scope.
     # Other admins (g-admins-demo, etc.) can only invoke agents in their specific group.
     # Users (t-user) can only invoke agents tagged with their groups (g-users-* → strip prefix).
     # Check this BEFORE creating any session/invocation records.
     if "g-admins-super" not in user.groups:
         agent_group = agent.get_tags().get("loom:group", "")
 
-        if "t-admin" in user.groups:
-            # Non-super admins: check against their g-admins-* group
-            admin_groups = [g for g in user.groups if g.startswith("g-admins-")]
-            allowed_tags = [g.replace("g-admins-", "", 1) for g in admin_groups]
-        else:
-            # Users: extract allowed tags from g-users-* groups
-            user_groups = [g for g in user.groups if g.startswith("g-users-")]
-            allowed_tags = [g.replace("g-users-", "", 1) for g in user_groups]
+        if agent_group:
+            if "t-admin" in user.groups:
+                admin_groups = [g for g in user.groups if g.startswith("g-admins-")]
+                allowed_tags = [g.replace("g-admins-", "", 1) for g in admin_groups]
+            else:
+                user_groups = [g for g in user.groups if g.startswith("g-users-")]
+                allowed_tags = [g.replace("g-users-", "", 1) for g in user_groups]
 
-        if agent_group not in allowed_tags:
+            if agent_group not in allowed_tags:
+                logger.warning(
+                    "Group-based 403 for user=%s groups=%s agent_id=%s agent_group=%s allowed_tags=%s",
+                    user.username, user.groups, agent_id, agent_group, allowed_tags,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"You can only invoke agents within your group (agent group: {agent_group})",
+                )
+
+    # Validate runtime model_id if provided
+    runtime_model_id: str | None = None
+    if request_body.model_id:
+        allowed = agent.get_allowed_model_ids()
+        if allowed and request_body.model_id not in allowed:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"You can only invoke agents within your group (agent group: {agent_group})",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Model '{request_body.model_id}' is not in this agent's allowed models: {allowed}",
             )
+        runtime_model_id = request_body.model_id
 
     # Record client invoke time before session creation
     client_invoke_time = time.time()
@@ -898,7 +926,7 @@ async def invoke_agent_endpoint(
 
     # Return streaming response
     return StreamingResponse(
-        invoke_agent_stream(agent, session, invocation, db, client_invoke_time, request_body.prompt, access_token, token_source, user.username or user.sub or "loom-agent"),
+        invoke_agent_stream(agent, session, invocation, db, client_invoke_time, request_body.prompt, access_token, token_source, user.username or user.sub or "loom-agent", runtime_model_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

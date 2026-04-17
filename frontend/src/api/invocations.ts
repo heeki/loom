@@ -1,10 +1,11 @@
-import { apiFetch, BASE_URL, getAuthToken } from "./client";
+import { apiFetch, BASE_URL, getAuthToken, tryRefreshToken } from "./client";
 import type {
   InvokeRequest,
   InvocationResponse,
   SessionResponse,
   SSESessionStart,
   SSEChunk,
+  SSEToolUse,
   SSESessionEnd,
   SSEError,
 } from "./types";
@@ -42,6 +43,7 @@ export function hideSession(agentId: number, sessionId: string): Promise<void> {
 export interface StreamCallbacks {
   onSessionStart?: (data: SSESessionStart) => void;
   onChunk?: (data: SSEChunk) => void;
+  onToolUse?: (data: SSEToolUse) => void;
   onSessionEnd?: (data: SSESessionEnd) => void;
   onError?: (data: SSEError) => void;
 }
@@ -58,12 +60,26 @@ export async function invokeAgentStream(
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${BASE_URL}/api/agents/${agentId}/invoke`, {
+  let response = await fetch(`${BASE_URL}/api/agents/${agentId}/invoke`, {
     method: "POST",
     headers,
     body: JSON.stringify(request),
     signal,
   });
+
+  // On 401, attempt token refresh and retry once (mirrors apiFetch behavior)
+  if (response.status === 401) {
+    const newToken = await tryRefreshToken();
+    if (newToken) {
+      headers["Authorization"] = `Bearer ${newToken}`;
+      response = await fetch(`${BASE_URL}/api/agents/${agentId}/invoke`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(request),
+        signal,
+      });
+    }
+  }
 
   if (!response.ok) {
     let detail = `HTTP ${response.status}`;
@@ -122,6 +138,9 @@ export async function invokeAgentStream(
               break;
             case "chunk":
               callbacks.onChunk?.(parsed as SSEChunk);
+              break;
+            case "tool_use":
+              callbacks.onToolUse?.(parsed as SSEToolUse);
               break;
             case "session_end":
               callbacks.onSessionEnd?.(parsed as SSESessionEnd);

@@ -16,6 +16,12 @@ export function setOnUnauthorized(cb: (() => Promise<string | null>) | null): vo
   _onUnauthorized = cb;
 }
 
+/** Try to refresh the auth token via the registered callback. Returns new token or null. */
+export async function tryRefreshToken(): Promise<string | null> {
+  if (!_onUnauthorized) return null;
+  return _onUnauthorized();
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,

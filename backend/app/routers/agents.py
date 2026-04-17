@@ -5,6 +5,7 @@ import os
 import re
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -53,28 +54,21 @@ router = APIRouter(prefix="/api/agents", tags=["agents"])
 
 DEFAULT_REGION = os.getenv("AWS_REGION", "us-east-1")
 
-SUPPORTED_MODELS = [
-    {"model_id": "us.anthropic.claude-opus-4-6-v1", "display_name": "Claude Opus 4.6", "group": "Anthropic", "max_tokens": 16384, "input_price_per_1k_tokens": 0.015, "output_price_per_1k_tokens": 0.075, "pricing_as_of": "2025-06-01"},
-    {"model_id": "us.anthropic.claude-sonnet-4-6", "display_name": "Claude Sonnet 4.6", "group": "Anthropic", "max_tokens": 16384, "input_price_per_1k_tokens": 0.003, "output_price_per_1k_tokens": 0.015, "pricing_as_of": "2025-06-01"},
-    {"model_id": "us.anthropic.claude-opus-4-5-20251101-v1:0", "display_name": "Claude Opus 4.5", "group": "Anthropic", "max_tokens": 16384, "input_price_per_1k_tokens": 0.015, "output_price_per_1k_tokens": 0.075, "pricing_as_of": "2025-06-01"},
-    {"model_id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "display_name": "Claude Sonnet 4.5", "group": "Anthropic", "max_tokens": 16384, "input_price_per_1k_tokens": 0.003, "output_price_per_1k_tokens": 0.015, "pricing_as_of": "2025-06-01"},
-    {"model_id": "us.anthropic.claude-haiku-4-5-20251001-v1:0", "display_name": "Claude Haiku 4.5", "group": "Anthropic", "max_tokens": 8192, "input_price_per_1k_tokens": 0.0008, "output_price_per_1k_tokens": 0.004, "pricing_as_of": "2025-06-01"},
-    {"model_id": "us.amazon.nova-2-lite-v1:0", "display_name": "Nova 2 Lite", "group": "Amazon", "max_tokens": 5120, "input_price_per_1k_tokens": 0.00006, "output_price_per_1k_tokens": 0.00024, "pricing_as_of": "2025-06-01"},
-    {"model_id": "us.amazon.nova-premier-v1:0", "display_name": "Nova Premier", "group": "Amazon", "max_tokens": 5120, "input_price_per_1k_tokens": 0.0025, "output_price_per_1k_tokens": 0.0125, "pricing_as_of": "2025-06-01"},
-    {"model_id": "us.amazon.nova-pro-v1:0", "display_name": "Nova Pro", "group": "Amazon", "max_tokens": 5120, "input_price_per_1k_tokens": 0.0008, "output_price_per_1k_tokens": 0.0032, "pricing_as_of": "2025-06-01"},
-    {"model_id": "us.amazon.nova-lite-v1:0", "display_name": "Nova Lite", "group": "Amazon", "max_tokens": 5120, "input_price_per_1k_tokens": 0.00006, "output_price_per_1k_tokens": 0.00024, "pricing_as_of": "2025-06-01"},
-    {"model_id": "us.amazon.nova-micro-v1:0", "display_name": "Nova Micro", "group": "Amazon", "max_tokens": 5120, "input_price_per_1k_tokens": 0.000035, "output_price_per_1k_tokens": 0.00014, "pricing_as_of": "2025-06-01"},
-]
+_MODELS_JSON_PATH = Path(__file__).resolve().parent.parent.parent / "etc" / "models.json"
 
-# AgentCore Runtime pricing (per-hour rates) and default resource allocation
-AGENTCORE_RUNTIME_PRICING = {
-    "cpu_per_vcpu_hour": 0.0895,
-    "memory_per_gb_hour": 0.00945,
-    "default_vcpu": 1,
-    "default_memory_gb": 0.5,
-    "default_idle_timeout_seconds": 900,
-    "pricing_as_of": "2025-06-01",
-}
+def _load_models() -> list[dict[str, Any]]:
+    with open(_MODELS_JSON_PATH) as f:
+        return json.load(f)
+
+SUPPORTED_MODELS: list[dict[str, Any]] = _load_models()
+
+_RUNTIME_PRICING_PATH = _MODELS_JSON_PATH.parent / "runtime_pricing.json"
+
+def _load_runtime_pricing() -> dict[str, Any]:
+    with open(_RUNTIME_PRICING_PATH) as f:
+        return json.load(f)
+
+AGENTCORE_RUNTIME_PRICING: dict[str, Any] = _load_runtime_pricing()
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +120,7 @@ class AgentCreateRequest(BaseModel):
     behavioral_guidelines: str = Field(default="", description="How it should behave")
     output_expectations: str = Field(default="", description="Output format/style")
     model_id: str | None = Field(None, description="Bedrock model ID (required for deploy)")
+    allowed_model_ids: list[str] | None = Field(None, description="Subset of models the user may select at invoke time")
     role_arn: str | None = Field(None, description="Existing IAM role ARN or null to create new")
     protocol: str = Field(default="HTTP", description="HTTP, MCP, or A2A")
     network_mode: str = Field(default="PUBLIC", description="PUBLIC or VPC")
@@ -169,6 +164,7 @@ class AgentResponse(BaseModel):
     tags: dict[str, str] = {}
     authorizer_config: dict | None = None
     model_id: str | None = None
+    allowed_model_ids: list[str] = []
     deployed_at: str | None = None
     registry_record_id: str | None = None
     registry_status: str | None = None
@@ -201,6 +197,8 @@ class ConfigUpdateRequest(BaseModel):
 class AgentUpdateRequest(BaseModel):
     """Request body for patching editable agent fields."""
     description: str | None = None
+    model_id: str | None = None
+    allowed_model_ids: list[str] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -339,9 +337,15 @@ def _agent_response(agent: Agent, db: Session) -> AgentResponse:
     mem_total = total_stm + total_ltm
     grand_total = total_est + rt_total + mem_total
 
+    # Derive allowed_model_ids: use agent column if set, else default to [model_id]
+    allowed_models = agent_dict.pop("allowed_model_ids", [])
+    if not allowed_models and model_id:
+        allowed_models = [model_id]
+
     result = AgentResponse(
         **agent_dict,
         model_id=model_id,
+        allowed_model_ids=allowed_models,
         active_session_count=compute_active_session_count(agent.id, db),
         memory_names=memory_names,
         mcp_names=mcp_names,
@@ -430,9 +434,17 @@ def get_cognito_pools(user: UserInfo = Depends(require_scopes("agent:read"))) ->
 
 
 @router.get("/models")
-def get_models(user: UserInfo = Depends(require_scopes("agent:read"))) -> list[dict]:
-    """Return list of supported Bedrock model IDs."""
-    return SUPPORTED_MODELS
+def get_models(
+    user: UserInfo = Depends(require_scopes("agent:read")),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """Return list of admin-enabled model IDs. If none configured, returns all."""
+    from app.routers.settings import get_enabled_model_ids
+    enabled = get_enabled_model_ids(db)
+    if not enabled:
+        return SUPPORTED_MODELS
+    enabled_set = set(enabled)
+    return [m for m in SUPPORTED_MODELS if m["model_id"] in enabled_set]
 
 
 @router.get("/models/pricing")
@@ -599,10 +611,16 @@ def _register_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
         )
         db.add(entry)
 
+    # Store allowed_model_ids (default to [model_id] if not specified)
+    if request.allowed_model_ids:
+        agent.set_allowed_model_ids(request.allowed_model_ids)
+    elif request.model_id:
+        agent.set_allowed_model_ids([request.model_id])
+
     db.commit()
     db.refresh(agent)
 
-    return AgentResponse(**agent.to_dict(), active_session_count=0)
+    return _agent_response(agent, db)
 
 
 def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: BackgroundTasks) -> AgentResponse:
@@ -745,6 +763,12 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
     placeholder_arn = f"pending-{uuid4()}"
 
     # Create agent record with CREATING status — returned to frontend immediately
+    # Resolve allowed models: use explicit list if provided, else default to [model_id]
+    effective_allowed = request.allowed_model_ids if request.allowed_model_ids else [request.model_id]
+    # Ensure the primary model_id is always in the allowed list
+    if request.model_id not in effective_allowed:
+        effective_allowed = [request.model_id] + effective_allowed
+
     agent = Agent(
         arn=placeholder_arn,
         runtime_id="",
@@ -759,6 +783,7 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
         network_mode=request.network_mode,
         registered_at=datetime.utcnow(),
     )
+    agent.set_allowed_model_ids(effective_allowed)
     db.add(agent)
     db.commit()
     db.refresh(agent)
@@ -1650,10 +1675,40 @@ def patch_agent(
     user: UserInfo = Depends(require_scopes("agent:write")),
     db: Session = Depends(get_db),
 ) -> AgentResponse:
-    """Update editable fields on an agent (e.g. description)."""
+    """Update editable fields on an agent (e.g. description, model_id, allowed_model_ids)."""
     agent = get_agent_or_404(agent_id, db)
     if "description" in request.model_fields_set:
         agent.description = request.description
+        if agent.runtime_id and agent.source == "deploy":
+            try:
+                update_runtime(agent.runtime_id, description=request.description or "")
+            except Exception:
+                logger.warning("Failed to propagate description to AgentCore for agent %s", agent_id, exc_info=True)
+    if "model_id" in request.model_fields_set and request.model_id is not None:
+        valid_ids = {m["model_id"] for m in SUPPORTED_MODELS}
+        if request.model_id not in valid_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid model ID: {request.model_id}",
+            )
+        for entry in agent.config_entries:
+            if entry.key == "AGENT_CONFIG_JSON":
+                try:
+                    config = json.loads(entry.value)
+                    config["model_id"] = request.model_id
+                    entry.value = json.dumps(config)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                break
+    if "allowed_model_ids" in request.model_fields_set and request.allowed_model_ids is not None:
+        valid_ids = {m["model_id"] for m in SUPPORTED_MODELS}
+        invalid = [m for m in request.allowed_model_ids if m not in valid_ids]
+        if invalid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid model IDs: {invalid}",
+            )
+        agent.set_allowed_model_ids(request.allowed_model_ids)
     db.commit()
     db.refresh(agent)
     return _agent_response(agent, db)

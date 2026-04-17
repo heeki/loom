@@ -21,6 +21,7 @@ import { listA2aAgents } from "@/api/a2a";
 import { listMemories } from "@/api/memories";
 import { ResourceTagFields } from "@/components/ResourceTagFields";
 import type { AgentDeployRequest, ModelOption, ManagedRole, AuthorizerConfigResponse, TagProfile, McpServer, A2aAgent, MemoryResponse } from "@/api/types";
+import { groupModels } from "@/lib/models";
 import { toast } from "sonner";
 
 function TagInput({
@@ -105,6 +106,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
   const [behavioralGuidelines, setBehavioralGuidelines] = useState("");
   const [outputExpectations, setOutputExpectations] = useState("");
   const [modelId, setModelId] = useState("");
+  const [selectedAllowedModelIds, setSelectedAllowedModelIds] = useState<string[]>([]);
   const [selectedRoleId, setSelectedRoleId] = useState<string>("");
   const [protocol] = useState("HTTP");
   const [networkMode, setNetworkMode] = useState("PUBLIC");
@@ -230,6 +232,9 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
         behavioral_guidelines: behavioralGuidelines.trim(),
         output_expectations: outputExpectations.trim(),
         model_id: modelId,
+        allowed_model_ids: selectedAllowedModelIds.length > 0
+          ? (selectedAllowedModelIds.includes(modelId) ? selectedAllowedModelIds : [modelId, ...selectedAllowedModelIds])
+          : undefined,
         role_arn: roleArn,
         protocol,
         network_mode: networkMode,
@@ -257,6 +262,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
       setBehavioralGuidelines("");
       setOutputExpectations("");
       setModelId("");
+      setSelectedAllowedModelIds([]);
       setSelectedRoleId("");
       setNetworkMode("PUBLIC");
       setSelectedAuthConfigId("");
@@ -327,6 +333,10 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                       const match = models.find((m) => m.model_id === parsed.model || m.display_name === parsed.model);
                       if (match) setModelId(match.model_id);
                     }
+                    if (Array.isArray(parsed.allowed_models)) {
+                      const validIds = models.map((m) => m.model_id);
+                      setSelectedAllowedModelIds(parsed.allowed_models.filter((id: string) => validIds.includes(id)));
+                    }
                     if (parsed.role) {
                       const match = managedRoles.find((r) => r.role_name === parsed.role || r.role_arn === parsed.role);
                       if (match) setSelectedRoleId(match.id.toString());
@@ -385,6 +395,9 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                   if (modelId) {
                     result.model = modelId;
                   }
+                  if (selectedAllowedModelIds.length > 0) {
+                    result.allowed_models = selectedAllowedModelIds;
+                  }
                   if (selectedRoleId) {
                     const role = managedRoles.find((r) => r.id.toString() === selectedRoleId);
                     if (role) result.role = role.role_name;
@@ -418,7 +431,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                   }
                   return JSON.stringify(result, null, 2);
                 }}
-                placeholder='{"name": "...", "description": "...", "persona": "...", "instructions": "...", "behavior": "...", "model": "...", "role": "...", "authorizer": "...", "tags": "...", "mcp_servers": ["..."], "a2a_agents": ["..."], "memories": ["..."]}'
+                placeholder='{"name": "...", "description": "...", "persona": "...", "instructions": "...", "behavior": "...", "model": "... (default)", "allowed_models": ["..."], "role": "...", "authorizer": "...", "tags": "...", "mcp_servers": ["..."], "a2a_agents": ["..."], "memories": ["..."]}'
               />
 
               {/* Agent Identity */}
@@ -480,7 +493,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
               {/* Model, Protocol, Network, IAM Role */}
               <div className="flex gap-3">
                 <section className="w-[20%] min-w-0 space-y-2">
-                  <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Model</h4>
+                  <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Default Model</h4>
                   <SearchableSelect
                     options={models.map((m) => ({ value: m.model_id, label: m.display_name, group: m.group }))}
                     value={modelId}
@@ -526,6 +539,42 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                   />
                 </section>
               </div>
+
+              {/* Allowed Models for Runtime Selection */}
+              {modelId && models.length > 0 && (
+                <section className="space-y-2">
+                  <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Allowed Models (runtime selection)</h4>
+                  <p className="text-xs text-muted-foreground">Users can choose from these models when invoking the agent. The deploy model is always included.</p>
+                  <div className="space-y-1.5">
+                    {groupModels(models).map(([group, groupedModels]) => (
+                      <div key={group} className="flex flex-wrap gap-x-4 gap-y-1 items-center">
+                        <span className="text-[10px] font-medium text-muted-foreground w-16 shrink-0">{group}</span>
+                        {groupedModels.map((m) => (
+                          <label key={m.model_id} className="flex items-center gap-2 text-xs cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="h-3.5 w-3.5 shrink-0"
+                              checked={m.model_id === modelId || selectedAllowedModelIds.includes(m.model_id)}
+                              disabled={m.model_id === modelId}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedAllowedModelIds((prev) => [...prev, m.model_id]);
+                                } else {
+                                  setSelectedAllowedModelIds((prev) => prev.filter((id) => id !== m.model_id));
+                                }
+                              }}
+                            />
+                            <span>{m.display_name}</span>
+                            {m.model_id === modelId && (
+                              <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded">default</span>
+                            )}
+                          </label>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
 
               {/* IAM Role Permissions (read-only) */}
               {selectedRole && (

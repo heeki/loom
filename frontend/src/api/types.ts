@@ -24,6 +24,7 @@ export interface AgentResponse {
   network_mode: string | null;
   authorizer_config: { type?: string; name?: string; pool_id?: string; discovery_url?: string } | null;
   model_id: string | null;
+  allowed_model_ids: string[];
   deployed_at: string | null;
   tags: Record<string, string>;
   cost_summary: {
@@ -56,6 +57,7 @@ export interface AgentDeployRequest {
   behavioral_guidelines: string;
   output_expectations: string;
   model_id: string;
+  allowed_model_ids?: string[];
   role_arn: string | null;
   protocol: string;
   network_mode: string;
@@ -170,6 +172,7 @@ export interface InvokeRequest {
   session_id?: string;
   credential_id?: number;
   bearer_token?: string;
+  model_id?: string;
 }
 
 export interface InvocationResponse {
@@ -504,6 +507,10 @@ export interface SSESessionEnd {
   memory_estimated_cost: number | null;
   stm_cost: number | null;
   ltm_cost: number | null;
+}
+
+export interface SSEToolUse {
+  name: string;
 }
 
 export interface SSEError {
