@@ -51,7 +51,9 @@ loom/
 │   ├── scripts/
 │   ├── tests/
 │   ├── etc/                     # Backend environment config (app + ECS backend service)
-│   │   └── environment.sh       # Sources account-specific file + shared outputs
+│   │   ├── environment.sh       # Sources account-specific file + shared outputs
+│   │   ├── models.json          # Supported model catalog (model_id, display_name, group, pricing)
+│   │   └── runtime_pricing.json # AgentCore Runtime pricing constants
 │   ├── iac/                     # Backend infrastructure
 │   │   ├── rds.yaml             # RDS PostgreSQL with optional RDS Proxy
 │   │   ├── ec2.yaml             # EC2 bastion for SSM tunnel to RDS
@@ -165,9 +167,10 @@ The frontend enforces scope-based access control derived from Cognito group memb
 
 ## 5. Supported Foundation Models
 
-Models are organized into two groups and use cross-region inference profiles (`us.` prefix):
+Model metadata (display names, groups, pricing) and AgentCore Runtime pricing are maintained in external JSON configuration files (`backend/etc/models.json` and `backend/etc/runtime_pricing.json`), loaded at backend startup. Models are organized by vendor group and sorted alphabetically in the UI via the `groupModels()` utility.
 
 **Anthropic:**
+- Claude Opus 4.7 (`anthropic.claude-opus-4-7`)
 - Claude Opus 4.6 (`us.anthropic.claude-opus-4-6-v1`)
 - Claude Sonnet 4.6 (`us.anthropic.claude-sonnet-4-6`)
 - Claude Opus 4.5 (`us.anthropic.claude-opus-4-5-20251101-v1:0`)
@@ -176,12 +179,50 @@ Models are organized into two groups and use cross-region inference profiles (`u
 
 **Amazon:**
 - Nova 2 Lite (`us.amazon.nova-2-lite-v1:0`)
-- Nova Premier (`us.amazon.nova-premier-v1:0`)
 - Nova Pro (`us.amazon.nova-pro-v1:0`)
 - Nova Lite (`us.amazon.nova-lite-v1:0`)
 - Nova Micro (`us.amazon.nova-micro-v1:0`)
 
-Model selectors in the UI are searchable by both display name and model ID, with grouped sections (Anthropic / Amazon). No default is pre-selected — the user must explicitly choose a model.
+**DeepSeek:**
+- DeepSeek v3.2 (`deepseek.v3.2`)
+- DeepSeek-R1 (`deepseek.r1-v1:0`)
+
+**Google:**
+- Gemma 3 12B IT (`google.gemma-3-12b-it`)
+- Gemma 3 27B PT (`google.gemma-3-27b-it`)
+- Gemma 3 4B IT (`google.gemma-3-4b-it`)
+
+**Meta:**
+- Llama 4 Maverick 17B Instruct (`meta.llama4-maverick-17b-instruct-v1:0`)
+- Llama 4 Scout 17B Instruct (`meta.llama4-scout-17b-instruct-v1:0`)
+- Llama 3.3 70B Instruct (`meta.llama3-3-70b-instruct-v1:0`)
+
+**MiniMax:**
+- MiniMax M2.5 (`minimax.minimax-m2.5`)
+- MiniMax M2.1 (`minimax.minimax-m2.1`)
+- MiniMax M2 (`minimax.minimax-m2`)
+
+**Moonshot AI:**
+- Kimi K2.5 (`moonshotai.kimi-k2.5`)
+- Kimi K2 Thinking (`moonshot.kimi-k2-thinking`)
+
+Model selectors in the UI are searchable by both display name and model ID, with grouped sections sorted alphabetically by vendor. No default is pre-selected — the user must explicitly choose a model.
+
+### Admin-Enabled Models
+
+Administrators can restrict which models are available for agent deployment and runtime selection via the Settings page ("Enabled Models" section). The `enabled_model_ids` site setting stores a JSON array of allowed model IDs. When the list is empty (default), all models are available. The `GET /api/agents/models` endpoint filters the full model catalog by this setting before returning results. The `GET /api/settings/models` and `PUT /api/settings/models` endpoints manage the configuration (requires `settings:read` / `settings:write` scopes).
+
+### Runtime Model Selection
+
+Agents support runtime model selection, allowing users to choose from a set of allowed models at invoke time rather than being locked to a single model:
+
+- **`allowed_model_ids`** — A JSON array stored on the `agents` table specifying which models the agent can use. Defaults to `[model_id]` (the deploy/register model) when not explicitly set.
+- **Deploy form** — An "Allowed Models (runtime selection)" checkbox section appears after selecting the default model. The deploy model is always included and cannot be unchecked.
+- **Agent detail / Deployment panel** — Displays allowed models grouped by vendor with an inline edit mode (pencil icon) for updating the allowed list and default model post-deployment.
+- **Invoke panel** — A model dropdown appears when the agent has multiple allowed models. The dropdown is disabled when only one model is available. Selecting a non-default model passes `model_id` in the invoke request.
+- **ChatPage** — A model picker button appears in the input area footer when the agent has multiple allowed models. Click to open a dropdown; selecting a model applies it to subsequent invocations.
+- **Backend validation** — `POST /api/agents/{id}/invoke` validates the optional `model_id` parameter against the agent's `allowed_model_ids`. Returns HTTP 400 if the model is not in the allowed list. The validated model overrides the agent's default for that invocation.
+- **PATCH endpoint** — `PATCH /api/agents/{id}` accepts `model_id` and `allowed_model_ids` fields for updating model configuration. Description changes are propagated to AgentCore via `update_runtime`.
 
 ---
 
@@ -486,7 +527,28 @@ Model selectors in the UI are searchable by both display name and model ID, with
 - **Collapsible catalog sections:** CatalogPage sections (Agents, Memory Resources, MCP Servers, A2A Agents) are collapsible via ChevronRight/ChevronDown toggles. Collapse state persisted to `localStorage` under `loom:collapsedSections:catalog`.
 - **Backend registry status sync:** When registry is re-enabled via the Settings page, `_sync_registry_statuses()` validates all stored `registry_record_id` values across Agent, McpServer, and A2aAgent models against the live registry. Records that no longer exist are cleared; status mismatches are updated. This prevents stale governance data after a disable/re-enable cycle.
 
-### Phase 23 — Advanced Operations
+### Phase 23 — Runtime Model Selection *(Complete)*
+- **Model catalog externalization:** `SUPPORTED_MODELS` and `AGENTCORE_RUNTIME_PRICING` extracted from inline Python constants to JSON configuration files (`backend/etc/models.json`, `backend/etc/runtime_pricing.json`), loaded at startup. Model catalog expanded from 10 to 22 models across 7 vendor groups (Anthropic, Amazon, DeepSeek, Google, Meta, MiniMax, Moonshot AI).
+- **Admin-enabled models:** `enabled_model_ids` site setting (default `[]` = all models). `GET /api/settings/models` returns the enabled list and full catalog. `PUT /api/settings/models` updates the enabled set (validates against `SUPPORTED_MODELS`). `GET /api/agents/models` filters by the enabled set. Settings page "Enabled Models" section with per-vendor grouped checkboxes and Save button.
+- **Per-agent allowed models:** `allowed_model_ids` TEXT column on the `agents` table (JSON array). `Agent` ORM model with `get_allowed_model_ids()` / `set_allowed_model_ids()` helpers. Deploy and register flows store the allowed list (defaults to `[model_id]`). `AgentResponse` includes `allowed_model_ids` field.
+- **Runtime model override on invoke:** `POST /api/agents/{id}/invoke` accepts optional `model_id` parameter. Validated against the agent's `allowed_model_ids` (HTTP 400 on mismatch). Passed through to `invoke_agent_stream()` which overrides `agent_model_id` for that invocation.
+- **Agent PATCH endpoint extended:** `PATCH /api/agents/{id}` accepts `model_id` (updates `AGENT_CONFIG_JSON`) and `allowed_model_ids` (validates against `SUPPORTED_MODELS`). Description changes propagated to AgentCore via `update_runtime(description=...)`.
+- **Group-based invoke fix:** Agents with no `loom:group` tag are now accessible to any authenticated user with invoke scope (previously blocked by empty-string comparison).
+- **Streaming tool-call events:** Strands agent handler detects `contentBlockStart` events with `toolUse` data and yields `{"tool_use": {"name": ..., "id": ...}}` structured events. Backend `invoke_agent_stream` forwards these as `event: tool_use` SSE events. Frontend `StreamSegment` type models interleaved text and tool_use segments. `useInvoke` hook tracks `segments`, `currentToolName`, and `toolNames` arrays.
+- **Inline tool-call indicators:** `ToolUseBlock` component renders tool calls with Wrench icon, counter (N/M), elapsed timer, and tool names. `formatToolName()` strips MCP server prefixes (`server___tool` → `tool`). Tool names persist in `ChatMessage.toolNames` and are displayed in finalized `MessageBubble` components after stream ends.
+- **401 retry for SSE invoke:** `invokeAgentStream()` in `invocations.ts` intercepts 401 responses, calls `tryRefreshToken()` (exported from `client.ts`), and retries the SSE request with the refreshed token. Mirrors the existing `apiFetch` 401 retry pattern.
+- **Frontend model selection UI:**
+  - Deploy form: "Default Model" label, "Allowed Models (runtime selection)" checkbox section grouped by vendor via `groupModels()`.
+  - `InvokePanel`: model dropdown (`Select`) filtered by `allowedModelIds`, disabled when single model, passes `model_id` override to `onInvoke`.
+  - `DeploymentPanel`: "Allowed Models" section with inline edit mode (grouped checkboxes, default model toggle, Save/Cancel buttons).
+  - `AgentDetailPage`: Overview card consolidates description + deployment + model config. `RegisteredAgentModelConfig` component for non-deployed agents.
+  - `ChatPage`: model picker button in input area footer with click-outside-to-close dropdown, auto-reset on agent switch.
+  - `groupModels()` utility in `frontend/src/lib/models.ts`: groups `ModelOption[]` by vendor, sorts groups alphabetically.
+- **AgentCard display updates:** Endpoint qualifiers shown as comma-separated text (removed individual badges). Authorizer shown as a single outline badge with name/type fallback.
+- **Agent detail response pane refactor:** Markdown rendering extracted to standalone `MarkdownBlock` component. Response pane renders `segments` array with `ToolUseBlock` and `MarkdownBlock` blocks. Thinking indicator shown when streaming with no segments. `StreamingBubble` component in ChatPage for segment-based rendering during active streams.
+- 12 backend tests in `test_model_selection.py` covering Agent model helpers, registration with `allowed_model_ids`, response inclusion, PATCH validation, and invoke model validation.
+
+### Phase 24 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.
