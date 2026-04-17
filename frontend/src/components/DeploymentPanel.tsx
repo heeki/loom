@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Loader2, Pencil, Check, X } from "lucide-react";
@@ -79,16 +78,100 @@ export function DeploymentPanel({ agent, onPatchAgent }: DeploymentPanelProps) {
     allModels.find((m) => m.model_id === modelId)?.display_name ?? modelId;
 
   return (
-    <Card className="py-3 gap-1">
-      <CardHeader className="gap-1 pb-3">
+    <div className="space-y-3">
+      {/* Allowed Models */}
+      <div className="text-xs text-muted-foreground">
+        <div className="flex items-center gap-1.5">
+          <span className="font-medium">Allowed Models:</span>
+          {!editingModels && onPatchAgent && (
+            <Button variant="ghost" size="icon" className="h-5 w-5" onClick={handleEditModels}>
+              <Pencil className="h-3 w-3" />
+            </Button>
+          )}
+        </div>
+        {editingModels ? (
+          <div className="space-y-2 mt-1">
+            <div className="space-y-1.5">
+              {groupModels(allModels).map(([group, models]) => (
+                <div key={group} className="flex flex-wrap gap-x-4 gap-y-1 items-center">
+                  <span className="text-[10px] font-medium text-muted-foreground w-16 shrink-0">{group}</span>
+                  {models.map((m) => {
+                    const isDefault = m.model_id === defaultModelDraft;
+                    const isChecked = modelsDraft.includes(m.model_id);
+                    return (
+                      <label key={m.model_id} className="flex items-center gap-1.5 text-xs cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 shrink-0"
+                          checked={isChecked}
+                          disabled={isDefault}
+                          onChange={() => toggleModel(m.model_id)}
+                        />
+                        <span>{m.display_name}</span>
+                        {isChecked && (
+                          <button
+                            type="button"
+                            onClick={() => setDefaultModelDraft(m.model_id)}
+                            className={`text-[10px] px-1 rounded ${
+                              isDefault
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-accent text-muted-foreground hover:bg-accent/80"
+                            }`}
+                          >
+                            {isDefault ? "default" : "set default"}
+                          </button>
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" className="h-6 text-xs" onClick={() => void handleSaveModels()} disabled={savingModels}>
+                <Check className="h-3 w-3 mr-1" />
+                Save
+              </Button>
+              <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setEditingModels(false)} disabled={savingModels}>
+                <X className="h-3 w-3 mr-1" />
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-0.5">
+            {agent.allowed_model_ids.length > 0 ? (
+              <div className="space-y-1">
+                {groupModels(allModels.filter((m) => agent.allowed_model_ids.includes(m.model_id))).map(([group, models]) => (
+                  <div key={group} className="flex flex-wrap gap-1 items-center">
+                    <span className="text-[10px] font-medium text-muted-foreground w-16 shrink-0">{group}</span>
+                    {models.map((m) => (
+                      <Badge key={m.model_id} variant="outline" className="text-[10px] px-1.5 py-0">
+                        {m.display_name}{m.model_id === agent.model_id ? " (default)" : ""}
+                      </Badge>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ) : agent.model_id ? (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                {getDisplayName(agent.model_id)} (default)
+              </Badge>
+            ) : (
+              <span className="italic">None configured</span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Deployed configuration details */}
+      <div className="rounded-md border bg-background p-3 space-y-1.5 text-xs text-muted-foreground">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-medium">Deployment</CardTitle>
+          <span className="font-medium text-foreground">Deployed Configuration</span>
           {isCreating(agent) && (
             <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
           )}
         </div>
-      </CardHeader>
-      <CardContent className="space-y-2 text-xs text-muted-foreground">
         <div className="flex items-center gap-1.5">
           <span>Runtime Status:</span>
           <Badge variant={statusVariant(agent.status)} className="text-[10px] px-1.5 py-0">
@@ -101,85 +184,7 @@ export function DeploymentPanel({ agent, onPatchAgent }: DeploymentPanelProps) {
         {agent.deployed_at && (
           <div>Deployed: {formatTimestamp(agent.deployed_at, timezone)}</div>
         )}
-
-        {/* Allowed Models */}
-        <div className="pt-1">
-          <div className="flex items-center gap-1.5">
-            <span className="font-medium">Allowed Models:</span>
-            {!editingModels && onPatchAgent && (
-              <Button variant="ghost" size="icon" className="h-5 w-5" onClick={handleEditModels}>
-                <Pencil className="h-3 w-3" />
-              </Button>
-            )}
-          </div>
-          {editingModels ? (
-            <div className="space-y-2 mt-1">
-              <div className="space-y-1.5">
-                {groupModels(allModels).map(([group, models]) => (
-                  <div key={group} className="flex flex-wrap gap-x-4 gap-y-1 items-center">
-                    <span className="text-[10px] font-medium text-muted-foreground w-16 shrink-0">{group}</span>
-                    {models.map((m) => {
-                      const isDefault = m.model_id === defaultModelDraft;
-                      const isChecked = modelsDraft.includes(m.model_id);
-                      return (
-                        <label key={m.model_id} className="flex items-center gap-1.5 text-xs cursor-pointer">
-                          <input
-                            type="checkbox"
-                            className="h-3.5 w-3.5 shrink-0"
-                            checked={isChecked}
-                            disabled={isDefault}
-                            onChange={() => toggleModel(m.model_id)}
-                          />
-                          <span>{m.display_name}</span>
-                          {isChecked && (
-                            <button
-                              type="button"
-                              onClick={() => setDefaultModelDraft(m.model_id)}
-                              className={`text-[10px] px-1 rounded ${
-                                isDefault
-                                  ? "bg-primary text-primary-foreground"
-                                  : "bg-accent text-muted-foreground hover:bg-accent/80"
-                              }`}
-                            >
-                              {isDefault ? "default" : "set default"}
-                            </button>
-                          )}
-                        </label>
-                      );
-                    })}
-                  </div>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <Button size="sm" className="h-6 text-xs" onClick={() => void handleSaveModels()} disabled={savingModels}>
-                  <Check className="h-3 w-3 mr-1" />
-                  Save
-                </Button>
-                <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setEditingModels(false)} disabled={savingModels}>
-                  <X className="h-3 w-3 mr-1" />
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-wrap gap-1 mt-0.5">
-              {agent.allowed_model_ids.length > 0 ? (
-                agent.allowed_model_ids.map((id) => (
-                  <Badge key={id} variant="outline" className="text-[10px] px-1.5 py-0">
-                    {getDisplayName(id)}{id === agent.model_id ? " (default)" : ""}
-                  </Badge>
-                ))
-              ) : agent.model_id ? (
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                  {getDisplayName(agent.model_id)} (default)
-                </Badge>
-              ) : (
-                <span className="italic">None configured</span>
-              )}
-            </div>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

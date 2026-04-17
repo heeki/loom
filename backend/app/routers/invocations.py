@@ -545,6 +545,7 @@ async def invoke_agent_stream(
                     # Tool use event forwarded from the agent handler
                     tool_use = structured.get("tool_use")
                     if isinstance(tool_use, dict) and tool_use.get("name"):
+                        logger.info("Tool use event: %s", tool_use["name"])
                         yield format_sse_event("tool_use", {"name": tool_use["name"]})
                         continue
                     # Strands SDK text delta: {"data": "token"}
@@ -764,26 +765,30 @@ async def invoke_agent_endpoint(
 
     # ---- Group-based invoke restriction ----
     # Super-admins (g-admins-super) can invoke any agent.
+    # Agents with no loom:group tag are accessible to any authenticated user with invoke scope.
     # Other admins (g-admins-demo, etc.) can only invoke agents in their specific group.
     # Users (t-user) can only invoke agents tagged with their groups (g-users-* → strip prefix).
     # Check this BEFORE creating any session/invocation records.
     if "g-admins-super" not in user.groups:
         agent_group = agent.get_tags().get("loom:group", "")
 
-        if "t-admin" in user.groups:
-            # Non-super admins: check against their g-admins-* group
-            admin_groups = [g for g in user.groups if g.startswith("g-admins-")]
-            allowed_tags = [g.replace("g-admins-", "", 1) for g in admin_groups]
-        else:
-            # Users: extract allowed tags from g-users-* groups
-            user_groups = [g for g in user.groups if g.startswith("g-users-")]
-            allowed_tags = [g.replace("g-users-", "", 1) for g in user_groups]
+        if agent_group:
+            if "t-admin" in user.groups:
+                admin_groups = [g for g in user.groups if g.startswith("g-admins-")]
+                allowed_tags = [g.replace("g-admins-", "", 1) for g in admin_groups]
+            else:
+                user_groups = [g for g in user.groups if g.startswith("g-users-")]
+                allowed_tags = [g.replace("g-users-", "", 1) for g in user_groups]
 
-        if agent_group not in allowed_tags:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"You can only invoke agents within your group (agent group: {agent_group})",
-            )
+            if agent_group not in allowed_tags:
+                logger.warning(
+                    "Group-based 403 for user=%s groups=%s agent_id=%s agent_group=%s allowed_tags=%s",
+                    user.username, user.groups, agent_id, agent_group, allowed_tags,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"You can only invoke agents within your group (agent group: {agent_group})",
+                )
 
     # Validate runtime model_id if provided
     runtime_model_id: str | None = None

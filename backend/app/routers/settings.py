@@ -1,4 +1,5 @@
 """Settings endpoints for managing tag policies and site settings."""
+import json
 import logging
 from datetime import datetime
 from typing import Any
@@ -23,6 +24,7 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 # ---------------------------------------------------------------------------
 SITE_SETTING_DEFAULTS: dict[str, str] = {
     "cpu_io_wait_discount": "75",
+    "enabled_model_ids": "[]",
     "loom_registry_id": "",
 }
 
@@ -428,3 +430,67 @@ def _sync_registry_statuses(client, db: Session) -> None:  # noqa: ANN001
     if updated or cleared:
         db.commit()
         logger.info("Registry sync complete: %d updated, %d cleared", updated, cleared)
+
+
+# ---------------------------------------------------------------------------
+# Enabled Models Configuration
+# ---------------------------------------------------------------------------
+def get_enabled_model_ids(db: Session) -> list[str]:
+    """Return the list of admin-enabled model IDs. Empty list means all models."""
+    raw = get_site_setting(db, "enabled_model_ids")
+    try:
+        ids = json.loads(raw)
+        if isinstance(ids, list):
+            return ids
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return []
+
+
+class EnabledModelsRequest(BaseModel):
+    """Request to update the set of enabled models."""
+    model_ids: list[str] = Field(..., description="List of enabled model IDs (empty = all)")
+
+
+class EnabledModelsResponse(BaseModel):
+    """Response for enabled models configuration."""
+    model_ids: list[str]
+    all_models: list[dict[str, Any]]
+
+
+@router.get("/models", response_model=EnabledModelsResponse)
+def get_enabled_models(
+    user: UserInfo = Depends(require_scopes("settings:read")),
+    db: Session = Depends(get_db),
+) -> EnabledModelsResponse:
+    """Get the list of admin-enabled model IDs along with the full model catalog."""
+    from app.routers.agents import SUPPORTED_MODELS
+    enabled = get_enabled_model_ids(db)
+    return EnabledModelsResponse(model_ids=enabled, all_models=SUPPORTED_MODELS)
+
+
+@router.put("/models", response_model=EnabledModelsResponse)
+def update_enabled_models(
+    request: EnabledModelsRequest,
+    user: UserInfo = Depends(require_scopes("settings:write")),
+    db: Session = Depends(get_db),
+) -> EnabledModelsResponse:
+    """Update the set of admin-enabled models."""
+    from app.routers.agents import SUPPORTED_MODELS
+    valid_ids = {m["model_id"] for m in SUPPORTED_MODELS}
+    invalid = [mid for mid in request.model_ids if mid not in valid_ids]
+    if invalid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown model IDs: {', '.join(invalid)}",
+        )
+    value = json.dumps(request.model_ids)
+    setting = db.query(SiteSetting).filter(SiteSetting.key == "enabled_model_ids").first()
+    if setting:
+        setting.value = value
+        setting.updated_at = datetime.utcnow()
+    else:
+        setting = SiteSetting(key="enabled_model_ids", value=value)
+        db.add(setting)
+    db.commit()
+    return EnabledModelsResponse(model_ids=request.model_ids, all_models=SUPPORTED_MODELS)

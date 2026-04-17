@@ -9,7 +9,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { useTimezone, type TimezonePreference } from "@/contexts/TimezoneContext";
 import { Button } from "@/components/ui/button";
-import { listSiteSettings, updateSiteSetting, getRegistryConfig, updateRegistryConfig } from "@/api/settings";
+import { listSiteSettings, updateSiteSetting, getRegistryConfig, updateRegistryConfig, getEnabledModels, updateEnabledModels } from "@/api/settings";
+import { groupModels } from "@/lib/models";
+import type { ModelOption } from "@/api/types";
 
 export function SettingsPage() {
   const { timezone, setTimezone } = useTimezone();
@@ -24,6 +26,11 @@ export function SettingsPage() {
   const [registrySaved, setRegistrySaved] = useState(false);
   const [registryError, setRegistryError] = useState("");
   const [confirmingDisable, setConfirmingDisable] = useState(false);
+
+  const [allModels, setAllModels] = useState<ModelOption[]>([]);
+  const [enabledModelIds, setEnabledModelIds] = useState<string[]>([]);
+  const [modelsSaved, setModelsSaved] = useState(false);
+  const [modelsSaving, setModelsSaving] = useState(false);
 
   const loadSiteSettings = useCallback(async () => {
     try {
@@ -46,8 +53,19 @@ export function SettingsPage() {
     }
   }, []);
 
+  const loadModelsConfig = useCallback(async () => {
+    try {
+      const config = await getEnabledModels();
+      setAllModels(config.all_models as ModelOption[]);
+      setEnabledModelIds(config.model_ids);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   useEffect(() => { void loadSiteSettings(); }, [loadSiteSettings]);
   useEffect(() => { void loadRegistryConfig(); }, [loadRegistryConfig]);
+  useEffect(() => { void loadModelsConfig(); }, [loadModelsConfig]);
 
   const saveRegistryConfig = async () => {
     setRegistryError("");
@@ -149,6 +167,75 @@ export function SettingsPage() {
               Assumed % of CPU time spent waiting on I/O (e.g., model API calls). Applied as a discount to runtime CPU cost across estimates and actuals. Range: 0–99.
             </p>
           </div>
+        </div>
+      </div>
+
+      {/* Enabled Models */}
+      <div className="space-y-4">
+        <div>
+          <h3 className="text-sm font-medium">Enabled Models</h3>
+          <p className="text-xs text-muted-foreground mt-1">
+            Select which models are available for agent deployment and runtime selection. When none are selected, all models are available.
+          </p>
+        </div>
+        <div className="space-y-2">
+          {groupModels(allModels).map(([group, models]) => (
+            <div key={group} className="flex flex-wrap gap-x-4 gap-y-1 items-center">
+              <span className="text-xs font-medium text-muted-foreground w-20 shrink-0">{group}</span>
+              {models.map((m) => (
+                <label key={m.model_id} className="flex items-center gap-1.5 text-xs cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5 shrink-0"
+                    checked={enabledModelIds.length === 0 || enabledModelIds.includes(m.model_id)}
+                    onChange={(e) => {
+                      setEnabledModelIds((prev) => {
+                        const current = prev.length === 0
+                          ? allModels.map((am) => am.model_id)
+                          : [...prev];
+                        if (e.target.checked) {
+                          return current.includes(m.model_id) ? current : [...current, m.model_id];
+                        }
+                        const next = current.filter((id) => id !== m.model_id);
+                        return next.length === allModels.length ? [] : next;
+                      });
+                    }}
+                  />
+                  <span>{m.display_name}</span>
+                </label>
+              ))}
+            </div>
+          ))}
+          <div className="flex items-center gap-2 pt-1">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              disabled={modelsSaving}
+              onClick={async () => {
+                setModelsSaving(true);
+                try {
+                  const idsToSave = enabledModelIds.length === allModels.length ? [] : enabledModelIds;
+                  const config = await updateEnabledModels(idsToSave);
+                  setEnabledModelIds(config.model_ids);
+                  setModelsSaved(true);
+                  setTimeout(() => setModelsSaved(false), 2000);
+                } finally {
+                  setModelsSaving(false);
+                }
+              }}
+            >
+              Save
+            </Button>
+            {modelsSaved && (
+              <span className="text-xs text-green-600 dark:text-green-400">Saved</span>
+            )}
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            {enabledModelIds.length === 0
+              ? "All models are currently available."
+              : `${enabledModelIds.length} of ${allModels.length} models enabled.`}
+          </p>
         </div>
       </div>
 

@@ -86,3 +86,20 @@ export function updateRegistryConfig(registry_arn: string): Promise<RegistryConf
     body: JSON.stringify({ registry_arn }),
   });
 }
+
+// Enabled Models API
+export interface EnabledModelsConfig {
+  model_ids: string[];
+  all_models: { model_id: string; display_name: string; group?: string }[];
+}
+
+export function getEnabledModels(): Promise<EnabledModelsConfig> {
+  return apiFetch<EnabledModelsConfig>("/api/settings/models");
+}
+
+export function updateEnabledModels(model_ids: string[]): Promise<EnabledModelsConfig> {
+  return apiFetch<EnabledModelsConfig>("/api/settings/models", {
+    method: "PUT",
+    body: JSON.stringify({ model_ids }),
+  });
+}

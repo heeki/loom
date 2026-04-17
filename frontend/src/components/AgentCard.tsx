@@ -182,22 +182,20 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
             <div>Network: {agent.network_mode}</div>
           )}
           {agent.available_qualifiers.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1">
-              <span>Endpoint:</span>
-              {agent.available_qualifiers.map((q) => (
-                <Badge key={q} variant="outline" className="text-[10px] px-1.5 py-0">
-                  {q}
-                </Badge>
-              ))}
-            </div>
+            <div>Endpoint: {agent.available_qualifiers.join(", ")}</div>
           )}
-          <div>Authorizer: {(() => {
-            const ac = agent.authorizer_config;
-            if (!ac) return <span className="text-muted-foreground/50">None</span>;
-            if (ac.type === "cognito") return "Cognito";
-            if (ac.name) return ac.name;
-            return "external";
-          })()}</div>
+          <div className="flex flex-wrap items-center gap-1">
+            <span>Authorizer:</span>
+            {(() => {
+              const ac = agent.authorizer_config;
+              if (!ac) return <span className="text-muted-foreground/50">None</span>;
+              return (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                  {ac.name ?? ac.type ?? "external"}
+                </Badge>
+              );
+            })()}
+          </div>
           {agent.memory_names && agent.memory_names.length > 0 && (
             <div className="flex flex-wrap items-center gap-1">
               <span>Memory:</span>

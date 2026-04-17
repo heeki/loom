@@ -9,22 +9,30 @@ import { friendlyInvokeError } from "@/lib/errors";
  * and coming back).  Keyed by agentId.
  */
 
+export type StreamSegment =
+  | { type: "text"; content: string }
+  | { type: "tool_use"; name: string; index: number; total: number; timestamp: number };
+
 interface InvokeSnapshot {
   streamedText: string;
+  segments: StreamSegment[];
   sessionStart: SSESessionStart | null;
   sessionEnd: SSESessionEnd | null;
   isStreaming: boolean;
   currentToolName: string | null;
+  toolNames: string[];
   error: string | null;
   rawError: string | null;
 }
 
 const EMPTY: InvokeSnapshot = {
   streamedText: "",
+  segments: [],
   sessionStart: null,
   sessionEnd: null,
   isStreaming: false,
   currentToolName: null,
+  toolNames: [],
   error: null,
   rawError: null,
 };
@@ -70,10 +78,12 @@ async function _startInvoke(
 
   _update(agentId, {
     streamedText: "",
+    segments: [],
     sessionStart: null,
     sessionEnd: null,
     isStreaming: true,
     currentToolName: null,
+    toolNames: [],
     error: null,
     rawError: null,
   });
@@ -93,10 +103,24 @@ async function _startInvoke(
         onSessionStart: (data) => _update(agentId, { sessionStart: data }),
         onChunk: (data) => {
           const cur = _get(agentId);
-          _update(agentId, { streamedText: cur.streamedText + data.text, currentToolName: null });
+          const segs = [...cur.segments];
+          const last = segs[segs.length - 1];
+          if (last && last.type === "text") {
+            segs[segs.length - 1] = { type: "text", content: last.content + data.text };
+          } else {
+            segs.push({ type: "text", content: data.text });
+          }
+          _update(agentId, { streamedText: cur.streamedText + data.text, segments: segs, currentToolName: null });
         },
         onToolUse: (data) => {
-          _update(agentId, { currentToolName: data.name });
+          const cur = _get(agentId);
+          const newToolNames = [...cur.toolNames, data.name];
+          const newTotal = newToolNames.length;
+          const segs: StreamSegment[] = cur.segments.map((s) =>
+            s.type === "tool_use" ? { ...s, total: newTotal } : s,
+          );
+          segs.push({ type: "tool_use", name: data.name, index: newTotal, total: newTotal, timestamp: Date.now() });
+          _update(agentId, { currentToolName: data.name, toolNames: newToolNames, segments: segs });
         },
         onSessionEnd: (data) => {
           _update(agentId, { sessionEnd: data, isStreaming: false, currentToolName: null });
@@ -172,10 +196,12 @@ export function useInvoke(agentId: number, authorizerName?: string) {
 
   return {
     streamedText: snapshot.streamedText,
+    segments: snapshot.segments,
     sessionStart: snapshot.sessionStart,
     sessionEnd: snapshot.sessionEnd,
     isStreaming: snapshot.isStreaming,
     currentToolName: snapshot.currentToolName,
+    toolNames: snapshot.toolNames,
     error: snapshot.error,
     rawError: snapshot.rawError,
     invoke,

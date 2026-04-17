@@ -5,6 +5,7 @@ import os
 import re
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -53,28 +54,21 @@ router = APIRouter(prefix="/api/agents", tags=["agents"])
 
 DEFAULT_REGION = os.getenv("AWS_REGION", "us-east-1")
 
-SUPPORTED_MODELS = [
-    {"model_id": "us.anthropic.claude-opus-4-6-v1", "display_name": "Claude Opus 4.6", "group": "Anthropic", "max_tokens": 16384, "input_price_per_1k_tokens": 0.015, "output_price_per_1k_tokens": 0.075, "pricing_as_of": "2025-06-01"},
-    {"model_id": "us.anthropic.claude-sonnet-4-6", "display_name": "Claude Sonnet 4.6", "group": "Anthropic", "max_tokens": 16384, "input_price_per_1k_tokens": 0.003, "output_price_per_1k_tokens": 0.015, "pricing_as_of": "2025-06-01"},
-    {"model_id": "us.anthropic.claude-opus-4-5-20251101-v1:0", "display_name": "Claude Opus 4.5", "group": "Anthropic", "max_tokens": 16384, "input_price_per_1k_tokens": 0.015, "output_price_per_1k_tokens": 0.075, "pricing_as_of": "2025-06-01"},
-    {"model_id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "display_name": "Claude Sonnet 4.5", "group": "Anthropic", "max_tokens": 16384, "input_price_per_1k_tokens": 0.003, "output_price_per_1k_tokens": 0.015, "pricing_as_of": "2025-06-01"},
-    {"model_id": "us.anthropic.claude-haiku-4-5-20251001-v1:0", "display_name": "Claude Haiku 4.5", "group": "Anthropic", "max_tokens": 8192, "input_price_per_1k_tokens": 0.0008, "output_price_per_1k_tokens": 0.004, "pricing_as_of": "2025-06-01"},
-    {"model_id": "us.amazon.nova-2-lite-v1:0", "display_name": "Nova 2 Lite", "group": "Amazon", "max_tokens": 5120, "input_price_per_1k_tokens": 0.00006, "output_price_per_1k_tokens": 0.00024, "pricing_as_of": "2025-06-01"},
-    {"model_id": "us.amazon.nova-premier-v1:0", "display_name": "Nova Premier", "group": "Amazon", "max_tokens": 5120, "input_price_per_1k_tokens": 0.0025, "output_price_per_1k_tokens": 0.0125, "pricing_as_of": "2025-06-01"},
-    {"model_id": "us.amazon.nova-pro-v1:0", "display_name": "Nova Pro", "group": "Amazon", "max_tokens": 5120, "input_price_per_1k_tokens": 0.0008, "output_price_per_1k_tokens": 0.0032, "pricing_as_of": "2025-06-01"},
-    {"model_id": "us.amazon.nova-lite-v1:0", "display_name": "Nova Lite", "group": "Amazon", "max_tokens": 5120, "input_price_per_1k_tokens": 0.00006, "output_price_per_1k_tokens": 0.00024, "pricing_as_of": "2025-06-01"},
-    {"model_id": "us.amazon.nova-micro-v1:0", "display_name": "Nova Micro", "group": "Amazon", "max_tokens": 5120, "input_price_per_1k_tokens": 0.000035, "output_price_per_1k_tokens": 0.00014, "pricing_as_of": "2025-06-01"},
-]
+_MODELS_JSON_PATH = Path(__file__).resolve().parent.parent.parent / "etc" / "models.json"
 
-# AgentCore Runtime pricing (per-hour rates) and default resource allocation
-AGENTCORE_RUNTIME_PRICING = {
-    "cpu_per_vcpu_hour": 0.0895,
-    "memory_per_gb_hour": 0.00945,
-    "default_vcpu": 1,
-    "default_memory_gb": 0.5,
-    "default_idle_timeout_seconds": 900,
-    "pricing_as_of": "2025-06-01",
-}
+def _load_models() -> list[dict[str, Any]]:
+    with open(_MODELS_JSON_PATH) as f:
+        return json.load(f)
+
+SUPPORTED_MODELS: list[dict[str, Any]] = _load_models()
+
+_RUNTIME_PRICING_PATH = _MODELS_JSON_PATH.parent / "runtime_pricing.json"
+
+def _load_runtime_pricing() -> dict[str, Any]:
+    with open(_RUNTIME_PRICING_PATH) as f:
+        return json.load(f)
+
+AGENTCORE_RUNTIME_PRICING: dict[str, Any] = _load_runtime_pricing()
 
 
 # ---------------------------------------------------------------------------
@@ -440,9 +434,17 @@ def get_cognito_pools(user: UserInfo = Depends(require_scopes("agent:read"))) ->
 
 
 @router.get("/models")
-def get_models(user: UserInfo = Depends(require_scopes("agent:read"))) -> list[dict]:
-    """Return list of supported Bedrock model IDs."""
-    return SUPPORTED_MODELS
+def get_models(
+    user: UserInfo = Depends(require_scopes("agent:read")),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """Return list of admin-enabled model IDs. If none configured, returns all."""
+    from app.routers.settings import get_enabled_model_ids
+    enabled = get_enabled_model_ids(db)
+    if not enabled:
+        return SUPPORTED_MODELS
+    enabled_set = set(enabled)
+    return [m for m in SUPPORTED_MODELS if m["model_id"] in enabled_set]
 
 
 @router.get("/models/pricing")
@@ -1677,6 +1679,11 @@ def patch_agent(
     agent = get_agent_or_404(agent_id, db)
     if "description" in request.model_fields_set:
         agent.description = request.description
+        if agent.runtime_id and agent.source == "deploy":
+            try:
+                update_runtime(agent.runtime_id, description=request.description or "")
+            except Exception:
+                logger.warning("Failed to propagate description to AgentCore for agent %s", agent_id, exc_info=True)
     if "model_id" in request.model_fields_set and request.model_id is not None:
         valid_ids = {m["model_id"] for m in SUPPORTED_MODELS}
         if request.model_id not in valid_ids:

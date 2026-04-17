@@ -1,4 +1,4 @@
-import { apiFetch, BASE_URL, getAuthToken } from "./client";
+import { apiFetch, BASE_URL, getAuthToken, tryRefreshToken } from "./client";
 import type {
   InvokeRequest,
   InvocationResponse,
@@ -60,12 +60,26 @@ export async function invokeAgentStream(
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${BASE_URL}/api/agents/${agentId}/invoke`, {
+  let response = await fetch(`${BASE_URL}/api/agents/${agentId}/invoke`, {
     method: "POST",
     headers,
     body: JSON.stringify(request),
     signal,
   });
+
+  // On 401, attempt token refresh and retry once (mirrors apiFetch behavior)
+  if (response.status === 401) {
+    const newToken = await tryRefreshToken();
+    if (newToken) {
+      headers["Authorization"] = `Bearer ${newToken}`;
+      response = await fetch(`${BASE_URL}/api/agents/${agentId}/invoke`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(request),
+        signal,
+      });
+    }
+  }
 
   if (!response.ok) {
     let detail = `HTTP ${response.status}`;

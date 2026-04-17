@@ -1,10 +1,9 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Key, Pencil, Check, X } from "lucide-react";
+import { Key, Pencil, Check, X, Wrench } from "lucide-react";
 import { fetchModels } from "@/api/agents";
 import type { ModelOption } from "@/api/types";
 import { groupModels } from "@/lib/models";
@@ -98,7 +97,7 @@ export function AgentDetailPage({
   const canInvokeThisAgent = isSuperAdmin || !agentGroup || allowedGroups.includes(agentGroup);
   const effectiveCanInvoke = canInvoke && canInvokeThisAgent;
   const { user, browserSessionId } = useAuth();
-  const { streamedText, sessionStart, sessionEnd, isStreaming, error, rawError, invoke, cancel } =
+  const { streamedText, segments, sessionStart, sessionEnd, isStreaming, error, rawError, invoke, cancel } =
     useInvoke(agent.id, agent.authorizer_config?.name ?? undefined);
 
   const handleInvoke = async (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string, modelId?: string) => {
@@ -111,17 +110,12 @@ export function AgentDetailPage({
 
   return (
     <div className="space-y-4">
-      {/* Description */}
+      {/* Overview */}
       <Card>
         <CardHeader className="pb-0">
           <div className="flex items-center gap-2">
-            <CardTitle className="text-sm font-medium">Description</CardTitle>
+            <CardTitle className="text-sm font-medium">Overview</CardTitle>
             <RegistryStatusBadge status={agent.registry_status} showUnregistered={registryEnabled} registryEnabled={registryEnabled} />
-            {!editingDescription && onPatchAgent && (
-              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleEditDescription}>
-                <Pencil className="h-3.5 w-3.5" />
-              </Button>
-            )}
             {!registryReadOnly && registryEnabled && (
               <RegistryActions
                 resourceType="agent"
@@ -133,31 +127,52 @@ export function AgentDetailPage({
             )}
           </div>
         </CardHeader>
-        <CardContent className="pt-2">
+        <CardContent className="pt-0 space-y-1 text-xs text-muted-foreground">
+          {/* Description */}
           {editingDescription ? (
             <div className="space-y-2">
               <Textarea
                 value={descriptionDraft}
                 onChange={(e) => setDescriptionDraft(e.target.value)}
                 placeholder="Describe what this agent does..."
-                className="text-sm resize-none"
+                className="text-xs resize-none"
                 rows={3}
               />
               <div className="flex gap-2">
-                <Button size="sm" onClick={() => void handleSaveDescription()} disabled={savingDescription}>
-                  <Check className="h-3.5 w-3.5 mr-1" />
+                <Button size="sm" className="h-6 text-xs" onClick={() => void handleSaveDescription()} disabled={savingDescription}>
+                  <Check className="h-3 w-3 mr-1" />
                   Save
                 </Button>
-                <Button size="sm" variant="ghost" onClick={handleCancelDescription} disabled={savingDescription}>
-                  <X className="h-3.5 w-3.5 mr-1" />
+                <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={handleCancelDescription} disabled={savingDescription}>
+                  <X className="h-3 w-3 mr-1" />
                   Cancel
                 </Button>
               </div>
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">
-              {agent.description ?? <span className="italic">No description set.</span>}
-            </p>
+            <div className="flex items-center gap-1.5">
+              <span className="font-medium shrink-0">Description:</span>
+              <span>{agent.description ?? <span className="italic">No description set.</span>}</span>
+              {onPatchAgent && (
+                <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={handleEditDescription}>
+                  <Pencil className="h-3 w-3" />
+                </Button>
+              )}
+            </div>
+          )}
+          {isDeployed && (
+            <div>
+              <DeploymentPanel
+                agent={agent}
+                onRedeploy={onRedeploy ?? (async () => {})}
+                onPatchAgent={onPatchAgent}
+              />
+            </div>
+          )}
+          {!isDeployed && agent.model_id && onPatchAgent && (
+            <div className="pt-2">
+              <RegisteredAgentModelConfig agent={agent} onPatchAgent={onPatchAgent} />
+            </div>
           )}
         </CardContent>
       </Card>
@@ -252,57 +267,41 @@ export function AgentDetailPage({
             </div>
           </CardHeader>
           <CardContent>
+            {isStreaming && segments.length === 0 && (
+              <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
+                <span className="flex gap-0.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:0ms]" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:150ms]" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:300ms]" />
+                </span>
+                <span>Thinking…</span>
+              </div>
+            )}
             <div className="rounded border bg-input-bg p-4 text-sm">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                  h1: ({ children }) => <h1 className="text-base font-bold mb-2 mt-3 first:mt-0">{children}</h1>,
-                  h2: ({ children }) => <h2 className="text-sm font-bold mb-2 mt-3 first:mt-0">{children}</h2>,
-                  h3: ({ children }) => <h3 className="text-sm font-semibold mb-1 mt-2 first:mt-0">{children}</h3>,
-                  ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
-                  ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
-                  li: ({ children }) => <li className="leading-snug">{children}</li>,
-                  pre: ({ children }) => {
-                    const codeClass = (children as { props?: { className?: string } } | null)?.props?.className ?? '';
-                    if (codeClass.includes('language-json')) {
-                      return <CollapsibleJsonBlock>{children}</CollapsibleJsonBlock>;
-                    }
-                    return (
-                      <pre className="mb-2 overflow-x-auto rounded bg-black/10 dark:bg-white/10 p-3 text-xs font-mono">{children}</pre>
-                    );
-                  },
-                  code: ({ className, children }) =>
-                    className?.startsWith("language-") ? (
-                      <code className={className}>{children}</code>
-                    ) : (
-                      <code className="rounded bg-black/10 dark:bg-white/10 px-1 py-0.5 text-xs font-mono">{children}</code>
-                    ),
-                  blockquote: ({ children }) => (
-                    <blockquote className="border-l-2 border-muted-foreground/30 pl-3 italic text-muted-foreground mb-2">{children}</blockquote>
-                  ),
-                  table: ({ children }) => (
-                    <div className="overflow-x-auto mb-2">
-                      <table className="border-collapse text-xs w-full">{children}</table>
-                    </div>
-                  ),
-                  thead: ({ children }) => <thead>{children}</thead>,
-                  tbody: ({ children }) => <tbody>{children}</tbody>,
-                  tr: ({ children }) => <tr>{children}</tr>,
-                  th: ({ children }) => (
-                    <th className="border border-border px-2 py-1 text-left font-semibold bg-muted/50">{children}</th>
-                  ),
-                  td: ({ children }) => (
-                    <td className="border border-border px-2 py-1">{children}</td>
-                  ),
-                  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-                  a: ({ href, children }) => (
-                    <a href={href} className="underline underline-offset-2 hover:opacity-80" target="_blank" rel="noopener noreferrer">{children}</a>
-                  ),
-                }}
-              >
-                {streamedText}
-              </ReactMarkdown>
+              {(() => {
+                const blocks: React.ReactNode[] = [];
+                let toolGroup: { name: string; index: number; total: number; timestamp: number }[] = [];
+                let toolGroupStart = 0;
+                const flushTools = () => {
+                  if (toolGroup.length > 0) {
+                    const lastIdx = toolGroupStart + toolGroup.length - 1;
+                    const active = isStreaming && lastIdx === segments.length - 1;
+                    blocks.push(<ToolUseBlock key={`tools-${toolGroupStart}`} tools={toolGroup} isActive={active} />);
+                    toolGroup = [];
+                  }
+                };
+                segments.forEach((seg, i) => {
+                  if (seg.type === "tool_use") {
+                    if (toolGroup.length === 0) toolGroupStart = i;
+                    toolGroup.push({ name: seg.name, index: seg.index, total: seg.total, timestamp: seg.timestamp });
+                  } else {
+                    flushTools();
+                    blocks.push(<MarkdownBlock key={i} text={seg.content} />);
+                  }
+                });
+                flushTools();
+                return blocks;
+              })()}
               {isStreaming && (
                 <span className="inline-block w-1.5 h-4 bg-foreground/70 animate-pulse ml-0.5 align-text-bottom" />
               )}
@@ -311,24 +310,96 @@ export function AgentDetailPage({
         </Card>
       )}
 
-      {/* Deployment section — only for deployed agents */}
-      {isDeployed && (
-        <>
-          <Separator />
-          <h3 className="text-sm font-medium">Deployment</h3>
+    </div>
+  );
+}
 
-          <DeploymentPanel
-            agent={agent}
-            onRedeploy={onRedeploy ?? (async () => {})}
-            onPatchAgent={onPatchAgent}
-          />
-        </>
-      )}
+function formatToolName(raw: string): string {
+  const parts = raw.split("___");
+  return parts.length > 1 ? parts.slice(1).join(" / ") : raw;
+}
 
-      {/* Model configuration for registered (non-deployed) agents */}
-      {!isDeployed && agent.model_id && onPatchAgent && (
-        <RegisteredAgentModelConfig agent={agent} onPatchAgent={onPatchAgent} />
-      )}
+const mdComponents = {
+  p: ({ children }: { children?: React.ReactNode }) => <p className="mb-2 last:mb-0">{children}</p>,
+  h1: ({ children }: { children?: React.ReactNode }) => <h1 className="text-base font-bold mb-2 mt-3 first:mt-0">{children}</h1>,
+  h2: ({ children }: { children?: React.ReactNode }) => <h2 className="text-sm font-bold mb-2 mt-3 first:mt-0">{children}</h2>,
+  h3: ({ children }: { children?: React.ReactNode }) => <h3 className="text-sm font-semibold mb-1 mt-2 first:mt-0">{children}</h3>,
+  ul: ({ children }: { children?: React.ReactNode }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
+  ol: ({ children }: { children?: React.ReactNode }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
+  li: ({ children }: { children?: React.ReactNode }) => <li className="leading-snug">{children}</li>,
+  pre: ({ children }: { children?: React.ReactNode }) => {
+    const codeClass = (children as { props?: { className?: string } } | null)?.props?.className ?? "";
+    if (codeClass.includes("language-json")) {
+      return <CollapsibleJsonBlock>{children}</CollapsibleJsonBlock>;
+    }
+    return <pre className="mb-2 overflow-x-auto rounded bg-black/10 dark:bg-white/10 p-3 text-xs font-mono">{children}</pre>;
+  },
+  code: ({ className, children }: { className?: string; children?: React.ReactNode }) =>
+    className?.startsWith("language-") ? (
+      <code className={className}>{children}</code>
+    ) : (
+      <code className="rounded bg-black/10 dark:bg-white/10 px-1 py-0.5 text-xs font-mono">{children}</code>
+    ),
+  blockquote: ({ children }: { children?: React.ReactNode }) => (
+    <blockquote className="border-l-2 border-muted-foreground/30 pl-3 italic text-muted-foreground mb-2">{children}</blockquote>
+  ),
+  table: ({ children }: { children?: React.ReactNode }) => (
+    <div className="overflow-x-auto mb-2"><table className="border-collapse text-xs w-full">{children}</table></div>
+  ),
+  thead: ({ children }: { children?: React.ReactNode }) => <thead>{children}</thead>,
+  tbody: ({ children }: { children?: React.ReactNode }) => <tbody>{children}</tbody>,
+  tr: ({ children }: { children?: React.ReactNode }) => <tr>{children}</tr>,
+  th: ({ children }: { children?: React.ReactNode }) => (
+    <th className="border border-border px-2 py-1 text-left font-semibold bg-muted/50">{children}</th>
+  ),
+  td: ({ children }: { children?: React.ReactNode }) => (
+    <td className="border border-border px-2 py-1">{children}</td>
+  ),
+  strong: ({ children }: { children?: React.ReactNode }) => <strong className="font-semibold">{children}</strong>,
+  a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
+    <a href={href} className="underline underline-offset-2 hover:opacity-80" target="_blank" rel="noopener noreferrer">{children}</a>
+  ),
+};
+
+function MarkdownBlock({ text }: { text: string }) {
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+      {text}
+    </ReactMarkdown>
+  );
+}
+
+function ElapsedTimer({ since }: { since: number }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    setElapsed(Math.floor((Date.now() - since) / 1000));
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - since) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [since]);
+  return <span className="tabular-nums">({elapsed}s)</span>;
+}
+
+function ToolUseBlock({ tools, isActive }: { tools: { name: string; index: number; total: number; timestamp: number }[]; isActive: boolean }) {
+  const last = tools[tools.length - 1]!;
+  return (
+    <div className="py-1.5 my-1 text-xs text-muted-foreground border-l-2 border-muted-foreground/30 pl-2 space-y-0.5">
+      <div className="flex items-center gap-1.5">
+        <Wrench className="h-3 w-3 shrink-0" />
+        <span>Tool calls ({last.index}/{last.total}):</span>
+        {isActive && (
+          <>
+            <ElapsedTimer since={last.timestamp} />
+            <span className="flex gap-0.5 ml-0.5">
+              <span className="h-1 w-1 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:0ms]" />
+              <span className="h-1 w-1 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:150ms]" />
+              <span className="h-1 w-1 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:300ms]" />
+            </span>
+          </>
+        )}
+      </div>
+      {tools.map((t, i) => (
+        <div key={i} className="pl-[18px] font-medium text-foreground/70">{formatToolName(t.name)}</div>
+      ))}
     </div>
   );
 }
@@ -346,9 +417,6 @@ function RegisteredAgentModelConfig({ agent, onPatchAgent }: {
   useEffect(() => {
     fetchModels().then(setAllModels).catch(() => {});
   }, []);
-
-  const getDisplayName = (modelId: string) =>
-    allModels.find((m) => m.model_id === modelId)?.display_name ?? modelId;
 
   const handleEdit = () => {
     setDraft([...agent.allowed_model_ids]);
@@ -443,11 +511,16 @@ function RegisteredAgentModelConfig({ agent, onPatchAgent }: {
             </div>
           </div>
         ) : (
-          <div className="flex flex-wrap gap-1">
-            {agent.allowed_model_ids.map((id) => (
-              <Badge key={id} variant="outline" className="text-[10px] px-1.5 py-0">
-                {getDisplayName(id)}{id === agent.model_id ? " (default)" : ""}
-              </Badge>
+          <div className="space-y-1">
+            {groupModels(allModels.filter((m) => agent.allowed_model_ids.includes(m.model_id))).map(([group, models]) => (
+              <div key={group} className="flex flex-wrap gap-1 items-center">
+                <span className="text-[10px] font-medium text-muted-foreground w-16 shrink-0">{group}</span>
+                {models.map((m) => (
+                  <Badge key={m.model_id} variant="outline" className="text-[10px] px-1.5 py-0">
+                    {m.display_name}{m.model_id === agent.model_id ? " (default)" : ""}
+                  </Badge>
+                ))}
+              </div>
             ))}
           </div>
         )}

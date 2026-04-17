@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Send, Plus, Brain, LogOut, Bot, User, X, Loader2, Palette, RefreshCw, ChevronDown } from "lucide-react";
+import { Send, Plus, Brain, LogOut, Bot, User, X, Loader2, Palette, RefreshCw, ChevronDown, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import ReactMarkdown from "react-markdown";
@@ -19,6 +19,7 @@ interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
+  toolNames?: string[];
 }
 
 interface ChatPageProps {
@@ -108,7 +109,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     Map<number, { messages: ChatMessage[]; pendingPrompt: string | null; currentSessionId: string | null }>
   >(new Map());
 
-  const { streamedText, sessionStart, sessionEnd, isStreaming, currentToolName, error, invoke, cancel } = useInvoke(
+  const { streamedText, segments, sessionStart, sessionEnd, isStreaming, toolNames, error, invoke, cancel } = useInvoke(
     selectedAgentId ?? 0,
   );
 
@@ -247,6 +248,8 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
   const lastSessionEndRef = useRef<typeof sessionEnd>(null);
   const pendingPromptRef = useRef<string | null>(null);
   pendingPromptRef.current = pendingPrompt;
+  const toolNamesRef = useRef<string[]>([]);
+  toolNamesRef.current = toolNames;
   const streamedTextRef = useRef<string>("");
   streamedTextRef.current = streamedText;
 
@@ -265,6 +268,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
         // replaced by a new invocation (e.g. auto-sent queued prompt) by the time
         // the async fetch completes.
         const capturedPending = pendingPromptRef.current;
+        const capturedToolNames = toolNamesRef.current.length > 0 ? [...toolNamesRef.current] : undefined;
         getSession(selectedAgentId, sessionId)
           .then((session) => {
             const msgs: ChatMessage[] = [];
@@ -273,6 +277,12 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                 msgs.push({ id: `user-${inv.invocation_id}`, role: "user", text: inv.prompt_text });
               if (inv.response_text)
                 msgs.push({ id: `assistant-${inv.invocation_id}`, role: "assistant", text: inv.response_text });
+            }
+            // Attach tool names from the just-completed stream to the last assistant message
+            if (capturedToolNames) {
+              for (let i = msgs.length - 1; i >= 0; i--) {
+                if (msgs[i]!.role === "assistant") { msgs[i]!.toolNames = capturedToolNames; break; }
+              }
             }
             setMessages(msgs);
             // Only clear pendingPrompt if it still matches the prompt from this
@@ -762,7 +772,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                 ) : (
                   <div className="max-w-3xl mx-auto px-6 py-6 space-y-4">
                     {messages.map((msg) => (
-                      <MessageBubble key={msg.id} role={msg.role} text={msg.text} />
+                      <MessageBubble key={msg.id} role={msg.role} text={msg.text} toolNames={msg.toolNames} />
                     ))}
 
                     {/* In-flight user message */}
@@ -770,15 +780,14 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                       <MessageBubble role="user" text={pendingPrompt} />
                     )}
 
-                    {/* Thinking indicator — shown while waiting for first response chunk */}
-                    {isCurrentlyStreaming && !streamedText && <ThinkingBubble toolName={currentToolName} />}
+                    {/* Thinking indicator — shown while waiting for first segment */}
+                    {isCurrentlyStreaming && segments.length === 0 && <ThinkingBubble />}
 
-                    {/* Streaming bubble — switches on once text starts arriving */}
-                    {((isCurrentlyStreaming && !!streamedText) ||
+                    {/* Streaming bubble — renders segments inline (text + tool calls) */}
+                    {((isCurrentlyStreaming && segments.length > 0) ||
                       (!isCurrentlyStreaming && pendingPrompt !== null && !!streamedText)) && (
-                      <MessageBubble
-                        role="assistant"
-                        text={streamedText}
+                      <StreamingBubble
+                        segments={segments}
                         isStreaming={isCurrentlyStreaming}
                       />
                     )}
@@ -923,7 +932,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
   );
 }
 
-function ThinkingBubble({ toolName }: { toolName?: string | null }) {
+function ThinkingBubble() {
   const [dots, setDots] = useState(".");
 
   useEffect(() => {
@@ -938,12 +947,135 @@ function ThinkingBubble({ toolName }: { toolName?: string | null }) {
       <div className="bg-muted rounded-2xl px-4 py-3 flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
         <span>
-          {toolName
-            ? <>using <span className="font-medium">{toolName}</span></>
-            : "thinking"
-          }
+          thinking
           <span className="inline-block w-5 text-left">{dots}</span>
         </span>
+      </div>
+    </div>
+  );
+}
+
+function formatToolName(raw: string): string {
+  const parts = raw.split("___");
+  return parts.length > 1 ? parts.slice(1).join(" / ") : raw;
+}
+
+function ChatElapsedTimer({ since }: { since: number }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    setElapsed(Math.floor((Date.now() - since) / 1000));
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - since) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [since]);
+  return <span className="tabular-nums">({elapsed}s)</span>;
+}
+
+function ChatToolUseBlock({ tools, isActive }: { tools: { name: string; index: number; total: number; timestamp: number }[]; isActive: boolean }) {
+  const last = tools[tools.length - 1]!;
+  return (
+    <div className="py-1.5 my-1 text-xs text-muted-foreground border-l-2 border-muted-foreground/30 pl-2 space-y-0.5">
+      <div className="flex items-center gap-1.5">
+        <Wrench className="h-3 w-3 shrink-0" />
+        <span>Tool calls ({last.index}/{last.total}):</span>
+        {isActive && (
+          <>
+            <ChatElapsedTimer since={last.timestamp} />
+            <span className="flex gap-0.5 ml-0.5">
+              <span className="h-1 w-1 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:0ms]" />
+              <span className="h-1 w-1 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:150ms]" />
+              <span className="h-1 w-1 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:300ms]" />
+            </span>
+          </>
+        )}
+      </div>
+      {tools.map((t, i) => (
+        <div key={i} className="pl-[18px] font-medium text-foreground/70">{formatToolName(t.name)}</div>
+      ))}
+    </div>
+  );
+}
+
+function StreamingBubble({
+  segments,
+  isStreaming,
+}: {
+  segments: { type: string; content?: string; name?: string; index?: number; total?: number; timestamp?: number }[];
+  isStreaming: boolean;
+}) {
+  return (
+    <div className="flex justify-start">
+      <div className="max-w-[84%] rounded-2xl px-4 py-3 text-sm break-words bg-muted">
+        {(() => {
+          const blocks: React.ReactNode[] = [];
+          let toolGroup: { name: string; index: number; total: number; timestamp: number }[] = [];
+          let toolGroupStart = 0;
+          const flushTools = () => {
+            if (toolGroup.length > 0) {
+              const lastIdx = toolGroupStart + toolGroup.length - 1;
+              const active = isStreaming && lastIdx === segments.length - 1;
+              blocks.push(<ChatToolUseBlock key={`tools-${toolGroupStart}`} tools={toolGroup} isActive={active} />);
+              toolGroup = [];
+            }
+          };
+          segments.forEach((seg, i) => {
+            if (seg.type === "tool_use") {
+              if (toolGroup.length === 0) toolGroupStart = i;
+              toolGroup.push({ name: seg.name!, index: seg.index!, total: seg.total!, timestamp: seg.timestamp! });
+            } else {
+              flushTools();
+              blocks.push(
+                <ReactMarkdown
+                  key={i}
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                    h1: ({ children }) => <h1 className="text-base font-bold mb-2 mt-3 first:mt-0">{children}</h1>,
+                    h2: ({ children }) => <h2 className="text-sm font-bold mb-2 mt-3 first:mt-0">{children}</h2>,
+                    h3: ({ children }) => <h3 className="text-sm font-semibold mb-1 mt-2 first:mt-0">{children}</h3>,
+                    ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
+                    ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
+                    li: ({ children }) => <li className="leading-snug">{children}</li>,
+                    pre: ({ children }) => {
+                      const codeClass = (children as { props?: { className?: string } } | null)?.props?.className ?? "";
+                      if (codeClass.includes("language-json")) {
+                        return <CollapsibleJsonBlock>{children}</CollapsibleJsonBlock>;
+                      }
+                      return <pre className="mb-2 overflow-x-auto rounded bg-black/10 dark:bg-white/10 p-3 text-xs font-mono">{children}</pre>;
+                    },
+                    code: ({ className, children }) =>
+                      className?.startsWith("language-") ? (
+                        <code className={className}>{children}</code>
+                      ) : (
+                        <code className="rounded bg-black/10 dark:bg-white/10 px-1 py-0.5 text-xs font-mono">{children}</code>
+                      ),
+                    blockquote: ({ children }) => (
+                      <blockquote className="border-l-2 border-muted-foreground/30 pl-3 italic text-muted-foreground mb-2">{children}</blockquote>
+                    ),
+                    table: ({ children }) => (
+                      <div className="overflow-x-auto mb-2"><table className="border-collapse text-xs w-full">{children}</table></div>
+                    ),
+                    thead: ({ children }) => <thead>{children}</thead>,
+                    tbody: ({ children }) => <tbody>{children}</tbody>,
+                    tr: ({ children }) => <tr>{children}</tr>,
+                    th: ({ children }) => <th className="border border-border px-2 py-1 text-left font-semibold bg-muted/50">{children}</th>,
+                    td: ({ children }) => <td className="border border-border px-2 py-1">{children}</td>,
+                    strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                    a: ({ href, children }) => (
+                      <a href={href} className="underline underline-offset-2 hover:opacity-80" target="_blank" rel="noopener noreferrer">{children}</a>
+                    ),
+                  }}
+                >
+                  {seg.content}
+                </ReactMarkdown>,
+              );
+            }
+          });
+          flushTools();
+          return blocks;
+        })()}
+        {isStreaming && (
+          <span className="inline-block w-1.5 h-4 bg-current animate-pulse ml-0.5 align-text-bottom opacity-70" />
+        )}
       </div>
     </div>
   );
@@ -953,10 +1085,12 @@ function MessageBubble({
   role,
   text,
   isStreaming,
+  toolNames,
 }: {
   role: "user" | "assistant";
   text: string;
   isStreaming?: boolean;
+  toolNames?: string[];
 }) {
   const isUser = role === "user";
   return (
@@ -966,6 +1100,17 @@ function MessageBubble({
           isUser ? "bg-primary text-primary-foreground" : "bg-muted"
         }`}
       >
+          {toolNames && toolNames.length > 0 && (
+            <div className="py-1 mb-2 text-xs text-muted-foreground border-l-2 border-muted-foreground/30 pl-2 space-y-0.5">
+              <div className="flex items-center gap-1.5">
+                <Wrench className="h-3 w-3 shrink-0" />
+                <span>Tool calls ({toolNames.length}/{toolNames.length}):</span>
+              </div>
+              {toolNames.map((name, i) => (
+                <div key={i} className="pl-[18px] font-medium text-foreground/70">{formatToolName(name)}</div>
+              ))}
+            </div>
+          )}
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{

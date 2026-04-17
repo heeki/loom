@@ -8,5 +8,5 @@ export function groupModels(models: ModelOption[]): [string, ModelOption[]][] {
     if (list) list.push(m);
     else groups.set(key, [m]);
   }
-  return Array.from(groups.entries());
+  return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
 }
