@@ -285,6 +285,14 @@ def delete_a2a_agent(
     db: Session = Depends(get_db),
 ) -> A2aAgentResponse:
     agent = _get_agent_or_404(agent_id, db)
+    if agent.registry_record_id:
+        try:
+            from app.services.registry import get_registry_client
+            reg_client = get_registry_client()
+            reg_client.delete_record(agent.registry_record_id)
+            logger.info("Deleted registry record %s for A2A agent %s", agent.registry_record_id, agent.id)
+        except Exception as reg_err:
+            logger.warning("Failed to delete registry record for A2A agent %s: %s", agent.id, reg_err)
     result = A2aAgentResponse(**agent.to_dict())
     db.delete(agent)
     db.commit()

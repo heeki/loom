@@ -21,9 +21,13 @@ router = APIRouter(prefix="/api/registry", tags=["registry"])
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
+MCP_NAMESPACES = ("aws.agentcore", "remote.mcp", "npm", "custom")
+
+
 class RegistryRecordCreateRequest(BaseModel):
     resource_type: str = Field(..., description="Resource type: 'mcp', 'a2a', or 'agent'")
     resource_id: int = Field(..., description="ID of the MCP server, A2A agent, or agent")
+    namespace: str | None = Field(None, description="Namespace prefix for MCP servers")
 
 
 class RegistryRecordResponse(BaseModel):
@@ -153,6 +157,12 @@ def create_record(
     client = get_registry_client()
 
     if request.resource_type == "mcp":
+        ns = request.namespace or "aws.agentcore"
+        if ns not in MCP_NAMESPACES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"namespace must be one of: {', '.join(MCP_NAMESPACES)}",
+            )
         server = db.query(McpServer).filter(McpServer.id == request.resource_id).first()
         if not server:
             raise HTTPException(
@@ -160,7 +170,7 @@ def create_record(
                 detail=f"MCP server with id {request.resource_id} not found",
             )
         tools = db.query(McpTool).filter(McpTool.server_id == server.id).all()
-        descriptors = client.build_mcp_descriptors(server, tools)
+        descriptors = client.build_mcp_descriptors(server, tools, namespace=ns)
         name = server.name
         description = server.description
         descriptor_type = "MCP"

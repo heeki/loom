@@ -198,14 +198,29 @@ class TestRegistryRouter(unittest.TestCase):
         response = self.client.post("/api/registry/records", json={
             "resource_type": "mcp",
             "resource_id": server.id,
+            "namespace": "remote.mcp",
         })
         self.assertEqual(response.status_code, 201)
         data = response.json()
         self.assertEqual(data["record_id"], "rec-new")
+        mock_client.build_mcp_descriptors.assert_called_once()
+        call_kwargs = mock_client.build_mcp_descriptors.call_args
+        self.assertEqual(call_kwargs.kwargs.get("namespace"), "remote.mcp")
 
         self.session.refresh(server)
         self.assertEqual(server.registry_record_id, "rec-new")
         self.assertEqual(server.registry_status, "DRAFT")
+
+    @patch("app.routers.registry.get_registry_client")
+    def test_create_record_mcp_invalid_namespace(self, mock_get_client):
+        server = self._create_mcp_server()
+        mock_get_client.return_value = MagicMock()
+        response = self.client.post("/api/registry/records", json={
+            "resource_type": "mcp",
+            "resource_id": server.id,
+            "namespace": "invalid.ns",
+        })
+        self.assertEqual(response.status_code, 400)
 
     @patch("app.routers.registry.get_registry_client")
     def test_create_record_a2a(self, mock_get_client):
@@ -485,18 +500,59 @@ class TestRegistryService(unittest.TestCase):
         mcp = descriptors["mcp"]
         self.assertIn("server", mcp)
         self.assertIn("tools", mcp)
+        self.assertNotIn("schemaVersion", mcp["server"])
         server_info = json.loads(mcp["server"]["inlineContent"])
         self.assertEqual(server_info["name"], "aws.agentcore/test-server")
         self.assertEqual(server_info["description"], "A test server")
+        self.assertEqual(server_info["protocolVersion"], "2025-12-11")
         self.assertEqual(server_info["version"], "1.0.0")
-        self.assertNotIn("protocolVersion", server_info)
-        self.assertNotIn("url", server_info)
-        self.assertNotIn("transport", server_info)
+        self.assertIn("capabilities", server_info)
+        self.assertEqual(server_info["serverInfo"]["name"], "aws.agentcore/test-server")
+        self.assertEqual(server_info["serverInfo"]["version"], "1.0.0")
+        self.assertEqual(server_info["instructions"], "A test server")
+        self.assertEqual(server_info["packages"][0]["identifier"], "aws.agentcore/test-server")
+        self.assertNotIn("protocolVersion", mcp["tools"])
         tools_wrapper = json.loads(mcp["tools"]["inlineContent"])
         self.assertIn("tools", tools_wrapper)
         self.assertEqual(len(tools_wrapper["tools"]), 1)
         self.assertEqual(tools_wrapper["tools"][0]["name"], "hello")
         self.assertIn("inputSchema", tools_wrapper["tools"][0])
+
+    def test_build_mcp_descriptors_truncates_long_descriptions(self):
+        from app.services.registry import RegistryClient
+
+        long_desc = "A" * 150
+        server = McpServer(
+            name="test-server",
+            description=long_desc,
+            endpoint_url="http://localhost:3000/mcp",
+            transport_type="sse",
+        )
+        tool = McpTool(server_id=1, tool_name="hello", description=long_desc)
+        tool.set_input_schema({"type": "object", "properties": {}})
+
+        descriptors = RegistryClient.build_mcp_descriptors(server, [tool])
+        mcp = descriptors["mcp"]
+        server_info = json.loads(mcp["server"]["inlineContent"])
+        self.assertEqual(len(server_info["description"]), 100)
+        self.assertEqual(len(server_info["instructions"]), 100)
+        tools_wrapper = json.loads(mcp["tools"]["inlineContent"])
+        self.assertEqual(len(tools_wrapper["tools"][0]["description"]), 100)
+
+    def test_build_mcp_descriptors_custom_namespace(self):
+        from app.services.registry import RegistryClient
+
+        server = McpServer(
+            name="exa-search",
+            description="Exa search",
+            endpoint_url="http://localhost:3000/mcp",
+            transport_type="sse",
+        )
+        descriptors = RegistryClient.build_mcp_descriptors(server, [], namespace="remote.mcp")
+        server_info = json.loads(descriptors["mcp"]["server"]["inlineContent"])
+        self.assertEqual(server_info["name"], "remote.mcp/exa-search")
+        self.assertEqual(server_info["serverInfo"]["name"], "remote.mcp/exa-search")
+        self.assertEqual(server_info["packages"][0]["identifier"], "remote.mcp/exa-search")
 
     def test_build_agent_descriptors(self):
         from app.services.registry import RegistryClient

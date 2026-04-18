@@ -87,3 +87,18 @@ export function updateServerAccess(serverId: number, request: McpAccessUpdateReq
     body: JSON.stringify(request),
   });
 }
+
+export function setUserApiKey(serverId: number, apiKey: string): Promise<{ has_user_api_key: boolean }> {
+  return apiFetch(`/api/mcp/servers/${serverId}/api-key`, {
+    method: "PUT",
+    body: JSON.stringify({ api_key: apiKey }),
+  });
+}
+
+export function getUserApiKeyStatus(serverId: number): Promise<{ has_user_api_key: boolean }> {
+  return apiFetch(`/api/mcp/servers/${serverId}/api-key/status`);
+}
+
+export function deleteUserApiKey(serverId: number): Promise<{ has_user_api_key: boolean }> {
+  return apiFetch(`/api/mcp/servers/${serverId}/api-key`, { method: "DELETE" });
+}

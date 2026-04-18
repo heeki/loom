@@ -1,9 +1,12 @@
 """MCP server connection and tool discovery service."""
 import json
 import logging
+import os
 from typing import Any
 
 import httpx
+
+from app.services.secrets import get_secret
 
 logger = logging.getLogger(__name__)
 
@@ -51,13 +54,38 @@ def _get_oauth2_token(server: Any) -> str | None:
         return None
 
 
-def _build_headers(server: Any) -> dict[str, str]:
+def resolve_api_key(server: Any, user_sub: str | None = None) -> str | None:
+    """Resolve API key from Secrets Manager. Admin key for admin context, user key for user context."""
+    if getattr(server, "auth_type", None) != "api_key":
+        return None
+    region = os.getenv("AWS_REGION", "us-east-1")
+    name = getattr(server, "name", "")
+    if user_sub:
+        try:
+            return get_secret(f"loom/mcp/{name}/api-key/{user_sub}", region)
+        except Exception:
+            return None
+    if getattr(server, "has_admin_api_key", None) == "true":
+        try:
+            return get_secret(f"loom/mcp/{name}/admin-api-key", region)
+        except Exception:
+            return None
+    return None
+
+
+def _build_headers(server: Any, api_key: str | None = None) -> dict[str, str]:
     """Build request headers, including auth if configured."""
     headers: dict[str, str] = {"Content-Type": "application/json"}
     if server.auth_type == "oauth2":
         token = _get_oauth2_token(server)
         if token:
             headers["Authorization"] = f"Bearer {token}"
+    elif server.auth_type == "api_key" and api_key:
+        header_name = getattr(server, "api_key_header_name", "x-api-key") or "x-api-key"
+        if header_name.lower() == "authorization":
+            headers["Authorization"] = f"Bearer {api_key}"
+        else:
+            headers[header_name] = api_key
     return headers
 
 
@@ -73,9 +101,10 @@ def _jsonrpc_request(method: str, params: dict | None = None, req_id: int = 1) -
     return msg
 
 
-def _call_streamable_http(server: Any, method: str, params: dict | None = None) -> dict | None:
+def _call_streamable_http(server: Any, method: str, params: dict | None = None, api_key: str | None = None) -> dict | None:
     """Call an MCP server using Streamable HTTP (POST JSON-RPC)."""
-    headers = _build_headers(server)
+    headers = _build_headers(server, api_key)
+    headers["Accept"] = "application/json, text/event-stream"
     body = _jsonrpc_request(method, params)
 
     try:
@@ -98,14 +127,14 @@ def _call_streamable_http(server: Any, method: str, params: dict | None = None) 
         return None
 
 
-def _call_sse(server: Any, method: str, params: dict | None = None) -> dict | None:
+def _call_sse(server: Any, method: str, params: dict | None = None, api_key: str | None = None) -> dict | None:
     """Call an MCP server using SSE transport.
 
     SSE transport: POST JSON-RPC to the endpoint, receive SSE stream back.
     Some SSE servers accept POST directly; others require establishing an SSE
     connection first. We try the POST approach which is the MCP standard.
     """
-    headers = _build_headers(server)
+    headers = _build_headers(server, api_key)
     headers["Accept"] = "text/event-stream"
     body = _jsonrpc_request(method, params)
 
@@ -148,15 +177,15 @@ def _parse_sse_response(text: str) -> dict | None:
     return None
 
 
-def _call_mcp(server: Any, method: str, params: dict | None = None) -> dict | None:
+def _call_mcp(server: Any, method: str, params: dict | None = None, api_key: str | None = None) -> dict | None:
     """Call an MCP server using the configured transport."""
     if server.transport_type == "streamable_http":
-        return _call_streamable_http(server, method, params)
+        return _call_streamable_http(server, method, params, api_key)
     else:
-        return _call_sse(server, method, params)
+        return _call_sse(server, method, params, api_key)
 
 
-def test_mcp_connection(server: Any) -> dict:
+def test_mcp_connection(server: Any, api_key: str | None = None) -> dict:
     """Test connectivity to an MCP server.
 
     Sends an `initialize` JSON-RPC request to verify the server is reachable
@@ -168,7 +197,7 @@ def test_mcp_connection(server: Any) -> dict:
         "clientInfo": {"name": "loom", "version": "1.0.0"},
     }
 
-    result = _call_mcp(server, "initialize", init_params)
+    result = _call_mcp(server, "initialize", init_params, api_key)
 
     if result is None:
         return {"success": False, "message": f"Failed to connect to {server.endpoint_url}"}
@@ -185,9 +214,9 @@ def test_mcp_connection(server: Any) -> dict:
     return {"success": True, "message": f"Connected to {server_name}{version_str}"}
 
 
-def fetch_mcp_tools(server: Any) -> list[dict]:
+def fetch_mcp_tools(server: Any, api_key: str | None = None) -> list[dict]:
     """Fetch available tools from an MCP server via the tools/list method."""
-    result = _call_mcp(server, "tools/list")
+    result = _call_mcp(server, "tools/list", api_key=api_key)
 
     if result is None:
         logger.warning("No response from %s for tools/list", server.endpoint_url)
@@ -214,14 +243,14 @@ def fetch_mcp_tools(server: Any) -> list[dict]:
     return tools
 
 
-def invoke_mcp_tool(server: Any, tool_name: str, arguments: dict) -> dict:
+def invoke_mcp_tool(server: Any, tool_name: str, arguments: dict, api_key: str | None = None) -> dict:
     """Invoke a tool on an MCP server via the tools/call method.
 
     Returns a dict with 'success', 'result' (on success), and 'error' (on failure).
     The 'request' field always contains the sent arguments for display purposes.
     """
     params = {"name": tool_name, "arguments": arguments}
-    result = _call_mcp(server, "tools/call", params)
+    result = _call_mcp(server, "tools/call", params, api_key)
 
     if result is None:
         return {

@@ -31,14 +31,15 @@ interface A2aAgentsPageProps {
   viewMode: "cards" | "table";
   onViewModeChange: (mode: "cards" | "table") => void;
   readOnly?: boolean;
+  initialSelectedId?: number | null;
 }
 
-export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly }: A2aAgentsPageProps) {
+export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly, initialSelectedId }: A2aAgentsPageProps) {
   const { timezone } = useTimezone();
   const { user, browserSessionId } = useAuth();
   const { agents, loading, fetchAgents, createAgent, updateAgent, deleteAgent, refreshCard } = useA2aAgents();
   const [showAddForm, setShowAddForm] = useState(false);
-  const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
+  const [selectedAgentId, setSelectedAgentId] = useState<number | null>(initialSelectedId ?? null);
   const [detailTab, setDetailTab] = useState<"card" | "access">("card");
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | null>(null);
   const [editingAgent, setEditingAgent] = useState<A2aAgent | null>(null);

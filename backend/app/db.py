@@ -106,6 +106,8 @@ def _migrate_add_columns(eng) -> None:
         ("agents", "description", "TEXT"),
         ("mcp_servers", "registry_record_id", "VARCHAR"),
         ("mcp_servers", "registry_status", "VARCHAR"),
+        ("mcp_servers", "api_key_header_name", "VARCHAR"),
+        ("mcp_servers", "has_admin_api_key", "VARCHAR"),
         ("a2a_agents", "registry_record_id", "VARCHAR"),
         ("a2a_agents", "registry_status", "VARCHAR"),
         ("agents", "registry_record_id", "VARCHAR"),

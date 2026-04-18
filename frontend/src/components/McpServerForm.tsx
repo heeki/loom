@@ -28,11 +28,13 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
   const [transportType, setTransportType] = useState<"sse" | "streamable_http">(
     initialData?.transport_type ?? "sse",
   );
-  const [authType, setAuthType] = useState<"none" | "oauth2">(initialData?.auth_type ?? "none");
+  const [authType, setAuthType] = useState<"none" | "oauth2" | "api_key">(initialData?.auth_type ?? "none");
   const [wellKnownUrl, setWellKnownUrl] = useState(initialData?.oauth2_well_known_url ?? "");
   const [clientId, setClientId] = useState(initialData?.oauth2_client_id ?? "");
   const [clientSecret, setClientSecret] = useState("");
   const [scopes, setScopes] = useState(initialData?.oauth2_scopes ?? "");
+  const [apiKeyHeaderName, setApiKeyHeaderName] = useState(initialData?.api_key_header_name ?? "x-api-key");
+  const [apiKey, setApiKey] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
@@ -53,6 +55,10 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
         if (clientId.trim()) request.oauth2_client_id = clientId.trim();
         if (clientSecret) request.oauth2_client_secret = clientSecret;
         if (scopes.trim()) request.oauth2_scopes = scopes.trim();
+      }
+      if (authType === "api_key") {
+        request.api_key_header_name = apiKeyHeaderName;
+        if (apiKey) request.api_key = apiKey;
       }
       await onSubmit(request);
     } finally {
@@ -80,6 +86,10 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
           if (clientSecret) config.oauth2_client_secret = clientSecret;
           if (scopes.trim()) config.oauth2_scopes = scopes.trim();
         }
+        if (authType === "api_key") {
+          (config as Record<string, string>).api_key_header_name = apiKeyHeaderName;
+          if (apiKey) (config as Record<string, string>).api_key = apiKey;
+        }
         result = await testConnectionPreCreate(config);
       }
       setTestResult(result);
@@ -102,13 +112,15 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
             if (parsed.transport_type && ["sse", "streamable_http"].includes(parsed.transport_type)) {
               setTransportType(parsed.transport_type);
             }
-            if (parsed.auth_type && ["none", "oauth2"].includes(parsed.auth_type)) {
+            if (parsed.auth_type && ["none", "oauth2", "api_key"].includes(parsed.auth_type)) {
               setAuthType(parsed.auth_type);
             }
             if (parsed.oauth2_well_known_url !== undefined) setWellKnownUrl(parsed.oauth2_well_known_url);
             if (parsed.oauth2_client_id !== undefined) setClientId(parsed.oauth2_client_id);
             if (parsed.oauth2_client_secret !== undefined) setClientSecret(parsed.oauth2_client_secret);
             if (parsed.oauth2_scopes !== undefined) setScopes(parsed.oauth2_scopes);
+            if (parsed.api_key_header_name !== undefined) setApiKeyHeaderName(parsed.api_key_header_name);
+            if (parsed.api_key !== undefined) setApiKey(parsed.api_key);
             return null;
           } catch {
             return "Invalid JSON. Please check the format and try again.";
@@ -127,9 +139,13 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
             result.oauth2_client_secret = "(redacted)";
             if (scopes) result.oauth2_scopes = scopes;
           }
+          if (authType === "api_key") {
+            result.api_key_header_name = apiKeyHeaderName;
+            result.api_key = "(redacted)";
+          }
           return JSON.stringify(result, null, 2);
         }}
-        placeholder={'{"name": "...", "endpoint_url": "https://...", "transport_type": "sse", "auth_type": "oauth2", "oauth2_well_known_url": "https://...", "oauth2_client_id": "...", "oauth2_client_secret": "...", "oauth2_scopes": "..."}'}
+        placeholder={'{"name": "...", "endpoint_url": "https://...", "transport_type": "sse", "auth_type": "oauth2|api_key", "oauth2_well_known_url": "https://...", "oauth2_client_id": "...", "oauth2_client_secret": "...", "oauth2_scopes": "...", "api_key_header_name": "x-api-key", "api_key": "..."}'}
       />
 
       <div className="flex gap-3">
@@ -190,6 +206,15 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
             />
             OAuth2
           </label>
+          <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+            <input
+              type="radio"
+              checked={authType === "api_key"}
+              onChange={() => setAuthType("api_key")}
+              className="h-3.5 w-3.5"
+            />
+            API Key
+          </label>
         </div>
 
         {authType === "oauth2" && (
@@ -222,6 +247,34 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
             <div>
               <label className="text-xs text-muted-foreground">Scopes</label>
               <Input value={scopes} onChange={(e) => setScopes(e.target.value)} placeholder="openid profile (space-separated)" />
+            </div>
+          </div>
+        )}
+
+        {authType === "api_key" && (
+          <div className="space-y-2 pl-2 border-l-2 border-border ml-1">
+            <div className="flex gap-3">
+              <div className="w-[200px]">
+                <label className="text-xs text-muted-foreground">Header Name</label>
+                <Select value={apiKeyHeaderName} onValueChange={setApiKeyHeaderName}>
+                  <SelectTrigger className="w-full text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="x-api-key">x-api-key</SelectItem>
+                    <SelectItem value="Authorization">Authorization</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex-1 min-w-0">
+                <label className="text-xs text-muted-foreground">API Key</label>
+                <Input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder={initialData?.id ? "(unchanged)" : "API key"}
+                />
+              </div>
             </div>
           </div>
         )}

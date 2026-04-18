@@ -3,6 +3,14 @@ import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import * as registryApi from "@/api/registry";
+import type { McpNamespace, RegistryRecordCreateRequest } from "@/api/types";
+
+const MCP_NAMESPACES: { value: McpNamespace; label: string }[] = [
+  { value: "aws.agentcore", label: "aws.agentcore" },
+  { value: "remote.mcp", label: "remote.mcp" },
+  { value: "npm", label: "npm" },
+  { value: "custom", label: "custom" },
+];
 
 interface RegistryActionsProps {
   resourceType: "mcp" | "a2a" | "agent";
@@ -24,6 +32,7 @@ export function RegistryActions({ resourceType, resourceId, registryRecordId, re
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [approveReason, setApproveReason] = useState("");
   const [showApproveInput, setShowApproveInput] = useState(false);
+  const [namespace, setNamespace] = useState<McpNamespace>("aws.agentcore");
 
   const timerActive = creating || submitting || approving || rejecting;
   useEffect(() => {
@@ -72,17 +81,33 @@ export function RegistryActions({ resourceType, resourceId, registryRecordId, re
 
   if (!registryRecordId && !registryStatus) {
     return (
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+        {resourceType === "mcp" && (
+          <select
+            value={namespace}
+            onChange={(e) => setNamespace(e.target.value as McpNamespace)}
+            className="h-6 text-xs border rounded px-1 bg-input-bg"
+            disabled={loading || creating}
+          >
+            {MCP_NAMESPACES.map((ns) => (
+              <option key={ns.value} value={ns.value}>{ns.label}</option>
+            ))}
+          </select>
+        )}
         <Button
           size="sm"
           variant="outline"
           className="h-6 text-xs w-[5.5rem] justify-center"
           disabled={loading || creating}
-          onClick={(e) => {
-            e.stopPropagation();
+          onClick={() => {
             setCreating(true);
+            const req: RegistryRecordCreateRequest = {
+              resource_type: resourceType,
+              resource_id: resourceId,
+              ...(resourceType === "mcp" ? { namespace } : {}),
+            };
             void handleAction(
-              () => registryApi.createRegistryRecord({ resource_type: resourceType, resource_id: resourceId }).then(() => {}),
+              () => registryApi.createRegistryRecord(req).then(() => {}),
               "Registered in registry"
             ).then((ok) => { if (!ok) setCreating(false); });
           }}

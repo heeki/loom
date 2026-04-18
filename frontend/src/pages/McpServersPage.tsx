@@ -20,6 +20,8 @@ import { useMcpServers } from "@/hooks/useMcpServers";
 import { McpServerForm } from "@/components/McpServerForm";
 import { McpToolList } from "@/components/McpToolList";
 import { McpAccessControl } from "@/components/McpAccessControl";
+import { setUserApiKey, getUserApiKeyStatus, deleteUserApiKey } from "@/api/mcp";
+import { Input } from "@/components/ui/input";
 import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "@/components/SortableCardGrid";
 import { SortableTableHead, sortRows } from "@/components/SortableTableHead";
 import { RegistryStatusBadge } from "@/components/RegistryStatusBadge";
@@ -30,15 +32,16 @@ interface McpServersPageProps {
   viewMode: "cards" | "table";
   onViewModeChange: (mode: "cards" | "table") => void;
   readOnly?: boolean;
+  initialSelectedId?: number | null;
 }
 
-export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServersPageProps) {
+export function McpServersPage({ viewMode, onViewModeChange, readOnly, initialSelectedId }: McpServersPageProps) {
   const { timezone } = useTimezone();
   const { user, browserSessionId } = useAuth();
   const { servers, loading, fetchServers, createServer, updateServer, deleteServer } = useMcpServers();
   const [showAddForm, setShowAddForm] = useState(false);
-  const [selectedServerId, setSelectedServerId] = useState<number | null>(null);
-  const [detailTab, setDetailTab] = useState<"tools" | "access">("tools");
+  const [selectedServerId, setSelectedServerId] = useState<number | null>(initialSelectedId ?? null);
+  const [detailTab, setDetailTab] = useState<"tools" | "access" | "api-key">("tools");
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | null>(null);
   const [editingServer, setEditingServer] = useState<McpServer | null>(null);
   const [registryEnabled, setRegistryEnabled] = useState(false);
@@ -143,6 +146,7 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
                   oauth2_well_known_url: editingServer.oauth2_well_known_url ?? undefined,
                   oauth2_client_id: editingServer.oauth2_client_id ?? undefined,
                   oauth2_scopes: editingServer.oauth2_scopes ?? undefined,
+                  api_key_header_name: editingServer.api_key_header_name ?? undefined,
                 }}
               />
             </CardContent>
@@ -150,14 +154,16 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
         )}
 
         <div className="flex rounded-md border text-sm w-fit" role="tablist">
-          {(["tools", "access"] as const).map((tab) => (
+          {(["tools", "access"] as const).map((tab, idx) => (
             <button
               key={tab}
               type="button"
               role="tab"
               aria-selected={detailTab === tab}
               className={`px-4 py-1.5 transition-colors ${
-                tab === "tools" ? "rounded-l-md" : "rounded-r-md"
+                idx === 0 ? "rounded-l-md" : ""
+              } ${
+                idx === 1 && selectedServer.auth_type !== "api_key" ? "rounded-r-md" : ""
               } ${
                 detailTab === tab
                   ? "bg-primary text-primary-foreground"
@@ -168,10 +174,28 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
               {tab === "tools" ? "Tools" : "Access"}
             </button>
           ))}
+          {selectedServer.auth_type === "api_key" && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={detailTab === "api-key"}
+              className={`px-4 py-1.5 transition-colors rounded-r-md ${
+                detailTab === "api-key"
+                  ? "bg-primary text-primary-foreground"
+                  : "hover:bg-accent"
+              }`}
+              onClick={() => setDetailTab("api-key")}
+            >
+              API Key
+            </button>
+          )}
         </div>
 
         {detailTab === "tools" && <McpToolList serverId={selectedServer.id} readOnly={readOnly} />}
         {detailTab === "access" && <McpAccessControl serverId={selectedServer.id} readOnly={readOnly} />}
+        {detailTab === "api-key" && selectedServer && (
+          <McpUserApiKeyPanel serverId={selectedServer.id} hasAdminApiKey={selectedServer.has_admin_api_key} />
+        )}
       </div>
     );
   }
@@ -298,7 +322,7 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
                 <div className="rounded border bg-input-bg p-3 space-y-0.5">
                   <div className="truncate" title={server.endpoint_url}><span className="text-muted-foreground/70">Endpoint:</span> {server.endpoint_url}</div>
                   <div><span className="text-muted-foreground/70">Transport:</span> {server.transport_type === "streamable_http" ? "Streamable HTTP" : "SSE"}</div>
-                  <div><span className="text-muted-foreground/70">Authentication:</span> {server.auth_type === "oauth2" ? "OAuth2" : "None"}</div>
+                  <div><span className="text-muted-foreground/70">Authentication:</span> {server.auth_type === "oauth2" ? "OAuth2" : server.auth_type === "api_key" ? "API Key" : "None"}</div>
                   {server.created_at && (
                     <div><span className="text-muted-foreground/70">Created:</span> {formatTimestamp(server.created_at, timezone)}</div>
                   )}
@@ -362,7 +386,7 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
                   <TableCell className="font-medium text-sm">{server.name}</TableCell>
                   <TableCell className="text-xs text-muted-foreground truncate">{server.endpoint_url}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{server.transport_type === "streamable_http" ? "Streamable HTTP" : "SSE"}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{server.auth_type === "oauth2" ? "OAuth2" : "None"}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{server.auth_type === "oauth2" ? "OAuth2" : server.auth_type === "api_key" ? "API Key" : "None"}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     <RegistryStatusBadge status={server.registry_status} showUnregistered={registryEnabled} registryEnabled={registryEnabled} />
                   </TableCell>
@@ -376,5 +400,89 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly }: McpServ
         </div>
       )}
     </div>
+  );
+}
+
+function McpUserApiKeyPanel({ serverId, hasAdminApiKey }: { serverId: number; hasAdminApiKey: boolean }) {
+  const [apiKeyValue, setApiKeyValue] = useState("");
+  const [hasKey, setHasKey] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    getUserApiKeyStatus(serverId)
+      .then((res) => setHasKey(res.has_user_api_key))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [serverId]);
+
+  const handleSave = async () => {
+    if (!apiKeyValue.trim()) return;
+    try {
+      const res = await setUserApiKey(serverId, apiKeyValue.trim());
+      setHasKey(res.has_user_api_key);
+      setApiKeyValue("");
+      toast.success("API key saved");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save API key");
+    }
+  };
+
+  const handleDelete = async () => {
+    try {
+      const res = await deleteUserApiKey(serverId);
+      setHasKey(res.has_user_api_key);
+      toast.success("API key removed");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to remove API key");
+    }
+  };
+
+  if (loading) {
+    return <Skeleton className="h-20" />;
+  }
+
+  return (
+    <Card>
+      <CardContent className="pt-4 space-y-4">
+        <div className="text-sm space-y-1">
+          <div>
+            <span className="font-medium">Admin Key:</span>{" "}
+            {hasAdminApiKey ? (
+              <span className="text-green-600 dark:text-green-400">Configured</span>
+            ) : (
+              <span className="text-muted-foreground">Not configured</span>
+            )}
+          </div>
+          <div>
+            <span className="font-medium">User Key:</span>{" "}
+            {hasKey ? (
+              <span className="text-green-600 dark:text-green-400">Configured</span>
+            ) : (
+              <span className="text-muted-foreground">Not configured</span>
+            )}
+          </div>
+        </div>
+        <div className="flex items-end gap-2">
+          <div className="flex-1 min-w-0">
+            <label className="text-xs text-muted-foreground">{hasKey ? "Update User API Key" : "Set User API Key"}</label>
+            <Input
+              type="password"
+              value={apiKeyValue}
+              onChange={(e) => setApiKeyValue(e.target.value)}
+              placeholder="Enter your API key"
+            />
+          </div>
+          <Button size="sm" onClick={handleSave} disabled={!apiKeyValue.trim()}>
+            Save
+          </Button>
+          {hasKey && (
+            <Button size="sm" variant="destructive" onClick={handleDelete}>
+              Delete
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

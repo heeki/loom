@@ -45,6 +45,8 @@ interface CatalogPageProps {
   canViewA2a?: boolean;
   groupRestriction?: string;
   userGroups?: string[];
+  onNavigateToMcp?: (serverId: number) => void;
+  onNavigateToA2a?: (agentId: number) => void;
 }
 
 export function CatalogPage({
@@ -63,6 +65,8 @@ export function CatalogPage({
   canViewA2a = true,
   groupRestriction,
   userGroups = [],
+  onNavigateToMcp,
+  onNavigateToA2a,
 }: CatalogPageProps) {
   const { timezone } = useTimezone();
   // Tag filter state
@@ -726,7 +730,10 @@ export function CatalogPage({
             sortDirection={mcpSortDir}
             onSortDirectionChange={(d) => { if (d) { setMcpSortDir(d); saveSortDirection("catalog-mcp", d); } }}
             renderItem={(server) => (
-              <Card className="py-3 gap-1 transition-colors hover:bg-accent/50">
+              <Card
+                className={`py-3 gap-1 transition-colors hover:bg-accent/50${onNavigateToMcp ? " cursor-pointer" : ""}`}
+                onClick={onNavigateToMcp ? () => onNavigateToMcp(server.id) : undefined}
+              >
                 <CardHeader className="gap-0 pb-2">
                   <div className="flex items-center gap-2">
                     <div className="text-sm font-medium truncate" title={server.name}>
@@ -768,7 +775,11 @@ export function CatalogPage({
                   auth: (s) => s.auth_type,
                   created: (s) => s.created_at ?? "",
                 }).map((server) => (
-                  <TableRow key={server.id} className="bg-input-bg hover:bg-input-bg/80">
+                  <TableRow
+                    key={server.id}
+                    className={`bg-input-bg hover:bg-input-bg/80${onNavigateToMcp ? " cursor-pointer" : ""}`}
+                    onClick={onNavigateToMcp ? () => onNavigateToMcp(server.id) : undefined}
+                  >
                     <TableCell className="font-medium text-sm">
                       <div className="flex items-center gap-2">
                         {server.name}
@@ -820,7 +831,10 @@ export function CatalogPage({
             sortDirection={a2aSortDir}
             onSortDirectionChange={(d) => { if (d) { setA2aSortDir(d); saveSortDirection("catalog-a2a", d); } }}
             renderItem={(agent) => (
-              <Card className="py-3 gap-1 transition-colors hover:bg-accent/50">
+              <Card
+                className={`py-3 gap-1 transition-colors hover:bg-accent/50${onNavigateToA2a ? " cursor-pointer" : ""}`}
+                onClick={onNavigateToA2a ? () => onNavigateToA2a(agent.id) : undefined}
+              >
                 <CardHeader className="gap-0 pb-2">
                   <div className="flex items-center gap-2">
                     <div className="text-sm font-medium truncate" title={agent.name}>
@@ -868,7 +882,11 @@ export function CatalogPage({
                   auth: (a) => a.auth_type,
                   created: (a) => a.created_at ?? "",
                 }).map((agent) => (
-                  <TableRow key={agent.id} className="bg-input-bg hover:bg-input-bg/80">
+                  <TableRow
+                    key={agent.id}
+                    className={`bg-input-bg hover:bg-input-bg/80${onNavigateToA2a ? " cursor-pointer" : ""}`}
+                    onClick={onNavigateToA2a ? () => onNavigateToA2a(agent.id) : undefined}
+                  >
                     <TableCell className="font-medium text-sm">
                       <div className="flex items-center gap-2">
                         {agent.name}
