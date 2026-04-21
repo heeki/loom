@@ -59,9 +59,9 @@ GROUP_SCOPES: dict[str, list[str]] = {
     ],
 
     # User groups (t-user users - can have multiple)
-    "g-users-demo": ["agent:read", "memory:read", "invoke"],
-    "g-users-test": ["agent:read", "memory:read", "invoke"],
-    "g-users-strategics": ["agent:read", "memory:read", "invoke"],
+    "g-users-demo": ["agent:read", "memory:read", "mcp:read", "invoke"],
+    "g-users-test": ["agent:read", "memory:read", "mcp:read", "invoke"],
+    "g-users-strategics": ["agent:read", "memory:read", "mcp:read", "invoke"],
 }
 
 ALL_SCOPES: set[str] = {s for scopes in GROUP_SCOPES.values() for s in scopes}

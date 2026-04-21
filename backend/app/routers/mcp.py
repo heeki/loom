@@ -98,6 +98,14 @@ class McpToolResponse(BaseModel):
     last_refreshed_at: str | None = None
 
 
+class ConnectorInfo(BaseModel):
+    id: int
+    name: str
+    description: str | None = None
+    auth_type: str
+    has_user_api_key: bool = False
+
+
 class McpAccessRuleResponse(BaseModel):
     id: int
     server_id: int
@@ -190,6 +198,37 @@ def list_mcp_servers(
         query = query.filter(or_(McpServer.registry_status == "APPROVED", McpServer.registry_status.is_(None)))
     servers = query.order_by(McpServer.created_at.desc()).all()
     return [McpServerResponse(**s.to_dict()) for s in servers]
+
+
+@router.get("/connectors", response_model=list[ConnectorInfo])
+def list_connectors(
+    user: UserInfo = Depends(require_scopes("mcp:read")),
+    db: Session = Depends(get_db),
+) -> list[ConnectorInfo]:
+    """List MCP servers available as connectors with per-user API key status."""
+    query = db.query(McpServer)
+    if "t-user" in user.groups and "t-admin" not in user.groups:
+        query = query.filter(or_(McpServer.registry_status == "APPROVED", McpServer.registry_status.is_(None)))
+    servers = query.order_by(McpServer.name.asc()).all()
+    region = os.getenv("AWS_REGION", "us-east-1")
+    from app.services.secrets import get_secret
+    results: list[ConnectorInfo] = []
+    for server in servers:
+        has_key = False
+        if server.auth_type == "api_key":
+            try:
+                get_secret(f"loom/mcp/{server.name}/api-key/{user.sub}", region)
+                has_key = True
+            except Exception:
+                pass
+        results.append(ConnectorInfo(
+            id=server.id,
+            name=server.name,
+            description=server.description,
+            auth_type=server.auth_type,
+            has_user_api_key=has_key,
+        ))
+    return results
 
 
 @router.get("/{server_id}", response_model=McpServerResponse)

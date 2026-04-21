@@ -9,10 +9,15 @@ import type {
   ToolInvokeRequest,
   ToolInvokeResult,
   TestConnectionResult,
+  ConnectorInfo,
 } from "./types";
 
 export function listMcpServers(): Promise<McpServer[]> {
   return apiFetch<McpServer[]>("/api/mcp/servers");
+}
+
+export function listConnectors(): Promise<ConnectorInfo[]> {
+  return apiFetch<ConnectorInfo[]>("/api/mcp/servers/connectors");
 }
 
 export function getMcpServer(id: number): Promise<McpServer> {

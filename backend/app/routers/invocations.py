@@ -24,6 +24,7 @@ from app.models.session import InvocationSession
 from app.models.invocation import Invocation
 from app.models.authorizer_config import AuthorizerConfig
 from app.models.authorizer_credential import AuthorizerCredential
+from app.models.mcp import McpServer
 
 from app.services.agentcore import invoke_agent
 from app.services.cloudwatch import (
@@ -50,6 +51,7 @@ class InvokeRequest(BaseModel):
     credential_id: int | None = Field(default=None, description="Authorizer credential ID for token generation")
     bearer_token: str | None = Field(default=None, description="Manual bearer token for agent invocation")
     model_id: str | None = Field(default=None, description="Runtime model override (must be in agent's allowed_model_ids)")
+    connector_ids: list[int] | None = Field(default=None, description="User-enabled MCP connector IDs for runtime tool access")
 
 
 class InvocationResponse(BaseModel):
@@ -449,6 +451,7 @@ async def invoke_agent_stream(
     token_source: str | None = None,
     actor_id: str | None = None,
     runtime_model_id: str | None = None,
+    dynamic_mcp_servers: list[dict[str, Any]] | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Invoke the agent and yield SSE events as the response streams.
@@ -519,6 +522,8 @@ async def invoke_agent_stream(
             region=region,
             access_token=access_token,
             actor_id=actor_id,
+            dynamic_mcp_servers=dynamic_mcp_servers,
+            runtime_model_id=runtime_model_id,
         )
 
         # Stream chunks to frontend. Each next() call on the synchronous
@@ -924,9 +929,37 @@ async def invoke_agent_endpoint(
     logger.info("Invoking agent %s with token_source=%s, has_token=%s",
                 agent_id, token_source, bool(access_token))
 
+    # Resolve dynamic MCP connector configs for user-enabled connectors
+    dynamic_mcp_servers: list[dict[str, Any]] | None = None
+    if request_body.connector_ids:
+        actor_id = user.username or user.sub or "loom-agent"
+        mcp_records = db.query(McpServer).filter(McpServer.id.in_(request_body.connector_ids)).all()
+        dynamic_mcp_servers = []
+        for server in mcp_records:
+            entry: dict[str, Any] = {
+                "name": server.name,
+                "enabled": True,
+                "transport": server.transport_type,
+                "endpoint_url": server.endpoint_url,
+            }
+            if server.auth_type == "api_key":
+                secret_name = f"loom/mcp/{server.name}/api-key/{actor_id}"
+                entry["auth"] = {
+                    "type": "api_key",
+                    "credentials_secret_arn": secret_name,
+                    "api_key_header_name": server.api_key_header_name or "x-api-key",
+                }
+            elif server.auth_type == "oauth2":
+                entry["auth"] = {
+                    "type": "oauth2",
+                    "well_known_endpoint": server.oauth2_well_known_url or "",
+                }
+            dynamic_mcp_servers.append(entry)
+        logger.info("Resolved %d dynamic MCP connectors for invocation", len(dynamic_mcp_servers))
+
     # Return streaming response
     return StreamingResponse(
-        invoke_agent_stream(agent, session, invocation, db, client_invoke_time, request_body.prompt, access_token, token_source, user.username or user.sub or "loom-agent", runtime_model_id),
+        invoke_agent_stream(agent, session, invocation, db, client_invoke_time, request_body.prompt, access_token, token_source, user.username or user.sub or "loom-agent", runtime_model_id, dynamic_mcp_servers),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

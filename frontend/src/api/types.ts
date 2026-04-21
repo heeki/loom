@@ -173,6 +173,7 @@ export interface InvokeRequest {
   credential_id?: number;
   bearer_token?: string;
   model_id?: string;
+  connector_ids?: number[];
 }
 
 export interface InvocationResponse {
@@ -555,6 +556,14 @@ export interface TagProfile {
 export interface TagProfileCreateRequest {
   name: string;
   tags: Record<string, string>;
+}
+
+export interface ConnectorInfo {
+  id: number;
+  name: string;
+  description: string | null;
+  auth_type: "none" | "oauth2" | "api_key";
+  has_user_api_key: boolean;
 }
 
 // MCP Server types

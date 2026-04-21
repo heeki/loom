@@ -5,6 +5,7 @@ import os
 from functools import partial
 from typing import Any, Generator
 
+import boto3
 import httpx
 from mcp.client.streamable_http import streamablehttp_client
 from strands.tools.mcp import MCPClient
@@ -63,6 +64,35 @@ class _OAuth2Auth(httpx.Auth):
         yield request
 
 
+class _ApiKeyAuth(httpx.Auth):
+    """httpx Auth that injects an API key header on each request.
+
+    The API key is resolved once from AWS Secrets Manager at initialization
+    (not per-request) to avoid throttling.
+    """
+
+    def __init__(self, secret_name: str, header_name: str = "x-api-key") -> None:
+        self._header_name = header_name
+        self._api_key = self._resolve_key(secret_name)
+
+    @staticmethod
+    def _resolve_key(secret_name: str) -> str:
+        region = os.environ.get("AWS_REGION", "us-east-1")
+        client = boto3.client("secretsmanager", region_name=region)
+        resp = client.get_secret_value(SecretId=secret_name)
+        return resp["SecretString"]
+
+    def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
+        if self._api_key:
+            if self._header_name.lower() == "authorization":
+                request.headers["Authorization"] = f"Bearer {self._api_key}"
+            else:
+                request.headers[self._header_name] = self._api_key
+        else:
+            logger.warning("No API key resolved; sending unauthenticated request")
+        yield request
+
+
 def _build_transport_callable(config: MCPServerConfig) -> Any:
     """Build a transport callable for the given MCP server configuration.
 
@@ -89,6 +119,26 @@ def _build_transport_callable(config: MCPServerConfig) -> Any:
             scope_list,
         )
         return partial(streamablehttp_client, url=config.endpoint_url, auth=auth)
+
+    if config.auth and config.auth.type == "api_key" and config.auth.credentials_secret_arn:
+        try:
+            auth = _ApiKeyAuth(
+                secret_name=config.auth.credentials_secret_arn,
+                header_name=config.auth.api_key_header_name or "x-api-key",
+            )
+            logger.info(
+                "MCP server '%s' configured with API key auth (secret=%s, header=%s)",
+                config.name,
+                config.auth.credentials_secret_arn,
+                config.auth.api_key_header_name,
+            )
+            return partial(streamablehttp_client, url=config.endpoint_url, auth=auth)
+        except Exception as e:
+            logger.warning(
+                "Failed to resolve API key for server '%s': %s. Falling back to unauthenticated.",
+                config.name,
+                e,
+            )
 
     return partial(streamablehttp_client, url=config.endpoint_url)
 
@@ -205,5 +255,13 @@ def has_oauth2_servers(servers: list[MCPServerConfig]) -> bool:
     """Check if any enabled MCP servers require OAuth2 authentication."""
     return any(
         s.enabled and s.auth and s.auth.type == "oauth2" and s.auth.credential_provider_name
+        for s in servers
+    )
+
+
+def has_deferred_auth_servers(servers: list[MCPServerConfig]) -> bool:
+    """Check if any enabled MCP servers require deferred auth (OAuth2 or API key)."""
+    return any(
+        s.enabled and s.auth and s.auth.type in ("oauth2", "api_key")
         for s in servers
     )

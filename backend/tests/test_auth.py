@@ -56,9 +56,9 @@ class TestDeriveScopes(unittest.TestCase):
         self.assertIn("a2a:write", scopes)
 
     def test_derive_scopes_for_users_demo_has_minimal_scopes(self) -> None:
-        """Test that g-users-demo group has only agent:read, memory:read, invoke."""
+        """Test that g-users-demo group has agent:read, memory:read, mcp:read, invoke."""
         scopes = derive_scopes(["g-users-demo"])
-        self.assertEqual(scopes, {"agent:read", "memory:read", "invoke"})
+        self.assertEqual(scopes, {"agent:read", "memory:read", "mcp:read", "invoke"})
 
 
 class TestJWTValidator(unittest.TestCase):

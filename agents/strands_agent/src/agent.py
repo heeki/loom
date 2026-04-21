@@ -42,11 +42,11 @@ def build_agent(config: AgentConfig, defer_mcp: bool = False) -> Agent:
     tools: list = []
     hooks: list = []
 
-    # MCP tool clients (R3) — may be deferred for OAuth2 servers
+    # MCP tool clients (R3) — may be deferred for authenticated servers
     if not defer_mcp and config.integrations.mcp_servers:
         enabled_servers = [s for s in config.integrations.mcp_servers if s.enabled]
         if enabled_servers:
-            mcp_clients = create_mcp_clients(config.integrations.mcp_servers)
+            mcp_clients = build_mcp_clients(config.integrations.mcp_servers)
             tools.extend(mcp_clients)
             logger.info("Loaded %d MCP tool client(s)", len(mcp_clients))
 

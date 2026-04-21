@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Send, Plus, Brain, LogOut, Bot, User, X, Loader2, Palette, RefreshCw, ChevronDown, Wrench } from "lucide-react";
+import { Send, Plus, Brain, LogOut, Bot, User, X, Loader2, Palette, RefreshCw, ChevronDown, Wrench, Plug, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import ReactMarkdown from "react-markdown";
@@ -13,7 +13,10 @@ import { trackAction } from "@/api/audit";
 import { useInvoke, clearInvokeState } from "@/hooks/useInvoke";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, isLightTheme, THEME_LABELS, type Theme } from "@/contexts/ThemeContext";
-import type { AgentResponse, SessionResponse, MemoryResponse, MemoryRecordItem, ModelOption } from "@/api/types";
+import { listConnectors, setUserApiKey } from "@/api/mcp";
+import { Input } from "@/components/ui/input";
+import { groupModels } from "@/lib/models";
+import type { AgentResponse, SessionResponse, MemoryResponse, MemoryRecordItem, ModelOption, ConnectorInfo } from "@/api/types";
 
 interface ChatMessage {
   id: string;
@@ -101,6 +104,81 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showModelPicker]);
+
+  // Connectors state
+  const [connectors, setConnectors] = useState<ConnectorInfo[]>([]);
+  const [enabledConnectors, setEnabledConnectors] = useState<Set<number>>(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem("loom:enabledConnectors") || "[]") as number[];
+      return new Set(stored);
+    } catch { return new Set(); }
+  });
+  const [showConnectors, setShowConnectors] = useState(false);
+  const [apiKeyDialog, setApiKeyDialog] = useState<{ serverId: number; serverName: string } | null>(null);
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [savingApiKey, setSavingApiKey] = useState(false);
+  const connectorsRef = useRef<HTMLDivElement>(null);
+
+  const toggleConnector = (c: ConnectorInfo) => {
+    const isEnabled = enabledConnectors.has(c.id);
+    if (isEnabled) {
+      setEnabledConnectors((prev) => {
+        const next = new Set(prev);
+        next.delete(c.id);
+        localStorage.setItem("loom:enabledConnectors", JSON.stringify([...next]));
+        return next;
+      });
+    } else if (c.auth_type === "api_key" && !c.has_user_api_key) {
+      setApiKeyDialog({ serverId: c.id, serverName: c.name });
+      setShowConnectors(false);
+    } else {
+      setEnabledConnectors((prev) => {
+        const next = new Set(prev);
+        next.add(c.id);
+        localStorage.setItem("loom:enabledConnectors", JSON.stringify([...next]));
+        return next;
+      });
+    }
+  };
+
+  useEffect(() => {
+    listConnectors().then(setConnectors).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!showConnectors) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (connectorsRef.current && !connectorsRef.current.contains(e.target as Node)) {
+        setShowConnectors(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showConnectors]);
+
+  const handleSaveApiKey = async () => {
+    if (!apiKeyDialog || !apiKeyInput.trim()) return;
+    setSavingApiKey(true);
+    try {
+      await setUserApiKey(apiKeyDialog.serverId, apiKeyInput.trim());
+      setConnectors((prev) =>
+        prev.map((c) => (c.id === apiKeyDialog.serverId ? { ...c, has_user_api_key: true } : c)),
+      );
+      setEnabledConnectors((prev) => {
+        const next = new Set(prev);
+        next.add(apiKeyDialog.serverId);
+        localStorage.setItem("loom:enabledConnectors", JSON.stringify([...next]));
+        return next;
+      });
+      setApiKeyDialog(null);
+      setApiKeyInput("");
+      toast.success("API key saved");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save API key");
+    } finally {
+      setSavingApiKey(false);
+    }
+  };
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -326,9 +404,10 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
       if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "agent", "invoke", agentName);
       const agent = agents.find((a) => a.id === selectedAgentId);
       const rtModel = selectedModelId && agent && selectedModelId !== agent.model_id ? selectedModelId : undefined;
-      invoke(prompt, "DEFAULT", currentSessionId ?? undefined, undefined, undefined, rtModel);
+      const activeConnectorIds = enabledConnectors.size > 0 ? Array.from(enabledConnectors) : undefined;
+      invoke(prompt, "DEFAULT", currentSessionId ?? undefined, undefined, undefined, rtModel, activeConnectorIds);
     }
-  }, [isStreaming, queuedPrompt, error, selectedModelId, selectedAgentId, agents]);
+  }, [isStreaming, queuedPrompt, error, selectedModelId, selectedAgentId, agents, enabledConnectors]);
 
   // Scroll to bottom on new messages or streaming updates
   useEffect(() => {
@@ -349,8 +428,9 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     const agentName = agents.find((a) => a.id === selectedAgentId)?.name ?? String(selectedAgentId);
     if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "agent", "invoke", agentName);
     const runtimeModelId = selectedModelId && selectedAgent && selectedModelId !== selectedAgent.model_id ? selectedModelId : undefined;
-    await invoke(prompt, "DEFAULT", currentSessionId ?? undefined, undefined, undefined, runtimeModelId);
-  }, [input, isStreaming, selectedAgentId, currentSessionId, invoke, agents, user, browserSessionId, selectedModelId, selectedAgent]);
+    const activeConnectorIds = enabledConnectors.size > 0 ? Array.from(enabledConnectors) : undefined;
+    await invoke(prompt, "DEFAULT", currentSessionId ?? undefined, undefined, undefined, runtimeModelId, activeConnectorIds);
+  }, [input, isStreaming, selectedAgentId, currentSessionId, invoke, agents, user, browserSessionId, selectedModelId, selectedAgent, enabledConnectors]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -843,8 +923,96 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                     className="resize-none border-0 shadow-none focus-visible:ring-0 rounded-none rounded-t-xl"
                   />
                   <div className="flex items-center justify-between px-3 py-2 bg-background rounded-b-xl">
-                    <div>
-                      {/* Left side — reserved for future '+' connectors button */}
+                    <div className="relative" ref={connectorsRef}>
+                      {connectors.length > 0 && (
+                        <button
+                          onClick={() => setShowConnectors((v) => !v)}
+                          className="flex items-center gap-1 text-xs text-muted-foreground rounded-md border px-2 py-1 hover:text-foreground hover:border-foreground/30 cursor-pointer"
+                          title="Connectors"
+                        >
+                          <Plug className="h-3 w-3" />
+                          <span>Connectors</span>
+                          {enabledConnectors.size > 0 && (
+                            <span className="ml-0.5 text-[10px] text-green-600 dark:text-green-400">{enabledConnectors.size}</span>
+                          )}
+                        </button>
+                      )}
+                      {showConnectors && (
+                        <div className="absolute bottom-8 left-0 z-50 w-72 rounded-lg border bg-background shadow-md py-1">
+                          <div className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                            MCP Connectors
+                          </div>
+                          {connectors.map((c) => {
+                            const isEnabled = enabledConnectors.has(c.id);
+                            const needsKey = c.auth_type === "api_key" && !c.has_user_api_key;
+                            return (
+                              <button
+                                key={c.id}
+                                onClick={() => toggleConnector(c)}
+                                className="w-full flex items-center justify-between px-3 py-2 text-xs hover:bg-accent transition-colors"
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="truncate" title={c.name}>{c.name}</span>
+                                  {needsKey && (
+                                    <span className="flex items-center gap-0.5 text-amber-500 shrink-0">
+                                      <KeyRound className="h-3 w-3" />
+                                    </span>
+                                  )}
+                                  {c.auth_type === "oauth2" && !isEnabled && (
+                                    <span className="text-[10px] text-muted-foreground shrink-0">OAuth2</span>
+                                  )}
+                                </div>
+                                <div
+                                  className={`relative w-7 h-4 rounded-full transition-colors shrink-0 ${
+                                    isEnabled ? "bg-green-500" : "bg-muted-foreground/30"
+                                  }`}
+                                >
+                                  <div
+                                    className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
+                                      isEnabled ? "translate-x-3.5" : "translate-x-0.5"
+                                    }`}
+                                  />
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {apiKeyDialog && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                          <div className="w-96 rounded-lg border bg-background shadow-lg p-4 space-y-3">
+                            <div className="text-sm font-medium">
+                              API Key for {apiKeyDialog.serverName}
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              Enter your personal API key to connect to this MCP server.
+                            </p>
+                            <Input
+                              type="password"
+                              value={apiKeyInput}
+                              onChange={(e) => setApiKeyInput(e.target.value)}
+                              placeholder="Enter your API key"
+                              onKeyDown={(e) => { if (e.key === "Enter") void handleSaveApiKey(); }}
+                            />
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => { setApiKeyDialog(null); setApiKeyInput(""); }}
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                size="sm"
+                                onClick={() => void handleSaveApiKey()}
+                                disabled={!apiKeyInput.trim() || savingApiKey}
+                              >
+                                {savingApiKey ? "Saving..." : "Save"}
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       {availableModels.length > 0 && (
@@ -863,27 +1031,34 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                             {availableModels.length > 1 && <ChevronDown className="h-3 w-3" />}
                           </button>
                           {showModelPicker && (
-                            <div className="absolute bottom-7 right-0 z-50 w-52 rounded-lg border bg-white shadow-md py-1">
-                              {availableModels.map((m) => {
-                                const isDefault = m.model_id === selectedAgent?.model_id;
-                                const isSelected = selectedModelId ? m.model_id === selectedModelId : isDefault;
-                                return (
-                                  <button
-                                    key={m.model_id}
-                                    onClick={() => {
-                                      setSelectedModelId(isDefault ? null : m.model_id);
-                                      setShowModelPicker(false);
-                                    }}
-                                    className={`w-full text-left px-3 py-1.5 text-xs transition-colors hover:bg-accent ${
-                                      isSelected ? "font-semibold text-foreground" : "text-muted-foreground"
-                                    }`}
-                                  >
-                                    {m.display_name}
-                                    {isDefault && <span className="text-[10px] opacity-60 ml-1">(default)</span>}
-                                    {isSelected && !isDefault && <span className="text-[10px] opacity-60 ml-1">(selected)</span>}
-                                  </button>
-                                );
-                              })}
+                            <div className="absolute bottom-7 right-0 z-50 w-56 rounded-lg border bg-background shadow-md py-1 max-h-64 overflow-y-auto">
+                              {groupModels(availableModels).map(([group, models]) => (
+                                <div key={group}>
+                                  <div className="px-3 py-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                                    {group}
+                                  </div>
+                                  {models.map((m) => {
+                                    const isDefault = m.model_id === selectedAgent?.model_id;
+                                    const isSelected = selectedModelId ? m.model_id === selectedModelId : isDefault;
+                                    return (
+                                      <button
+                                        key={m.model_id}
+                                        onClick={() => {
+                                          setSelectedModelId(isDefault ? null : m.model_id);
+                                          setShowModelPicker(false);
+                                        }}
+                                        className={`w-full text-left px-3 py-1.5 text-xs transition-colors hover:bg-accent ${
+                                          isSelected ? "font-semibold text-foreground" : "text-muted-foreground"
+                                        }`}
+                                      >
+                                        {m.display_name}
+                                        {isDefault && <span className="text-[10px] opacity-60 ml-1">(default)</span>}
+                                        {isSelected && !isDefault && <span className="text-[10px] opacity-60 ml-1">(selected)</span>}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              ))}
                             </div>
                           )}
                         </div>
