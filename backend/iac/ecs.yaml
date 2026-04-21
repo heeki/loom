@@ -265,6 +265,14 @@ Resources:
                   - secretsmanager:DeleteSecret
                   - secretsmanager:PutSecretValue
                 Resource: !Sub "arn:aws:secretsmanager:*:${AWS::AccountId}:secret:bedrock-agentcore-identity!*"
+              # Loom-managed secrets for MCP server API keys (admin and per-user).
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:DeleteSecret
+                  - secretsmanager:PutSecretValue
+                Resource: !Sub "arn:aws:secretsmanager:*:${AWS::AccountId}:secret:loom/*"
         - PolicyName: CognitoPolicy
           PolicyDocument:
             Version: "2012-10-17"
