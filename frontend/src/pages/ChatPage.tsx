@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Send, Plus, Brain, LogOut, Bot, User, X, Loader2, Palette, RefreshCw, ChevronDown, Wrench, Plug, KeyRound } from "lucide-react";
+import { Send, Plus, Brain, LogOut, Bot, User, X, Loader2, Palette, RefreshCw, ChevronDown, Wrench, Plug, KeyRound, Unplug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import ReactMarkdown from "react-markdown";
@@ -13,7 +13,7 @@ import { trackAction } from "@/api/audit";
 import { useInvoke, clearInvokeState } from "@/hooks/useInvoke";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, isLightTheme, THEME_LABELS, type Theme } from "@/contexts/ThemeContext";
-import { listConnectors, setUserApiKey } from "@/api/mcp";
+import { listConnectors, setUserApiKey, deleteUserApiKey } from "@/api/mcp";
 import { Input } from "@/components/ui/input";
 import { groupModels } from "@/lib/models";
 import type { AgentResponse, SessionResponse, MemoryResponse, MemoryRecordItem, ModelOption, ConnectorInfo } from "@/api/types";
@@ -105,19 +105,23 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showModelPicker]);
 
-  // Connectors state
+  // Connectors state (scoped per agent)
+  const connectorStorageKey = selectedAgentId != null ? `loom:enabledConnectors:${selectedAgentId}` : null;
   const [connectors, setConnectors] = useState<ConnectorInfo[]>([]);
-  const [enabledConnectors, setEnabledConnectors] = useState<Set<number>>(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem("loom:enabledConnectors") || "[]") as number[];
-      return new Set(stored);
-    } catch { return new Set(); }
-  });
+  const [enabledConnectors, setEnabledConnectors] = useState<Set<number>>(new Set());
   const [showConnectors, setShowConnectors] = useState(false);
   const [apiKeyDialog, setApiKeyDialog] = useState<{ serverId: number; serverName: string } | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [savingApiKey, setSavingApiKey] = useState(false);
   const connectorsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!connectorStorageKey) { setEnabledConnectors(new Set()); return; }
+    try {
+      const stored = JSON.parse(localStorage.getItem(connectorStorageKey) || "[]") as number[];
+      setEnabledConnectors(new Set(stored));
+    } catch { setEnabledConnectors(new Set()); }
+  }, [connectorStorageKey]);
 
   const toggleConnector = (c: ConnectorInfo) => {
     const isEnabled = enabledConnectors.has(c.id);
@@ -125,7 +129,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
       setEnabledConnectors((prev) => {
         const next = new Set(prev);
         next.delete(c.id);
-        localStorage.setItem("loom:enabledConnectors", JSON.stringify([...next]));
+        if (connectorStorageKey) localStorage.setItem(connectorStorageKey, JSON.stringify([...next]));
         return next;
       });
     } else if (c.auth_type === "api_key" && !c.has_user_api_key) {
@@ -135,7 +139,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
       setEnabledConnectors((prev) => {
         const next = new Set(prev);
         next.add(c.id);
-        localStorage.setItem("loom:enabledConnectors", JSON.stringify([...next]));
+        if (connectorStorageKey) localStorage.setItem(connectorStorageKey, JSON.stringify([...next]));
         return next;
       });
     }
@@ -167,7 +171,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
       setEnabledConnectors((prev) => {
         const next = new Set(prev);
         next.add(apiKeyDialog.serverId);
-        localStorage.setItem("loom:enabledConnectors", JSON.stringify([...next]));
+        if (connectorStorageKey) localStorage.setItem(connectorStorageKey, JSON.stringify([...next]));
         return next;
       });
       setApiKeyDialog(null);
@@ -177,6 +181,26 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
       toast.error(e instanceof Error ? e.message : "Failed to save API key");
     } finally {
       setSavingApiKey(false);
+    }
+  };
+
+  const disconnectConnector = async (c: ConnectorInfo) => {
+    try {
+      if (c.auth_type === "api_key" && c.has_user_api_key) {
+        await deleteUserApiKey(c.id);
+      }
+      setConnectors((prev) =>
+        prev.map((item) => (item.id === c.id ? { ...item, has_user_api_key: false } : item)),
+      );
+      setEnabledConnectors((prev) => {
+        const next = new Set(prev);
+        next.delete(c.id);
+        if (connectorStorageKey) localStorage.setItem(connectorStorageKey, JSON.stringify([...next]));
+        return next;
+      });
+      toast.success(`Disconnected from ${c.name}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to disconnect");
     }
   };
 
@@ -945,13 +969,16 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                           {connectors.map((c) => {
                             const isEnabled = enabledConnectors.has(c.id);
                             const needsKey = c.auth_type === "api_key" && !c.has_user_api_key;
+                            const isConnected = c.auth_type === "none" || (c.auth_type === "api_key" && c.has_user_api_key);
                             return (
-                              <button
+                              <div
                                 key={c.id}
-                                onClick={() => toggleConnector(c)}
-                                className="w-full flex items-center justify-between px-3 py-2 text-xs hover:bg-accent transition-colors"
+                                className="flex items-center justify-between px-3 py-2 text-xs hover:bg-accent transition-colors"
                               >
-                                <div className="flex items-center gap-2 min-w-0">
+                                <button
+                                  onClick={() => toggleConnector(c)}
+                                  className="flex items-center gap-2 min-w-0 flex-1"
+                                >
                                   <span className="truncate" title={c.name}>{c.name}</span>
                                   {needsKey && (
                                     <span className="flex items-center gap-0.5 text-amber-500 shrink-0">
@@ -961,19 +988,32 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                                   {c.auth_type === "oauth2" && !isEnabled && (
                                     <span className="text-[10px] text-muted-foreground shrink-0">OAuth2</span>
                                   )}
+                                </button>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {isConnected && c.auth_type !== "none" && (
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); void disconnectConnector(c); }}
+                                      className="text-muted-foreground/50 hover:text-destructive transition-colors"
+                                      title={`Disconnect ${c.name}`}
+                                    >
+                                      <Unplug className="h-3 w-3" />
+                                    </button>
+                                  )}
+                                  <button onClick={() => toggleConnector(c)}>
+                                    <div
+                                      className={`relative w-7 h-4 rounded-full transition-colors ${
+                                        isEnabled ? "bg-green-500" : "bg-muted-foreground/30"
+                                      }`}
+                                    >
+                                      <div
+                                        className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
+                                          isEnabled ? "translate-x-3.5" : "translate-x-0.5"
+                                        }`}
+                                      />
+                                    </div>
+                                  </button>
                                 </div>
-                                <div
-                                  className={`relative w-7 h-4 rounded-full transition-colors shrink-0 ${
-                                    isEnabled ? "bg-green-500" : "bg-muted-foreground/30"
-                                  }`}
-                                >
-                                  <div
-                                    className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
-                                      isEnabled ? "translate-x-3.5" : "translate-x-0.5"
-                                    }`}
-                                  />
-                                </div>
-                              </button>
+                              </div>
                             );
                           })}
                         </div>
