@@ -8,6 +8,7 @@ COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/app/ ./app/
+COPY backend/etc/models.json backend/etc/runtime_pricing.json ./etc/
 
 # Agent source for build_agent_artifact (deployment.py resolves via parents[3] -> /)
 COPY agents/strands_agent/src/ /agents/strands_agent/src/
