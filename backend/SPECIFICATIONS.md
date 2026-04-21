@@ -352,6 +352,8 @@ Tag profiles are named presets of tag values that satisfy required tag policies.
 | `oauth2_client_id` | TEXT | OAuth2 client ID (required when auth_type is `oauth2`) |
 | `oauth2_client_secret` | TEXT | OAuth2 client secret (write-only, never returned in GET responses) |
 | `oauth2_scopes` | TEXT | Space-separated OAuth2 scopes |
+| `api_key_header_name` | TEXT | HTTP header name for API key auth (e.g. `x-api-key`, `Authorization`) (nullable) |
+| `has_admin_api_key` | TEXT | `"true"` or `"false"` — whether an admin API key is stored in Secrets Manager (nullable) |
 | `created_at` | DATETIME | Creation timestamp |
 | `registry_record_id` | TEXT | AWS Agent Registry record ID (nullable) |
 | `registry_status` | TEXT | Registry lifecycle status: DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, DEPRECATED (nullable) |
@@ -791,6 +793,10 @@ Retrieves stored long-term memory records for the authenticated user within a me
 | `POST` | `/api/mcp/servers/{server_id}/tools/refresh` | Refresh tool list from the MCP server. |
 | `GET` | `/api/mcp/servers/{server_id}/access` | Get access control rules for a server. |
 | `PUT` | `/api/mcp/servers/{server_id}/access` | Replace all access control rules for a server. |
+| `GET` | `/api/mcp/connectors` | List MCP servers available as connectors with per-user API key status. |
+| `PUT` | `/api/mcp/servers/{server_id}/api-key` | Store the user's personal API key in Secrets Manager. |
+| `GET` | `/api/mcp/servers/{server_id}/api-key/status` | Check whether the user has a personal API key set. |
+| `DELETE` | `/api/mcp/servers/{server_id}/api-key` | Remove the user's personal API key from Secrets Manager. |
 
 **`POST /api/mcp/servers` request body:**
 ```json
@@ -807,9 +813,17 @@ Retrieves stored long-term memory records for the authenticated user within a me
 }
 ```
 
-When `auth_type` is `oauth2`, `oauth2_well_known_url` and `oauth2_client_id` are required (validated via Pydantic model validator).
+When `auth_type` is `oauth2`, `oauth2_well_known_url` and `oauth2_client_id` are required (validated via Pydantic model validator). When `auth_type` is `api_key`, `api_key_header_name` is required.
 
-**Security:** `oauth2_client_secret` is write-only — it is never included in GET responses. The response includes `has_oauth2_secret: bool` instead.
+**Security:** `oauth2_client_secret` is write-only — it is never included in GET responses. The response includes `has_oauth2_secret: bool` instead. API keys are stored in Loom-managed AWS Secrets Manager — admin keys at `loom/mcp/{name}/admin-api-key`, per-user keys at `loom/mcp/{name}/api-key/{user_sub}`. The response includes `has_admin_api_key: bool` instead of the key value.
+
+**API key authentication model:**
+- **Admin key:** Used by the Loom backend for test connection, refresh tools, and invoke from admin console. Stored in Secrets Manager on create/update.
+- **Per-user key:** Each user supplies their own key via the ChatPage connector UI or API. Required for runtime invocations. Admin key is for admin console operations only — no fallback between them.
+- **Header injection:** When `api_key_header_name` is `Authorization`, the key is sent as `Bearer {key}`. For all other headers (e.g. `x-api-key`), the raw key is set directly.
+
+**`GET /api/mcp/connectors` response:**
+Returns MCP servers available as connectors with per-user API key status. End-users (`t-user`) see only APPROVED or unregistered servers. Each entry includes `id`, `name`, `description`, `auth_type`, and `has_user_api_key` (whether the current user has a stored API key).
 
 **`PUT /api/mcp/servers/{server_id}/access` request body:**
 ```json
@@ -851,7 +865,7 @@ Replaces all existing access rules for the server. Personas not listed have no a
 }
 ```
 
-On registration, the backend fetches `<base_url>/.well-known/agent.json` to retrieve the Agent Card. All agent metadata (name, description, version, capabilities, skills) is populated from the card. If the fetch fails, registration is rejected with a descriptive error.
+On registration, the backend fetches the Agent Card from the well-known endpoint. Standard A2A agents use `/.well-known/agent.json`; AgentCore agents try `/.well-known/agent-card.json` first; Salesforce Agentforce agents use `/v1/card`. All agent metadata (name, description, version, capabilities, skills) is populated from the card. If the fetch fails, registration is rejected with a descriptive error.
 
 When `auth_type` is `oauth2`, `oauth2_well_known_url` and `oauth2_client_id` are required (validated via Pydantic model validator).
 
@@ -923,7 +937,9 @@ Replaces all existing access rules for the agent. Personas not listed have no ac
 
 The optional `credential_id` references an authorizer credential. When provided, the backend fetches the client secret from Secrets Manager and generates an OAuth token for authenticated invocation. The optional `bearer_token` allows passing a raw bearer token directly — it takes highest priority (Priority 0) in the token selection chain, above user tokens and credential-based tokens.
 
-The optional `model_id` specifies a runtime model override. When provided, it is validated against the agent's `allowed_model_ids`. If the model is not in the allowed list, the endpoint returns HTTP 400. If valid, the override is passed to `invoke_agent_stream()` which uses it instead of the agent's default model for that invocation.
+The optional `model_id` specifies a runtime model override. When provided, it is validated against the agent's `allowed_model_ids`. If the model is not in the allowed list, the endpoint returns HTTP 400. If valid, the override is passed to `invoke_agent_stream()` which uses it instead of the agent's default model for that invocation. At the agent runtime level, model override uses a cached `BedrockModel` pool — models are created once and reused across invocations.
+
+The optional `connector_ids` field is a list of MCP server IDs to dynamically attach for this invocation. The backend resolves each connector's configuration (endpoint URL, transport type, auth settings) and passes them to the agent runtime as `dynamic_mcp_servers` in the invocation payload. The agent runtime maintains a connection pool keyed by `(server_name, actor_id)` to reuse MCP clients across invocations. For API key connectors, the user's personal API key is resolved from Secrets Manager at `loom/mcp/{name}/api-key/{user_sub}`.
 
 The invoke endpoint uses a priority-based token selection: (0) `bearer_token` from request body, (1) `credential_id` for M2M token, (2) user access token (forwarded when agent has authorizer), (3) agent config M2M flow, (4) SigV4 (no token).
 
@@ -1141,16 +1157,20 @@ Core authentication and authorization module. Provides:
 
 ### `services/mcp.py`
 
-Stub service for MCP server integration:
+MCP server connection, tool discovery, and invocation:
 
-- `test_mcp_connection(server) -> dict` — Returns success/failure with message. Validates OAuth2 well-known URL when auth_type is `oauth2`. Actual MCP client connectivity is future work.
-- `fetch_mcp_tools(server) -> list[dict]` — Returns empty list (stub). A real implementation would connect to the server and call `tools/list`.
+- `test_mcp_connection(server, api_key=None) -> dict` — Sends an `initialize` JSON-RPC request to verify the server is reachable. Supports OAuth2, API key, and unauthenticated connections.
+- `fetch_mcp_tools(server, api_key=None) -> list[dict]` — Calls `tools/list` JSON-RPC method and returns tool metadata (name, description, input_schema).
+- `invoke_mcp_tool(server, tool_name, arguments, api_key=None) -> dict` — Calls `tools/call` JSON-RPC method to invoke a specific tool with arguments.
+- `resolve_api_key(server, user_sub=None) -> str | None` — Resolves API key from Secrets Manager. Admin key for admin context (`loom/mcp/{name}/admin-api-key`), user key for user context (`loom/mcp/{name}/api-key/{user_sub}`).
+- `_build_headers(server, api_key=None) -> dict` — Builds request headers with auth injection. For API key auth, uses `api_key_header_name` to set the correct header; `Authorization` headers are prefixed with `Bearer`.
+- `_call_streamable_http()`, `_call_sse()`, `_call_mcp()` — Transport methods accepting optional `api_key` parameter.
 
 ### `services/a2a.py`
 
 A2A Agent Card fetching and connection testing:
 
-- `fetch_agent_card(base_url: str, auth_headers: dict | None) -> dict` — fetches `<base_url>/.well-known/agent.json` and returns the raw JSON. Raises on HTTP errors or invalid JSON.
+- `fetch_agent_card(base_url: str, auth_headers: dict | None) -> dict` — fetches the Agent Card from the well-known endpoint. Standard A2A agents use `/.well-known/agent.json`; AgentCore agents try `/.well-known/agent-card.json` first; Salesforce Agentforce agents use `/v1/card`. Raises on HTTP errors or invalid JSON.
 - `parse_agent_card(card_json: dict) -> dict` — extracts structured fields (name, description, version, provider, capabilities, authentication, skills, etc.) from raw Agent Card JSON.
 - `sync_skills(db: Session, agent_id: int, skills: list[dict])` — synchronizes skills from Agent Card to the database. Adds new skills, removes stale ones.
 - `test_a2a_connection(agent) -> dict` — acquires OAuth2 token if configured and fetches the Agent Card, returning success/failure with details.
