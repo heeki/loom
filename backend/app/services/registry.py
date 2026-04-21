@@ -199,6 +199,42 @@ class RegistryClient:
             statusReason=reason,
         )
 
+    def update_record(
+        self,
+        record_id: str,
+        name: str,
+        descriptor_type: str,
+        descriptors: dict[str, Any],
+        record_version: str,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        if not self._require_registry():
+            return {}
+        update_descriptors = self._wrap_descriptors_for_update(descriptors)
+        kwargs: dict[str, Any] = dict(
+            registryId=self.registry_id,
+            recordId=record_id,
+            name=name,
+            descriptorType=descriptor_type,
+            descriptors=update_descriptors,
+            recordVersion=record_version,
+        )
+        if description:
+            kwargs["description"] = {"optionalValue": description}
+        logger.info("update_record payload: %s", json.dumps(kwargs, indent=2, default=str))
+        return self.control.update_registry_record(**kwargs)
+
+    @staticmethod
+    def _wrap_descriptors_for_update(descriptors: dict[str, Any]) -> dict[str, Any]:
+        """Wrap create-style descriptors in the optionalValue structure required by UpdateRegistryRecord."""
+        inner = {}
+        for dtype, fields in descriptors.items():
+            wrapped_fields = {}
+            for field_name, field_value in fields.items():
+                wrapped_fields[field_name] = {"optionalValue": field_value}
+            inner[dtype] = {"optionalValue": wrapped_fields}
+        return {"optionalValue": inner}
+
     def delete_record(self, record_id: str) -> dict[str, Any]:
         if not self._require_registry():
             return {}
@@ -219,13 +255,22 @@ class RegistryClient:
 
     # -- descriptor builders -------------------------------------------------
     @staticmethod
-    def build_mcp_descriptors(server: McpServer, tools: list[McpTool]) -> dict[str, Any]:
-        """Build MCP-type descriptors conforming to the MCP protocol spec."""
-        namespaced_name = f"aws.agentcore/{server.name}"
-        server_info = {
+    def build_mcp_descriptors(server: McpServer, tools: list[McpTool], namespace: str = "aws.agentcore") -> dict[str, Any]:
+        """Build MCP-type descriptors conforming to the MCP InitializeResult schema."""
+        MCP_DESCRIPTION_MAX_LENGTH = 100
+        namespaced_name = f"{namespace}/{server.name}"
+        server_info: dict[str, Any] = {
             "name": namespaced_name,
-            "description": server.description or "",
+            "description": (server.description or "")[:MCP_DESCRIPTION_MAX_LENGTH],
+            "protocolVersion": "2025-12-11",
             "version": "1.0.0",
+            "capabilities": {
+                "tools": {},
+            },
+            "serverInfo": {
+                "name": namespaced_name,
+                "version": "1.0.0",
+            },
             "packages": [{
                 "registryType": "npm",
                 "identifier": namespaced_name,
@@ -233,12 +278,14 @@ class RegistryClient:
                 "transport": {"type": "stdio"},
             }],
         }
+        if server.description:
+            server_info["instructions"] = server.description[:MCP_DESCRIPTION_MAX_LENGTH]
 
         tool_definitions = []
         for tool in tools:
             tool_def: dict[str, Any] = {
                 "name": tool.tool_name,
-                "description": tool.description or "",
+                "description": (tool.description or "")[:MCP_DESCRIPTION_MAX_LENGTH],
             }
             schema = tool.get_input_schema()
             if schema:
@@ -249,8 +296,12 @@ class RegistryClient:
 
         return {
             "mcp": {
-                "server": {"inlineContent": json.dumps(server_info)},
-                "tools": {"inlineContent": json.dumps({"tools": tool_definitions})},
+                "server": {
+                    "inlineContent": json.dumps(server_info),
+                },
+                "tools": {
+                    "inlineContent": json.dumps({"tools": tool_definitions}),
+                },
             }
         }
 

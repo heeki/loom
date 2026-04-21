@@ -202,6 +202,8 @@ function AppContent() {
 
   const [activePersona, setActivePersona] = useState<Persona>(getDefaultPersona());
   const [viewAsUser, setViewAsUser] = useState<string | null>(null);
+  const [pendingMcpId, setPendingMcpId] = useState<number | null>(null);
+  const [pendingA2aId, setPendingA2aId] = useState<number | null>(null);
 
   // Reset all navigation state when user logs in
   useEffect(() => {
@@ -290,6 +292,8 @@ function AppContent() {
     if (isAuthenticated && (activePersona === "catalog" || activePersona === "builder")) {
       void fetchAgents();
     }
+    if (activePersona !== "mcp") setPendingMcpId(null);
+    if (activePersona !== "a2a") setPendingA2aId(null);
   }, [activePersona, isAuthenticated, fetchAgents]);
 
   const [registryEnabled, setRegistryEnabled] = useState(false);
@@ -400,7 +404,7 @@ function AppContent() {
     }
   };
 
-  // Breadcrumb (only for catalog persona drill-down)
+  // Breadcrumb (for builder/agents persona drill-down)
   const breadcrumb: { label: string; onClick?: () => void }[] = [
     {
       label: "Agents",
@@ -658,7 +662,7 @@ function AppContent() {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-y-auto">
-        {activePersona === "catalog" && selectedAgentId !== null && (
+        {activePersona === "builder" && selectedAgentId !== null && (
           <header className="border-b">
             <div className="max-w-7xl px-8 py-3 flex items-center justify-between gap-4">
               <nav className="flex items-center gap-1 text-sm text-muted-foreground min-w-0">
@@ -684,6 +688,28 @@ function AppContent() {
 
         <main className="max-w-7xl px-8 py-6 flex-1 w-full">
           {activePersona === "catalog" && (
+            <CatalogPage
+              agents={agents}
+              loading={loading}
+              viewMode={catalogViewMode}
+              onViewModeChange={setCatalogViewMode}
+              onSelectAgent={(id) => { handleSelectAgent(id); setActivePersona("builder"); }}
+              onRefreshAgent={refreshAgent}
+              onDelete={handleDelete}
+              readOnly={!effectiveHasScope("agent:write")}
+              agentDeleteStartTimes={deleteStartTimes}
+              canViewAgents={effectiveHasScope("agent:read")}
+              canViewMemories={effectiveHasScope("memory:read")}
+              canViewMcp={effectiveHasScope("mcp:read")}
+              canViewA2a={effectiveHasScope("a2a:read")}
+              groupRestriction={groupRestriction}
+              userGroups={viewAsUser ? (USER_GROUPS[viewAsUser] ?? []) : (user?.groups ?? [])}
+              onNavigateToMcp={(serverId) => { setPendingMcpId(serverId); setActivePersona("mcp"); }}
+              onNavigateToA2a={(agentId) => { setPendingA2aId(agentId); setActivePersona("a2a"); }}
+            />
+          )}
+
+          {activePersona === "builder" && (
             <>
               {selectedAgentId !== null && (
                 <Button variant="ghost" size="sm" onClick={handleBack} className="mb-4">
@@ -692,21 +718,20 @@ function AppContent() {
               )}
 
               {selectedAgentId === null && (
-                <CatalogPage
+                <AgentListPage
                   agents={agents}
                   loading={loading}
-                  viewMode={catalogViewMode}
-                  onViewModeChange={setCatalogViewMode}
+                  viewMode={agentsViewMode}
+                  onViewModeChange={setAgentsViewMode}
+                  onRegister={registerAgent}
+                  onDeploy={deployAgent}
                   onSelectAgent={handleSelectAgent}
                   onRefreshAgent={refreshAgent}
                   onDelete={handleDelete}
                   readOnly={!effectiveHasScope("agent:write")}
-                  agentDeleteStartTimes={deleteStartTimes}
-                  canViewAgents={effectiveHasScope("agent:read")}
-                  canViewMemories={effectiveHasScope("memory:read")}
-                  canViewMcp={effectiveHasScope("mcp:read")}
-                  canViewA2a={effectiveHasScope("a2a:read")}
                   groupRestriction={groupRestriction}
+                  ownerRestriction={ownerRestriction}
+                  deleteStartTimes={deleteStartTimes}
                   userGroups={viewAsUser ? (USER_GROUPS[viewAsUser] ?? []) : (user?.groups ?? [])}
                 />
               )}
@@ -750,33 +775,11 @@ function AppContent() {
             </>
           )}
 
-          {activePersona === "builder" && (
-            <AgentListPage
-              agents={agents}
-              loading={loading}
-              viewMode={agentsViewMode}
-              onViewModeChange={setAgentsViewMode}
-              onRegister={registerAgent}
-              onDeploy={deployAgent}
-              onSelectAgent={(id) => {
-                handleSelectAgent(id);
-                setActivePersona("catalog");
-              }}
-              onRefreshAgent={refreshAgent}
-              onDelete={handleDelete}
-              readOnly={!effectiveHasScope("agent:write")}
-              groupRestriction={groupRestriction}
-              ownerRestriction={ownerRestriction}
-              deleteStartTimes={deleteStartTimes}
-              userGroups={viewAsUser ? (USER_GROUPS[viewAsUser] ?? []) : (user?.groups ?? [])}
-            />
-          )}
-
           {activePersona === "security" && <SecurityAdminPage readOnly={!effectiveHasScope("security:write")} />}
           {activePersona === "memory" && <MemoryManagementPage viewMode={memoryViewMode} onViewModeChange={setMemoryViewMode} readOnly={!effectiveHasScope("memory:write")} groupRestriction={groupRestriction} ownerRestriction={ownerRestriction} userGroups={viewAsUser ? (USER_GROUPS[viewAsUser] ?? []) : (user?.groups ?? [])} />}
           {activePersona === "tagging" && <TaggingPage readOnly={!effectiveHasScope("tagging:write")} userGroups={user?.groups || []} />}
-          {activePersona === "mcp" && <McpServersPage viewMode={mcpViewMode} onViewModeChange={setMcpViewMode} readOnly={!effectiveHasScope("mcp:write")} />}
-          {activePersona === "a2a" && <A2aAgentsPage viewMode={a2aViewMode} onViewModeChange={setA2aViewMode} readOnly={!effectiveHasScope("a2a:write")} />}
+          {activePersona === "mcp" && <McpServersPage viewMode={mcpViewMode} onViewModeChange={setMcpViewMode} readOnly={!effectiveHasScope("mcp:write")} initialSelectedId={pendingMcpId} key={`mcp-${pendingMcpId}`} />}
+          {activePersona === "a2a" && <A2aAgentsPage viewMode={a2aViewMode} onViewModeChange={setA2aViewMode} readOnly={!effectiveHasScope("a2a:write")} initialSelectedId={pendingA2aId} key={`a2a-${pendingA2aId}`} />}
           {activePersona === "registry" && <RegistryPage readOnly={!effectiveHasScope("registry:write")} isEndUserRole={effectiveUserGroups.includes("t-user") && !effectiveUserGroups.includes("t-admin")} />}
           {activePersona === "settings" && <SettingsPage />}
           {activePersona === "costs" && (

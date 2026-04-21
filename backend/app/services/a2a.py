@@ -20,6 +20,11 @@ def _is_agentcore_url(base_url: str) -> bool:
     return "bedrock-agentcore" in base_url
 
 
+def _is_salesforce_url(base_url: str) -> bool:
+    """Detect if the base URL points to a Salesforce Agentforce endpoint."""
+    return "salesforce.com/einstein/ai-agent" in base_url
+
+
 def _get_oauth2_token(agent: Any) -> str | None:
     """Exchange OAuth2 client credentials for an access token."""
     if agent.auth_type != "oauth2" or not agent.oauth2_client_id or not agent.oauth2_client_secret:
@@ -76,6 +81,33 @@ def _build_headers(agent: Any) -> dict[str, str]:
     return headers
 
 
+def _fetch_salesforce_agent_card(base_url: str, headers: dict[str, str]) -> dict:
+    """Fetch the Agent Card from a Salesforce Agentforce A2A endpoint.
+
+    Salesforce uses /v1/card instead of /.well-known/agent.json and returns
+    401 for unknown paths rather than 404.
+    """
+    url = base_url + "/v1/card"
+    try:
+        resp = httpx.get(url, headers=headers, timeout=A2A_REQUEST_TIMEOUT, follow_redirects=True)
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.HTTPStatusError as e:
+        status_code = e.response.status_code
+        friendly = {
+            401: "authentication required — check OAuth2 credentials",
+            403: "access denied — check OAuth2 credentials and scopes",
+        }
+        detail = friendly.get(status_code, e.response.text[:200])
+        raise ValueError(f"Salesforce Agent Card fetch failed (HTTP {status_code}): {detail}") from e
+    except httpx.ConnectError as e:
+        raise ValueError(f"Cannot connect to {base_url} — verify the URL is correct") from e
+    except httpx.TimeoutException as e:
+        raise ValueError(f"Connection to {base_url} timed out after {A2A_REQUEST_TIMEOUT}s") from e
+    except Exception as e:
+        raise ValueError(f"Failed to fetch Salesforce Agent Card from {url}: {e}") from e
+
+
 def fetch_agent_card(base_url: str, auth_headers: dict[str, str] | None = None) -> dict:
     """Fetch the Agent Card from the well-known endpoint.
 
@@ -91,6 +123,10 @@ def fetch_agent_card(base_url: str, auth_headers: dict[str, str] | None = None) 
     """
     stripped = base_url.rstrip("/")
     headers = auth_headers or {"Accept": "*/*"}
+
+    # Salesforce Agentforce: card is at /v1/card, not .well-known
+    if _is_salesforce_url(base_url):
+        return _fetch_salesforce_agent_card(stripped, headers)
 
     # Try AgentCore path first for AgentCore URLs, then standard; reverse for others
     if _is_agentcore_url(base_url):
@@ -128,7 +164,6 @@ def fetch_agent_card(base_url: str, auth_headers: dict[str, str] | None = None) 
         except Exception as e:
             raise ValueError(f"Failed to fetch Agent Card from {url}: {e}") from e
     else:
-        # Both paths returned 404/424
         raise ValueError(
             "No Agent Card found — tried both /.well-known/agent.json and "
             "/.well-known/agent-card.json. The underlying agent may not implement "

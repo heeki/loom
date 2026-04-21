@@ -735,6 +735,7 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
             "oauth2_client_id": s.oauth2_client_id,
             "oauth2_client_secret": s.oauth2_client_secret,
             "oauth2_scopes": s.oauth2_scopes,
+            "api_key_header_name": s.api_key_header_name,
         }
         for s in mcp_records
     ]
@@ -940,6 +941,13 @@ def _deploy_agent_background(
                 if server["oauth2_scopes"]:
                     auth_entry["scopes"] = server["oauth2_scopes"]
                 entry["auth"] = auth_entry
+            elif server["auth_type"] == "api_key":
+                secret_name = f"loom/mcp/{server['name']}/api-key/{{actor_id}}"
+                entry["auth"] = {
+                    "type": "api_key",
+                    "credentials_secret_arn": secret_name,
+                    "api_key_header_name": server["api_key_header_name"] or "x-api-key",
+                }
             mcp_server_configs.append(entry)
 
         # Build A2A agent configs from snapshots

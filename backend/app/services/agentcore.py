@@ -6,7 +6,10 @@ for describing runtimes, listing endpoints, and invoking agents with streaming r
 """
 
 import json
+import logging
 from typing import Any, Generator
+
+logger = logging.getLogger(__name__)
 
 
 def describe_runtime(arn: str, region: str) -> dict[str, Any]:
@@ -79,6 +82,8 @@ def invoke_agent(
     region: str,
     access_token: str | None = None,
     actor_id: str | None = None,
+    dynamic_mcp_servers: list[dict[str, Any]] | None = None,
+    runtime_model_id: str | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """
     Invoke an AgentCore Runtime agent and stream the response.
@@ -108,6 +113,10 @@ def invoke_agent(
     from botocore.config import Config
 
     payload: dict[str, Any] = {"prompt": prompt, "session_id": session_id, "actor_id": actor_id or "loom-agent"}
+    if dynamic_mcp_servers:
+        payload["dynamic_mcp_servers"] = dynamic_mcp_servers
+    if runtime_model_id:
+        payload["model_id"] = runtime_model_id
     payload_bytes = json.dumps(payload).encode('utf-8')
 
     params: dict[str, Any] = {
@@ -145,9 +154,16 @@ def invoke_agent(
     if streaming_body is None:
         return
 
+    line_count = 0
     for line in streaming_body.iter_lines():
         decoded = line.decode('utf-8').strip()
+        if not decoded:
+            continue
+        line_count += 1
+        if line_count <= 10:
+            logger.info("Stream line %d: %s", line_count, decoded[:500])
         if not decoded.startswith('data:'):
+            logger.info("Non-data stream line: %s", decoded[:500])
             continue
         payload = decoded[5:].strip()  # strip "data:" prefix
         if not payload:
@@ -161,3 +177,4 @@ def invoke_agent(
         except json.JSONDecodeError:
             if payload:
                 yield {"type": "text", "content": payload}
+    logger.info("Stream completed: %d total lines received", line_count)

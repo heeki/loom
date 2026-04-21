@@ -20,6 +20,8 @@ class McpServer(Base):
     oauth2_client_id = Column(String, nullable=True)
     oauth2_client_secret = Column(String, nullable=True)
     oauth2_scopes = Column(String, nullable=True)  # space-separated
+    api_key_header_name = Column(String, nullable=True)  # e.g. 'x-api-key', 'Authorization'
+    has_admin_api_key = Column(String, nullable=True)  # 'true' or 'false'
     registry_record_id = Column(String, nullable=True)
     registry_status = Column(String, nullable=True)  # DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, DEPRECATED
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -41,6 +43,8 @@ class McpServer(Base):
             "oauth2_client_id": self.oauth2_client_id,
             "oauth2_scopes": self.oauth2_scopes,
             "has_oauth2_secret": self.oauth2_client_secret is not None and self.oauth2_client_secret != "",
+            "api_key_header_name": self.api_key_header_name,
+            "has_admin_api_key": self.has_admin_api_key == "true",
             "registry_record_id": self.registry_record_id,
             "registry_status": self.registry_status,
             "created_at": (self.created_at.isoformat() + "Z") if self.created_at else None,

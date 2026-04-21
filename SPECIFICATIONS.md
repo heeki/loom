@@ -548,7 +548,20 @@ Agents support runtime model selection, allowing users to choose from a set of a
 - **Agent detail response pane refactor:** Markdown rendering extracted to standalone `MarkdownBlock` component. Response pane renders `segments` array with `ToolUseBlock` and `MarkdownBlock` blocks. Thinking indicator shown when streaming with no segments. `StreamingBubble` component in ChatPage for segment-based rendering during active streams.
 - 12 backend tests in `test_model_selection.py` covering Agent model helpers, registration with `allowed_model_ids`, response inclusion, PATCH validation, and invoke model validation.
 
-### Phase 24 — Advanced Operations
+### Phase 24 — Third-Party Connectors *(Complete)*
+- **API key authentication for MCP servers:** New `api_key` auth type alongside `none` and `oauth2`. Admin API keys stored in Loom-managed AWS Secrets Manager (`loom/mcp/{name}/admin-api-key`), never in the database. Per-user API keys stored at `loom/mcp/{name}/api-key/{user_sub}`. Backend resolves keys from Secrets Manager with 5-minute in-memory cache. `_ApiKeyAuth` httpx handler in agent runtime resolves key once at session init (not per-request) to avoid throttling.
+- **Dynamic MCP connectors in ChatPage:** "Connectors" button in the input area footer (left of model picker). Dropdown lists MCP servers available to the user with per-server toggle switches. Enabled connector state persisted to `localStorage` per agent (`loom:enabledConnectors:{agentId}`). API key connectors prompt for key entry on first enable; disconnect action deletes the stored key. Connector IDs passed through invoke request to agent runtime as `dynamic_mcp_servers`.
+- **Agent runtime model override:** `AGENT_MODEL_ID` environment variable and `model_id` field in invoke payload. Agent handler caches `BedrockModel` instances per model ID and swaps `agent.model` per invocation. Default model restored when no override specified.
+- **Agent runtime dynamic MCP attachment:** Handler accepts `dynamic_mcp_servers` in invoke payload. Maintains connection pool keyed by `(server_name, actor_id)`. Previously-connected servers are reused across invocations. Supports `api_key`, `oauth2`, and unauthenticated transports.
+- **Salesforce Agentforce A2A integration:** Salesforce uses `/v1/card` instead of `/.well-known/agent.json` for Agent Card endpoint. `_AuthenticatedA2AAgent` detects Salesforce URLs and trusts the card's declared RPC URL (does not override with endpoint). Agent card `capabilities.streaming` check — skip `message/stream` and go directly to `message/send` for agents that don't advertise streaming support.
+- **A2A agent card UX improvements:** Skill list restyled from Card-based layout to compact expandable rows matching MCP tool list style. Capabilities (streaming, push notifications, state history) and default I/O modes displayed inline with label prefixes. Empty default modes show "none" indicator.
+- **Registry lifecycle improvements:** MCP server deletion cleans up associated registry records. Tool refresh propagates updated descriptors to the registry. Registry status badges shown across catalog and list views.
+- **Catalog navigation improvements:** Clicking an item in the CatalogPage navigates to the corresponding admin page with the item pre-selected.
+- **AgentCard overflow fix:** `overflow-hidden` on flex container prevents long agent names from overflowing card boundaries.
+- **ChatPage model picker grouped by vendor:** Model dropdown uses `groupModels()` utility for alphabetical vendor grouping with section headers, matching the admin deploy form pattern.
+- **SQLite absolute path default:** `DATABASE_URL` defaults to an absolute path based on the backend directory to avoid data loss when CWD differs between invocations.
+
+### Phase 25 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

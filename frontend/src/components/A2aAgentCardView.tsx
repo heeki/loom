@@ -80,10 +80,49 @@ export function A2aAgentCardView({ agent, onRefresh, refreshing }: A2aAgentCardV
         </div>
       )}
 
+      {/* Capabilities & Modes */}
+      <div className="space-y-0.5 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-muted-foreground/70">Capabilities:</span>
+          <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+            streaming: {agent.capabilities.streaming ? "yes" : "no"}
+          </Badge>
+          {agent.capabilities.pushNotifications !== undefined && (
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+              push notifications: {agent.capabilities.pushNotifications ? "yes" : "no"}
+            </Badge>
+          )}
+          {agent.capabilities.stateTransitionHistory !== undefined && (
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+              state history: {agent.capabilities.stateTransitionHistory ? "yes" : "no"}
+            </Badge>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-muted-foreground/70">Default Modes:</span>
+          <span className="text-[10px] text-muted-foreground/70">Input:</span>
+          {agent.default_input_modes.length > 0 ? agent.default_input_modes.map((m) => (
+            <Badge key={m} variant="outline" className="text-[10px] px-1.5 py-0">
+              {m}
+            </Badge>
+          )) : (
+            <span className="text-[10px] text-muted-foreground/50">none</span>
+          )}
+          <span className="text-[10px] text-muted-foreground/70 ml-1">Output:</span>
+          {agent.default_output_modes.length > 0 ? agent.default_output_modes.map((m) => (
+            <Badge key={m} variant="outline" className="text-[10px] px-1.5 py-0">
+              {m}
+            </Badge>
+          )) : (
+            <span className="text-[10px] text-muted-foreground/50">none</span>
+          )}
+        </div>
+      </div>
+
       {/* Authentication Schemes */}
       {agent.authentication_schemes.length > 0 && (
         <div className="space-y-1">
-          <h4 className="text-xs font-medium text-muted-foreground">Authentication Schemes</h4>
+          <h4 className="text-xs font-medium text-muted-foreground">Authentication</h4>
           <div className="flex flex-wrap gap-1.5">
             {agent.authentication_schemes.map((scheme) => (
               <Badge key={scheme} variant="outline" className="text-[10px] px-1.5 py-0">

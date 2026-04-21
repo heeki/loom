@@ -80,9 +80,9 @@ const GROUP_SCOPES: Record<string, Scope[]> = {
   ],
 
   // User groups (t-user users - can have multiple)
-  "g-users-demo": ["agent:read", "memory:read", "invoke"],
-  "g-users-test": ["agent:read", "memory:read", "invoke"],
-  "g-users-strategics": ["agent:read", "memory:read", "invoke"],
+  "g-users-demo": ["agent:read", "memory:read", "mcp:read", "invoke"],
+  "g-users-test": ["agent:read", "memory:read", "mcp:read", "invoke"],
+  "g-users-strategics": ["agent:read", "memory:read", "mcp:read", "invoke"],
 };
 
 function deriveScopes(groups: string[]): Set<Scope> {

@@ -46,6 +46,18 @@ def store_secret(name: str, secret_value: str, region: str, description: str = "
         arn = response["ARN"]
         logger.info("Updated existing secret %s", name)
         return arn
+    except client.exceptions.InvalidRequestException as e:
+        if "scheduled for deletion" in str(e):
+            # Restore the secret then update its value
+            client.restore_secret(SecretId=name)
+            response = client.put_secret_value(
+                SecretId=name,
+                SecretString=secret_value,
+            )
+            arn = response["ARN"]
+            logger.info("Restored and updated secret %s (was pending deletion)", name)
+            return arn
+        raise
 
 
 def get_secret(name: str, region: str) -> str:

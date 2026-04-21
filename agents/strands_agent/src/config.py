@@ -15,6 +15,7 @@ class AuthConfig:
     credentials_secret_arn: str = ""
     credential_provider_name: str = ""
     scopes: str = ""
+    api_key_header_name: str = "x-api-key"
 
 
 @dataclass
@@ -84,6 +85,7 @@ def _parse_auth(data: Optional[dict]) -> Optional[AuthConfig]:
         credentials_secret_arn=data.get("credentials_secret_arn", ""),
         credential_provider_name=data.get("credential_provider_name", ""),
         scopes=data.get("scopes", ""),
+        api_key_header_name=data.get("api_key_header_name", "x-api-key"),
     )
 
 

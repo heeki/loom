@@ -418,8 +418,9 @@ Accessed by clicking a server card/row. Shows:
 Create/edit form with:
 - Name (required, 1/3 width) and Endpoint URL (required, flex-1) and Transport Type (select: SSE/Streamable HTTP, 180px)
 - Description (textarea)
-- Authentication section: radio toggle for None / OAuth2
+- Authentication section: radio toggle for None / OAuth2 / API Key
 - When OAuth2: well-known URL, client ID, client secret (password input with "(unchanged)" placeholder in edit mode), scopes (space-separated)
+- When API Key: Header Name dropdown (`x-api-key` or `Authorization`), API Key password input (with "(unchanged)" placeholder in edit mode when admin key exists)
 - "Test Connection" button (only shown in edit mode) with success/failure badge result
 - Create/Update and Cancel buttons
 
@@ -693,8 +694,8 @@ The invoke panel's credential dropdown includes a "Manual token" sentinel value.
 
 ### Key Components
 - **A2aAgentForm** — Create/edit form for A2A agents with base URL input and progressive OAuth2 disclosure (auth_type toggle reveals well-known URL, client ID, secret, scopes). Test connection button in edit mode.
-- **A2aAgentCardView** — Structured display of the full Agent Card: header (name, version, status, provider, documentation, refresh button with last-fetched timestamp), capabilities (streaming, push notifications, state history as enabled/disabled badges), authentication schemes, input/output mode badges, and skills list.
-- **A2aSkillList** — Expandable skill cards with name, skill ID, description, tag badges, examples (bulleted list), and input/output mode overrides.
+- **A2aAgentCardView** — Structured display of the full Agent Card: header (name, version, status, provider, documentation, refresh button with last-fetched timestamp), capabilities and default modes displayed inline (streaming yes/no, push notifications, state history as badges, input/output modes with "none" fallback for empty arrays), authentication schemes, and skills list.
+- **A2aSkillList** — Compact expandable skill rows matching MCP tool list style. Each row shows name and description with chevron toggle. Expanded view shows skill ID, tag badges, examples (bulleted list), and input/output mode overrides. Single-column grid layout.
 - **A2aAccessControl** — Per-persona access control for A2A agent skills. Checkbox to grant/revoke access, all_skills/selected_skills radio, individual skill checkboxes with descriptions. Deny by default.
 
 ### Views
@@ -802,7 +803,7 @@ A "Previewing end-user experience as [user]" banner is shown to admins when in v
 - Input area with rounded border container: Textarea at top (borderless), footer row with model picker (left of Send) and Send/Cancel buttons (right)
 
 **Model selection:**
-- Model picker button in the input area footer, shown when the agent has multiple allowed models. Displays the current model's display name (or agent default). Click to open a dropdown of available models; click-outside-to-close behavior via `mousedown` listener. Default model marked with "(default)" suffix. Selecting a model sets `selectedModelId`; selecting the default clears it to `null`. Model selection resets when switching agents. The selected non-default model ID is passed as `model_id` in the invoke request.
+- Model picker button in the input area footer (right side, left of Send), shown when the agent has multiple allowed models. Displays the current model's display name (or agent default). Click to open a dropdown grouped by vendor via `groupModels()` with section headers; click-outside-to-close behavior via `mousedown` listener. Default model marked with "(default)" suffix. Selecting a model sets `selectedModelId`; selecting the default clears it to `null`. Model selection resets when switching agents. The selected non-default model ID is passed as `model_id` in the invoke request.
 
 **Session management:**
 - New conversations start with no session ID; a new `InvocationSession` is created automatically on first invocation
@@ -817,6 +818,15 @@ A "Previewing end-user experience as [user]" banner is shown to admins when in v
 
 **`useInvoke` subscription stability:**
 - `clearInvokeState(agentId)` resets the module-level store to `EMPTY` and notifies subscribers, but does NOT remove the listener set for the agent. This keeps the component's subscription alive after "New Conversation" so that subsequent invocations correctly propagate to the UI. Deleting the listener entry (the prior behavior) caused a silent state-update drop where streams ran to completion without any React re-renders.
+
+**MCP Connectors:**
+- "Connectors" button in the input area footer (left of model picker), shown when MCP connectors are available
+- Dropdown lists MCP servers with per-server toggle switches (green when enabled)
+- API key connectors (`auth_type === "api_key"`) show a KeyRound icon when key is not set; toggling on prompts a modal dialog for key entry. Disconnect (Unplug icon) deletes the stored key from Secrets Manager.
+- OAuth2 connectors show "OAuth2" label when disabled (currently no user-side auth flow — admin-configured credentials are used)
+- Enabled connector state persisted to `localStorage` per agent (`loom:enabledConnectors:{agentId}`) and reset when switching agents
+- Active connector count shown as a green badge on the Connectors button
+- Connector IDs are passed through the invoke request as `connector_ids`
 
 **Abstractions (admin details hidden):**
 - No qualifier picker (always uses `DEFAULT`)
@@ -851,4 +861,4 @@ Accessible via the "My Memory" sidebar button when the selected agent has memory
 - **Real-time auto-refresh** of sessions and metrics
 - **Log stream selection** and agent-level log viewer
 - **Latency charts** using Recharts
-- **Memory integration** with agent deployment (attach memory to agents)
+- **OAuth2 user-side connector auth flow** for MCP connectors requiring OAuth2 in the ChatPage

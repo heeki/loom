@@ -1,6 +1,7 @@
 """MCP server management endpoints."""
 import json
 import logging
+import os
 from datetime import datetime
 from typing import Optional
 
@@ -16,6 +17,8 @@ from app.models.mcp import McpServer, McpTool, McpServerAccess
 from app.services.mcp import test_mcp_connection as svc_test_connection
 from app.services.mcp import fetch_mcp_tools as svc_fetch_tools
 from app.services.mcp import invoke_mcp_tool as svc_invoke_tool
+from app.services.mcp import resolve_api_key
+from app.services.secrets import store_secret, delete_secret
 
 logger = logging.getLogger(__name__)
 
@@ -35,14 +38,19 @@ class McpServerCreateRequest(BaseModel):
     oauth2_client_id: str | None = Field(None, description="OAuth2 client ID")
     oauth2_client_secret: str | None = Field(None, description="OAuth2 client secret")
     oauth2_scopes: str | None = Field(None, description="OAuth2 scopes (space-separated)")
+    api_key_header_name: str | None = Field(None, description="Header name for API key auth")
+    api_key: str | None = Field(None, description="Admin API key (stored in Secrets Manager)")
 
     @model_validator(mode="after")
-    def validate_oauth2_fields(self):
+    def validate_auth_fields(self):
         if self.auth_type == "oauth2":
             if not self.oauth2_well_known_url:
                 raise ValueError("oauth2_well_known_url is required when auth_type is 'oauth2'")
             if not self.oauth2_client_id:
                 raise ValueError("oauth2_client_id is required when auth_type is 'oauth2'")
+        if self.auth_type == "api_key":
+            if not self.api_key_header_name:
+                raise ValueError("api_key_header_name is required when auth_type is 'api_key'")
         return self
 
 
@@ -57,6 +65,8 @@ class McpServerUpdateRequest(BaseModel):
     oauth2_client_id: str | None = None
     oauth2_client_secret: str | None = None
     oauth2_scopes: str | None = None
+    api_key_header_name: str | None = None
+    api_key: str | None = None
 
 
 class McpServerResponse(BaseModel):
@@ -71,6 +81,8 @@ class McpServerResponse(BaseModel):
     oauth2_client_id: str | None = None
     oauth2_scopes: str | None = None
     has_oauth2_secret: bool = False
+    api_key_header_name: str | None = None
+    has_admin_api_key: bool = False
     registry_record_id: str | None = None
     registry_status: str | None = None
     created_at: str | None = None
@@ -84,6 +96,14 @@ class McpToolResponse(BaseModel):
     description: str | None = None
     input_schema: dict | None = None
     last_refreshed_at: str | None = None
+
+
+class ConnectorInfo(BaseModel):
+    id: int
+    name: str
+    description: str | None = None
+    auth_type: str
+    has_user_api_key: bool = False
 
 
 class McpAccessRuleResponse(BaseModel):
@@ -156,6 +176,11 @@ def create_mcp_server(
         oauth2_client_secret=request.oauth2_client_secret,
         oauth2_scopes=request.oauth2_scopes,
     )
+    server.api_key_header_name = request.api_key_header_name
+    if request.auth_type == "api_key" and request.api_key:
+        region = os.getenv("AWS_REGION", "us-east-1")
+        store_secret(f"loom/mcp/{request.name}/admin-api-key", request.api_key, region, description=f"Admin API key for MCP server {request.name}")
+        server.has_admin_api_key = "true"
     db.add(server)
     db.commit()
     db.refresh(server)
@@ -173,6 +198,37 @@ def list_mcp_servers(
         query = query.filter(or_(McpServer.registry_status == "APPROVED", McpServer.registry_status.is_(None)))
     servers = query.order_by(McpServer.created_at.desc()).all()
     return [McpServerResponse(**s.to_dict()) for s in servers]
+
+
+@router.get("/connectors", response_model=list[ConnectorInfo])
+def list_connectors(
+    user: UserInfo = Depends(require_scopes("mcp:read")),
+    db: Session = Depends(get_db),
+) -> list[ConnectorInfo]:
+    """List MCP servers available as connectors with per-user API key status."""
+    query = db.query(McpServer)
+    if "t-user" in user.groups and "t-admin" not in user.groups:
+        query = query.filter(or_(McpServer.registry_status == "APPROVED", McpServer.registry_status.is_(None)))
+    servers = query.order_by(McpServer.name.asc()).all()
+    region = os.getenv("AWS_REGION", "us-east-1")
+    from app.services.secrets import get_secret
+    results: list[ConnectorInfo] = []
+    for server in servers:
+        has_key = False
+        if server.auth_type == "api_key":
+            try:
+                get_secret(f"loom/mcp/{server.name}/api-key/{user.sub}", region)
+                has_key = True
+            except Exception:
+                pass
+        results.append(ConnectorInfo(
+            id=server.id,
+            name=server.name,
+            description=server.description,
+            auth_type=server.auth_type,
+            has_user_api_key=has_key,
+        ))
+    return results
 
 
 @router.get("/{server_id}", response_model=McpServerResponse)
@@ -195,8 +251,14 @@ def update_mcp_server(
     server = _get_server_or_404(server_id, db)
 
     update_data = request.model_dump(exclude_unset=True)
+    new_api_key = update_data.pop("api_key", None)
     for field, value in update_data.items():
         setattr(server, field, value)
+
+    if new_api_key:
+        region = os.getenv("AWS_REGION", "us-east-1")
+        store_secret(f"loom/mcp/{server.name}/admin-api-key", new_api_key, region, description=f"Admin API key for MCP server {server.name}")
+        server.has_admin_api_key = "true"
 
     server.updated_at = datetime.utcnow()
     db.commit()
@@ -211,6 +273,17 @@ def delete_mcp_server(
     db: Session = Depends(get_db),
 ) -> McpServerResponse:
     server = _get_server_or_404(server_id, db)
+    if server.registry_record_id:
+        try:
+            from app.services.registry import get_registry_client
+            reg_client = get_registry_client()
+            reg_client.delete_record(server.registry_record_id)
+            logger.info("Deleted registry record %s for MCP server %s", server.registry_record_id, server.id)
+        except Exception as reg_err:
+            logger.warning("Failed to delete registry record for MCP server %s: %s", server.id, reg_err)
+    if server.has_admin_api_key == "true":
+        region = os.getenv("AWS_REGION", "us-east-1")
+        delete_secret(f"loom/mcp/{server.name}/admin-api-key", region)
     result = McpServerResponse(**server.to_dict())
     db.delete(server)
     db.commit()
@@ -228,6 +301,8 @@ class TestConnectionRequest(BaseModel):
     oauth2_client_id: str | None = None
     oauth2_client_secret: str | None = None
     oauth2_scopes: str | None = None
+    api_key_header_name: str | None = None
+    api_key: str | None = None
 
 
 @router.post("/test-connection", response_model=TestConnectionResponse)
@@ -235,7 +310,7 @@ def test_connection_pre_create(
     request: TestConnectionRequest,
     user: UserInfo = Depends(require_scopes("mcp:write")),
 ) -> TestConnectionResponse:
-    result = svc_test_connection(request)
+    result = svc_test_connection(request, api_key=request.api_key)
     return TestConnectionResponse(**result)
 
 
@@ -246,7 +321,8 @@ def test_connection(
     db: Session = Depends(get_db),
 ) -> TestConnectionResponse:
     server = _get_server_or_404(server_id, db)
-    result = svc_test_connection(server)
+    api_key = resolve_api_key(server)
+    result = svc_test_connection(server, api_key=api_key)
     return TestConnectionResponse(**result)
 
 
@@ -271,8 +347,9 @@ def refresh_mcp_tools(
     db: Session = Depends(get_db),
 ) -> list[McpToolResponse]:
     server = _get_server_or_404(server_id, db)
+    api_key = resolve_api_key(server)
 
-    fetched_tools = svc_fetch_tools(server)
+    fetched_tools = svc_fetch_tools(server, api_key=api_key)
 
     # Clear existing tools
     db.query(McpTool).filter(McpTool.server_id == server_id).delete()
@@ -296,6 +373,24 @@ def refresh_mcp_tools(
     for t in new_tools:
         db.refresh(t)
 
+    if server.registry_record_id:
+        try:
+            from app.services.registry import get_registry_client
+            reg_client = get_registry_client()
+            tools_for_registry = db.query(McpTool).filter(McpTool.server_id == server_id).all()
+            descriptors = reg_client.build_mcp_descriptors(server, tools_for_registry)
+            reg_client.update_record(
+                record_id=server.registry_record_id,
+                name=server.name,
+                descriptor_type="MCP",
+                descriptors=descriptors,
+                record_version="1.0",
+                description=server.description,
+            )
+            logger.info("Updated registry record %s for MCP server %s", server.registry_record_id, server.id)
+        except Exception as reg_err:
+            logger.warning("Failed to update registry record for MCP server %s: %s", server.id, reg_err)
+
     return [McpToolResponse(**t.to_dict()) for t in new_tools]
 
 
@@ -307,8 +402,66 @@ def invoke_mcp_tool(
     db: Session = Depends(get_db),
 ) -> ToolInvokeResponse:
     server = _get_server_or_404(server_id, db)
-    result = svc_invoke_tool(server, request.tool_name, request.arguments)
+    api_key = resolve_api_key(server)
+    result = svc_invoke_tool(server, request.tool_name, request.arguments, api_key=api_key)
     return ToolInvokeResponse(**result)
+
+
+# ---------------------------------------------------------------------------
+# Per-user API keys
+# ---------------------------------------------------------------------------
+class UserApiKeyRequest(BaseModel):
+    api_key: str = Field(..., description="User's personal API key")
+
+
+class UserApiKeyStatusResponse(BaseModel):
+    has_user_api_key: bool
+
+
+@router.put("/{server_id}/api-key", response_model=UserApiKeyStatusResponse)
+def set_user_api_key(
+    server_id: int,
+    request: UserApiKeyRequest,
+    user: UserInfo = Depends(require_scopes("mcp:read")),
+    db: Session = Depends(get_db),
+) -> UserApiKeyStatusResponse:
+    server = _get_server_or_404(server_id, db)
+    region = os.getenv("AWS_REGION", "us-east-1")
+    store_secret(
+        f"loom/mcp/{server.name}/api-key/{user.sub}",
+        request.api_key,
+        region,
+        description=f"User API key for MCP server {server.name}",
+    )
+    return UserApiKeyStatusResponse(has_user_api_key=True)
+
+
+@router.get("/{server_id}/api-key/status", response_model=UserApiKeyStatusResponse)
+def get_user_api_key_status(
+    server_id: int,
+    user: UserInfo = Depends(require_scopes("mcp:read")),
+    db: Session = Depends(get_db),
+) -> UserApiKeyStatusResponse:
+    server = _get_server_or_404(server_id, db)
+    region = os.getenv("AWS_REGION", "us-east-1")
+    try:
+        from app.services.secrets import get_secret
+        get_secret(f"loom/mcp/{server.name}/api-key/{user.sub}", region)
+        return UserApiKeyStatusResponse(has_user_api_key=True)
+    except Exception:
+        return UserApiKeyStatusResponse(has_user_api_key=False)
+
+
+@router.delete("/{server_id}/api-key", response_model=UserApiKeyStatusResponse)
+def delete_user_api_key(
+    server_id: int,
+    user: UserInfo = Depends(require_scopes("mcp:read")),
+    db: Session = Depends(get_db),
+) -> UserApiKeyStatusResponse:
+    server = _get_server_or_404(server_id, db)
+    region = os.getenv("AWS_REGION", "us-east-1")
+    delete_secret(f"loom/mcp/{server.name}/api-key/{user.sub}", region)
+    return UserApiKeyStatusResponse(has_user_api_key=False)
 
 
 # ---------------------------------------------------------------------------

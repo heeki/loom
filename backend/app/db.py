@@ -8,8 +8,10 @@ from typing import Generator
 
 logger = logging.getLogger(__name__)
 
-# Get LOOM_DATABASE_URL from environment, default to SQLite
-DATABASE_URL = os.getenv("LOOM_DATABASE_URL", "sqlite:///./loom.db")
+# Get LOOM_DATABASE_URL from environment, default to SQLite.
+# Use absolute path to avoid data loss when CWD differs between invocations.
+_default_db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "loom.db")
+DATABASE_URL = os.getenv("LOOM_DATABASE_URL", f"sqlite:///{_default_db_path}")
 
 # Create SQLAlchemy engine
 # PostgreSQL connections (including via RDS Proxy) use pool_pre_ping to detect
@@ -106,6 +108,8 @@ def _migrate_add_columns(eng) -> None:
         ("agents", "description", "TEXT"),
         ("mcp_servers", "registry_record_id", "VARCHAR"),
         ("mcp_servers", "registry_status", "VARCHAR"),
+        ("mcp_servers", "api_key_header_name", "VARCHAR"),
+        ("mcp_servers", "has_admin_api_key", "VARCHAR"),
         ("a2a_agents", "registry_record_id", "VARCHAR"),
         ("a2a_agents", "registry_status", "VARCHAR"),
         ("agents", "registry_record_id", "VARCHAR"),

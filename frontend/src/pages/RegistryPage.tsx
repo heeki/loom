@@ -23,6 +23,7 @@ import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { useRegistry } from "@/hooks/useRegistry";
 import { RegistryStatusBadge } from "@/components/RegistryStatusBadge";
+import { RegistryActions } from "@/components/RegistryActions";
 import { SortableTableHead, sortRows } from "@/components/SortableTableHead";
 import { SortableCardGrid, loadSortDirection, saveSortDirection, type SortDirection } from "@/components/SortableCardGrid";
 import * as registryApi from "@/api/registry";
@@ -395,11 +396,6 @@ export function RegistryPage({ readOnly, isEndUserRole }: RegistryPageProps) {
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [recordDetail, setRecordDetail] = useState<RegistryRecordDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
-  const [rejectReason, setRejectReason] = useState("");
-  const [showRejectInput, setShowRejectInput] = useState(false);
-  const [approveReason, setApproveReason] = useState("");
-  const [showApproveInput, setShowApproveInput] = useState(false);
-  const [actionLoading, setActionLoading] = useState(false);
 
   // Apply filters
   useEffect(() => {
@@ -452,49 +448,6 @@ export function RegistryPage({ readOnly, isEndUserRole }: RegistryPageProps) {
     }
   };
 
-  const handleSubmit = async (recordId: string) => {
-    setActionLoading(true);
-    try {
-      await registryApi.submitForApproval(recordId);
-      toast.success("Submitted for approval");
-      void fetchRecords();
-      void refreshDetail(recordId);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Submit failed");
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleApprove = async (recordId: string, reason: string) => {
-    setActionLoading(true);
-    try {
-      await registryApi.approveRecord(recordId, reason);
-      toast.success("Record approved");
-      void fetchRecords();
-      void refreshDetail(recordId);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Approve failed");
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleReject = async (recordId: string, reason: string) => {
-    setActionLoading(true);
-    try {
-      await registryApi.rejectRecord(recordId, reason);
-      toast.success("Record rejected");
-      void fetchRecords();
-      void refreshDetail(recordId);
-      setShowRejectInput(false);
-      setRejectReason("");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Reject failed");
-    } finally {
-      setActionLoading(false);
-    }
-  };
 
   // Compute display records before any early returns so hooks are called consistently
   const displayRecords = searchResults !== null
@@ -520,10 +473,6 @@ export function RegistryPage({ readOnly, isEndUserRole }: RegistryPageProps) {
   const goBackToList = () => {
     setSelectedRecordId(null);
     setRecordDetail(null);
-    setShowRejectInput(false);
-    setRejectReason("");
-    setShowApproveInput(false);
-    setApproveReason("");
   };
 
   // Detail view
@@ -556,119 +505,23 @@ export function RegistryPage({ readOnly, isEndUserRole }: RegistryPageProps) {
                 )}
               </div>
 
-              {/* Header: name, badges */}
-              <div className="flex items-center gap-3">
+              {/* Header: name, badges, actions */}
+              <div className="flex items-center gap-2">
                 <h2 className="text-lg font-semibold">{recordDetail.name}</h2>
                 <RegistryStatusBadge status={recordDetail.status} showUnregistered />
                 <Badge variant="outline" className="text-[10px] px-1.5 py-0">
                   {recordDetail.descriptor_type}
                 </Badge>
+                {!readOnly && (
+                  <RegistryActions
+                    resourceType={recordDetail.descriptor_type.toLowerCase() as "mcp" | "a2a" | "agent"}
+                    resourceId={0}
+                    registryRecordId={recordDetail.record_id}
+                    registryStatus={recordDetail.status}
+                    onAction={() => { void fetchRecords(); void refreshDetail(recordDetail.record_id); }}
+                  />
+                )}
               </div>
-
-              {/* Action buttons based on status */}
-              {!readOnly && recordDetail.status === "DRAFT" && (
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={actionLoading}
-                    onClick={() => void handleSubmit(recordDetail.record_id)}
-                  >
-                    Submit for Approval
-                  </Button>
-                </div>
-              )}
-
-              {!readOnly && recordDetail.status === "PENDING_APPROVAL" && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    {!showApproveInput ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={actionLoading}
-                        onClick={() => { setShowApproveInput(true); setShowRejectInput(false); }}
-                      >
-                        Approve
-                      </Button>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={approveReason}
-                          onChange={(e) => setApproveReason(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" && approveReason.trim()) {
-                              void handleApprove(recordDetail.record_id, approveReason.trim());
-                            }
-                          }}
-                          placeholder="Approval reason..."
-                          className="h-8 text-xs border rounded px-2 bg-input-bg w-[30rem]"
-                          autoFocus
-                        />
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={actionLoading || !approveReason.trim()}
-                          onClick={() => void handleApprove(recordDetail.record_id, approveReason.trim())}
-                        >
-                          Confirm Approve
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => { setShowApproveInput(false); setApproveReason(""); }}
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    )}
-
-                    {!showRejectInput ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-destructive"
-                        disabled={actionLoading}
-                        onClick={() => { setShowRejectInput(true); setShowApproveInput(false); }}
-                      >
-                        Reject
-                      </Button>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={rejectReason}
-                          onChange={(e) => setRejectReason(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" && rejectReason.trim()) {
-                              void handleReject(recordDetail.record_id, rejectReason.trim());
-                            }
-                          }}
-                          placeholder="Rejection reason..."
-                          className="h-8 text-xs border rounded px-2 bg-input-bg w-[30rem]"
-                          autoFocus
-                        />
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          disabled={actionLoading || !rejectReason.trim()}
-                          onClick={() => void handleReject(recordDetail.record_id, rejectReason.trim())}
-                        >
-                          Confirm Reject
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => { setShowRejectInput(false); setRejectReason(""); }}
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
 
               {/* Descriptors + Record metadata */}
               <DescriptorView

@@ -101,6 +101,7 @@ This allows the frontend to pass the user-configured prompt as a deploy-time par
 | `AGENT_CONFIG_PATH` | Path to configuration JSON file | — |
 | `AGENT_CONFIG_JSON` | Inline configuration JSON string | — |
 | `MEMORY_STORE_ID` | AgentCore Memory store identifier | — |
+| `AGENT_MODEL_ID` | Runtime model override (overrides config) | — |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTEL collector endpoint | `http://localhost:4317` |
 | `OTEL_SERVICE_NAME` | Service name for telemetry | `loom-agent` |
 | `AWS_REGION` | AWS region | `us-east-1` |
@@ -141,6 +142,13 @@ Produces `build/agent.zip` — a self-contained zip deployable to AgentCore Runt
 
 MCP (Model Context Protocol) tool servers are dynamically loaded from configuration. The agent creates MCP clients at startup for each enabled server. Currently supports `streamable_http` transport.
 
+**Authentication types:**
+- `oauth2` — Uses `_OAuth2Auth` httpx handler to exchange workload tokens for downstream access tokens via AgentCore Identity credential providers.
+- `api_key` — Uses `_ApiKeyAuth` httpx handler. Resolves the API key once from AWS Secrets Manager at initialization (not per-request) to avoid throttling. Header injection follows `api_key_header_name` — `Authorization` headers use `Bearer` prefix; all others set the raw key.
+- Unauthenticated — no auth handler.
+
+**Dynamic MCP connectors:** The handler accepts `dynamic_mcp_servers` in the invocation payload for per-invocation MCP server attachment. A connection pool keyed by `(server_name, actor_id)` reuses previously-connected servers across invocations. For API key connectors, the `{actor_id}` placeholder in `credentials_secret_arn` is resolved to the invoking user's identity.
+
 ### A2A Agent Clients
 
 Agent-to-agent (A2A) communication uses the Strands SDK `A2AAgent` class. Each enabled A2A agent in the configuration is wrapped as a `@tool` function that the orchestrating agent can invoke during conversation.
@@ -148,9 +156,10 @@ Agent-to-agent (A2A) communication uses the Strands SDK `A2AAgent` class. Each e
 **`_AuthenticatedA2AAgent`** — Subclass of `A2AAgent` for OAuth2-protected A2A endpoints. Injects OAuth2 Bearer tokens via the AgentCore Identity service M2M flow (using the workload token from `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE`). Handles:
 
 - **Agent Card fetching** with authentication, backfilling required fields that older agent cards may omit, and overriding the card's internal URL with the external AgentCore Runtime endpoint.
-- **Message sending** via `message/stream` (SSE) with automatic fallback to `message/send` when the server returns "Method not found".
+- **Message sending** with capability-aware method selection. Checks `agent_card.capabilities.streaming` — uses `message/stream` (SSE) only when streaming is supported, otherwise goes directly to `message/send`. Falls back from `message/stream` to `message/send` when the server returns "Method not found".
 - **SSE response parsing** — handles both `text/event-stream` (standard A2A streaming) and `application/json` (AgentCore proxy-collapsed) content types. Buffers `Message` events and yields them after `Task` events so that `stream_async` picks the content-bearing `Message` as the `last_complete_event`.
 - **Manual task tracking** instead of `ClientTaskManager` to handle duplicate `Task` events emitted by some A2A servers.
+- **Salesforce Agentforce support** — detects Salesforce URLs and uses `/v1/card` for Agent Card endpoint instead of `/.well-known/agent.json`. Trusts the card's declared RPC URL (does not override with the configured endpoint) since Salesforce RPC URLs differ from base URLs.
 
 **Authentication flow:** The `_OAuth2Auth` httpx handler (shared with MCP clients) exchanges the ephemeral container workload token for a downstream OAuth2 access token via the AgentCore Identity service credential provider.
 

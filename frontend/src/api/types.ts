@@ -173,6 +173,7 @@ export interface InvokeRequest {
   credential_id?: number;
   bearer_token?: string;
   model_id?: string;
+  connector_ids?: number[];
 }
 
 export interface InvocationResponse {
@@ -557,6 +558,14 @@ export interface TagProfileCreateRequest {
   tags: Record<string, string>;
 }
 
+export interface ConnectorInfo {
+  id: number;
+  name: string;
+  description: string | null;
+  auth_type: "none" | "oauth2" | "api_key";
+  has_user_api_key: boolean;
+}
+
 // MCP Server types
 export interface McpServer {
   id: number;
@@ -565,11 +574,13 @@ export interface McpServer {
   endpoint_url: string;
   transport_type: "sse" | "streamable_http";
   status: "active" | "inactive" | "error";
-  auth_type: "none" | "oauth2";
+  auth_type: "none" | "oauth2" | "api_key";
   oauth2_well_known_url: string | null;
   oauth2_client_id: string | null;
   oauth2_scopes: string | null;
   has_oauth2_secret: boolean;
+  api_key_header_name: string | null;
+  has_admin_api_key: boolean;
   created_at: string | null;
   updated_at: string | null;
   registry_record_id: string | null;
@@ -581,11 +592,13 @@ export interface McpServerCreateRequest {
   description?: string;
   endpoint_url: string;
   transport_type: "sse" | "streamable_http";
-  auth_type?: "none" | "oauth2";
+  auth_type?: "none" | "oauth2" | "api_key";
   oauth2_well_known_url?: string;
   oauth2_client_id?: string;
   oauth2_client_secret?: string;
   oauth2_scopes?: string;
+  api_key_header_name?: string;
+  api_key?: string;
 }
 
 export interface McpServerUpdateRequest {
@@ -594,11 +607,13 @@ export interface McpServerUpdateRequest {
   endpoint_url?: string;
   transport_type?: "sse" | "streamable_http";
   status?: "active" | "inactive" | "error";
-  auth_type?: "none" | "oauth2";
+  auth_type?: "none" | "oauth2" | "api_key";
   oauth2_well_known_url?: string;
   oauth2_client_id?: string;
   oauth2_client_secret?: string;
   oauth2_scopes?: string;
+  api_key_header_name?: string;
+  api_key?: string;
 }
 
 export interface McpTool {
@@ -856,9 +871,12 @@ export interface RegistryRecordDetail extends RegistryRecord {
   status_reason: string | null;
 }
 
+export type McpNamespace = "aws.agentcore" | "remote.mcp" | "npm" | "custom";
+
 export interface RegistryRecordCreateRequest {
   resource_type: "mcp" | "a2a" | "agent";
   resource_id: number;
+  namespace?: McpNamespace;
 }
 
 export interface RegistrySearchResult {
