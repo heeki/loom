@@ -89,14 +89,17 @@ class _AuthenticatedA2AAgent(A2AAgent):
         # Fetch the raw card JSON and apply defaults for fields that older
         # A2A agents may omit but the current SDK requires, then validate.
         base_url = self.endpoint.rstrip("/")
-        card_url = f"{base_url}/{AGENT_CARD_WELL_KNOWN_PATH.lstrip('/')}"
+        if "salesforce.com/einstein/ai-agent" in base_url:
+            card_url = f"{base_url}/v1/card"
+        else:
+            card_url = f"{base_url}/{AGENT_CARD_WELL_KNOWN_PATH.lstrip('/')}"
 
         async with httpx.AsyncClient(timeout=self.timeout, auth=self._http_auth) as client:
             response = await client.get(card_url)
             response.raise_for_status()
             card_data: dict = response.json()
 
-        logger.info("Fetched agent card JSON from %s", card_url)
+        logger.info("Fetched agent card JSON from %s: %s", card_url, _json.dumps(card_data, indent=2, default=str))
 
         # Backfill required fields that older agent cards may omit
         card_data.setdefault("defaultInputModes", ["application/json"])
@@ -106,18 +109,26 @@ class _AuthenticatedA2AAgent(A2AAgent):
 
         self._agent_card = AgentCard.model_validate(card_data)
 
-        # Replace the card's internal URL with the external endpoint so
-        # that message sending targets the AgentCore Runtime URL.
-        # Ensure a trailing slash so the POST routes through the proxy
-        # to the A2A server's root (/) rather than the entrypoint handler.
-        external_url = self.endpoint.rstrip("/") + "/"
-        logger.info(
-            "Overriding agent card url '%s' → '%s' (endpoint='%s')",
-            self._agent_card.url,
-            external_url,
-            self.endpoint,
-        )
-        self._agent_card.url = external_url
+        # AgentCore-hosted agents report an internal URL (e.g.
+        # http://localhost:8081) that is not reachable externally.
+        # Override with the configured endpoint for those agents.
+        # For non-AgentCore agents (e.g. Salesforce), trust the card's URL
+        # since the RPC endpoint may differ from the base URL.
+        if "salesforce.com/einstein/ai-agent" not in self.endpoint:
+            external_url = self.endpoint.rstrip("/") + "/"
+            logger.info(
+                "Overriding agent card url '%s' → '%s' (endpoint='%s')",
+                self._agent_card.url,
+                external_url,
+                self.endpoint,
+            )
+            self._agent_card.url = external_url
+        else:
+            logger.info(
+                "Using agent card url '%s' as-is (endpoint='%s')",
+                self._agent_card.url,
+                self.endpoint,
+            )
 
         if self.name is None and self._agent_card.name:
             self.name = self._agent_card.name
@@ -131,16 +142,15 @@ class _AuthenticatedA2AAgent(A2AAgent):
         return self._agent_card
 
     async def _send_message(self, prompt) -> AsyncIterator[Any]:
-        """Send message to remote A2A agent via ``message/stream``.
+        """Send message to remote A2A agent.
 
-        The response may arrive as either:
-        - **SSE** (``text/event-stream``) — the standard A2A streaming
-          format, where each SSE event carries a JSON-RPC response.
-        - **Plain JSON** (``application/json``) — when the AgentCore
-          proxy collapses the SSE stream into a single JSON body.
-
-        This method handles both transparently.  If ``message/stream``
-        returns *Method not found*, it retries with ``message/send``.
+        Checks ``agent_card.capabilities.streaming`` to decide whether
+        to use ``message/stream`` or ``message/send``.  The response
+        may arrive as either:
+        - **SSE** (``text/event-stream``) — streaming format where
+          each SSE event carries a JSON-RPC response.
+        - **Plain JSON** (``application/json``) — when the proxy
+          collapses the stream or the agent only supports send.
 
         Yields the same event shapes as the SDK's ``BaseClient.send_message``:
         - ``Message`` for direct message responses
@@ -156,11 +166,26 @@ class _AuthenticatedA2AAgent(A2AAgent):
             configuration=MessageSendConfiguration(blocking=True),
         )
 
-        # Try message/stream first, fall back to message/send on Method-not-found.
-        for rpc_request_cls, method_label in [
-            (SendStreamingMessageRequest, "message/stream"),
-            (SendMessageRequest, "message/send"),
-        ]:
+        # Use message/stream only if the agent advertises streaming support;
+        # otherwise go directly to message/send.
+        supports_streaming = getattr(
+            getattr(agent_card, "capabilities", None), "streaming", False,
+        )
+        if supports_streaming:
+            methods = [
+                (SendStreamingMessageRequest, "message/stream"),
+                (SendMessageRequest, "message/send"),
+            ]
+        else:
+            methods = [
+                (SendMessageRequest, "message/send"),
+            ]
+        logger.info(
+            "Agent '%s' streaming=%s, methods=%s",
+            self.name, supports_streaming, [m for _, m in methods],
+        )
+
+        for rpc_request_cls, method_label in methods:
             rpc_request = rpc_request_cls(params=params, id=str(uuid4()))
             payload = rpc_request.model_dump(mode="json", exclude_none=True)
 

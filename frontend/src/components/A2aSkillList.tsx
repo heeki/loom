@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ChevronRight, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
@@ -11,73 +10,71 @@ interface A2aSkillListProps {
   agentId: number;
 }
 
-function SkillCard({ skill }: { skill: A2aAgentSkill }) {
+function SkillRow({ skill }: { skill: A2aAgentSkill }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <Card className="py-2 gap-1">
-      <CardHeader className="gap-0 pb-1">
-        <button
-          type="button"
-          onClick={() => setExpanded(!expanded)}
-          className="flex items-center gap-1.5 text-left w-full"
-        >
-          {expanded ? (
-            <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+    <div className="rounded border bg-input-bg px-3 py-2">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1.5 text-left w-full"
+      >
+        {expanded ? (
+          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+        )}
+        <span className="text-sm font-medium">{skill.name}</span>
+        {skill.description && (
+          <span className="text-xs text-muted-foreground truncate"> — {skill.description}</span>
+        )}
+      </button>
+      {expanded && (
+        <div className="mt-2 pl-[22px] space-y-1.5 text-xs text-muted-foreground">
+          <div className="text-[10px] text-muted-foreground/70">ID: {skill.skill_id}</div>
+          {skill.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {skill.tags.map((tag) => (
+                <Badge key={tag} variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
+                  {tag}
+                </Badge>
+              ))}
+            </div>
           )}
-          <span className="text-sm font-medium truncate">{skill.name}</span>
-          <span className="text-[10px] text-muted-foreground/70 shrink-0">({skill.skill_id})</span>
-        </button>
-      </CardHeader>
-      <CardContent className="text-xs text-muted-foreground space-y-1.5">
-        <p>{skill.description}</p>
-        {skill.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {skill.tags.map((tag) => (
-              <Badge key={tag} variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
-                {tag}
-              </Badge>
-            ))}
-          </div>
-        )}
-        {expanded && (
-          <div className="space-y-1.5 pt-1 border-t">
-            {skill.examples && skill.examples.length > 0 && (
-              <div>
-                <span className="text-[10px] font-medium text-muted-foreground/70">Examples:</span>
-                <ul className="list-disc list-inside text-[11px] mt-0.5">
-                  {skill.examples.map((ex, i) => (
-                    <li key={i}>{ex}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {skill.input_modes && skill.input_modes.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1">
-                <span className="text-[10px] text-muted-foreground/70">Input:</span>
-                {skill.input_modes.map((m) => (
-                  <Badge key={m} variant="outline" className="text-[10px] px-1 py-0 font-normal">
-                    {m}
-                  </Badge>
+          {skill.examples && skill.examples.length > 0 && (
+            <div>
+              <span className="text-[10px] font-medium text-muted-foreground/70">Examples:</span>
+              <ul className="list-disc list-inside text-[11px] mt-0.5">
+                {skill.examples.map((ex, i) => (
+                  <li key={i}>{ex}</li>
                 ))}
-              </div>
-            )}
-            {skill.output_modes && skill.output_modes.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1">
-                <span className="text-[10px] text-muted-foreground/70">Output:</span>
-                {skill.output_modes.map((m) => (
-                  <Badge key={m} variant="outline" className="text-[10px] px-1 py-0 font-normal">
-                    {m}
-                  </Badge>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+              </ul>
+            </div>
+          )}
+          {skill.input_modes && skill.input_modes.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="text-[10px] text-muted-foreground/70">Input:</span>
+              {skill.input_modes.map((m) => (
+                <Badge key={m} variant="outline" className="text-[10px] px-1 py-0 font-normal">
+                  {m}
+                </Badge>
+              ))}
+            </div>
+          )}
+          {skill.output_modes && skill.output_modes.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="text-[10px] text-muted-foreground/70">Output:</span>
+              {skill.output_modes.map((m) => (
+                <Badge key={m} variant="outline" className="text-[10px] px-1 py-0 font-normal">
+                  {m}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -104,7 +101,7 @@ export function A2aSkillList({ agentId }: A2aSkillListProps) {
     return (
       <div className="space-y-2">
         {Array.from({ length: 2 }).map((_, i) => (
-          <Skeleton key={i} className="h-16" />
+          <Skeleton key={i} className="h-10" />
         ))}
       </div>
     );
@@ -116,9 +113,9 @@ export function A2aSkillList({ agentId }: A2aSkillListProps) {
       {skills.length === 0 ? (
         <p className="text-xs text-muted-foreground/50 py-2">No skills defined in the Agent Card.</p>
       ) : (
-        <div className="grid gap-2 md:grid-cols-2">
+        <div className="grid gap-2 grid-cols-1">
           {skills.map((skill) => (
-            <SkillCard key={skill.id} skill={skill} />
+            <SkillRow key={skill.id} skill={skill} />
           ))}
         </div>
       )}

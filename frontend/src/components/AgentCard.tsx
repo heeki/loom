@@ -105,7 +105,7 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
     >
       <CardHeader className="gap-1 pb-3">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-0 overflow-hidden">
             <CardTitle className="text-sm font-medium truncate">
               {agent.name ?? agent.runtime_id}
             </CardTitle>
