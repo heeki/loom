@@ -4,7 +4,7 @@ Loom is an enterprise-grade platform for building, deploying, and operating AI a
 
 ## Features
 
-Loom seamlessly stitches together agents, memory stores, MCP servers, and agent-to-agent integrations in a unified platform. It handles the complexity of IAM roles, credential providers, authentication flows, and resource tagging — making it simple to deploy agents with full observability and cost tracking from day one.
+Loom seamlessly weaves together agents, memory stores, MCP servers, and agent-to-agent integrations in a unified platform. It handles the complexity of IAM roles, credential providers, authentication flows, and resource tagging — making it simple to deploy agents with full observability and cost tracking from day one.
 
 ![Loom Features](assets/loom_features.png)
 

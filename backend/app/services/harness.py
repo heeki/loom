@@ -19,10 +19,8 @@ def create_harness(
     tools: list[dict[str, Any]] | None = None,
     allowed_tools: list[str] | None = None,
     max_iterations: int | None = None,
-    timeout_seconds: int | None = None,
     max_tokens: int | None = None,
-    temperature: float | None = None,
-    top_p: float | None = None,
+    authorizer_config: dict[str, Any] | None = None,
     network_mode: str = "PUBLIC",
     idle_timeout: int | None = None,
     max_lifetime: int | None = None,
@@ -48,10 +46,6 @@ def create_harness(
 
     if max_tokens is not None:
         params["model"]["bedrockModelConfig"]["maxTokens"] = max_tokens
-    if temperature is not None:
-        params["model"]["bedrockModelConfig"]["temperature"] = temperature
-    if top_p is not None:
-        params["model"]["bedrockModelConfig"]["topP"] = top_p
 
     if tools:
         params["tools"] = tools
@@ -62,8 +56,8 @@ def create_harness(
 
     if max_iterations is not None:
         params["maxIterations"] = max_iterations
-    if timeout_seconds is not None:
-        params["timeoutSeconds"] = timeout_seconds
+    if authorizer_config:
+        params["authorizerConfiguration"] = authorizer_config
 
     lifecycle_config: dict[str, int] = {}
     if idle_timeout is not None:
@@ -83,8 +77,9 @@ def create_harness(
         params["tags"] = tags
 
     response = client.create_harness(**params)
-    logger.info("Created harness '%s': id=%s status=%s", name, response.get("harnessId"), response.get("status"))
-    return response
+    result = response.get("harness", response)
+    logger.info("Created harness '%s': id=%s status=%s", name, result.get("harnessId"), result.get("status"))
+    return result
 
 
 def get_harness(harness_id: str, region: str = "us-east-1") -> dict[str, Any]:
@@ -92,7 +87,8 @@ def get_harness(harness_id: str, region: str = "us-east-1") -> dict[str, Any]:
     import boto3
 
     client = boto3.client("bedrock-agentcore-control", region_name=region)
-    return client.get_harness(harnessId=harness_id)
+    response = client.get_harness(harnessId=harness_id)
+    return response.get("harness", response)
 
 
 def delete_harness(harness_id: str, region: str = "us-east-1") -> dict[str, Any]:
@@ -118,6 +114,7 @@ def invoke_harness_stream(
     timeout_seconds: int | None = None,
     max_tokens: int | None = None,
     actor_id: str | None = None,
+    access_token: str | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """Invoke a harness and yield translated SSE events.
 
@@ -132,7 +129,22 @@ def invoke_harness_stream(
     """
     import boto3
 
-    client = boto3.client("bedrock-agentcore", region_name=region)
+    if access_token:
+        from botocore import UNSIGNED
+        from botocore.config import Config
+
+        client = boto3.client(
+            "bedrock-agentcore",
+            region_name=region,
+            config=Config(signature_version=UNSIGNED),
+        )
+
+        def _add_auth_header(request, **kwargs):
+            request.headers["Authorization"] = f"Bearer {access_token}"
+
+        client.meta.events.register("before-send.bedrock-agentcore.InvokeHarness", _add_auth_header)
+    else:
+        client = boto3.client("bedrock-agentcore", region_name=region)
 
     params: dict[str, Any] = {
         "harnessArn": harness_arn,
@@ -159,7 +171,7 @@ def invoke_harness_stream(
 
     response = client.invoke_harness(**params)
 
-    stream = response.get("body") or response.get("response")
+    stream = response.get("stream") or response.get("body") or response.get("response")
     if stream is None:
         return
 

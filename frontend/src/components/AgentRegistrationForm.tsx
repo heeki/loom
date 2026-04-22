@@ -147,12 +147,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
 
   // Harness-specific state
   const [harnessMaxIterations, setHarnessMaxIterations] = useState("");
-  const [harnessTimeoutSeconds, setHarnessTimeoutSeconds] = useState("");
   const [harnessMaxTokens, setHarnessMaxTokens] = useState("");
-  const [harnessTemperature, setHarnessTemperature] = useState("");
-  const [harnessTopP, setHarnessTopP] = useState("");
-  const [harnessCodeInterpreter, setHarnessCodeInterpreter] = useState(false);
-  const [harnessBrowser, setHarnessBrowser] = useState(false);
 
   // Discovery data
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -233,6 +228,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
       if (!name.trim() || !modelId || !selectedRoleId || !onDeployHarness || hasValidationErrors) return;
 
       const roleArn = selectedRole?.role_arn ?? "";
+      const authConfig = selectedAuthConfig;
       const request: AgentHarnessDeployRequest = {
         source: "harness",
         name: name.trim(),
@@ -248,17 +244,19 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
         network_mode: networkMode,
         idle_timeout: idleTimeout ? parseInt(idleTimeout, 10) : null,
         max_lifetime: maxLifetime ? parseInt(maxLifetime, 10) : null,
+        authorizer_type: authConfig?.authorizer_type ?? null,
+        authorizer_pool_id: authConfig?.pool_id ?? null,
+        authorizer_discovery_url: authConfig?.discovery_url ?? null,
+        authorizer_allowed_clients: authConfig?.allowed_clients ?? [],
+        authorizer_allowed_scopes: authConfig?.allowed_scopes ?? [],
+        authorizer_client_id: authConfig?.client_id ?? null,
+        authorizer_client_secret: null,
         mcp_servers: selectedMcpServerIds,
         tags: Object.fromEntries(
           Object.entries(tagValues).filter(([, v]) => v.trim() !== "")
         ),
         harness_max_iterations: harnessMaxIterations ? parseInt(harnessMaxIterations, 10) : null,
-        harness_timeout_seconds: harnessTimeoutSeconds ? parseInt(harnessTimeoutSeconds, 10) : null,
         harness_max_tokens: harnessMaxTokens ? parseInt(harnessMaxTokens, 10) : null,
-        harness_temperature: harnessTemperature ? parseFloat(harnessTemperature) : null,
-        harness_top_p: harnessTopP ? parseFloat(harnessTopP) : null,
-        harness_code_interpreter: harnessCodeInterpreter,
-        harness_browser: harnessBrowser,
       };
       await onDeployHarness(request);
     } else {
@@ -369,6 +367,9 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                 onApply={(json) => {
                   try {
                     const parsed = JSON.parse(json);
+                    if (parsed.deployment_type === "custom" || parsed.deployment_type === "managed") {
+                      setDeploymentType(parsed.deployment_type);
+                    }
                     if (parsed.name) setName(parsed.name);
                     if (parsed.description) setDescription(parsed.description);
                     if (parsed.persona) setAgentDescription(parsed.persona);
@@ -425,6 +426,8 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                         .filter((id: number | undefined): id is number => id !== undefined);
                       setSelectedMemoryIds(ids);
                     }
+                    if (parsed.max_iterations != null) setHarnessMaxIterations(String(parsed.max_iterations));
+                    if (parsed.max_tokens != null) setHarnessMaxTokens(String(parsed.max_tokens));
                     return null;
                   } catch {
                     return "Invalid JSON. Please check the format and try again.";
@@ -432,6 +435,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                 }}
                 onExport={() => {
                   const result: Record<string, unknown> = {};
+                  result.deployment_type = deploymentType;
                   if (name) result.name = name;
                   if (description) result.description = description;
                   if (agentDescription) result.persona = agentDescription;
@@ -474,9 +478,13 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                       return mem?.name ?? id;
                     });
                   }
+                  if (deploymentType === "managed") {
+                    if (harnessMaxIterations) result.max_iterations = parseInt(harnessMaxIterations, 10);
+                    if (harnessMaxTokens) result.max_tokens = parseInt(harnessMaxTokens, 10);
+                  }
                   return JSON.stringify(result, null, 2);
                 }}
-                placeholder='{"name": "...", "description": "...", "persona": "...", "instructions": "...", "behavior": "...", "model": "... (default)", "allowed_models": ["..."], "role": "...", "authorizer": "...", "tags": "...", "mcp_servers": ["..."], "a2a_agents": ["..."], "memories": ["..."]}'
+                placeholder='{"deployment_type": "custom|managed", "name": "...", "description": "...", "persona": "...", "instructions": "...", "behavior": "...", "model": "... (default)", "allowed_models": ["..."], "role": "...", "authorizer": "...", "tags": "...", "mcp_servers": ["..."], "a2a_agents": ["..."], "memories": ["..."], "max_iterations": 75, "max_tokens": 4096}'
               />
 
               {/* Deployment Type Selector */}
@@ -618,105 +626,6 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                 </section>
               </div>
 
-              {/* Harness Model Parameters (Managed Agent only) */}
-              {deploymentType === "managed" && (
-                <section className="space-y-3">
-                  <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Model Parameters</h4>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">Max Tokens</label>
-                      <Input
-                        type="number"
-                        placeholder="Model default"
-                        value={harnessMaxTokens}
-                        onChange={(e) => setHarnessMaxTokens(e.target.value)}
-                        min={1}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">Temperature (0.0-1.0)</label>
-                      <Input
-                        type="number"
-                        placeholder="Model default"
-                        value={harnessTemperature}
-                        onChange={(e) => setHarnessTemperature(e.target.value)}
-                        min={0}
-                        max={1}
-                        step={0.1}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">Top P (0.0-1.0)</label>
-                      <Input
-                        type="number"
-                        placeholder="Model default"
-                        value={harnessTopP}
-                        onChange={(e) => setHarnessTopP(e.target.value)}
-                        min={0}
-                        max={1}
-                        step={0.1}
-                      />
-                    </div>
-                  </div>
-                </section>
-              )}
-
-              {/* Harness Tool Configuration (Managed Agent only) */}
-              {deploymentType === "managed" && (
-                <section className="space-y-3">
-                  <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Built-in Tools</h4>
-                  <div className="flex gap-4">
-                    <label className="flex items-center gap-2 text-xs cursor-pointer">
-                      <input
-                        type="checkbox"
-                        className="h-3.5 w-3.5"
-                        checked={harnessCodeInterpreter}
-                        onChange={(e) => setHarnessCodeInterpreter(e.target.checked)}
-                      />
-                      <span>Code Interpreter</span>
-                    </label>
-                    <label className="flex items-center gap-2 text-xs cursor-pointer">
-                      <input
-                        type="checkbox"
-                        className="h-3.5 w-3.5"
-                        checked={harnessBrowser}
-                        onChange={(e) => setHarnessBrowser(e.target.checked)}
-                      />
-                      <span>Web Browser</span>
-                    </label>
-                  </div>
-                </section>
-              )}
-
-              {/* Harness Iteration & Timeout (Managed Agent only) */}
-              {deploymentType === "managed" && (
-                <section className="space-y-3">
-                  <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Iteration & Timeout</h4>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">Max Iterations</label>
-                      <Input
-                        type="number"
-                        placeholder="Defaults to 75"
-                        value={harnessMaxIterations}
-                        onChange={(e) => setHarnessMaxIterations(e.target.value)}
-                        min={1}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs text-muted-foreground">Timeout (seconds)</label>
-                      <Input
-                        type="number"
-                        placeholder="Defaults to 3600"
-                        value={harnessTimeoutSeconds}
-                        onChange={(e) => setHarnessTimeoutSeconds(e.target.value)}
-                        min={1}
-                      />
-                    </div>
-                  </div>
-                </section>
-              )}
-
               {/* Allowed Models for Runtime Selection */}
               {modelId && models.length > 0 && (
                 <section className="space-y-2">
@@ -843,8 +752,8 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                 </section>
               )}
 
-              {/* Authorizer (Custom Agent only) */}
-              {deploymentType === "custom" && <section className="space-y-3">
+              {/* Authorizer */}
+              <section className="space-y-3">
                 <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Authorizer</h4>
                 <div className="w-1/4">
                   <SearchableSelect
@@ -873,7 +782,36 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                     )}
                   </div>
                 )}
-              </section>}
+              </section>
+
+              {/* Harness Parameters (Managed Agent only) */}
+              {deploymentType === "managed" && (
+                <section className="space-y-3">
+                  <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Harness Parameters</h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Max Iterations</label>
+                      <Input
+                        type="number"
+                        placeholder="Defaults to 75"
+                        value={harnessMaxIterations}
+                        onChange={(e) => setHarnessMaxIterations(e.target.value)}
+                        min={1}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Max Tokens</label>
+                      <Input
+                        type="number"
+                        placeholder="Model default"
+                        value={harnessMaxTokens}
+                        onChange={(e) => setHarnessMaxTokens(e.target.value)}
+                        min={1}
+                      />
+                    </div>
+                  </div>
+                </section>
+              )}
 
               {/* Lifecycle */}
               <section className="space-y-3">

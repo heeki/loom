@@ -22,7 +22,9 @@ function needsPolling(agent: AgentResponse): boolean {
       (agent.status === "CREATING" ||
         DEPLOY_IN_PROGRESS.has(agent.deployment_status ?? "") ||
         agent.endpoint_status === "CREATING")) ||
-    (agent.source === "harness" && agent.status === "CREATING")
+    (agent.source === "harness" &&
+      (agent.status === "CREATING" ||
+        DEPLOY_IN_PROGRESS.has(agent.deployment_status ?? "")))
   );
 }
 

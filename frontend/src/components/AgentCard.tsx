@@ -45,11 +45,17 @@ function phaseLabel(agent: AgentResponse): string | null {
     case "creating_credentials": return "Creating credential provider";
     case "creating_role": return "Creating IAM role";
     case "building_artifact": return "Building artifact";
-    case "deploying": return "Deploying runtime";
+    case "deploying": return agent.source === "harness" ? "Creating harness" : "Deploying runtime";
     default: break;
   }
-  if (agent.status === "CREATING") return "Completing deployment";
+  if (agent.status === "CREATING") return agent.source === "harness" ? "Creating harness" : "Completing deployment";
   if (agent.status === "READY" && agent.endpoint_status === "CREATING") return "Finalizing endpoint";
+  return null;
+}
+
+function deploymentTypeLabel(agent: AgentResponse): string | null {
+  if (agent.source === "harness") return "MANAGED";
+  if (agent.source === "deploy") return "CUSTOM";
   return null;
 }
 
@@ -121,13 +127,6 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
               <span className="inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-primary text-primary-foreground text-[10px] font-medium shrink-0">
                 {agent.active_session_count}
               </span>
-            )}
-            {!creating && agent.cost_summary && agent.cost_summary.total_cost > 0 && (
-              <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0 font-mono">
-                {agent.cost_summary.total_cost < 0.01
-                  ? `~$${agent.cost_summary.total_cost.toFixed(6)}`
-                  : `~$${agent.cost_summary.total_cost.toFixed(4)}`}
-              </Badge>
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
@@ -232,6 +231,22 @@ export function AgentCard({ agent, onSelect, onRefresh, onDelete, readOnly, show
             <div>Registered: {formatTimestamp(agent.registered_at, timezone)}</div>
           )}
         </div>
+        {!creating && (deploymentTypeLabel(agent) || (agent.cost_summary && agent.cost_summary.total_cost > 0)) && (
+          <div className="flex flex-wrap gap-1">
+            {deploymentTypeLabel(agent) && (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                {deploymentTypeLabel(agent)}
+              </Badge>
+            )}
+            {agent.cost_summary && agent.cost_summary.total_cost > 0 && (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-mono">
+                {agent.cost_summary.total_cost < 0.01
+                  ? `~$${agent.cost_summary.total_cost.toFixed(6)}`
+                  : `~$${agent.cost_summary.total_cost.toFixed(4)}`}
+              </Badge>
+            )}
+          </div>
+        )}
         {showOnCardKeys && showOnCardKeys.length > 0 && agent.tags && Object.keys(agent.tags).length > 0 && (
           <div className="flex flex-wrap gap-1 pt-1">
             {showOnCardKeys

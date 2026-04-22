@@ -32,6 +32,12 @@ function isCreating(agent: AgentResponse): boolean {
   );
 }
 
+function sourceLabel(agent: AgentResponse): string {
+  if (agent.source === "harness") return "Managed (Harness)";
+  if (agent.source === "deploy") return "Custom (Runtime)";
+  return agent.source ?? "Unknown";
+}
+
 export function DeploymentPanel({ agent, onPatchAgent }: DeploymentPanelProps) {
   const { timezone } = useTimezone();
   const [editingModels, setEditingModels] = useState(false);
@@ -172,13 +178,14 @@ export function DeploymentPanel({ agent, onPatchAgent }: DeploymentPanelProps) {
             <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
           )}
         </div>
+        <div>Deployment Type: {sourceLabel(agent)}</div>
         <div className="flex items-center gap-1.5">
           <span>Runtime Status:</span>
           <Badge variant={statusVariant(agent.status)} className="text-[10px] px-1.5 py-0">
             {agent.status ?? "—"}
           </Badge>
         </div>
-        <div>Protocol: {agent.protocol ?? "—"}</div>
+        {agent.source !== "harness" && <div>Protocol: {agent.protocol ?? "—"}</div>}
         <div>Network: {agent.network_mode ?? "—"}</div>
         <div className="truncate">Execution Role: {agent.execution_role_arn ?? "—"}</div>
         {agent.deployed_at && (

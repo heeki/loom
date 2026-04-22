@@ -199,35 +199,6 @@ class TestHarnessDeployment(unittest.TestCase):
         self.assertEqual(tools[0]["config"]["remoteMcp"]["url"], "http://localhost:3000/mcp")
 
     @patch("app.routers.agents.create_harness_api")
-    def test_deploy_harness_with_builtin_tools(self, mock_create):
-        mock_create.return_value = {
-            "harnessId": "h-tools",
-            "harnessArn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:harness/h-tools",
-            "status": "CREATING",
-            "environment": {"agentCoreRuntimeEnvironment": {}},
-        }
-
-        response = self.client.post(
-            "/api/agents",
-            json={
-                "source": "harness",
-                "name": "tools_harness_agent",
-                "model_id": "us.anthropic.claude-sonnet-4-6-v1",
-                "role_arn": "arn:aws:iam::123456789012:role/test-role",
-                "harness_code_interpreter": True,
-                "harness_browser": True,
-            },
-        )
-
-        self.assertEqual(response.status_code, 201)
-
-        call_kwargs = mock_create.call_args[1]
-        tools = call_kwargs["tools"]
-        tool_types = [t["type"] for t in tools]
-        self.assertIn("agentcore_code_interpreter", tool_types)
-        self.assertIn("agentcore_browser", tool_types)
-
-    @patch("app.routers.agents.create_harness_api")
     def test_deploy_harness_with_model_params(self, mock_create):
         mock_create.return_value = {
             "harnessId": "h-params",
@@ -244,10 +215,7 @@ class TestHarnessDeployment(unittest.TestCase):
                 "model_id": "us.anthropic.claude-sonnet-4-6-v1",
                 "role_arn": "arn:aws:iam::123456789012:role/test-role",
                 "harness_max_iterations": 15,
-                "harness_timeout_seconds": 300,
                 "harness_max_tokens": 4096,
-                "harness_temperature": 0.7,
-                "harness_top_p": 0.9,
             },
         )
 
@@ -255,10 +223,7 @@ class TestHarnessDeployment(unittest.TestCase):
 
         call_kwargs = mock_create.call_args[1]
         self.assertEqual(call_kwargs["max_iterations"], 15)
-        self.assertEqual(call_kwargs["timeout_seconds"], 300)
         self.assertEqual(call_kwargs["max_tokens"], 4096)
-        self.assertAlmostEqual(call_kwargs["temperature"], 0.7)
-        self.assertAlmostEqual(call_kwargs["top_p"], 0.9)
 
     @patch("app.routers.agents.delete_harness_api")
     @patch("app.routers.agents.create_harness_api")
@@ -444,18 +409,14 @@ class TestHarnessService(unittest.TestCase):
             model_id="model",
             system_prompt="prompt",
             max_tokens=4096,
-            temperature=0.5,
-            top_p=0.9,
             max_iterations=10,
-            timeout_seconds=600,
         )
 
         call_kwargs = mock_client.create_harness.call_args[1]
         self.assertEqual(call_kwargs["model"]["bedrockModelConfig"]["maxTokens"], 4096)
-        self.assertAlmostEqual(call_kwargs["model"]["bedrockModelConfig"]["temperature"], 0.5)
-        self.assertAlmostEqual(call_kwargs["model"]["bedrockModelConfig"]["topP"], 0.9)
         self.assertEqual(call_kwargs["maxIterations"], 10)
-        self.assertEqual(call_kwargs["timeoutSeconds"], 600)
+        self.assertNotIn("temperature", call_kwargs["model"]["bedrockModelConfig"])
+        self.assertNotIn("topP", call_kwargs["model"]["bedrockModelConfig"])
 
     @patch("boto3.client")
     def test_create_harness_with_tools(self, mock_boto3_client):
@@ -485,7 +446,7 @@ class TestHarnessService(unittest.TestCase):
         mock_boto3_client.return_value = mock_client
 
         mock_client.invoke_harness.return_value = {
-            "body": [
+            "stream": [
                 {"messageStart": {"role": "assistant"}},
                 {"contentBlockStart": {"contentBlockIndex": 0, "start": {}}},
                 {"contentBlockDelta": {"delta": {"text": "Hello"}}},
@@ -520,7 +481,7 @@ class TestHarnessService(unittest.TestCase):
         mock_boto3_client.return_value = mock_client
 
         mock_client.invoke_harness.return_value = {
-            "body": [
+            "stream": [
                 {"messageStart": {"role": "assistant"}},
                 {"contentBlockStart": {"contentBlockIndex": 0, "start": {"toolUse": {"name": "search"}}}},
                 {"contentBlockDelta": {"delta": {"text": "searching..."}}},

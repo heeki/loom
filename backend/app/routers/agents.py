@@ -146,12 +146,7 @@ class AgentCreateRequest(BaseModel):
     # Harness-specific fields
     harness_tools: list[dict[str, Any]] | None = Field(None, description="Harness tool configurations")
     harness_max_iterations: int | None = Field(None, description="Max agent loop iterations (default: 75)")
-    harness_timeout_seconds: int | None = Field(None, description="Max execution time per invocation (default: 3600)")
     harness_max_tokens: int | None = Field(None, description="Max tokens for model output")
-    harness_temperature: float | None = Field(None, description="Model temperature (0.0-1.0)")
-    harness_top_p: float | None = Field(None, description="Model top_p (0.0-1.0)")
-    harness_code_interpreter: bool = Field(default=False, description="Enable AgentCore Code Interpreter")
-    harness_browser: bool = Field(default=False, description="Enable AgentCore Browser")
 
 
 class AgentResponse(BaseModel):
@@ -1274,11 +1269,8 @@ def _deploy_harness(request: AgentCreateRequest, db: Session, background_tasks: 
 
     system_prompt = _build_system_prompt(request)
 
-    # Build harness tools from MCP servers and built-in tool toggles
-    harness_tools: list[dict[str, Any]] = []
-
-    # MCP server tools (remote_mcp)
-    mcp_records: list[McpServer] = []
+    # Snapshot MCP server data for the background task
+    mcp_snapshots: list[dict[str, Any]] = []
     if request.mcp_servers:
         mcp_records = db.query(McpServer).filter(McpServer.id.in_(request.mcp_servers)).all()
         found_ids = {s.id for s in mcp_records}
@@ -1289,34 +1281,44 @@ def _deploy_harness(request: AgentCreateRequest, db: Session, background_tasks: 
                 detail=f"MCP server IDs not found: {sorted(missing)}"
             )
         for server in mcp_records:
-            harness_tools.append({
-                "type": "remote_mcp",
+            mcp_snapshots.append({
                 "name": server.name,
-                "config": {
-                    "remoteMcp": {"url": server.endpoint_url}
-                },
+                "endpoint_url": server.endpoint_url,
+                "auth_type": server.auth_type,
+                "oauth2_client_id": server.oauth2_client_id,
+                "oauth2_client_secret": server.oauth2_client_secret,
+                "oauth2_well_known_url": server.oauth2_well_known_url,
+                "oauth2_scopes": server.oauth2_scopes,
             })
 
-    if request.harness_code_interpreter:
-        harness_tools.append({
-            "type": "agentcore_code_interpreter",
-            "name": "code_interpreter",
-            "config": {"agentCoreCodeInterpreter": {}},
-        })
-
-    if request.harness_browser:
-        harness_tools.append({
-            "type": "agentcore_browser",
-            "name": "browser",
-            "config": {"agentCoreBrowser": {}},
-        })
-
-    if request.harness_tools:
-        harness_tools.extend(request.harness_tools)
+    extra_harness_tools = request.harness_tools or []
 
     effective_allowed = request.allowed_model_ids if request.allowed_model_ids else [request.model_id]
     if request.model_id not in effective_allowed:
         effective_allowed = [request.model_id] + effective_allowed
+
+    # Build authorizer configuration (same logic as custom agent deploy)
+    authorizer_config = None
+    user_client_id = os.getenv("LOOM_COGNITO_USER_CLIENT_ID", "")
+    if request.authorizer_type == "cognito" and request.authorizer_pool_id:
+        jwt_config: dict[str, Any] = {
+            "discoveryUrl": f"https://cognito-idp.{region}.amazonaws.com/{request.authorizer_pool_id}/.well-known/openid-configuration"
+        }
+        allowed_clients = list(request.authorizer_allowed_clients) if request.authorizer_allowed_clients else []
+        if user_client_id and user_client_id not in allowed_clients:
+            allowed_clients.append(user_client_id)
+        if allowed_clients:
+            jwt_config["allowedClients"] = allowed_clients
+        if request.authorizer_allowed_scopes:
+            jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
+        authorizer_config = {"customJWTAuthorizer": jwt_config}
+    elif request.authorizer_type == "other" and request.authorizer_discovery_url:
+        jwt_config = {"discoveryUrl": request.authorizer_discovery_url}
+        if request.authorizer_allowed_clients:
+            jwt_config["allowedClients"] = request.authorizer_allowed_clients
+        if request.authorizer_allowed_scopes:
+            jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
+        authorizer_config = {"customJWTAuthorizer": jwt_config}
 
     placeholder_arn = f"pending-{uuid4()}"
 
@@ -1336,6 +1338,15 @@ def _deploy_harness(request: AgentCreateRequest, db: Session, background_tasks: 
         registered_at=datetime.utcnow(),
     )
     agent.set_allowed_model_ids(effective_allowed)
+    if authorizer_config:
+        jwt = authorizer_config.get("customJWTAuthorizer", {})
+        agent.set_authorizer_config({
+            "type": request.authorizer_type,
+            "pool_id": request.authorizer_pool_id,
+            "discovery_url": jwt.get("discoveryUrl"),
+            "allowed_clients": jwt.get("allowedClients", []),
+            "allowed_scopes": jwt.get("allowedScopes", []),
+        })
     db.add(agent)
     db.commit()
     db.refresh(agent)
@@ -1348,26 +1359,6 @@ def _deploy_harness(request: AgentCreateRequest, db: Session, background_tasks: 
     agent_id = agent.id
     response_data = AgentResponse(**agent.to_dict(), active_session_count=0)
 
-    config_json = json.dumps({
-        "system_prompt": system_prompt,
-        "model_id": request.model_id,
-        "max_tokens": request.harness_max_tokens,
-        "harness_config": {
-            "tools": harness_tools,
-            "max_iterations": request.harness_max_iterations,
-            "timeout_seconds": request.harness_timeout_seconds,
-            "temperature": request.harness_temperature,
-            "top_p": request.harness_top_p,
-            "code_interpreter": request.harness_code_interpreter,
-            "browser": request.harness_browser,
-        },
-        "integrations": {
-            "mcp_servers": [{"name": s.name, "endpoint_url": s.endpoint_url} for s in mcp_records],
-            "a2a_agents": [],
-            "memory": {"enabled": False, "resources": []},
-        },
-    })
-
     background_tasks.add_task(
         _deploy_harness_background,
         agent_id=agent_id,
@@ -1375,21 +1366,29 @@ def _deploy_harness(request: AgentCreateRequest, db: Session, background_tasks: 
         execution_role_arn=request.role_arn,
         model_id=request.model_id,
         system_prompt=system_prompt,
-        harness_tools=harness_tools,
+        mcp_snapshots=mcp_snapshots,
+        extra_harness_tools=extra_harness_tools,
         max_iterations=request.harness_max_iterations,
-        timeout_seconds=request.harness_timeout_seconds,
         max_tokens=request.harness_max_tokens,
-        temperature=request.harness_temperature,
-        top_p=request.harness_top_p,
+        authorizer_config=authorizer_config,
         network_mode=request.network_mode,
         idle_timeout=request.idle_timeout,
         max_lifetime=request.max_lifetime,
         resolved_tags=resolved_tags,
-        config_json=config_json,
         region=region,
+        account_id=account_id,
     )
 
     return response_data
+
+
+def _build_harness_tool_for_mcp(server: dict[str, Any]) -> dict[str, Any]:
+    """Build a remote_mcp harness tool entry for an MCP server."""
+    return {
+        "type": "remote_mcp",
+        "name": server["name"],
+        "config": {"remoteMcp": {"url": server["endpoint_url"]}},
+    }
 
 
 def _deploy_harness_background(
@@ -1398,20 +1397,19 @@ def _deploy_harness_background(
     execution_role_arn: str,
     model_id: str,
     system_prompt: str,
-    harness_tools: list[dict[str, Any]],
+    mcp_snapshots: list[dict[str, Any]],
+    extra_harness_tools: list[dict[str, Any]],
     max_iterations: int | None,
-    timeout_seconds: int | None,
     max_tokens: int | None,
-    temperature: float | None,
-    top_p: float | None,
+    authorizer_config: dict[str, Any] | None,
     network_mode: str,
     idle_timeout: int | None,
     max_lifetime: int | None,
     resolved_tags: dict[str, str],
-    config_json: str,
     region: str,
+    account_id: str,
 ) -> None:
-    """Background task that creates the harness in AWS."""
+    """Background task that creates credential providers and the harness in AWS."""
     db = SessionLocal()
     try:
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
@@ -1419,8 +1417,83 @@ def _deploy_harness_background(
             logger.error("Background harness deploy: agent %s not found", agent_id)
             return
 
+        # --- Step 1: Create credential providers for OAuth2 MCP servers ---
+        has_oauth2 = any(s["auth_type"] == "oauth2" for s in mcp_snapshots)
+        if has_oauth2:
+            agent.deployment_status = "creating_credentials"
+            db.commit()
+
+        harness_tools: list[dict[str, Any]] = []
+        mcp_server_configs: list[dict[str, Any]] = []
+        for server in mcp_snapshots:
+            cp_name: str | None = None
+            cp_arn: str | None = None
+            if server["auth_type"] == "oauth2":
+                cp_name = f"loom-{name}-mcp-{server['name']}"
+                try:
+                    cp_response = create_oauth2_credential_provider(
+                        name=cp_name,
+                        client_id=server["oauth2_client_id"] or "",
+                        client_secret=server["oauth2_client_secret"] or "",
+                        auth_server_url=server["oauth2_well_known_url"] or "",
+                        region=region,
+                        tags=resolved_tags if resolved_tags else None,
+                    )
+                    cp_arn = cp_response.get("arn") or cp_response.get("credentialProviderArn")
+                    logger.info(
+                        "Created credential provider '%s' for harness MCP server '%s' (arn=%s)",
+                        cp_name, server["name"], cp_arn,
+                    )
+                except Exception as e:
+                    logger.error(
+                        "Failed to create credential provider for harness MCP '%s': %s",
+                        server["name"], e,
+                    )
+                    agent.status = "FAILED"
+                    agent.deployment_status = "credential_creation_failed"
+                    db.commit()
+                    return
+
+            # Only include non-auth MCP tools at deploy time; OAuth2 tools
+            # require a Bearer header and are injected at invocation time.
+            if server["auth_type"] != "oauth2":
+                harness_tools.append(_build_harness_tool_for_mcp(server))
+
+            mcp_entry: dict[str, Any] = {
+                "name": server["name"],
+                "endpoint_url": server["endpoint_url"],
+                "auth_type": server["auth_type"],
+            }
+            if cp_name:
+                mcp_entry["auth"] = {"type": "oauth2", "credential_provider_name": cp_name}
+            mcp_server_configs.append(mcp_entry)
+
+        harness_tools.extend(extra_harness_tools)
+
         agent.deployment_status = "deploying"
         db.commit()
+
+        # Build all MCP tools (for invocation-time injection with auth headers)
+        all_mcp_tools = [_build_harness_tool_for_mcp(s) for s in mcp_snapshots]
+        all_mcp_tools.extend(extra_harness_tools)
+
+        # Build config JSON — deploy_tools go to create_harness, all tools
+        # are stored for invocation-time injection with auth headers
+        config_json = json.dumps({
+            "system_prompt": system_prompt,
+            "model_id": model_id,
+            "max_tokens": max_tokens,
+            "harness_config": {
+                "tools": all_mcp_tools,
+                "deploy_tools": harness_tools,
+                "max_iterations": max_iterations,
+            },
+            "integrations": {
+                "mcp_servers": mcp_server_configs,
+                "a2a_agents": [],
+                "memory": {"enabled": False, "resources": []},
+            },
+        })
 
         # Store config entry
         db.add(ConfigEntry(
@@ -1432,6 +1505,7 @@ def _deploy_harness_background(
         ))
         db.commit()
 
+
         response = create_harness_api(
             name=name,
             execution_role_arn=execution_role_arn,
@@ -1439,10 +1513,8 @@ def _deploy_harness_background(
             system_prompt=system_prompt,
             tools=harness_tools if harness_tools else None,
             max_iterations=max_iterations,
-            timeout_seconds=timeout_seconds,
             max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
+            authorizer_config=authorizer_config,
             network_mode=network_mode,
             idle_timeout=idle_timeout,
             max_lifetime=max_lifetime,
@@ -1451,13 +1523,14 @@ def _deploy_harness_background(
         )
 
         harness_id = response.get("harnessId", "")
-        harness_arn = response.get("harnessArn", "")
+        harness_arn = response.get("arn") or response.get("harnessArn", "")
 
         agent.harness_id = harness_id
         agent.arn = harness_arn
         agent.runtime_id = harness_id
-        agent.status = response.get("status", "CREATING")
-        agent.deployment_status = "deployed"
+        harness_status = response.get("status", "CREATING")
+        agent.status = harness_status
+        agent.deployment_status = "READY" if harness_status == "READY" else "deployed"
         agent.deployed_at = datetime.utcnow()
         agent.last_refreshed_at = datetime.utcnow()
         agent.set_tags(resolved_tags)
@@ -1478,6 +1551,20 @@ def _deploy_harness_background(
                 agent.account_id = arn_parts[4]
         except Exception:
             pass
+
+        # Enable USAGE_LOGS and APPLICATION_LOGS observability on the auto-provisioned runtime
+        if runtime_arn and runtime_id and agent.account_id:
+            try:
+                from app.services.observability import enable_runtime_observability
+                obs_result = enable_runtime_observability(
+                    runtime_arn=runtime_arn,
+                    runtime_id=runtime_id,
+                    account_id=agent.account_id,
+                    region=region,
+                )
+                logger.info("Enabled observability for harness agent %s: %s", agent_id, obs_result)
+            except Exception as obs_err:
+                logger.warning("Failed to enable observability for harness agent %s: %s", agent_id, obs_err)
 
         db.commit()
         logger.info("Harness deploy complete: agent=%s harness_id=%s", agent_id, harness_id)
@@ -1574,7 +1661,7 @@ def get_agent_status(agent_id: int, user: UserInfo = Depends(require_scopes("age
         try:
             harness = get_harness_api(agent.harness_id, agent.region)
             agent.status = harness.get("status", agent.status)
-            agent.arn = harness.get("harnessArn", agent.arn)
+            agent.arn = harness.get("arn") or harness.get("harnessArn") or agent.arn
             agent.last_refreshed_at = datetime.utcnow()
 
             if agent.status == "READY":
@@ -1764,6 +1851,12 @@ def delete_agent(
             delete_harness_api(_harness_id, _region)
         except Exception as e:
             logger.warning("Failed to delete harness %s: %s", _harness_id, e)
+        if _runtime_id:
+            try:
+                from app.services.observability import cleanup_runtime_observability
+                cleanup_runtime_observability(_runtime_id, _region)
+            except Exception as obs_err:
+                logger.warning("Failed to cleanup observability for harness %s: %s", _harness_id, obs_err)
     else:
         # Skip DEFAULT endpoint — AWS removes it automatically when the runtime is deleted
         if _endpoint_name and _endpoint_name != "DEFAULT":
@@ -1892,7 +1985,7 @@ def refresh_agent(agent_id: int, user: UserInfo = Depends(require_scopes("agent:
         try:
             harness = get_harness_api(agent.harness_id, agent.region)
             agent.status = harness.get("status", agent.status)
-            agent.arn = harness.get("harnessArn", agent.arn)
+            agent.arn = harness.get("arn") or harness.get("harnessArn") or agent.arn
             agent.last_refreshed_at = datetime.utcnow()
 
             if agent.status == "READY":

@@ -749,6 +749,9 @@ async def invoke_harness_agent_stream(
     prompt: str,
     actor_id: str | None = None,
     runtime_model_id: str | None = None,
+    access_token: str | None = None,
+    token_source: str | None = None,
+    dynamic_tools: list[dict[str, Any]] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Invoke a harness-deployed agent and yield SSE events.
 
@@ -771,6 +774,55 @@ async def invoke_harness_agent_stream(
     if runtime_model_id:
         agent_model_id = runtime_model_id
 
+    # Build tools with OAuth2 M2M tokens injected for this invocation.
+    # Each MCP server has its own OAuth2 credentials — resolve a
+    # client_credentials token per server and inject as a Bearer header.
+    invoke_tools: list[dict[str, Any]] | None = None
+    if config_json_str:
+        try:
+            parsed_config = _json.loads(config_json_str)
+            harness_config = parsed_config.get("harness_config", {})
+            configured_tools = harness_config.get("tools", [])
+            mcp_servers_config = parsed_config.get("integrations", {}).get("mcp_servers", [])
+
+            # Build name → auth_type lookup from stored config
+            mcp_auth_map: dict[str, str] = {}
+            for mcp_cfg in mcp_servers_config:
+                mcp_auth_map[mcp_cfg["name"]] = mcp_cfg.get("auth_type", "none")
+
+            # Pre-fetch OAuth2 tokens for MCP servers that need them
+            mcp_tokens: dict[str, str] = {}
+            if any(v == "oauth2" for v in mcp_auth_map.values()):
+                from app.services.mcp import _get_oauth2_token
+                oauth2_names = [n for n, t in mcp_auth_map.items() if t == "oauth2"]
+                oauth2_servers = db.query(McpServer).filter(McpServer.name.in_(oauth2_names)).all()
+                for server in oauth2_servers:
+                    token = _get_oauth2_token(server)
+                    if token:
+                        mcp_tokens[server.name] = token
+                    else:
+                        logger.warning("Failed to get OAuth2 token for MCP server '%s'", server.name)
+
+            if configured_tools:
+                invoke_tools = []
+                for tool in configured_tools:
+                    tool_copy = _json.loads(_json.dumps(tool))
+                    tool_name = tool_copy.get("name", "")
+                    remote_mcp = (tool_copy.get("config") or {}).get("remoteMcp")
+                    if remote_mcp and tool_name in mcp_tokens:
+                        headers = remote_mcp.get("headers") or {}
+                        headers["Authorization"] = f"Bearer {mcp_tokens[tool_name]}"
+                        remote_mcp["headers"] = headers
+                    invoke_tools.append(tool_copy)
+        except (ValueError, TypeError):
+            pass
+
+    if dynamic_tools:
+        if invoke_tools is None:
+            invoke_tools = []
+        for tool in dynamic_tools:
+            invoke_tools.append(_json.loads(_json.dumps(tool)))
+
     invocation.client_invoke_time = client_invoke_time
     invocation.status = "streaming"
     session.status = "streaming"
@@ -780,6 +832,8 @@ async def invoke_harness_agent_stream(
         "session_id": session_id,
         "invocation_id": invocation_id,
         "client_invoke_time": client_invoke_time,
+        "has_token": bool(access_token),
+        "token_source": token_source,
     })
 
     response_chunks: list[str] = []
@@ -794,6 +848,8 @@ async def invoke_harness_agent_stream(
             region=agent.region,
             model_id=runtime_model_id,
             actor_id=actor_id,
+            access_token=access_token,
+            tools=invoke_tools,
         )
 
         _sentinel = object()
@@ -1116,10 +1172,23 @@ async def invoke_agent_endpoint(
 
     # Dispatch to harness or standard invoke path
     if agent.source == "harness" and agent.harness_id:
+        # Convert dynamic MCP connectors to harness tool format
+        dynamic_harness_tools: list[dict[str, Any]] | None = None
+        if dynamic_mcp_servers:
+            dynamic_harness_tools = []
+            for mcp in dynamic_mcp_servers:
+                tool_entry: dict[str, Any] = {
+                    "type": "remote_mcp",
+                    "name": mcp["name"],
+                    "config": {"remoteMcp": {"url": mcp["endpoint_url"]}},
+                }
+                dynamic_harness_tools.append(tool_entry)
+
         stream_gen = invoke_harness_agent_stream(
             agent, session, invocation, db, client_invoke_time,
             request_body.prompt, user.username or user.sub or "loom-agent",
-            runtime_model_id,
+            runtime_model_id, access_token, token_source,
+            dynamic_harness_tools,
         )
     else:
         stream_gen = invoke_agent_stream(

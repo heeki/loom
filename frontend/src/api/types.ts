@@ -57,15 +57,17 @@ export interface AgentHarnessDeployRequest {
   network_mode: string;
   idle_timeout: number | null;
   max_lifetime: number | null;
+  authorizer_type: string | null;
+  authorizer_pool_id: string | null;
+  authorizer_discovery_url: string | null;
+  authorizer_allowed_clients: string[];
+  authorizer_allowed_scopes: string[];
+  authorizer_client_id: string | null;
+  authorizer_client_secret: string | null;
   mcp_servers: number[];
   tags?: Record<string, string>;
   harness_max_iterations: number | null;
-  harness_timeout_seconds: number | null;
   harness_max_tokens: number | null;
-  harness_temperature: number | null;
-  harness_top_p: number | null;
-  harness_code_interpreter: boolean;
-  harness_browser: boolean;
 }
 
 export interface AgentRegisterRequest {
