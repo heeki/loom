@@ -561,7 +561,22 @@ Agents support runtime model selection, allowing users to choose from a set of a
 - **ChatPage model picker grouped by vendor:** Model dropdown uses `groupModels()` utility for alphabetical vendor grouping with section headers, matching the admin deploy form pattern.
 - **SQLite absolute path default:** `DATABASE_URL` defaults to an absolute path based on the backend directory to avoid data loss when CWD differs between invocations.
 
-### Phase 25 — Advanced Operations
+### Phase 25 — AgentCore Harness Deployment *(Complete)*
+- **New deployment type:** `source="harness"` alongside existing `register` and `deploy` types. Harness is a fully managed agent loop — no user-authored code, artifact build, or credential provider creation required. Agents are configured entirely through API parameters (model, system prompt, tools, iteration limits, timeouts).
+- **Backend model:** `harness_id` column added to the `agents` table (VARCHAR, nullable). Stores the harness ID for managed agent deployments. Included in `Agent.to_dict()` serialization and `AgentResponse`.
+- **Backend service module:** `backend/app/services/harness.py` with `create_harness()`, `get_harness()`, `delete_harness()`, and `invoke_harness_stream()` functions. Control plane operations use the `bedrock-agentcore-control` client; data plane invocation uses the `bedrock-agentcore` client. `invoke_harness_stream()` translates Converse API streaming events (`messageStart`, `contentBlockStart`, `contentBlockDelta`, `contentBlockStop`, `messageStop`, `metadata`) into the existing SSE format (`text`, `structured/tool_use`, `metadata`) so the frontend works without modification.
+- **Harness tools:** Three tool types supported — `remote_mcp` (from MCP server catalog), `agentcore_code_interpreter` (built-in toggle), and `agentcore_browser` (built-in toggle). Custom tools can also be passed via `harness_tools` parameter.
+- **Deployment flow:** `_deploy_harness()` validates name, model_id, and role_arn. Creates Agent record with `source="harness"`, `status="CREATING"`, `deployment_status="initializing"`. Background task `_deploy_harness_background()` calls `create_harness_api`, sets harness_id, extracts auto-provisioned runtime from the environment response, and updates status to `deployed`. On failure, status is set to `FAILED`.
+- **Status polling:** `get_agent_status()` detects `source="harness"` agents and polls via `get_harness_api()` instead of the runtime API. Extracts runtime from the harness environment and updates status.
+- **Refresh:** `refresh_agent()` routes harness agents to `get_harness_api()` for status refresh.
+- **Deletion:** `delete_agent()` routes harness agents to `delete_harness_api()` instead of `delete_runtime()`.
+- **Invocation:** `invoke_agent_endpoint()` dispatches to `invoke_harness_agent_stream()` when `agent.source == "harness"`. Uses harness ARN from the agent record. Token counts come from harness metadata events (falls back to CountTokens API if zero).
+- **Frontend types:** `AgentHarnessDeployRequest` interface with harness-specific fields (max_iterations, timeout_seconds, max_tokens, temperature, top_p, code_interpreter, browser). `AgentResponse.source` union extended to include `"harness"`. `AgentResponse.harness_id` field added.
+- **Frontend form:** `AgentRegistrationForm` adds a Deployment Type selector (Custom Agent vs Managed Agent radio buttons). Managed mode shows model parameters (max tokens, temperature, top_p), built-in tools (code interpreter, browser toggles), and iteration/timeout configuration. Custom-only sections (protocol, authorizer, A2A agents, memory) are hidden in managed mode.
+- **Frontend wiring:** `useAgents` hook includes `deployHarnessAgent` function with harness-specific polling support. `AgentListPage` and `App.tsx` wire `onDeployHarness` prop through to the registration form.
+- **21 backend tests** in `test_harness.py` covering deployment CRUD, validation, MCP server integration, built-in tools, model parameters, status polling, refresh, deletion, config storage, and service module functions (create, get, delete, invoke stream with text and tool_use events).
+
+### Phase 26 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.
