@@ -27,6 +27,7 @@ from app.models.authorizer_credential import AuthorizerCredential
 from app.models.mcp import McpServer
 
 from app.services.agentcore import invoke_agent
+from app.services.harness import invoke_harness_stream
 from app.services.cloudwatch import (
     get_log_events, get_usage_log_events,
     parse_agent_start_time, parse_agentcore_request_id,
@@ -739,6 +740,162 @@ async def invoke_agent_stream(
             thread.start()
 
 
+async def invoke_harness_agent_stream(
+    agent: Agent,
+    session: InvocationSession,
+    invocation: Invocation,
+    db: Session,
+    client_invoke_time: float,
+    prompt: str,
+    actor_id: str | None = None,
+    runtime_model_id: str | None = None,
+) -> AsyncGenerator[str, None]:
+    """Invoke a harness-deployed agent and yield SSE events.
+
+    Translates the harness streaming response to the same SSE format as
+    invoke_agent_stream so the frontend works without modification.
+    """
+    session_id = session.session_id
+    invocation_id = invocation.invocation_id
+
+    config_map = {e.key: e.value for e in agent.config_entries}
+    import json as _json
+    agent_model_id = None
+    config_json_str = config_map.get("AGENT_CONFIG_JSON", "")
+    if config_json_str:
+        try:
+            agent_model_id = _json.loads(config_json_str).get("model_id")
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    if runtime_model_id:
+        agent_model_id = runtime_model_id
+
+    invocation.client_invoke_time = client_invoke_time
+    invocation.status = "streaming"
+    session.status = "streaming"
+    db.commit()
+
+    yield format_sse_event("session_start", {
+        "session_id": session_id,
+        "invocation_id": invocation_id,
+        "client_invoke_time": client_invoke_time,
+    })
+
+    response_chunks: list[str] = []
+    harness_input_tokens = 0
+    harness_output_tokens = 0
+
+    try:
+        chunk_generator = invoke_harness_stream(
+            harness_arn=agent.arn,
+            session_id=session_id,
+            prompt=prompt,
+            region=agent.region,
+            model_id=runtime_model_id,
+            actor_id=actor_id,
+        )
+
+        _sentinel = object()
+
+        def _next_chunk():
+            return next(chunk_generator, _sentinel)
+
+        while True:
+            chunk = await asyncio.to_thread(_next_chunk)
+            if chunk is _sentinel:
+                break
+
+            if chunk.get("type") == "text":
+                text_content = chunk["content"]
+                response_chunks.append(text_content)
+                yield format_sse_event("chunk", {"text": text_content})
+            elif chunk.get("type") == "structured":
+                structured = chunk["content"]
+                if isinstance(structured, dict):
+                    tool_use = structured.get("tool_use")
+                    if isinstance(tool_use, dict) and tool_use.get("name"):
+                        yield format_sse_event("tool_use", {"name": tool_use["name"]})
+            elif chunk.get("type") == "metadata":
+                meta = chunk.get("content", {})
+                harness_input_tokens = meta.get("input_tokens", 0)
+                harness_output_tokens = meta.get("output_tokens", 0)
+
+        client_done_time = time.time()
+        invocation.client_done_time = client_done_time
+        invocation.client_duration_ms = compute_client_duration(client_invoke_time, client_done_time)
+        invocation.response_text = "".join(response_chunks) if response_chunks else None
+
+        # Use token counts from harness metadata (no heuristic needed)
+        input_tokens = harness_input_tokens
+        output_tokens = harness_output_tokens
+        if input_tokens == 0 and output_tokens == 0:
+            output_text = "".join(response_chunks) if response_chunks else ""
+            if agent_model_id:
+                input_tokens = await asyncio.to_thread(count_input_tokens, agent_model_id, prompt, agent.region)
+                output_tokens = await asyncio.to_thread(count_output_tokens, agent_model_id, output_text, agent.region)
+            else:
+                input_tokens = max(1, len(prompt) // 4)
+                output_tokens = max(1, len(output_text) // 4)
+
+        estimated_cost = None
+        if agent_model_id:
+            from app.routers.agents import SUPPORTED_MODELS
+            model_pricing = next((m for m in SUPPORTED_MODELS if m["model_id"] == agent_model_id), None)
+            if model_pricing:
+                input_price = model_pricing.get("input_price_per_1k_tokens", 0)
+                output_price = model_pricing.get("output_price_per_1k_tokens", 0)
+                estimated_cost = round(
+                    (input_tokens / 1000 * input_price) + (output_tokens / 1000 * output_price), 6,
+                )
+
+        duration_seconds = client_done_time - client_invoke_time
+        compute_cpu_cost, compute_memory_cost, compute_cost = _estimate_compute_costs(duration_seconds)
+
+        invocation.input_tokens = input_tokens
+        invocation.output_tokens = output_tokens
+        invocation.estimated_cost = estimated_cost
+        invocation.compute_cost = compute_cost
+        invocation.compute_cpu_cost = compute_cpu_cost
+        invocation.compute_memory_cost = compute_memory_cost
+        invocation.cost_source = "harness"
+        invocation.status = "complete"
+        session.status = "complete"
+        db.commit()
+
+        yield format_sse_event("session_end", {
+            "session_id": session_id,
+            "invocation_id": invocation_id,
+            "request_id": None,
+            "qualifier": session.qualifier,
+            "client_invoke_time": client_invoke_time,
+            "client_done_time": client_done_time,
+            "client_duration_ms": invocation.client_duration_ms,
+            "cold_start_latency_ms": None,
+            "agent_start_time": None,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "estimated_cost": estimated_cost,
+            "compute_cost": compute_cost,
+            "compute_cpu_cost": compute_cpu_cost,
+            "compute_memory_cost": compute_memory_cost,
+            "memory_retrievals": None,
+            "memory_events_sent": None,
+            "memory_estimated_cost": None,
+            "stm_cost": None,
+            "ltm_cost": None,
+        })
+
+    except Exception as e:
+        error_detail = str(e)
+        logger.error("Harness invocation failed for agent %s session %s: %s", agent.id, session_id, error_detail)
+        invocation.status = "error"
+        invocation.error_message = error_detail
+        session.status = "error"
+        db.commit()
+        yield format_sse_event("error", {"message": f"Invocation failed: {error_detail}"})
+
+
 @router.post("/{agent_id}/invoke")
 async def invoke_agent_endpoint(
     agent_id: int,
@@ -957,14 +1114,28 @@ async def invoke_agent_endpoint(
             dynamic_mcp_servers.append(entry)
         logger.info("Resolved %d dynamic MCP connectors for invocation", len(dynamic_mcp_servers))
 
-    # Return streaming response
+    # Dispatch to harness or standard invoke path
+    if agent.source == "harness" and agent.harness_id:
+        stream_gen = invoke_harness_agent_stream(
+            agent, session, invocation, db, client_invoke_time,
+            request_body.prompt, user.username or user.sub or "loom-agent",
+            runtime_model_id,
+        )
+    else:
+        stream_gen = invoke_agent_stream(
+            agent, session, invocation, db, client_invoke_time,
+            request_body.prompt, access_token, token_source,
+            user.username or user.sub or "loom-agent",
+            runtime_model_id, dynamic_mcp_servers,
+        )
+
     return StreamingResponse(
-        invoke_agent_stream(agent, session, invocation, db, client_invoke_time, request_body.prompt, access_token, token_source, user.username or user.sub or "loom-agent", runtime_model_id, dynamic_mcp_servers),
+        stream_gen,
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable buffering in nginx
+            "X-Accel-Buffering": "no",
         }
     )
 
