@@ -89,6 +89,7 @@ backend/
 │       ├── cognito.py       # Cognito OAuth2 token retrieval (client credentials grant)
 │       ├── credential.py    # AgentCore credential provider management
 │       ├── deployment.py    # Agent artifact build, runtime CRUD, secret detection
+│       ├── harness.py       # AgentCore Harness API: create, get, delete, invoke stream
 │       ├── iam.py           # IAM role creation/deletion, Cognito pool listing
 │       ├── jwt_validator.py # JWT validation against Cognito JWKS (with caching)
 │       ├── latency.py       # Latency calculation helpers
@@ -120,6 +121,7 @@ backend/
 │   ├── test_scopes.py       # Scope enforcement and GROUP_SCOPES mapping tests
 │   ├── test_tags.py         # Tag policy, tag profile, and tag enforcement tests
 │   ├── test_traces.py       # Trace router + OTEL parsing tests (12 tests)
+│   ├── test_harness.py      # AgentCore Harness tests (21 tests: deploy CRUD, MCP integration, built-in tools, model params, status, config, service module)
 │   ├── test_model_selection.py  # Runtime model selection tests (12 tests: allowed_model_ids, invoke validation, PATCH)
 │   └── test_admin_audit.py  # Admin audit router tests (14 tests: login, action, pageview, sessions, summary)
 ├── etc/
@@ -1105,10 +1107,10 @@ Handles agent artifact build and runtime lifecycle:
 
 AgentCore Harness API wrapper for managed agent deployments:
 
-- `create_harness(name, execution_role_arn, model_id, system_prompt, tools, allowed_tools, max_iterations, timeout_seconds, max_tokens, temperature, top_p, network_mode, idle_timeout, max_lifetime, tags, region) -> dict` — creates a new AgentCore Harness via the `bedrock-agentcore-control` client. Builds `bedrockModelConfig` with optional model parameters (maxTokens, temperature, topP). Supports tool types: `remote_mcp`, `agentcore_code_interpreter`, `agentcore_browser`. Sets `allowedTools: ["*"]` by default.
+- `create_harness(name, execution_role_arn, model_id, system_prompt, tools, allowed_tools, max_iterations, max_tokens, authorizer_config, network_mode, idle_timeout, max_lifetime, tags, region) -> dict` — creates a new AgentCore Harness via the `bedrock-agentcore-control` client. Builds `bedrockModelConfig` with optional model parameters (maxTokens). Supports tool types: `remote_mcp`, `agentcore_code_interpreter`, `agentcore_browser`. Sets `allowedTools: ["*"]` by default. Returns the harness response with ARN in the `"arn"` field.
 - `get_harness(harness_id, region) -> dict` — retrieves current harness state from the control plane.
 - `delete_harness(harness_id, region) -> dict` — deletes a harness.
-- `invoke_harness_stream(harness_arn, session_id, prompt, region, model_id, system_prompt, tools, allowed_tools, max_iterations, timeout_seconds, max_tokens, actor_id) -> Generator[dict]` — invokes a harness and yields translated events. Translates Converse API streaming format (`messageStart`, `contentBlockStart`, `contentBlockDelta`, `contentBlockStop`, `messageStop`, `metadata`) into `{"type": "text", "content": str}`, `{"type": "structured", "content": {"tool_use": {"name": str}}}`, and `{"type": "metadata", "content": dict}` events. Accumulates token counts from metadata events.
+- `invoke_harness_stream(harness_arn, session_id, prompt, region, model_id, system_prompt, tools, allowed_tools, max_iterations, timeout_seconds, max_tokens, actor_id, access_token) -> Generator[dict]` — invokes a harness and yields translated events. When `access_token` is provided, configures the `bedrock-agentcore` client with `UNSIGNED` SigV4 and injects `Authorization: Bearer <token>` via a boto3 `before-send` event hook for JWT auth. Translates Converse API streaming format (`messageStart`, `contentBlockStart`, `contentBlockDelta`, `contentBlockStop`, `messageStop`, `metadata`) into `{"type": "text", "content": str}`, `{"type": "structured", "content": {"tool_use": {"name": str}}}`, and `{"type": "metadata", "content": dict}` events. Accumulates token counts from metadata events.
 
 ### `services/credential.py`
 

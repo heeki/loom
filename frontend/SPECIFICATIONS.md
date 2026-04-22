@@ -185,7 +185,8 @@ Each card displays:
 - Agent name (or runtime ID fallback)
 - Protocol badge (e.g., `HTTP`) — inline with name
 - Status badge (color-coded: READY=default, CREATING=secondary, FAILED=destructive) — inline with name
-- Progressive deployment status phases: `initializing`, `creating_credentials` (Creating credential provider), `creating_role` (Creating IAM role), `building_artifact` (Building artifact), `deploying` (Deploying runtime), then "Completing deployment", "Finalizing endpoint"
+- Deployment type badge (`MANAGED` or `CUSTOM`) and cost badge displayed below the info box as outline badges (not in the header row)
+- Progressive deployment status phases: `initializing`, `creating_credentials` (Creating credential provider), `creating_role` (Creating IAM role), `building_artifact` (Building artifact), `deploying` (Deploying runtime / Creating harness), then "Completing deployment" / "Creating harness", "Finalizing endpoint"
 - Spinner animation when agent is in a creating/deploying state
 - Spinner animation and elapsed timer when agent is in DELETING state, using `deleteStartTime` prop for accurate timer display
 - Endpoint status badge hidden during DELETING state
@@ -236,11 +237,11 @@ Full deployment form with sections:
 - **Allowed Models (runtime selection)**: shown after a default model is selected. Per-vendor grouped checkboxes via `groupModels()`. The default model is always checked and disabled. Additional models can be checked to allow runtime selection at invoke time. If no additional models are selected, only the default model is allowed. JSON import/export supports `allowed_models` array field.
 - **Model Parameters** (managed only): max tokens, temperature, top_p — numeric inputs for controlling harness model behavior.
 - **Built-in Tools** (managed only): toggle switches for Code Interpreter and Browser tools. When enabled, the corresponding `agentcore_code_interpreter` or `agentcore_browser` tool is added to the harness configuration.
-- **Iteration & Timeout** (managed only): max iterations and timeout seconds — numeric inputs for controlling the harness agent loop.
 - **Role Permissions (read-only)**: collapsible section shown after IAM role selection, displays policy document. Clicking the header toggles visibility.
 - **Authorizer** (custom only): radio selection of None, Cognito, or Other. Authorizer dropdown is 25% width, shows just the authorizer config name. Fields show "Allowed Clients" and "Allowed Scopes".
   - Cognito: searchable Cognito pool select (30% width), auto-populated discovery URL, tag inputs for allowed clients and scopes, app client ID and client secret fields
   - Other: textbox for discovery URL, tag inputs for allowed clients and scopes
+- **Harness Parameters** (managed only): max iterations and timeout seconds — positioned between Authorizer and Lifecycle.
 - **Lifecycle**: idle timeout and max lifetime fields with dynamic placeholders fetched from `/api/agents/defaults` (e.g., "300" and "3600")
 - **Resource Tags**: `ResourceTagFields` component with tag profile dropdown (persisted in `sessionStorage`). Deploy-time tags are auto-applied; build-time tags are resolved from the selected tag profile.
 - **Integrations**: Memory (enabled, with multi-select dropdown for memory resources, custom only), MCP Servers (enabled with multi-select dropdown), A2A Agents (enabled with multi-select dropdown, custom only)
