@@ -281,7 +281,7 @@ function AppContent() {
       ? `demo-user-${_demoAdminMatch[1]}`
       : undefined;
 
-  const { agents, loading, deleteStartTimes, fetchAgents, registerAgent, deployAgent, redeployAgent, refreshAgent, patchAgent, deleteAgent } = useAgents();
+  const { agents, loading, deleteStartTimes, fetchAgents, registerAgent, deployAgent, deployHarnessAgent, redeployAgent, refreshAgent, patchAgent, deleteAgent } = useAgents();
 
   // Re-fetch agents after authentication completes and when navigating to agent tabs
   useEffect(() => {
@@ -725,6 +725,7 @@ function AppContent() {
                   onViewModeChange={setAgentsViewMode}
                   onRegister={registerAgent}
                   onDeploy={deployAgent}
+                  onDeployHarness={deployHarnessAgent}
                   onSelectAgent={handleSelectAgent}
                   onRefreshAgent={refreshAgent}
                   onDelete={handleDelete}

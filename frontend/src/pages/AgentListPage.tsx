@@ -25,7 +25,7 @@ import { formatTimestamp } from "@/lib/format";
 import { statusVariant } from "@/lib/status";
 import { listTagPolicies, getRegistryConfig } from "@/api/settings";
 import { RegistryStatusBadge } from "@/components/RegistryStatusBadge";
-import type { AgentDeployRequest, AgentResponse, TagPolicy } from "@/api/types";
+import type { AgentDeployRequest, AgentHarnessDeployRequest, AgentResponse, TagPolicy } from "@/api/types";
 
 type BuilderTab = "register" | "deploy";
 
@@ -36,6 +36,7 @@ interface AgentListPageProps {
   onViewModeChange: (mode: "cards" | "table") => void;
   onRegister: (arn: string, modelId?: string) => Promise<unknown>;
   onDeploy?: (request: AgentDeployRequest) => Promise<unknown>;
+  onDeployHarness?: (request: AgentHarnessDeployRequest) => Promise<unknown>;
   onSelectAgent: (id: number) => void;
   onRefreshAgent: (id: number) => void;
   onDelete: (id: number, cleanupAws: boolean) => void;
@@ -53,6 +54,7 @@ export function AgentListPage({
   onViewModeChange,
   onRegister,
   onDeploy,
+  onDeployHarness,
   onSelectAgent,
   onRefreshAgent,
   onDelete,
@@ -147,6 +149,18 @@ export function AgentListPage({
     }
   };
 
+  const handleDeployHarness = async (request: AgentHarnessDeployRequest) => {
+    if (!onDeployHarness) return;
+    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'agent', 'deploy_harness', request.name);
+    setShowAddForm(false);
+    try {
+      await onDeployHarness(request);
+      toast.success("Harness deployment started");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Deployment failed");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
@@ -228,6 +242,7 @@ export function AgentListPage({
                 mode={activeTab}
                 onRegister={handleRegister}
                 onDeploy={onDeploy ? handleDeploy : undefined}
+                onDeployHarness={onDeployHarness ? handleDeployHarness : undefined}
                 isLoading={submitting}
                 groupRestriction={groupRestriction}
                 ownerRestriction={ownerRestriction}

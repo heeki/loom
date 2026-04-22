@@ -20,7 +20,7 @@ import { listMcpServers } from "@/api/mcp";
 import { listA2aAgents } from "@/api/a2a";
 import { listMemories } from "@/api/memories";
 import { ResourceTagFields } from "@/components/ResourceTagFields";
-import type { AgentDeployRequest, ModelOption, ManagedRole, AuthorizerConfigResponse, TagProfile, McpServer, A2aAgent, MemoryResponse } from "@/api/types";
+import type { AgentDeployRequest, AgentHarnessDeployRequest, ModelOption, ManagedRole, AuthorizerConfigResponse, TagProfile, McpServer, A2aAgent, MemoryResponse } from "@/api/types";
 import { groupModels } from "@/lib/models";
 import { toast } from "sonner";
 
@@ -83,17 +83,22 @@ function TagInput({
 }
 
 type Mode = "register" | "deploy";
+type DeploymentType = "custom" | "managed";
 
 interface AgentRegistrationFormProps {
   mode: Mode;
   onRegister: (arn: string, modelId?: string) => Promise<void>;
   onDeploy?: (request: AgentDeployRequest) => Promise<void>;
+  onDeployHarness?: (request: AgentHarnessDeployRequest) => Promise<void>;
   isLoading: boolean;
   groupRestriction?: string;
   ownerRestriction?: string;
 }
 
-export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, groupRestriction, ownerRestriction }: AgentRegistrationFormProps) {
+export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarness, isLoading, groupRestriction, ownerRestriction }: AgentRegistrationFormProps) {
+
+  // Deployment type (Custom Agent vs Managed Agent)
+  const [deploymentType, setDeploymentType] = useState<DeploymentType>("custom");
 
   // Register state
   const [arn, setArn] = useState("");
@@ -140,6 +145,14 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
   const [tagProfiles, setTagProfiles] = useState<TagProfile[]>([]);
   const [selectedTagProfileId, setSelectedTagProfileId] = useState<string | undefined>(undefined);
 
+  // Harness-specific state
+  const [harnessMaxIterations, setHarnessMaxIterations] = useState("");
+  const [harnessTimeoutSeconds, setHarnessTimeoutSeconds] = useState("");
+  const [harnessMaxTokens, setHarnessMaxTokens] = useState("");
+  const [harnessTemperature, setHarnessTemperature] = useState("");
+  const [harnessTopP, setHarnessTopP] = useState("");
+  const [harnessCodeInterpreter, setHarnessCodeInterpreter] = useState(false);
+  const [harnessBrowser, setHarnessBrowser] = useState(false);
 
   // Discovery data
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -216,6 +229,38 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
       if (!arn.trim()) return;
       await onRegister(arn.trim(), modelId || undefined);
       setArn("");
+    } else if (deploymentType === "managed") {
+      if (!name.trim() || !modelId || !selectedRoleId || !onDeployHarness || hasValidationErrors) return;
+
+      const roleArn = selectedRole?.role_arn ?? "";
+      const request: AgentHarnessDeployRequest = {
+        source: "harness",
+        name: name.trim(),
+        description: description.trim(),
+        agent_description: agentDescription.trim(),
+        behavioral_guidelines: behavioralGuidelines.trim(),
+        output_expectations: outputExpectations.trim(),
+        model_id: modelId,
+        allowed_model_ids: selectedAllowedModelIds.length > 0
+          ? (selectedAllowedModelIds.includes(modelId) ? selectedAllowedModelIds : [modelId, ...selectedAllowedModelIds])
+          : undefined,
+        role_arn: roleArn,
+        network_mode: networkMode,
+        idle_timeout: idleTimeout ? parseInt(idleTimeout, 10) : null,
+        max_lifetime: maxLifetime ? parseInt(maxLifetime, 10) : null,
+        mcp_servers: selectedMcpServerIds,
+        tags: Object.fromEntries(
+          Object.entries(tagValues).filter(([, v]) => v.trim() !== "")
+        ),
+        harness_max_iterations: harnessMaxIterations ? parseInt(harnessMaxIterations, 10) : null,
+        harness_timeout_seconds: harnessTimeoutSeconds ? parseInt(harnessTimeoutSeconds, 10) : null,
+        harness_max_tokens: harnessMaxTokens ? parseInt(harnessMaxTokens, 10) : null,
+        harness_temperature: harnessTemperature ? parseFloat(harnessTemperature) : null,
+        harness_top_p: harnessTopP ? parseFloat(harnessTopP) : null,
+        harness_code_interpreter: harnessCodeInterpreter,
+        harness_browser: harnessBrowser,
+      };
+      await onDeployHarness(request);
     } else {
       if (!name.trim() || !modelId || !selectedRoleId || !onDeploy || hasValidationErrors) return;
 
@@ -434,6 +479,37 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                 placeholder='{"name": "...", "description": "...", "persona": "...", "instructions": "...", "behavior": "...", "model": "... (default)", "allowed_models": ["..."], "role": "...", "authorizer": "...", "tags": "...", "mcp_servers": ["..."], "a2a_agents": ["..."], "memories": ["..."]}'
               />
 
+              {/* Deployment Type Selector */}
+              <section className="space-y-2">
+                <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Deployment Type</h4>
+                <div className="flex gap-3">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      name="deploymentType"
+                      value="custom"
+                      checked={deploymentType === "custom"}
+                      onChange={() => setDeploymentType("custom")}
+                      className="h-3.5 w-3.5"
+                    />
+                    <span>Custom Agent</span>
+                    <span className="text-[10px] text-muted-foreground">Deploys your agent code into AgentCore Runtime</span>
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      name="deploymentType"
+                      value="managed"
+                      checked={deploymentType === "managed"}
+                      onChange={() => setDeploymentType("managed")}
+                      className="h-3.5 w-3.5"
+                    />
+                    <span>Managed Agent</span>
+                    <span className="text-[10px] text-muted-foreground">Fully managed agent loop via AgentCore Harness</span>
+                  </label>
+                </div>
+              </section>
+
               {/* Agent Identity */}
               <section className="space-y-3">
                 <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Agent Identity</h4>
@@ -501,19 +577,21 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                     placeholder="Select model..."
                   />
                 </section>
-                <section className="w-[10%] min-w-0 space-y-2">
-                  <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Protocol</h4>
-                  <Select value={protocol} onValueChange={() => {}}>
-                    <SelectTrigger className="w-full text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="HTTP">HTTP</SelectItem>
-                      <SelectItem value="MCP" disabled>MCP (coming soon)</SelectItem>
-                      <SelectItem value="A2A" disabled>A2A (coming soon)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </section>
+                {deploymentType === "custom" && (
+                  <section className="w-[10%] min-w-0 space-y-2">
+                    <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Protocol</h4>
+                    <Select value={protocol} onValueChange={() => {}}>
+                      <SelectTrigger className="w-full text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="HTTP">HTTP</SelectItem>
+                        <SelectItem value="MCP" disabled>MCP (coming soon)</SelectItem>
+                        <SelectItem value="A2A" disabled>A2A (coming soon)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </section>
+                )}
                 <section className="w-[10%] min-w-0 space-y-2">
                   <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Network</h4>
                   <Select value={networkMode} onValueChange={setNetworkMode}>
@@ -539,6 +617,105 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                   />
                 </section>
               </div>
+
+              {/* Harness Model Parameters (Managed Agent only) */}
+              {deploymentType === "managed" && (
+                <section className="space-y-3">
+                  <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Model Parameters</h4>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Max Tokens</label>
+                      <Input
+                        type="number"
+                        placeholder="Model default"
+                        value={harnessMaxTokens}
+                        onChange={(e) => setHarnessMaxTokens(e.target.value)}
+                        min={1}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Temperature (0.0-1.0)</label>
+                      <Input
+                        type="number"
+                        placeholder="Model default"
+                        value={harnessTemperature}
+                        onChange={(e) => setHarnessTemperature(e.target.value)}
+                        min={0}
+                        max={1}
+                        step={0.1}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Top P (0.0-1.0)</label>
+                      <Input
+                        type="number"
+                        placeholder="Model default"
+                        value={harnessTopP}
+                        onChange={(e) => setHarnessTopP(e.target.value)}
+                        min={0}
+                        max={1}
+                        step={0.1}
+                      />
+                    </div>
+                  </div>
+                </section>
+              )}
+
+              {/* Harness Tool Configuration (Managed Agent only) */}
+              {deploymentType === "managed" && (
+                <section className="space-y-3">
+                  <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Built-in Tools</h4>
+                  <div className="flex gap-4">
+                    <label className="flex items-center gap-2 text-xs cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="h-3.5 w-3.5"
+                        checked={harnessCodeInterpreter}
+                        onChange={(e) => setHarnessCodeInterpreter(e.target.checked)}
+                      />
+                      <span>Code Interpreter</span>
+                    </label>
+                    <label className="flex items-center gap-2 text-xs cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="h-3.5 w-3.5"
+                        checked={harnessBrowser}
+                        onChange={(e) => setHarnessBrowser(e.target.checked)}
+                      />
+                      <span>Web Browser</span>
+                    </label>
+                  </div>
+                </section>
+              )}
+
+              {/* Harness Iteration & Timeout (Managed Agent only) */}
+              {deploymentType === "managed" && (
+                <section className="space-y-3">
+                  <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Iteration & Timeout</h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Max Iterations</label>
+                      <Input
+                        type="number"
+                        placeholder="Defaults to 75"
+                        value={harnessMaxIterations}
+                        onChange={(e) => setHarnessMaxIterations(e.target.value)}
+                        min={1}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Timeout (seconds)</label>
+                      <Input
+                        type="number"
+                        placeholder="Defaults to 3600"
+                        value={harnessTimeoutSeconds}
+                        onChange={(e) => setHarnessTimeoutSeconds(e.target.value)}
+                        min={1}
+                      />
+                    </div>
+                  </div>
+                </section>
+              )}
 
               {/* Allowed Models for Runtime Selection */}
               {modelId && models.length > 0 && (
@@ -666,8 +843,8 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                 </section>
               )}
 
-              {/* Authorizer */}
-              <section className="space-y-3">
+              {/* Authorizer (Custom Agent only) */}
+              {deploymentType === "custom" && <section className="space-y-3">
                 <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Authorizer</h4>
                 <div className="w-1/4">
                   <SearchableSelect
@@ -696,7 +873,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                     )}
                   </div>
                 )}
-              </section>
+              </section>}
 
               {/* Lifecycle */}
               <section className="space-y-3">
@@ -740,7 +917,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
 
               {/* Integrations */}
               <section className="space-y-3">
-                <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Integrations</h4>
+                <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{deploymentType === "managed" ? "MCP Servers (Remote MCP Tools)" : "Integrations"}</h4>
                 <div className="space-y-3">
                   {/* MCP Servers */}
                   <div className="space-y-1.5">
@@ -773,8 +950,8 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                       </div>
                     )}
                   </div>
-                  {/* A2A Agents */}
-                  <div className="space-y-1.5">
+                  {/* A2A Agents (Custom Agent only) */}
+                  {deploymentType === "custom" && <div className="space-y-1.5">
                     <label className="text-xs text-muted-foreground">A2A Agents</label>
                     {filteredA2aAgents.length === 0 ? (
                       <p className="text-xs text-muted-foreground italic">No A2A agents available. Register agents on the A2A Agents page first.</p>
@@ -803,9 +980,9 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                         ))}
                       </div>
                     )}
-                  </div>
-                  {/* Memory Resources */}
-                  <div className="space-y-1.5">
+                  </div>}
+                  {/* Memory Resources (Custom Agent only) */}
+                  {deploymentType === "custom" && <div className="space-y-1.5">
                     <label className="text-xs text-muted-foreground">Memory Resources</label>
                     {filteredMemories.length === 0 ? (
                       <p className="text-xs text-muted-foreground italic">No memory resources available{groupRestriction ? " for your group" : ""}. Create one on the Memory page first.</p>
@@ -833,22 +1010,22 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, isLoading, g
                         ))}
                       </div>
                     )}
-                  </div>
+                  </div>}
                 </div>
               </section>
 
               <div className="space-y-1.5">
               <p className="text-[10px] text-muted-foreground italic">
-                Deployment typically takes ~1 minute
+                {deploymentType === "managed" ? "Harness creation typically takes ~1 minute" : "Deployment typically takes ~1 minute"}
               </p>
               <div className="flex items-center gap-2">
                 <Button
                   type="submit"
                   size="sm"
                   className="min-w-[120px]"
-                  disabled={isLoading || !name.trim() || !modelId || !selectedRoleId || !onDeploy || hasValidationErrors}
+                  disabled={isLoading || !name.trim() || !modelId || !selectedRoleId || (deploymentType === "custom" ? !onDeploy : !onDeployHarness) || hasValidationErrors}
                 >
-                  {isLoading ? "Deploying..." : "Deploy"}
+                  {isLoading ? "Deploying..." : (deploymentType === "managed" ? "Deploy Harness" : "Deploy")}
                 </Button>
                 <Button
                   type="button"
