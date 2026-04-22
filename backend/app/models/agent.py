@@ -50,6 +50,7 @@ class Agent(Base):
     registry_record_id = Column(String, nullable=True)
     registry_status = Column(String, nullable=True)
     allowed_model_ids = Column(Text, nullable=True)  # JSON array of allowed model IDs
+    harness_id = Column(String, nullable=True)  # Harness ID for managed agent deployments
 
     # Relationships
     sessions = relationship("InvocationSession", back_populates="agent", cascade="all, delete-orphan")
@@ -152,4 +153,5 @@ class Agent(Base):
             "registry_record_id": self.registry_record_id,
             "registry_status": self.registry_status,
             "allowed_model_ids": self.get_allowed_model_ids(),
+            "harness_id": self.harness_id,
         }
