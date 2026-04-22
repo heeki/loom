@@ -25,7 +25,7 @@ import { formatTimestamp } from "@/lib/format";
 import { statusVariant } from "@/lib/status";
 import { listTagPolicies, getRegistryConfig } from "@/api/settings";
 import { RegistryStatusBadge } from "@/components/RegistryStatusBadge";
-import type { AgentDeployRequest, AgentResponse, TagPolicy } from "@/api/types";
+import type { AgentDeployRequest, AgentHarnessDeployRequest, AgentResponse, TagPolicy } from "@/api/types";
 
 type BuilderTab = "register" | "deploy";
 
@@ -36,6 +36,7 @@ interface AgentListPageProps {
   onViewModeChange: (mode: "cards" | "table") => void;
   onRegister: (arn: string, modelId?: string) => Promise<unknown>;
   onDeploy?: (request: AgentDeployRequest) => Promise<unknown>;
+  onDeployHarness?: (request: AgentHarnessDeployRequest) => Promise<unknown>;
   onSelectAgent: (id: number) => void;
   onRefreshAgent: (id: number) => void;
   onDelete: (id: number, cleanupAws: boolean) => void;
@@ -53,6 +54,7 @@ export function AgentListPage({
   onViewModeChange,
   onRegister,
   onDeploy,
+  onDeployHarness,
   onSelectAgent,
   onRefreshAgent,
   onDelete,
@@ -147,6 +149,18 @@ export function AgentListPage({
     }
   };
 
+  const handleDeployHarness = async (request: AgentHarnessDeployRequest) => {
+    if (!onDeployHarness) return;
+    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'agent', 'deploy_harness', request.name);
+    setShowAddForm(false);
+    try {
+      await onDeployHarness(request);
+      toast.success("Harness deployment started");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Deployment failed");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
@@ -228,6 +242,7 @@ export function AgentListPage({
                 mode={activeTab}
                 onRegister={handleRegister}
                 onDeploy={onDeploy ? handleDeploy : undefined}
+                onDeployHarness={onDeployHarness ? handleDeployHarness : undefined}
                 isLoading={submitting}
                 groupRestriction={groupRestriction}
                 ownerRestriction={ownerRestriction}
@@ -380,8 +395,8 @@ export function AgentListPage({
                       <SortableTableHead column="name" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[26%]">Name</SortableTableHead>
                       <SortableTableHead column="status" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[10%]">Status</SortableTableHead>
                       <SortableTableHead column="cost" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Cost</SortableTableHead>
-                      <SortableTableHead column="protocol" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Protocol</SortableTableHead>
-                      <SortableTableHead column="network" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[12%]">Network</SortableTableHead>
+                      <SortableTableHead column="type" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[10%]">Type</SortableTableHead>
+                      <SortableTableHead column="network" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[10%]">Network</SortableTableHead>
                       <SortableTableHead column="registry" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[10%]">Registry</SortableTableHead>
                       <SortableTableHead column="region" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[10%]">Region</SortableTableHead>
                       <SortableTableHead column="registered" activeColumn={agentTableCol} direction={agentTableDir} onSort={handleAgentTableSort} className="w-[14%]">Registered</SortableTableHead>
@@ -392,7 +407,7 @@ export function AgentListPage({
                       name: (a) => a.name ?? a.runtime_id ?? "",
                       status: (a) => a.status ?? "",
                       cost: (a) => a.cost_summary?.total_cost ?? 0,
-                      protocol: (a) => a.protocol ?? "",
+                      type: (a) => a.source ?? "",
                       network: (a) => a.network_mode ?? "",
                       registry: (a) => a.registry_status ?? "",
                       region: (a) => a.region ?? "",
@@ -422,7 +437,7 @@ export function AgentListPage({
                             : "\u2014"}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
-                          {agent.protocol ?? "\u2014"}
+                          {agent.source === "harness" ? "Managed" : agent.source === "deploy" ? "Custom" : agent.source ?? "\u2014"}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {agent.network_mode ?? "\u2014"}

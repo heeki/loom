@@ -13,7 +13,7 @@ export interface AgentResponse {
   active_session_count: number;
   registered_at: string | null;
   last_refreshed_at: string | null;
-  source: "register" | "deploy" | null;
+  source: "register" | "deploy" | "harness" | null;
   deployment_status: string | null;
   execution_role_arn: string | null;
   config_hash: string | null;
@@ -39,8 +39,35 @@ export interface AgentResponse {
   memory_names: string[];
   mcp_names: string[];
   a2a_names: string[];
+  harness_id: string | null;
   registry_record_id: string | null;
   registry_status: string | null;
+}
+
+export interface AgentHarnessDeployRequest {
+  source: "harness";
+  name: string;
+  description: string;
+  agent_description: string;
+  behavioral_guidelines: string;
+  output_expectations: string;
+  model_id: string;
+  allowed_model_ids?: string[];
+  role_arn: string;
+  network_mode: string;
+  idle_timeout: number | null;
+  max_lifetime: number | null;
+  authorizer_type: string | null;
+  authorizer_pool_id: string | null;
+  authorizer_discovery_url: string | null;
+  authorizer_allowed_clients: string[];
+  authorizer_allowed_scopes: string[];
+  authorizer_client_id: string | null;
+  authorizer_client_secret: string | null;
+  mcp_servers: number[];
+  tags?: Record<string, string>;
+  harness_max_iterations: number | null;
+  harness_max_tokens: number | null;
 }
 
 export interface AgentRegisterRequest {

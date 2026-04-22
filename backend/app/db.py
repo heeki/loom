@@ -115,6 +115,7 @@ def _migrate_add_columns(eng) -> None:
         ("agents", "registry_record_id", "VARCHAR"),
         ("agents", "registry_status", "VARCHAR"),
         ("agents", "allowed_model_ids", "TEXT"),
+        ("agents", "harness_id", "VARCHAR"),
     ]
 
     is_postgres = eng.dialect.name == "postgresql"

@@ -106,7 +106,7 @@ export function AgentDetailPage({
     onSessionsRefresh();
   };
 
-  const isDeployed = agent.source === "deploy";
+  const isDeployed = agent.source === "deploy" || agent.source === "harness";
 
   return (
     <div className="space-y-4">
@@ -115,6 +115,12 @@ export function AgentDetailPage({
         <CardHeader className="pb-0">
           <div className="flex items-center gap-2">
             <CardTitle className="text-sm font-medium">Overview</CardTitle>
+            {agent.source === "harness" && (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0">Managed</Badge>
+            )}
+            {agent.source === "deploy" && (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0">Custom</Badge>
+            )}
             <RegistryStatusBadge status={agent.registry_status} showUnregistered={registryEnabled} registryEnabled={registryEnabled} />
             {!registryReadOnly && registryEnabled && (
               <RegistryActions

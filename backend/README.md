@@ -189,6 +189,7 @@ backend/
 │       ├── cognito.py       # Cognito OAuth2 token retrieval
 │       ├── credential.py    # AgentCore credential provider management
 │       ├── deployment.py    # Agent artifact build + runtime CRUD
+│       ├── harness.py       # AgentCore Harness API: create, get, delete, invoke stream
 │       ├── iam.py           # IAM role management + Cognito pool listing
 │       ├── jwt_validator.py # JWT validation against Cognito JWKS
 │       ├── latency.py       # Pure computation: cold_start_latency_ms, client_duration_ms
@@ -221,7 +222,7 @@ backend/
 
 ### `agents`
 
-Stores registered and deployed AgentCore Runtime agents. Uses an auto-incrementing integer PK for internal references; `arn` and `runtime_id` are stored as indexed columns for AWS lookups. Includes columns for: `source`, `deployment_status`, `execution_role_arn`, `endpoint_name`, `endpoint_arn`, `endpoint_status`, `protocol`, `network_mode`, `authorizer_config`, `credential_providers`, `deployed_at`, `tags` (JSON dict of resolved tag key-value pairs), `registry_record_id` (AWS Agent Registry record ID), and `registry_status` (registry lifecycle status). Agents are auto-registered in DRAFT status on deployment when registry is configured.
+Stores registered and deployed AgentCore Runtime agents. Uses an auto-incrementing integer PK for internal references; `arn` and `runtime_id` are stored as indexed columns for AWS lookups. Includes columns for: `source` (`register`, `deploy`, or `harness`), `deployment_status`, `execution_role_arn`, `endpoint_name`, `endpoint_arn`, `endpoint_status`, `protocol`, `network_mode`, `authorizer_config`, `credential_providers`, `deployed_at`, `tags` (JSON dict of resolved tag key-value pairs), `harness_id` (harness ID for managed agent deployments), `registry_record_id` (AWS Agent Registry record ID), and `registry_status` (registry lifecycle status). Agents are auto-registered in DRAFT status on deployment when registry is configured.
 
 ### `agent_config_entries`
 

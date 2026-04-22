@@ -3,6 +3,7 @@ import type {
   AgentResponse,
   AgentRegisterRequest,
   AgentDeployRequest,
+  AgentHarnessDeployRequest,
   ConfigEntry,
   ConfigUpdateRequest,
   IamRole,
@@ -29,6 +30,15 @@ export function registerAgent(
 
 export function deployAgent(
   request: AgentDeployRequest,
+): Promise<AgentResponse> {
+  return apiFetch<AgentResponse>("/api/agents", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export function deployHarnessAgent(
+  request: AgentHarnessDeployRequest,
 ): Promise<AgentResponse> {
   return apiFetch<AgentResponse>("/api/agents", {
     method: "POST",

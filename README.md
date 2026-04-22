@@ -4,12 +4,13 @@ Loom is an enterprise-grade platform for building, deploying, and operating AI a
 
 ## Features
 
-Loom seamlessly stitches together agents, memory stores, MCP servers, and agent-to-agent integrations in a unified platform. It handles the complexity of IAM roles, credential providers, authentication flows, and resource tagging — making it simple to deploy agents with full observability and cost tracking from day one.
+Loom seamlessly weaves together agents, memory stores, MCP servers, and agent-to-agent integrations in a unified platform. It handles the complexity of IAM roles, credential providers, authentication flows, and resource tagging — making it simple to deploy agents with full observability and cost tracking from day one.
 
 ![Loom Features](assets/loom_features.png)
 
 ### Agent Lifecycle
 - Deploy new agents or import existing AgentCore Runtime agents
+- Deploy managed agents via AgentCore Harness (no code required) with configurable model parameters, built-in tools (code interpreter, browser), and MCP server integration
 - SSE streaming invocation with real-time response display
 - Progressive deployment status tracking and async deletion
 - Cold-start latency measurement via CloudWatch log parsing

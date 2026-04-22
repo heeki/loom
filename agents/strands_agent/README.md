@@ -97,13 +97,12 @@ This allows the frontend to pass the user-configured prompt as a deploy-time par
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `AGENT_SYSTEM_PROMPT` | System prompt (overrides config file) | — |
-| `AGENT_CONFIG_PATH` | Path to configuration JSON file | — |
 | `AGENT_CONFIG_JSON` | Inline configuration JSON string | — |
+| `AGENT_CONFIG_PATH` | Path to configuration JSON file (local dev) | — |
+| `AGENT_SYSTEM_PROMPT` | System prompt (overrides config file) | — |
+| `AGENT_OBSERVABILITY_ENABLED` | Enables ADOT export pipeline | — |
+| `OTEL_SERVICE_NAME` | Service name for ADOT telemetry | `loom-agent` |
 | `MEMORY_STORE_ID` | AgentCore Memory store identifier | — |
-| `AGENT_MODEL_ID` | Runtime model override (overrides config) | — |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTEL collector endpoint | `http://localhost:4317` |
-| `OTEL_SERVICE_NAME` | Service name for telemetry | `loom-agent` |
 | `AWS_REGION` | AWS region | `us-east-1` |
 | `LOG_LEVEL` | Logging level | `INFO` |
 

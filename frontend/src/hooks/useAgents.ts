@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { AgentResponse, AgentDeployRequest } from "@/api/types";
+import type { AgentResponse, AgentDeployRequest, AgentHarnessDeployRequest } from "@/api/types";
 import * as agentsApi from "@/api/agents";
 import { ApiError } from "@/api/client";
 import { toast } from "sonner";
@@ -21,7 +21,10 @@ function needsPolling(agent: AgentResponse): boolean {
     (agent.source === "deploy" &&
       (agent.status === "CREATING" ||
         DEPLOY_IN_PROGRESS.has(agent.deployment_status ?? "") ||
-        agent.endpoint_status === "CREATING"))
+        agent.endpoint_status === "CREATING")) ||
+    (agent.source === "harness" &&
+      (agent.status === "CREATING" ||
+        DEPLOY_IN_PROGRESS.has(agent.deployment_status ?? "")))
   );
 }
 
@@ -139,6 +142,15 @@ export function useAgents() {
     [fetchAgents],
   );
 
+  const deployHarnessAgent = useCallback(
+    async (request: AgentHarnessDeployRequest) => {
+      const agent = await agentsApi.deployHarnessAgent(request);
+      await fetchAgents();
+      return agent;
+    },
+    [fetchAgents],
+  );
+
   const redeployAgent = useCallback(
     async (id: number) => {
       const agent = await agentsApi.redeployAgent(id);
@@ -183,5 +195,5 @@ export function useAgents() {
     [],
   );
 
-  return { agents, loading, error, deleteStartTimes, fetchAgents, registerAgent, deployAgent, redeployAgent, refreshAgent, patchAgent, deleteAgent };
+  return { agents, loading, error, deleteStartTimes, fetchAgents, registerAgent, deployAgent, deployHarnessAgent, redeployAgent, refreshAgent, patchAgent, deleteAgent };
 }

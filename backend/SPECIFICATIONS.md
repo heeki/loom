@@ -89,6 +89,7 @@ backend/
 │       ├── cognito.py       # Cognito OAuth2 token retrieval (client credentials grant)
 │       ├── credential.py    # AgentCore credential provider management
 │       ├── deployment.py    # Agent artifact build, runtime CRUD, secret detection
+│       ├── harness.py       # AgentCore Harness API: create, get, delete, invoke stream
 │       ├── iam.py           # IAM role creation/deletion, Cognito pool listing
 │       ├── jwt_validator.py # JWT validation against Cognito JWKS (with caching)
 │       ├── latency.py       # Latency calculation helpers
@@ -120,6 +121,7 @@ backend/
 │   ├── test_scopes.py       # Scope enforcement and GROUP_SCOPES mapping tests
 │   ├── test_tags.py         # Tag policy, tag profile, and tag enforcement tests
 │   ├── test_traces.py       # Trace router + OTEL parsing tests (12 tests)
+│   ├── test_harness.py      # AgentCore Harness tests (21 tests: deploy CRUD, MCP integration, built-in tools, model params, status, config, service module)
 │   ├── test_model_selection.py  # Runtime model selection tests (12 tests: allowed_model_ids, invoke validation, PATCH)
 │   └── test_admin_audit.py  # Admin audit router tests (14 tests: login, action, pageview, sessions, summary)
 ├── etc/
@@ -211,7 +213,7 @@ uv pip install ".[postgres]"
 | `log_group` | TEXT | Derived: `/aws/bedrock-agentcore/runtimes/{runtime_id}-{qualifier}` |
 | `available_qualifiers` | TEXT | JSON array of endpoint names (e.g., `["DEFAULT"]`) |
 | `raw_metadata` | TEXT | Full JSON from AgentCore describe API |
-| `source` | TEXT | `register` or `deploy` |
+| `source` | TEXT | `register`, `deploy`, or `harness` |
 | `deployment_status` | TEXT | `initializing`, `creating_credentials`, `creating_role`, `building_artifact`, `deploying`, `deployed`, `failed`, `removing`, `READY` |
 | `execution_role_arn` | TEXT | IAM execution role ARN |
 | `config_hash` | TEXT | Configuration hash |
@@ -223,6 +225,7 @@ uv pip install ".[postgres]"
 | `authorizer_config` | TEXT | JSON: `{type, pool_id, discovery_url, allowed_clients, allowed_scopes}` |
 | `tags` | TEXT | JSON dict of resolved tags applied to this agent's AWS resources |
 | `allowed_model_ids` | TEXT | JSON array of model IDs the agent is allowed to use at invoke time (defaults to `[model_id]`) |
+| `harness_id` | VARCHAR | Harness ID for managed agent deployments (nullable, set when `source="harness"`) |
 | `registered_at` | DATETIME | Timestamp of local registration |
 | `deployed_at` | DATETIME | Deployment timestamp |
 | `last_refreshed_at` | DATETIME | Last time metadata was fetched from AWS |
@@ -581,7 +584,7 @@ The `model_id` field is optional on registration and stored as an `AGENT_CONFIG_
 
 | Field | Description |
 |-------|-------------|
-| `source` | `register` or `deploy` |
+| `source` | `register`, `deploy`, or `harness` |
 | `name` | Agent name |
 | `description` | Agent description |
 | `agent_description` | Description passed to the agent prompt |
@@ -606,6 +609,16 @@ The `model_id` field is optional on registration and stored as an `AGENT_CONFIG_
 | `mcp_servers` | MCP server configuration (stored in `AGENT_CONFIG_JSON` as `integrations.mcp_servers`) |
 | `a2a_agents` | A2A agent IDs to integrate (from A2A catalog) |
 | `tags` | Build-time tag values (e.g., `{"team": "aws", "owner": "heeki"}`) |
+| `harness_tools` | Custom tool definitions for harness deployment (optional) |
+| `harness_max_iterations` | Maximum iterations for harness agent loop (optional) |
+| `harness_timeout_seconds` | Timeout in seconds for harness invocations (optional) |
+| `harness_max_tokens` | Maximum tokens for harness model output (optional) |
+| `harness_temperature` | Temperature for harness model sampling (optional) |
+| `harness_top_p` | Top-p for harness model sampling (optional) |
+| `harness_code_interpreter` | Enable built-in code interpreter tool (boolean, default false) |
+| `harness_browser` | Enable built-in browser tool (boolean, default false) |
+
+When `source="harness"`, the agent is deployed as a fully managed AgentCore Harness — no artifact build, no credential provider creation. Requires `name`, `model_id`, and `role_arn`. The backend calls `CreateHarness` API, sets `harness_id` on the agent record, and extracts the auto-provisioned runtime from the harness environment. Harness agents are invoked via `InvokeHarness` API (Converse API streaming format translated to existing SSE events) and deleted via `DeleteHarness` API.
 
 The `mcp_servers` configuration is stored in the `AGENT_CONFIG_JSON` config entry under `integrations.mcp_servers` as an array. Each MCP server with OAuth2 authentication includes:
 - `auth.credential_provider_name` — Name of the AgentCore credential provider created during deployment
@@ -1089,6 +1102,15 @@ Handles agent artifact build and runtime lifecycle:
 ### `services/cognito.py`
 
 - `get_cognito_token(pool_id: str, client_id: str, client_secret: str, scopes: list[str]) -> str` — exchanges client credentials for an access token via the Cognito OAuth2 token endpoint.
+
+### `services/harness.py`
+
+AgentCore Harness API wrapper for managed agent deployments:
+
+- `create_harness(name, execution_role_arn, model_id, system_prompt, tools, allowed_tools, max_iterations, max_tokens, authorizer_config, network_mode, idle_timeout, max_lifetime, tags, region) -> dict` — creates a new AgentCore Harness via the `bedrock-agentcore-control` client. Builds `bedrockModelConfig` with optional model parameters (maxTokens). Supports tool types: `remote_mcp`, `agentcore_code_interpreter`, `agentcore_browser`. Sets `allowedTools: ["*"]` by default. Returns the harness response with ARN in the `"arn"` field.
+- `get_harness(harness_id, region) -> dict` — retrieves current harness state from the control plane.
+- `delete_harness(harness_id, region) -> dict` — deletes a harness.
+- `invoke_harness_stream(harness_arn, session_id, prompt, region, model_id, system_prompt, tools, allowed_tools, max_iterations, timeout_seconds, max_tokens, actor_id, access_token) -> Generator[dict]` — invokes a harness and yields translated events. When `access_token` is provided, configures the `bedrock-agentcore` client with `UNSIGNED` SigV4 and injects `Authorization: Bearer <token>` via a boto3 `before-send` event hook for JWT auth. Translates Converse API streaming format (`messageStart`, `contentBlockStart`, `contentBlockDelta`, `contentBlockStop`, `messageStop`, `metadata`) into `{"type": "text", "content": str}`, `{"type": "structured", "content": {"tool_use": {"name": str}}}`, and `{"type": "metadata", "content": dict}` events. Accumulates token counts from metadata events.
 
 ### `services/credential.py`
 
