@@ -116,10 +116,10 @@ export function AgentDetailPage({
           <div className="flex items-center gap-2">
             <CardTitle className="text-sm font-medium">Overview</CardTitle>
             {agent.source === "harness" && (
-              <Badge variant="outline" className="text-[10px] px-1.5 py-0">Managed</Badge>
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0">MANAGED</Badge>
             )}
             {agent.source === "deploy" && (
-              <Badge variant="outline" className="text-[10px] px-1.5 py-0">Custom</Badge>
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0">CUSTOM</Badge>
             )}
             <RegistryStatusBadge status={agent.registry_status} showUnregistered={registryEnabled} registryEnabled={registryEnabled} />
             {!registryReadOnly && registryEnabled && (

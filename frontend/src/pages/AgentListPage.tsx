@@ -437,7 +437,7 @@ export function AgentListPage({
                             : "\u2014"}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
-                          {agent.source === "harness" ? "Managed" : agent.source === "deploy" ? "Custom" : agent.source ?? "\u2014"}
+                          {agent.source === "harness" ? "MANAGED" : agent.source === "deploy" ? "CUSTOM" : agent.source ?? "\u2014"}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {agent.network_mode ?? "\u2014"}
