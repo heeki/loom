@@ -2200,3 +2200,250 @@ def update_agent_config(
             d["value"] = "********"
         result.append(ConfigEntryResponse(**d))
     return result
+
+
+# ---------------------------------------------------------------------------
+# External Integration Info
+# ---------------------------------------------------------------------------
+
+class IntegrationEndpoint(BaseModel):
+    qualifier: str
+    invocation_url: str
+    protocol_url: str | None = None
+    protocol_url_label: str | None = None
+
+class IntegrationAuthSigV4(BaseModel):
+    method: str = "SigV4"
+    iam_action: str
+    resource_arn: str
+    execution_role_arn: str | None = None
+    example_policy: dict
+    example_boto3: str
+    example_cli: str
+
+class IntegrationAuthOAuth2(BaseModel):
+    method: str = "OAuth2"
+    authorizer_type: str
+    discovery_url: str | None = None
+    token_endpoint: str | None = None
+    allowed_client_ids: list[str] = []
+    allowed_scopes: list[str] = []
+    example_token_request: str
+    example_invocation: str
+
+class IntegrationInfoResponse(BaseModel):
+    runtime_arn: str
+    region: str
+    protocol: str
+    network_mode: str
+    endpoints: list[IntegrationEndpoint]
+    auth: IntegrationAuthSigV4 | IntegrationAuthOAuth2
+
+
+def _build_integration_info(agent, db) -> IntegrationInfoResponse:
+    from urllib.parse import quote
+
+    region = agent.region or "us-east-1"
+    arn = agent.arn or ""
+    runtime_id = agent.runtime_id or ""
+    protocol = (agent.protocol or "HTTP").upper()
+    network_mode = (agent.network_mode or "PUBLIC").upper()
+    source = agent.source or "custom"
+    base_host = f"https://bedrock-agentcore.{region}.amazonaws.com"
+
+    qualifiers_raw = agent.available_qualifiers
+    if isinstance(qualifiers_raw, str):
+        import json as _json
+        try:
+            qualifiers = _json.loads(qualifiers_raw)
+        except Exception:
+            qualifiers = [qualifiers_raw]
+    elif isinstance(qualifiers_raw, list):
+        qualifiers = qualifiers_raw
+    else:
+        qualifiers = ["DEFAULT"]
+
+    encoded_arn = quote(arn, safe="")
+    endpoints: list[IntegrationEndpoint] = []
+    if source == "harness":
+        for q in qualifiers:
+            endpoints.append(IntegrationEndpoint(
+                qualifier=q,
+                invocation_url=f"{base_host}/harnesses/invoke",
+                protocol_url=None,
+                protocol_url_label=None,
+            ))
+    else:
+        for q in qualifiers:
+            invoke_url = f"{base_host}/runtimes/{encoded_arn}/invocations"
+            proto_url = None
+            proto_label = None
+            if protocol == "MCP":
+                proto_url = f"{base_host}/runtimes/{encoded_arn}/mcp"
+                proto_label = "MCP Streamable HTTP"
+            elif protocol == "A2A":
+                proto_url = f"{base_host}/runtimes/{encoded_arn}/.well-known/agent.json"
+                proto_label = "A2A Agent Card"
+            endpoints.append(IntegrationEndpoint(
+                qualifier=q,
+                invocation_url=invoke_url,
+                protocol_url=proto_url,
+                protocol_url_label=proto_label,
+            ))
+
+    auth_config = agent.authorizer_config
+    if isinstance(auth_config, str):
+        import json as _json
+        try:
+            auth_config = _json.loads(auth_config)
+        except Exception:
+            auth_config = None
+
+    if not auth_config or not auth_config.get("type"):
+        iam_action = "bedrock-agentcore:InvokeHarness" if source == "harness" else "bedrock-agentcore:InvokeAgentRuntime"
+        example_policy = {
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Effect": "Allow",
+                "Action": iam_action,
+                "Resource": arn or f"arn:aws:bedrock-agentcore:{region}:*:runtime/{runtime_id}",
+            }],
+        }
+        first_url = endpoints[0].invocation_url if endpoints else "<invocation_url>"
+        if source == "harness":
+            harness_arn = getattr(agent, "harness_id", None) or arn
+            example_boto3 = (
+                'import boto3\n'
+                'import json\n\n'
+                f'client = boto3.client("bedrock-agentcore", region_name="{region}")\n'
+                f'response = client.invoke_harness(\n'
+                f'    harnessArn="{harness_arn}",\n'
+                f'    runtimeSessionId="your-session-id",\n'
+                f'    messages=[{{"role": "user", "content": [{{"text": "Hello"}}]}}]\n'
+                f')'
+            )
+            example_cli = (
+                f'aws bedrock-agentcore invoke-harness \\\n'
+                f'  --harness-arn "{harness_arn}" \\\n'
+                f'  --runtime-session-id "your-session-id" \\\n'
+                f'  --messages \'[{{"role":"user","content":[{{"text":"Hello"}}]}}]\' \\\n'
+                f'  --region {region}'
+            )
+        else:
+            example_boto3 = (
+                'import boto3\n'
+                'import json\n\n'
+                f'client = boto3.client("bedrock-agentcore", region_name="{region}")\n'
+                f'response = client.invoke_agent_runtime(\n'
+                f'    agentRuntimeArn="{arn}",\n'
+                f'    qualifier="{qualifiers[0]}",\n'
+                f'    runtimeSessionId="your-session-id",\n'
+                f'    contentType="application/json",\n'
+                f'    accept="application/json",\n'
+                f'    payload=json.dumps({{"prompt": "Hello", "session_id": "your-session-id"}})\n'
+                f')'
+            )
+            example_cli = (
+                f'aws bedrock-agentcore invoke-agent-runtime \\\n'
+                f'  --agent-runtime-arn "{arn}" \\\n'
+                f'  --qualifier "{qualifiers[0]}" \\\n'
+                f'  --runtime-session-id "your-session-id" \\\n'
+                f'  --content-type "application/json" \\\n'
+                f'  --accept "application/json" \\\n'
+                f'  --payload \'{{"prompt": "Hello", "session_id": "your-session-id"}}\' \\\n'
+                f'  --region {region} \\\n'
+                f'  output.json'
+            )
+        execution_role = getattr(agent, "execution_role_arn", None)
+        auth: IntegrationAuthSigV4 | IntegrationAuthOAuth2 = IntegrationAuthSigV4(
+            iam_action=iam_action,
+            resource_arn=arn or f"arn:aws:bedrock-agentcore:{region}:*:runtime/{runtime_id}",
+            execution_role_arn=execution_role,
+            example_policy=example_policy,
+            example_boto3=example_boto3,
+            example_cli=example_cli,
+        )
+    else:
+        auth_type = auth_config.get("type", "custom")
+        pool_id = auth_config.get("pool_id", "")
+        discovery_url = auth_config.get("discovery_url", "")
+        allowed_clients = auth_config.get("allowed_clients", [])
+        allowed_scopes = auth_config.get("allowed_scopes", [])
+
+        if auth_type.lower() == "cognito" and pool_id:
+            discovery_url = discovery_url or f"https://cognito-idp.{region}.amazonaws.com/{pool_id}/.well-known/openid-configuration"
+            try:
+                from app.services.cognito import _get_pool_domain
+                cognito_domain = _get_pool_domain(pool_id, region)
+                token_endpoint = f"https://{cognito_domain}/oauth2/token"
+            except Exception:
+                token_endpoint = f"https://<your-domain>.auth.{region}.amazoncognito.com/oauth2/token"
+        else:
+            token_endpoint = discovery_url.replace("/.well-known/openid-configuration", "/oauth2/token") if discovery_url else "<token_endpoint>"
+
+        first_url = endpoints[0].invocation_url if endpoints else "<invocation_url>"
+        client_id_placeholder = allowed_clients[0] if allowed_clients else "<client_id>"
+
+        scope_param = ""
+        if allowed_scopes:
+            scopes_str = " ".join(allowed_scopes)
+            scope_param = f"&scope={scopes_str}"
+
+        example_token = (
+            f'TOKEN=$(curl -s -X POST "{token_endpoint}" \\\n'
+            f'  -H "Content-Type: application/x-www-form-urlencoded" \\\n'
+            f'  -d "grant_type=client_credentials'
+            f'&client_id={client_id_placeholder}'
+            f'&client_secret=YOUR_SECRET'
+            f'{scope_param}" \\\n'
+            f'  | jq -r \'.access_token\')'
+        )
+        if source == "harness":
+            harness_arn = getattr(agent, "harness_id", None) or arn
+            invoke_body = json.dumps({
+                "harnessArn": harness_arn,
+                "runtimeSessionId": "your-session-id",
+                "messages": [{"role": "user", "content": [{"text": "Hello"}]}],
+            }, indent=2)
+        else:
+            invoke_body = json.dumps({
+                "prompt": "Hello",
+                "session_id": "your-session-id",
+            })
+        example_invoke = (
+            f'curl -X POST "{first_url}" \\\n'
+            f'  -H "Authorization: Bearer $TOKEN" \\\n'
+            f'  -H "Content-Type: application/json" \\\n'
+            f'  --no-buffer \\\n'
+            f"  -d '{invoke_body}'"
+        )
+        auth = IntegrationAuthOAuth2(
+            authorizer_type=auth_type,
+            discovery_url=discovery_url or None,
+            token_endpoint=token_endpoint,
+            allowed_client_ids=allowed_clients,
+            allowed_scopes=allowed_scopes,
+            example_token_request=example_token,
+            example_invocation=example_invoke,
+        )
+
+    return IntegrationInfoResponse(
+        runtime_arn=arn,
+        region=region,
+        protocol=protocol,
+        network_mode=network_mode,
+        endpoints=endpoints,
+        auth=auth,
+    )
+
+
+@router.get("/{agent_id}/integration", response_model=IntegrationInfoResponse)
+async def get_agent_integration(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_scopes("agent:read")),
+):
+    agent = get_agent_or_404(agent_id, db)
+    if agent.status != "READY":
+        raise HTTPException(status_code=400, detail="Integration info is only available for agents with status READY")
+    return _build_integration_info(agent, db)

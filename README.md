@@ -15,6 +15,7 @@ Loom seamlessly weaves together agents, memory stores, MCP servers, and agent-to
 - Progressive deployment status tracking and async deletion
 - Cold-start latency measurement via CloudWatch log parsing
 - Active session tracking with idle timeout heuristic
+- External integration info: invocation URLs, auth requirements (SigV4/OAuth2), and copy-ready code snippets for connecting from outside Loom
 
 ### Memory Management
 - Create and manage AgentCore Memory resources

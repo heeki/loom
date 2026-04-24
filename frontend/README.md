@@ -124,13 +124,14 @@ src/
 │   ├── ResourceTagFields.tsx      # Shared tag profile selector + tag resolution
 │   ├── InvokePanel.tsx            # Qualifier, credential selector, model badge, prompt
 │   ├── DeploymentPanel.tsx        # Deployment details for deployed agents
+│   ├── ExternalIntegrationSection.tsx # Endpoint URLs, auth info, code snippets for external callers
 │   └── ui/
 │       ├── searchable-select.tsx  # Searchable dropdown with group headers
 │       └── multi-select.tsx       # Checkbox-based multi-select dropdown
 ├── pages/        # Page-level view components
 │   ├── CatalogPage.tsx         # Platform Catalog: agents, memory, MCP, A2A sections
 │   ├── AgentListPage.tsx       # Agents: Deploy/Import form + agent grid
-│   ├── AgentDetailPage.tsx     # Sessions, invoke, latency, response
+│   ├── AgentDetailPage.tsx     # Tabbed: Details (overview, integration) + Invoke (sessions, invoke, response)
 │   ├── SecurityAdminPage.tsx   # Roles, authorizers, credentials, permissions
 │   ├── MemoryManagementPage.tsx # Memory resource management
 │   ├── McpServersPage.tsx      # MCP server management with tool/access tabs
@@ -212,7 +213,7 @@ The `AuthContext` also provides scope-based authorization using a two-dimensiona
 |------|---------|-------------|
 | LoginPage | — | Cognito login + set new password |
 | CatalogPage | Platform Catalog | Agents (with multi-select tag filter bar), memory resources (with tag badges), MCP servers, A2A agents sections |
-| AgentDetailPage | Platform Catalog | Sessions, invoke, latency, streaming response, deployment details |
+| AgentDetailPage | Platform Catalog | Tabbed layout — Details (overview, deployment, external integration) + Invoke (sessions, invoke, latency, streaming response) |
 | SessionDetailPage | Platform Catalog | Session metadata, invocation timing, tabbed Logs/Traces view with paginated CloudWatch logs, stream selector, vended log sources, and interactive OTEL trace visualization (waterfall timeline) |
 | InvocationDetailPage | Platform Catalog | Invocation details, cost breakdown, prompt/response, Traces tab with invocation-scoped trace graph |
 | AgentListPage | Agents | Deploy/Import form (with tag profile selector) + agent card/table grid with multi-select tag filters |

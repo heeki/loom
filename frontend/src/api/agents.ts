@@ -9,6 +9,7 @@ import type {
   IamRole,
   CognitoPool,
   ModelOption,
+  IntegrationInfoResponse,
 } from "./types";
 
 export function listAgents(): Promise<AgentResponse[]> {
@@ -118,4 +119,8 @@ export interface LoomDefaults {
 
 export function fetchDefaults(): Promise<LoomDefaults> {
   return apiFetch<LoomDefaults>("/api/agents/defaults");
+}
+
+export function getAgentIntegration(id: number): Promise<IntegrationInfoResponse> {
+  return apiFetch<IntegrationInfoResponse>(`/api/agents/${id}/integration`);
 }

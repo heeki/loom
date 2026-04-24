@@ -123,7 +123,8 @@ backend/
 │   ├── test_traces.py       # Trace router + OTEL parsing tests (12 tests)
 │   ├── test_harness.py      # AgentCore Harness tests (21 tests: deploy CRUD, MCP integration, built-in tools, model params, status, config, service module)
 │   ├── test_model_selection.py  # Runtime model selection tests (12 tests: allowed_model_ids, invoke validation, PATCH)
-│   └── test_admin_audit.py  # Admin audit router tests (14 tests: login, action, pageview, sessions, summary)
+│   ├── test_admin_audit.py  # Admin audit router tests (14 tests: login, action, pageview, sessions, summary)
+│   └── test_integration_info.py  # External integration info tests (10 tests: SigV4, OAuth2, protocols, qualifiers, network modes)
 ├── etc/
 │   ├── environment.sh           # Sources account-specific file + shared outputs
 │   ├── environment.sh.example   # Example environment configuration template
@@ -549,6 +550,7 @@ The `/api/auth/config` endpoint returns only the pool ID and region. The user cl
 | `PATCH` | `/api/agents/{agent_id}` | Update editable agent fields (description, model_id, allowed_model_ids). Description changes propagated to AgentCore. |
 | `PUT` | `/api/agents/{agent_id}/config` | Update agent configuration entries. |
 | `GET` | `/api/agents/{agent_id}/config` | Get agent configuration entries. |
+| `GET` | `/api/agents/{agent_id}/integration` | Get external integration info (endpoints, auth, code snippets). Only for READY agents. |
 
 **`DELETE /api/agents/{agent_id}` behavior:**
 - When `cleanup_aws=false` or agent has no `runtime_id`: immediately deletes from local DB, returns the `AgentResponse` with HTTP 200.

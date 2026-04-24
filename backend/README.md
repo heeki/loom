@@ -315,6 +315,7 @@ Write-only audit tables populated by the frontend. `audit_login` records user lo
 | `GET` | `/api/agents/models` | List supported models (with display name and group) |
 | `GET` | `/api/agents/models/pricing` | List models with pricing metadata |
 | `GET` | `/api/agents/defaults` | Get configurable defaults (idle timeout, max lifetime) |
+| `GET` | `/api/agents/{agent_id}/integration` | Get external integration info (endpoints, auth, code snippets) |
 
 ### Security Administration
 

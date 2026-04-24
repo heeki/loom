@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Key, Pencil, Check, X, Wrench } from "lucide-react";
 import { fetchModels } from "@/api/agents";
 import type { ModelOption } from "@/api/types";
@@ -16,6 +17,7 @@ import { SessionTable } from "@/components/SessionTable";
 import { DeploymentPanel } from "@/components/DeploymentPanel";
 import { RegistryStatusBadge } from "@/components/RegistryStatusBadge";
 import { RegistryActions } from "@/components/RegistryActions";
+import { ExternalIntegrationSection } from "@/components/ExternalIntegrationSection";
 import { useInvoke } from "@/hooks/useInvoke";
 import { useAuth } from "@/contexts/AuthContext";
 import { trackAction } from "@/api/audit";
@@ -109,214 +111,221 @@ export function AgentDetailPage({
   const isDeployed = agent.source === "deploy" || agent.source === "harness";
 
   return (
-    <div className="space-y-4">
-      {/* Overview */}
-      <Card>
-        <CardHeader className="pb-0">
-          <div className="flex items-center gap-2">
-            <CardTitle className="text-sm font-medium">Overview</CardTitle>
-            {agent.source === "harness" && (
-              <Badge variant="outline" className="text-[10px] px-1.5 py-0">MANAGED</Badge>
-            )}
-            {agent.source === "deploy" && (
-              <Badge variant="outline" className="text-[10px] px-1.5 py-0">CUSTOM</Badge>
-            )}
-            <RegistryStatusBadge status={agent.registry_status} showUnregistered={registryEnabled} registryEnabled={registryEnabled} />
-            {!registryReadOnly && registryEnabled && (
-              <RegistryActions
-                resourceType="agent"
-                resourceId={agent.id}
-                registryRecordId={agent.registry_record_id}
-                registryStatus={agent.registry_status}
-                onAction={() => onRefreshAgents?.()}
-              />
-            )}
-          </div>
-        </CardHeader>
-        <CardContent className="pt-0 space-y-1 text-xs text-muted-foreground">
-          {/* Description */}
-          {editingDescription ? (
-            <div className="space-y-2">
-              <Textarea
-                value={descriptionDraft}
-                onChange={(e) => setDescriptionDraft(e.target.value)}
-                placeholder="Describe what this agent does..."
-                className="text-xs resize-none"
-                rows={3}
-              />
-              <div className="flex gap-2">
-                <Button size="sm" className="h-6 text-xs" onClick={() => void handleSaveDescription()} disabled={savingDescription}>
-                  <Check className="h-3 w-3 mr-1" />
-                  Save
-                </Button>
-                <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={handleCancelDescription} disabled={savingDescription}>
-                  <X className="h-3 w-3 mr-1" />
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5">
-              <span className="font-medium shrink-0">Description:</span>
-              <span>{agent.description ?? <span className="italic">No description set.</span>}</span>
-              {onPatchAgent && (
-                <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={handleEditDescription}>
-                  <Pencil className="h-3 w-3" />
-                </Button>
-              )}
-            </div>
-          )}
-          {isDeployed && (
-            <div>
-              <DeploymentPanel
-                agent={agent}
-                onRedeploy={onRedeploy ?? (async () => {})}
-                onPatchAgent={onPatchAgent}
-              />
-            </div>
-          )}
-          {!isDeployed && agent.model_id && onPatchAgent && (
-            <div className="pt-2">
-              <RegisteredAgentModelConfig agent={agent} onPatchAgent={onPatchAgent} />
-            </div>
-          )}
-        </CardContent>
-      </Card>
+    <Tabs defaultValue="details" className="space-y-4">
+      <TabsList>
+        <TabsTrigger value="details">Details</TabsTrigger>
+        <TabsTrigger value="invoke">Invoke</TabsTrigger>
+      </TabsList>
 
-      {/* Sessions — full width across top */}
-      <section>
-        <SessionTable
-          sessions={sessions}
-          onSelectSession={onSelectSession}
-          loading={sessionsLoading}
-          currentUserId={user?.username ?? user?.sub}
-        />
-      </section>
-
-      {/* Invoke form */}
-      {effectiveCanInvoke ? (
-        <InvokePanel
-          agentId={agent.id}
-          qualifiers={agent.available_qualifiers}
-          sessions={sessions}
-          isStreaming={isStreaming}
-          modelId={agent.model_id}
-          allowedModelIds={agent.allowed_model_ids}
-          authorizerName={agent.authorizer_config?.name}
-          currentUserId={user?.username ?? user?.sub}
-          onInvoke={handleInvoke}
-          onCancel={cancel}
-        />
-      ) : (
-        <Card className="border-muted-foreground/20">
-          <CardContent className="pt-6 pb-6 text-center text-sm text-muted-foreground">
-            <Key className="h-8 w-8 mx-auto mb-2 opacity-50" />
-            {!canInvoke ? (
-              <>
-                <p>You don't have permission to invoke agents.</p>
-                <p className="text-xs mt-1">Contact your administrator for the <code className="px-1 py-0.5 rounded bg-muted">invoke</code> scope.</p>
-              </>
-            ) : (
-              <>
-                <p>This agent is in the <code className="px-1 py-0.5 rounded bg-muted">{agentGroup}</code> group.</p>
-                <p className="text-xs mt-1">You can only invoke agents in your assigned groups.</p>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Latency summary — shown only after invocation completes */}
-      {sessionEnd && <LatencySummary sessionEnd={sessionEnd} />}
-
-      {/* Error */}
-      {error && (
-        <Card className="border-destructive">
-          <CardContent className="pt-4 text-sm text-destructive space-y-2">
-            <p>{error}</p>
-            {rawError && rawError !== error && (
-              <details className="text-xs">
-                <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                  Show details
-                </summary>
-                <pre className="mt-1 p-2 rounded bg-muted text-muted-foreground whitespace-pre-wrap font-mono text-xs">
-                  {rawError}
-                </pre>
-              </details>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Response — full width, expands dynamically with content */}
-      {(streamedText || isStreaming || sessionStart) && (
+      {/* Details tab: Overview + External Integration */}
+      <TabsContent value="details" className="space-y-4">
         <Card>
-          <CardHeader className="pb-2">
+          <CardHeader className="pb-0">
             <div className="flex items-center gap-2">
-              <CardTitle className="text-sm font-medium">Response</CardTitle>
-              {sessionStart && (
-                <Badge variant="outline" className="font-mono text-xs">
-                  {sessionStart.session_id}
-                </Badge>
+              <CardTitle className="text-sm font-medium">Overview</CardTitle>
+              {agent.source === "harness" && (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0">MANAGED</Badge>
               )}
-              {sessionStart?.has_token && (
-                <Badge variant="outline" className="border-border bg-input-bg text-xs gap-1">
-                  <Key className="h-3 w-3" />
-                  {sessionStart.token_source ?? "token"}
-                </Badge>
+              {agent.source === "deploy" && (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0">CUSTOM</Badge>
               )}
-              {isStreaming && (
-                <Badge variant="secondary" className="animate-pulse">
-                  streaming
-                </Badge>
+              <RegistryStatusBadge status={agent.registry_status} showUnregistered={registryEnabled} registryEnabled={registryEnabled} />
+              {!registryReadOnly && registryEnabled && (
+                <RegistryActions
+                  resourceType="agent"
+                  resourceId={agent.id}
+                  registryRecordId={agent.registry_record_id}
+                  registryStatus={agent.registry_status}
+                  onAction={() => onRefreshAgents?.()}
+                />
               )}
             </div>
           </CardHeader>
-          <CardContent>
-            {isStreaming && segments.length === 0 && (
-              <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
-                <span className="flex gap-0.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:0ms]" />
-                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:150ms]" />
-                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:300ms]" />
-                </span>
-                <span>Thinking…</span>
+          <CardContent className="pt-0 space-y-1 text-xs text-muted-foreground">
+            {editingDescription ? (
+              <div className="space-y-2">
+                <Textarea
+                  value={descriptionDraft}
+                  onChange={(e) => setDescriptionDraft(e.target.value)}
+                  placeholder="Describe what this agent does..."
+                  className="text-xs resize-none"
+                  rows={3}
+                />
+                <div className="flex gap-2">
+                  <Button size="sm" className="h-6 text-xs" onClick={() => void handleSaveDescription()} disabled={savingDescription}>
+                    <Check className="h-3 w-3 mr-1" />
+                    Save
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={handleCancelDescription} disabled={savingDescription}>
+                    <X className="h-3 w-3 mr-1" />
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <span className="font-medium shrink-0">Description:</span>
+                <span>{agent.description ?? <span className="italic">No description set.</span>}</span>
+                {onPatchAgent && (
+                  <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={handleEditDescription}>
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                )}
               </div>
             )}
-            <div className="rounded border bg-input-bg p-4 text-sm">
-              {(() => {
-                const blocks: React.ReactNode[] = [];
-                let toolGroup: { name: string; index: number; total: number; timestamp: number }[] = [];
-                let toolGroupStart = 0;
-                const flushTools = () => {
-                  if (toolGroup.length > 0) {
-                    const lastIdx = toolGroupStart + toolGroup.length - 1;
-                    const active = isStreaming && lastIdx === segments.length - 1;
-                    blocks.push(<ToolUseBlock key={`tools-${toolGroupStart}`} tools={toolGroup} isActive={active} />);
-                    toolGroup = [];
-                  }
-                };
-                segments.forEach((seg, i) => {
-                  if (seg.type === "tool_use") {
-                    if (toolGroup.length === 0) toolGroupStart = i;
-                    toolGroup.push({ name: seg.name, index: seg.index, total: seg.total, timestamp: seg.timestamp });
-                  } else {
-                    flushTools();
-                    blocks.push(<MarkdownBlock key={i} text={seg.content} />);
-                  }
-                });
-                flushTools();
-                return blocks;
-              })()}
-              {isStreaming && (
-                <span className="inline-block w-1.5 h-4 bg-foreground/70 animate-pulse ml-0.5 align-text-bottom" />
-              )}
-            </div>
+            {isDeployed && (
+              <div>
+                <DeploymentPanel
+                  agent={agent}
+                  onRedeploy={onRedeploy ?? (async () => {})}
+                  onPatchAgent={onPatchAgent}
+                />
+              </div>
+            )}
+            {!isDeployed && agent.model_id && onPatchAgent && (
+              <div className="pt-2">
+                <RegisteredAgentModelConfig agent={agent} onPatchAgent={onPatchAgent} />
+              </div>
+            )}
           </CardContent>
         </Card>
-      )}
 
-    </div>
+        {agent.status === "READY" && (agent.deployment_status === "deployed" || isDeployed) && (
+          <ExternalIntegrationSection agentId={agent.id} />
+        )}
+      </TabsContent>
+
+      {/* Invoke tab: Sessions + Invoke form + Response */}
+      <TabsContent value="invoke" className="space-y-4">
+        <section>
+          <SessionTable
+            sessions={sessions}
+            onSelectSession={onSelectSession}
+            loading={sessionsLoading}
+            currentUserId={user?.username ?? user?.sub}
+          />
+        </section>
+
+        {effectiveCanInvoke ? (
+          <InvokePanel
+            agentId={agent.id}
+            qualifiers={agent.available_qualifiers}
+            sessions={sessions}
+            isStreaming={isStreaming}
+            modelId={agent.model_id}
+            allowedModelIds={agent.allowed_model_ids}
+            authorizerName={agent.authorizer_config?.name}
+            currentUserId={user?.username ?? user?.sub}
+            onInvoke={handleInvoke}
+            onCancel={cancel}
+          />
+        ) : (
+          <Card className="border-muted-foreground/20">
+            <CardContent className="pt-6 pb-6 text-center text-sm text-muted-foreground">
+              <Key className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              {!canInvoke ? (
+                <>
+                  <p>You don't have permission to invoke agents.</p>
+                  <p className="text-xs mt-1">Contact your administrator for the <code className="px-1 py-0.5 rounded bg-muted">invoke</code> scope.</p>
+                </>
+              ) : (
+                <>
+                  <p>This agent is in the <code className="px-1 py-0.5 rounded bg-muted">{agentGroup}</code> group.</p>
+                  <p className="text-xs mt-1">You can only invoke agents in your assigned groups.</p>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {sessionEnd && <LatencySummary sessionEnd={sessionEnd} />}
+
+        {error && (
+          <Card className="border-destructive">
+            <CardContent className="pt-4 text-sm text-destructive space-y-2">
+              <p>{error}</p>
+              {rawError && rawError !== error && (
+                <details className="text-xs">
+                  <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                    Show details
+                  </summary>
+                  <pre className="mt-1 p-2 rounded bg-muted text-muted-foreground whitespace-pre-wrap font-mono text-xs">
+                    {rawError}
+                  </pre>
+                </details>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {(streamedText || isStreaming || sessionStart) && (
+          <Card>
+            <CardHeader className="pb-2">
+              <div className="flex items-center gap-2">
+                <CardTitle className="text-sm font-medium">Response</CardTitle>
+                {sessionStart && (
+                  <Badge variant="outline" className="font-mono text-xs">
+                    {sessionStart.session_id}
+                  </Badge>
+                )}
+                {sessionStart?.has_token && (
+                  <Badge variant="outline" className="border-border bg-input-bg text-xs gap-1">
+                    <Key className="h-3 w-3" />
+                    {sessionStart.token_source ?? "token"}
+                  </Badge>
+                )}
+                {isStreaming && (
+                  <Badge variant="secondary" className="animate-pulse">
+                    streaming
+                  </Badge>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              {isStreaming && segments.length === 0 && (
+                <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
+                  <span className="flex gap-0.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:0ms]" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:150ms]" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:300ms]" />
+                  </span>
+                  <span>Thinking…</span>
+                </div>
+              )}
+              <div className="rounded border bg-input-bg p-4 text-sm">
+                {(() => {
+                  const blocks: React.ReactNode[] = [];
+                  let toolGroup: { name: string; index: number; total: number; timestamp: number }[] = [];
+                  let toolGroupStart = 0;
+                  const flushTools = () => {
+                    if (toolGroup.length > 0) {
+                      const lastIdx = toolGroupStart + toolGroup.length - 1;
+                      const active = isStreaming && lastIdx === segments.length - 1;
+                      blocks.push(<ToolUseBlock key={`tools-${toolGroupStart}`} tools={toolGroup} isActive={active} />);
+                      toolGroup = [];
+                    }
+                  };
+                  segments.forEach((seg, i) => {
+                    if (seg.type === "tool_use") {
+                      if (toolGroup.length === 0) toolGroupStart = i;
+                      toolGroup.push({ name: seg.name, index: seg.index, total: seg.total, timestamp: seg.timestamp });
+                    } else {
+                      flushTools();
+                      blocks.push(<MarkdownBlock key={i} text={seg.content} />);
+                    }
+                  });
+                  flushTools();
+                  return blocks;
+                })()}
+                {isStreaming && (
+                  <span className="inline-block w-1.5 h-4 bg-foreground/70 animate-pulse ml-0.5 align-text-bottom" />
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </TabsContent>
+    </Tabs>
   );
 }
 

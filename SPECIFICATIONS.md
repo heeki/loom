@@ -583,7 +583,15 @@ Agents support runtime model selection, allowing users to choose from a set of a
 - **Frontend wiring:** `useAgents` hook includes `deployHarnessAgent` function with harness-specific polling support. `AgentListPage` and `App.tsx` wire `onDeployHarness` prop through to the registration form.
 - **21 backend tests** in `test_harness.py` covering deployment CRUD, validation, MCP server integration, built-in tools, model parameters, status polling, refresh, deletion, config storage, and service module functions (create, get, delete, invoke stream with text and tool_use events).
 
-### Phase 26 — Advanced Operations
+### Phase 26 — External Integration Info *(Complete)*
+- **Backend endpoint:** `GET /api/agents/{id}/integration` returns assembled integration details for READY agents: invocation URLs (per qualifier), protocol, network mode, authentication requirements, and example code snippets.
+- **URL construction:** Invocation URLs follow the `bedrock-agentcore.{region}.amazonaws.com/runtimes/{runtime_id}/endpoints/{qualifier}/invoke` pattern. Protocol-specific URLs for MCP (`/mcp`) and A2A (`/.well-known/agent.json`) are included.
+- **Auth info (SigV4):** For agents without an authorizer, displays required IAM action (`InvokeAgentRuntime` for custom, `InvokeHarness` for managed), resource ARN, example IAM policy, boto3 snippet, and AWS CLI snippet.
+- **Auth info (OAuth2):** For agents with an authorizer, displays authorizer type, OIDC discovery URL, token endpoint (derived from Cognito pool ID or custom discovery URL), allowed client IDs and scopes, example token request and invocation curl snippets. Client secrets are never returned.
+- **Frontend component:** `ExternalIntegrationSection` displays endpoint info with copy-to-clipboard buttons, protocol badges, network mode indicators, and syntax-highlighted code blocks. Only shown for agents with status READY.
+- **10 backend tests** in `test_integration_info.py` covering SigV4 custom/harness agents, OAuth2 Cognito/custom OIDC, MCP/A2A protocol URLs, multiple qualifiers, VPC network mode, and error cases.
+
+### Phase 27 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

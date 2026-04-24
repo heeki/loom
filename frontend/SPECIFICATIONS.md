@@ -68,6 +68,7 @@ frontend/
 │   │   ├── MemoryManagementPanel.tsx    # Memory resource create form + list table
 │   │   ├── ResourceTagFields.tsx       # Shared tag profile selector + tag resolution
 │   │   ├── DeploymentPanel.tsx # Deployment details panel
+│   │   ├── ExternalIntegrationSection.tsx # External integration info (endpoints, auth, code snippets)
 │   │   ├── InvokePanel.tsx     # Qualifier select, credential select, model select, prompt input, invoke/cancel
 │   │   ├── LatencySummary.tsx  # Invocation metrics (timing + token usage + cost)
 │   │   ├── SessionTable.tsx    # Clickable session list
@@ -291,6 +292,12 @@ Full deployment form with sections:
 ### Deployment Section (deployed agents only)
 - `DeploymentPanel` component restructured: "Allowed Models" section at top with inline edit mode (pencil icon triggers grouped checkbox editor with "set default" toggle per model, Save/Cancel buttons). "Deployed Configuration" section below with runtime status, protocol, network mode, execution role, deployed timestamp.
 - `RegisteredAgentModelConfig` card shown for non-deployed agents with model configuration. Same edit flow as `DeploymentPanel` allowed models.
+
+### External Integration (READY deployed agents only)
+- `ExternalIntegrationSection` component fetches integration info from `GET /api/agents/{id}/integration` and displays endpoint URLs, auth requirements, and copy-ready code snippets.
+- **Endpoint info:** Runtime ARN, protocol badge (HTTP/MCP/A2A), network mode badge (PUBLIC/VPC with icon), per-qualifier invocation URLs and protocol-specific URLs (MCP streamable HTTP, A2A agent card). All URL/ARN fields have copy-to-clipboard buttons.
+- **Auth info (SigV4):** IAM action, resource ARN, execution role, example IAM policy (JSON), boto3 snippet, and AWS CLI snippet in syntax-highlighted copyable code blocks.
+- **Auth info (OAuth2):** Authorizer type badge, OIDC discovery URL, token endpoint, allowed client IDs and scopes as badges, example token request and invocation curl snippets. Client secrets are never displayed — a note directs users to their identity provider administrator.
 
 ---
 
