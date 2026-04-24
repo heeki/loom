@@ -1669,10 +1669,23 @@ def get_agent_status(agent_id: int, user: UserInfo = Depends(require_scopes("age
                 agent.endpoint_name = "DEFAULT"
                 agent.endpoint_status = "READY"
                 env = harness.get("environment", {}).get("agentCoreRuntimeEnvironment", {})
+                runtime_arn = env.get("agentRuntimeArn", "")
                 runtime_id = env.get("agentRuntimeId", "")
                 if runtime_id and runtime_id != agent.runtime_id:
                     agent.runtime_id = runtime_id
                     agent.log_group = derive_log_group(runtime_id, "DEFAULT")
+                    if runtime_arn and agent.account_id:
+                        try:
+                            from app.services.observability import enable_runtime_observability
+                            enable_runtime_observability(
+                                runtime_arn=runtime_arn,
+                                runtime_id=runtime_id,
+                                account_id=agent.account_id,
+                                region=agent.region,
+                            )
+                            logger.info("Enabled observability for harness agent %s during status poll", agent.id)
+                        except Exception as obs_err:
+                            logger.warning("Failed to enable observability for harness agent %s: %s", agent.id, obs_err)
         except Exception as e:
             logger.warning("Failed to poll harness status for %s: %s", agent.harness_id, e)
             if agent.status == "DELETING" and _is_resource_not_found(e):
@@ -1993,10 +2006,23 @@ def refresh_agent(agent_id: int, user: UserInfo = Depends(require_scopes("agent:
                 agent.endpoint_name = "DEFAULT"
                 agent.endpoint_status = "READY"
                 env = harness.get("environment", {}).get("agentCoreRuntimeEnvironment", {})
+                runtime_arn = env.get("agentRuntimeArn", "")
                 runtime_id = env.get("agentRuntimeId", "")
                 if runtime_id and runtime_id != agent.runtime_id:
                     agent.runtime_id = runtime_id
                     agent.log_group = derive_log_group(runtime_id, "DEFAULT")
+                    if runtime_arn and agent.account_id:
+                        try:
+                            from app.services.observability import enable_runtime_observability
+                            enable_runtime_observability(
+                                runtime_arn=runtime_arn,
+                                runtime_id=runtime_id,
+                                account_id=agent.account_id,
+                                region=agent.region,
+                            )
+                            logger.info("Enabled observability for harness agent %s during refresh", agent.id)
+                        except Exception as obs_err:
+                            logger.warning("Failed to enable observability for harness agent %s: %s", agent.id, obs_err)
 
             db.commit()
             db.refresh(agent)
