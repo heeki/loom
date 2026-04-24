@@ -22,7 +22,7 @@ export interface AgentResponse {
   endpoint_status: string | null;
   protocol: string | null;
   network_mode: string | null;
-  authorizer_config: { type?: string; name?: string; pool_id?: string; discovery_url?: string } | null;
+  authorizer_config: { type?: string; name?: string; pool_id?: string; discovery_url?: string; allowed_clients?: string[]; allowed_scopes?: string[] } | null;
   model_id: string | null;
   allowed_model_ids: string[];
   deployed_at: string | null;
@@ -908,4 +908,42 @@ export interface RegistryRecordCreateRequest {
 
 export interface RegistrySearchResult {
   results: Array<Record<string, unknown>>;
+}
+
+// External integration types
+export interface IntegrationEndpoint {
+  qualifier: string;
+  invocation_url: string;
+  protocol_url: string | null;
+  protocol_url_label: string | null;
+}
+
+export interface IntegrationAuthSigV4 {
+  method: "SigV4";
+  iam_action: string;
+  resource_arn: string;
+  execution_role_arn: string | null;
+  example_policy: Record<string, unknown>;
+  example_boto3: string;
+  example_cli: string;
+}
+
+export interface IntegrationAuthOAuth2 {
+  method: "OAuth2";
+  authorizer_type: string;
+  discovery_url: string | null;
+  token_endpoint: string | null;
+  allowed_client_ids: string[];
+  allowed_scopes: string[];
+  example_token_request: string;
+  example_invocation: string;
+}
+
+export interface IntegrationInfoResponse {
+  runtime_arn: string;
+  region: string;
+  protocol: string;
+  network_mode: string;
+  endpoints: IntegrationEndpoint[];
+  auth: IntegrationAuthSigV4 | IntegrationAuthOAuth2;
 }
