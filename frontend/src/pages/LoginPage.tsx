@@ -5,20 +5,29 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { CognitoAuthResult } from "@/api/auth";
 
+const PROVIDER_LABELS: Record<string, string> = {
+  azure_ad: "Microsoft Entra ID",
+  okta: "Okta",
+  auth0: "Auth0",
+  generic_oidc: "Single Sign-On",
+};
+
 export function LoginPage() {
-  const { login, completeNewPassword } = useAuth();
+  const { login, loginWithOIDC, completeNewPassword, authConfig } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // NEW_PASSWORD_REQUIRED challenge state
   const [challenge, setChallenge] = useState<{
     session: string;
     username: string;
   } | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+
+  const isExternalOIDC = authConfig?.provider_type && authConfig.provider_type !== "cognito";
+  const providerLabel = PROVIDER_LABELS[authConfig?.provider_type ?? ""] ?? "Single Sign-On";
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,6 +46,17 @@ export function LoginPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOIDCLogin = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      await loginWithOIDC();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Login redirect failed");
       setLoading(false);
     }
   };
@@ -86,7 +106,20 @@ export function LoginPage() {
         </div>
 
         <div className="rounded-lg border bg-card p-6 shadow-sm">
-          {!challenge ? (
+          {isExternalOIDC ? (
+            <div className="space-y-4">
+              <Button
+                className="w-full"
+                disabled={loading}
+                onClick={() => void handleOIDCLogin()}
+              >
+                {loading ? "Redirecting..." : `Sign in with ${providerLabel}`}
+              </Button>
+              {error && (
+                <p className="text-sm text-destructive">{error}</p>
+              )}
+            </div>
+          ) : !challenge ? (
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="username">Username</Label>
