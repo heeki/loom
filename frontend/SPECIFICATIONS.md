@@ -866,7 +866,51 @@ Accessible via the "My Memory" sidebar button when the selected agent has memory
 
 ---
 
-## 14. Future Work
+## 14. 3rd-Party Identity Provider Support
+
+### Overview
+
+The frontend supports federated login via 3rd-party OIDC identity providers (Microsoft Entra ID, Okta, Auth0, Generic OIDC) alongside the existing Cognito `USER_PASSWORD_AUTH` flow. The active provider is determined by the `GET /api/auth/config` response at startup.
+
+### OIDC Authorization Code + PKCE Flow
+
+When an external IdP is active, `AuthContext` uses the standard Authorization Code flow with PKCE (Proof Key for Code Exchange):
+
+1. `startOIDCLogin()` generates a cryptographic code verifier and challenge, stores state in `sessionStorage`, and redirects to the provider's authorization endpoint.
+2. On callback, `exchangeOIDCCode()` exchanges the authorization code for tokens at the provider's token endpoint using the stored code verifier.
+3. Group claims are extracted from the ID token using the provider's configured `group_claim` and mapped to Loom groups via the `group_mapping` from the auth config.
+
+Functions are implemented in `frontend/src/api/auth.ts`.
+
+### LoginPage
+
+When an external IdP is active:
+- A provider-branded button is shown (e.g., "Sign in with Microsoft Entra ID", "Sign in with Okta").
+- Clicking the button initiates the OIDC redirect flow.
+- The existing Cognito username/password form is hidden.
+
+When no external IdP is active, the login page behaves identically to the existing Cognito flow.
+
+### Identity Provider Management UI
+
+`IdentityProviderPanel.tsx` on the Security Admin page provides:
+- **Identity Providers tab**: CRUD for provider configurations with fields for name, provider type (dropdown: Microsoft Entra ID, Okta, Auth0, Generic OIDC), discovery URL, client ID, group claim, and scopes.
+- **OIDC Discovery button**: fetches `.well-known/openid-configuration` and auto-populates authorization, token, JWKS, and userinfo endpoints.
+- **Test Discovery button**: validates that the provider's discovery endpoint is reachable and returns valid metadata.
+- **Group Mapping table**: editable table for mapping external IdP group names/IDs to Loom groups. Each row has external group (text input) and Loom group (dropdown of known groups).
+- **Active toggle**: at most one provider can be active. Activating a provider deactivates any previously active one.
+
+### API Client
+
+`frontend/src/api/identity_providers.ts` provides typed functions for all identity provider CRUD operations: `listIdentityProviders`, `getIdentityProvider`, `createIdentityProvider`, `updateIdentityProvider`, `deleteIdentityProvider`, `discoverOIDC`, and `testDiscovery`.
+
+### Backward Compatibility
+
+When no external IdP is configured, the entire authentication flow remains unchanged — Cognito `USER_PASSWORD_AUTH` with `NEW_PASSWORD_REQUIRED` challenge handling, token refresh, and scope derivation from `cognito:groups`. The external IdP feature is purely additive.
+
+---
+
+## 15. Future Work
 
 - **VPC network mode** support
 - **Operate Tab** — aggregate dashboard with summary cards, per-agent latency charts

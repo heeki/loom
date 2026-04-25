@@ -1355,7 +1355,60 @@ Counts sessions whose `live_status` would be `"pending"`, `"streaming"`, or `"ac
 
 ---
 
-## 12. Makefile Targets
+## 12. 3rd-Party Identity Provider Support
+
+### Overview
+
+The backend supports federated authentication via 3rd-party OIDC identity providers (Microsoft Entra ID, Okta, Auth0, Generic OIDC) alongside the existing Cognito-based authentication. Cognito remains the default; external IdPs are opt-in via the Identity Provider management API.
+
+### `identity_providers` Table
+
+Stores OIDC identity provider configurations. Columns include `name`, `provider_type` (entra_id, okta, auth0, generic_oidc), `issuer`, `client_id`, `discovery_url`, `authorization_endpoint`, `token_endpoint`, `jwks_uri`, `userinfo_endpoint`, `group_claim` (the JWT claim containing group membership), `group_mapping` (JSON dict mapping external groups to Loom groups), `scopes` (space-separated OIDC scopes), `is_active` (boolean, at most one active at a time), `discovery_metadata` (cached `.well-known/openid-configuration` response), and timestamps. Client secrets are never stored in the database.
+
+### Identity Provider Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/settings/identity-providers` | Create an identity provider configuration |
+| `GET` | `/api/settings/identity-providers` | List all identity provider configurations |
+| `GET` | `/api/settings/identity-providers/{id}` | Get a specific identity provider |
+| `PUT` | `/api/settings/identity-providers/{id}` | Update an identity provider configuration |
+| `DELETE` | `/api/settings/identity-providers/{id}` | Delete an identity provider configuration |
+| `POST` | `/api/settings/identity-providers/discover` | Run OIDC discovery against a well-known URL |
+| `POST` | `/api/settings/identity-providers/{id}/test-discovery` | Test discovery for an existing provider |
+
+Scope enforcement: `settings:read` for GET, `settings:write` for POST/PUT/DELETE.
+
+### OIDC Discovery Service (`services/oidc.py`)
+
+Fetches `.well-known/openid-configuration` from any OIDC-compliant provider. Extracts `authorization_endpoint`, `token_endpoint`, `jwks_uri`, `userinfo_endpoint`, and `issuer` from the discovery document. Used both at provider creation (to auto-populate endpoints) and at runtime (to refresh cached metadata).
+
+### Generic JWT Validation (`services/jwt_validator.py`)
+
+Extended to validate tokens against any JWKS endpoint, not just Cognito. On token validation:
+1. Extracts the `kid` from the JWT header.
+2. Looks up the signing key from the cached JWKS keyset for the provider's `jwks_uri`.
+3. On key-not-found, refreshes the JWKS cache and retries (handles key rotation).
+4. Validates `iss`, `aud`, and `exp` claims against the provider configuration.
+
+### Group Claim Mapping
+
+External IdPs use different claim names and group identifiers. The `group_mapping` field on `IdentityProvider` maps external group values to Loom groups:
+- The `group_claim` field specifies which JWT claim contains group membership (e.g., `groups` for Entra ID, `groups` for Okta).
+- The `group_mapping` JSON dict maps external group names/IDs to Loom group names (e.g., `{"EntraAdmins": "g-admins-super", "EntraUsers": "g-users-demo"}`).
+- Unmapped groups are ignored. Users with no mapped groups receive no scopes (same as an unrecognized Cognito group).
+
+### Generic Token Service (`services/token.py`)
+
+Performs client credentials grants against any OIDC-compliant token endpoint for M2M flows. Used when agents are configured with non-Cognito OIDC authorizers.
+
+### Auth Config Endpoint
+
+`GET /api/auth/config` returns the active identity provider configuration when an external IdP is active. The response includes `provider_type`, `issuer`, `authorization_endpoint`, `client_id`, and `scopes` — sufficient for the frontend to initiate an Authorization Code + PKCE flow. When no external IdP is active, the response falls back to the existing Cognito-only format for backward compatibility.
+
+---
+
+## 13. Makefile Targets
 
 The backend `makefile` sources `etc/environment.sh` and provides:
 

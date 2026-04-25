@@ -1,6 +1,6 @@
 # Loom Frontend
 
-Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, AWS Agent Registry integration, security administration, resource tag management, tag profile management, cost estimation dashboard, actual runtime cost analysis, an admin dashboard with platform usage analytics, and an end-user chat interface.
+Single-page React application for managing, deploying, and invoking Bedrock AgentCore agents with real-time streaming, latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, AWS Agent Registry integration, security administration, 3rd-party identity provider management (Microsoft Entra ID, Okta, Auth0, Generic OIDC), resource tag management, tag profile management, cost estimation dashboard, actual runtime cost analysis, an admin dashboard with platform usage analytics, and an end-user chat interface.
 
 ## Prerequisites
 
@@ -97,6 +97,7 @@ src/
 │   ├── settings.ts    # Tag policy CRUD operations
 │   ├── audit.ts       # Admin audit API: login/action/pageview recording, session/summary queries, trackAction utility
 │   ├── registry.ts    # Agent Registry API: record CRUD, lifecycle, search
+│   ├── identity_providers.ts  # Identity provider CRUD, OIDC discovery, test
 │   └── types.ts       # TypeScript interfaces mirroring backend models
 ├── contexts/     # React contexts (auth, timezone preference)
 │   ├── ThemeContext.tsx   # Theme provider with 10 themes and localStorage persistence
@@ -108,6 +109,7 @@ src/
 │   ├── SortableCardGrid.tsx       # Drag-to-reorder card grid with @dnd-kit, alphabetical sort, SortButton
 │   ├── SortableTableHead.tsx      # Clickable sortable table column headers
 │   ├── AgentRegistrationForm.tsx  # Import (ARN + model) and Deploy (full form) tabs
+│   ├── IdentityProviderPanel.tsx  # Identity provider CRUD, OIDC discovery, group mapping
 │   ├── JsonConfigSection.tsx     # Shared collapsible JSON import/export section
 │   ├── AuthorizerManagementPanel.tsx # Authorizer config and credential management
 │   ├── MemoryCard.tsx             # Memory resource card with status, tags, refresh, delete
@@ -152,6 +154,8 @@ When Cognito is configured, users must sign in before accessing the app. Configu
 - **Frontend:** `VITE_COGNITO_USER_CLIENT_ID` in `frontend/.env`
 
 The login page handles the `USER_PASSWORD_AUTH` flow and `NEW_PASSWORD_REQUIRED` challenge. Tokens are stored in memory only (not persisted across page reloads). The access token is automatically attached to all API requests. The `.env` file is the standard Vite mechanism for environment variables — any variable prefixed with `VITE_` is exposed via `import.meta.env`.
+
+When a 3rd-party identity provider is active (configured via Security Admin), the login page shows a provider-branded button (e.g., "Sign in with Microsoft Entra ID") and uses the OIDC Authorization Code + PKCE flow. Group claims from the external IdP are mapped to Loom groups via the provider's configured group mapping. Supported providers: Microsoft Entra ID, Okta, Auth0, Generic OIDC. Cognito remains the default when no external IdP is active.
 
 The `AuthContext` also generates a `browserSessionId` (UUID via `crypto.randomUUID()`) on login, stored in React state only (resets on page refresh). This is used for audit tracking — all login, action, and page view events include this session ID so that multiple users sharing the same Cognito account can be distinguished by session. A `recordLogin` event is fired automatically on successful authentication.
 
