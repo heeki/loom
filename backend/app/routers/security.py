@@ -24,7 +24,7 @@ from app.services.security import (
     get_role_policy_details,
     update_iam_role_policy,
 )
-from app.services.secrets import store_secret, delete_secret
+from app.services.secrets import store_secret, get_secret, delete_secret
 
 logger = logging.getLogger(__name__)
 
@@ -497,8 +497,6 @@ def delete_credential(auth_id: int, cred_id: int, user: UserInfo = Depends(requi
 @router.post("/authorizers/{auth_id}/credentials/{cred_id}/token")
 def get_credential_token(auth_id: int, cred_id: int, user: UserInfo = Depends(require_scopes("security:read")), db: Session = Depends(get_db)) -> dict:
     """Generate an access token using a credential's client_id and client_secret."""
-    from app.services.cognito import get_cognito_token
-
     auth = db.query(AuthorizerConfig).filter(AuthorizerConfig.id == auth_id).first()
     if not auth:
         raise HTTPException(status_code=404, detail="Authorizer not found")
@@ -510,26 +508,41 @@ def get_credential_token(auth_id: int, cred_id: int, user: UserInfo = Depends(re
     if not cred:
         raise HTTPException(status_code=404, detail="Credential not found")
 
-    if not auth.pool_id:
-        raise HTTPException(status_code=400, detail="Authorizer has no Cognito pool configured")
     if not cred.client_secret_arn:
         raise HTTPException(status_code=400, detail="Credential has no client secret stored")
 
     region = _get_region()
+    allowed_scopes = json.loads(auth.allowed_scopes) if auth.allowed_scopes else None
+
     try:
         client_secret = get_secret(cred.client_secret_arn, region)
-        allowed_scopes = json.loads(auth.allowed_scopes) if auth.allowed_scopes else None
-        token_response = get_cognito_token(
-            pool_id=auth.pool_id,
-            client_id=cred.client_id,
-            client_secret=client_secret,
-            scopes=allowed_scopes or None,
-        )
+
+        if auth.authorizer_type == "cognito" and auth.pool_id:
+            from app.services.cognito import get_cognito_token
+            token_response = get_cognito_token(
+                pool_id=auth.pool_id,
+                client_id=cred.client_id,
+                client_secret=client_secret,
+                scopes=allowed_scopes or None,
+            )
+        elif auth.discovery_url:
+            from app.services.token import get_oauth2_token
+            token_response = get_oauth2_token(
+                discovery_url=auth.discovery_url,
+                client_id=cred.client_id,
+                client_secret=client_secret,
+                scopes=allowed_scopes or None,
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Authorizer has no Cognito pool or discovery URL configured")
+
         return {
             "access_token": token_response["access_token"],
             "token_type": token_response.get("token_type", "Bearer"),
             "expires_in": token_response.get("expires_in"),
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to get token: {e}")
 
