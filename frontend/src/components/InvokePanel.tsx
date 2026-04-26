@@ -33,13 +33,15 @@ interface InvokePanelProps {
   allowedModelIds?: string[];
   authorizerName?: string;
   authorizerId?: number;
+  authorizerPoolId?: string;
+  authorizerDiscoveryUrl?: string;
   isExternalIdp?: boolean;
   currentUserId?: string;
   onInvoke: (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string, modelId?: string, connectorIds?: number[], useLinkedToken?: boolean) => void;
   onCancel: () => void;
 }
 
-export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelId, allowedModelIds = [], authorizerName, authorizerId, isExternalIdp, currentUserId, onInvoke, onCancel }: InvokePanelProps) {
+export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelId, allowedModelIds = [], authorizerName, authorizerId, authorizerPoolId, authorizerDiscoveryUrl, isExternalIdp, currentUserId, onInvoke, onCancel }: InvokePanelProps) {
   const promptKey = `loom:invokePrompt:${agentId}`;
   const [prompt, setPrompt] = useState(() => sessionStorage.getItem(promptKey) ?? "");
 
@@ -176,8 +178,12 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
           if (isExternalIdp && authorizerName && results.length > 0) {
             setSelectedCredential(String(results[0]!.id));
           }
-          if (!authorizerId && authorizerName) {
-            const match = configs.find((c) => c.name === authorizerName);
+          if (!authorizerId) {
+            const match = configs.find((c) =>
+              (authorizerName && c.name === authorizerName) ||
+              (authorizerPoolId && c.pool_id === authorizerPoolId) ||
+              (authorizerDiscoveryUrl && c.discovery_url === authorizerDiscoveryUrl)
+            );
             if (match) setResolvedAuthorizerId(match.id);
           }
         }

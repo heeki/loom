@@ -215,6 +215,8 @@ export function AgentDetailPage({
             modelId={agent.model_id}
             allowedModelIds={agent.allowed_model_ids}
             authorizerName={agent.authorizer_config?.name}
+            authorizerPoolId={agent.authorizer_config?.pool_id}
+            authorizerDiscoveryUrl={agent.authorizer_config?.discovery_url}
             isExternalIdp={Boolean(authConfig?.provider_type && authConfig.provider_type !== "cognito")}
             currentUserId={user?.username ?? user?.sub}
             onInvoke={handleInvoke}

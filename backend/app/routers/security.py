@@ -369,9 +369,9 @@ def create_authorizer(request: CreateAuthorizerRequest, user: UserInfo = Depends
 
 @router.get("/authorizers")
 def list_authorizers(user: UserInfo = Depends(get_current_user), db: Session = Depends(get_db)) -> list[dict]:
-    """List all authorizer configurations. Requires security:read or agent:write."""
-    if "security:read" not in user.scopes and "agent:write" not in user.scopes:
-        raise HTTPException(status_code=403, detail="Missing required scope: security:read or agent:write")
+    """List all authorizer configurations. Requires security:read, agent:write, or agent:read."""
+    if "security:read" not in user.scopes and "agent:write" not in user.scopes and "agent:read" not in user.scopes:
+        raise HTTPException(status_code=403, detail="Missing required scope: security:read, agent:write, or agent:read")
     auths = db.query(AuthorizerConfig).order_by(AuthorizerConfig.id).all()
     return [a.to_dict() for a in auths]
 
