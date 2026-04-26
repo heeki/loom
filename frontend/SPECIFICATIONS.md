@@ -265,8 +265,10 @@ Full deployment form with sections:
 - `InvokePanel` component: qualifier selector, credential selector, model selector, multi-line prompt textarea, invoke/cancel buttons
 - Model dropdown (`Select`) shown when the agent has allowed models. Filters to `allowedModelIds` when available, otherwise shows only the agent's default model. Disabled when only one model is available. Default model marked with "(default)" suffix. Selected non-default model passed as `model_id` override in the invoke request.
 - Credential dropdown is context-aware:
-  - **OAuth agents** (agent has authorizer): shows user's token (default), M2M credentials from authorizer configs, and manual token (always last)
+  - **OAuth agents** (agent has authorizer): shows user's token (default), M2M credentials filtered to the agent's matching authorizer only, linked token option (when cross-IdP linking is available), and manual token (always last)
   - **Non-OAuth agents** (no authorizer): shows "No credentials (SigV4)" only
+- **Same-IdP detection**: `issuerMatchesDiscovery()` compares the user's login issuer URL against the agent's authorizer discovery URL. For Entra ID, tenant IDs are extracted from both URLs for comparison (handles v1.0/v2.0 URL differences). When matched, the credential dropdown auto-selects the user's login token and shows a green dot indicator. No account linking UI is shown.
+- **Cross-IdP account linking**: When the user's login IdP differs from the agent's authorizer, a "Link Account" button appears. Clicking opens an OAuth popup flow. After successful linking, a green dot with "Unlink" option is shown. Linked tokens are used at invocation time (Priority 1.5 in the backend).
 - When a credential is selected, the `credential_id` is passed with the invoke request
 - When "Manual token" is selected, a password input field appears for entering a raw bearer token
 - Session dropdown auto-selects the newly created session after an invocation
@@ -903,6 +905,19 @@ When no external IdP is active, the login page behaves identically to the existi
 ### API Client
 
 `frontend/src/api/identity_providers.ts` provides typed functions for all identity provider CRUD operations: `listIdentityProviders`, `getIdentityProvider`, `createIdentityProvider`, `updateIdentityProvider`, `deleteIdentityProvider`, `discoverOIDC`, and `testDiscovery`.
+
+### Per-User Authorizer Linking
+
+When a user's login IdP differs from an agent's authorizer (cross-IdP), the user can link their identity via an OAuth popup flow:
+
+- **InvokePanel**: checks link status on mount when the agent has an authorizer. Shows "Link Account" button when not linked and not same-IdP. After linking, shows a green dot with "Unlink" option.
+- **ChatPage**: same-IdP detection with tenant ID comparison. Same-IdP status skips all linking UI.
+- **OAuthLinkCallbackPage** (`/oauth/link-callback`): minimal popup callback page that extracts the authorization code from URL params, exchanges it via the backend callback endpoint, and sends `window.opener.postMessage({type: "authorizer-linked", authId})` before closing.
+- **API functions** in `frontend/src/api/security.ts`: `checkAuthorizerLinkStatus`, `getAuthorizerLinkAuthorizeUrl`, `submitAuthorizerLinkCallback`, `deleteAuthorizerLink`.
+
+### Authorizer Allowed Audience
+
+The `AuthorizerManagementPanel` includes an "Allowed Audience" field for configuring the `allowedAudience` parameter on AgentCore runtimes. This is separate from "Allowed Clients" — audience validates the JWT `aud` claim while clients validates the `azp` claim. The field is included in create, edit, JSON paste, and export flows.
 
 ### Backward Compatibility
 

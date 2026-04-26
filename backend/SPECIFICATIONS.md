@@ -1291,7 +1291,8 @@ Invocations are authenticated with a priority-based token selection:
 
 0. **Bearer token (highest priority):** If the invoke request includes a `bearer_token` field, it is used directly as the Authorization header. The `token_source` is set to `"manual"`. This supports agents with external authorizers where credentials are not managed within Loom.
 1. **Credential-based token:** If the invoke request includes a `credential_id`, the backend looks up the `AuthorizerCredential`, fetches the client secret from Secrets Manager (5-minute cache), and exchanges credentials for an M2M access token. The `token_source` is set to the credential label.
-2. **User login token:** If the agent has an authorizer configured and the request includes an `Authorization: Bearer` header, the user's access token is forwarded directly to AgentCore. The `token_source` is set to `"user"`. This works because the frontend and agent share the same Cognito user pool.
+1.5. **Linked-user token (cross-IdP):** If the agent has an authorizer with a configured user client, the backend attempts to resolve a linked access token for the current user from Secrets Manager (`loom/authorizers/{auth_id}/user-tokens/{user.sub}`). The refresh token is exchanged for a fresh access token via the authorizer's token endpoint. The `token_source` is set to `"linked-user"`. This enables cross-IdP scenarios where the user's login IdP differs from the agent's authorizer.
+2. **User login token:** If the agent has an authorizer configured and the request includes an `Authorization: Bearer` header, the user's access token is forwarded directly to AgentCore. The `token_source` is set to `"user"`. This works when the user's login IdP matches the agent's authorizer (same-IdP scenario).
 3. **Agent config token (lowest priority):** Falls back to the agent's stored authorizer config for M2M token retrieval. The `token_source` is set to `"agent-config"`.
 4. **No token (SigV4):** If no token is resolved, the request uses IAM SigV4 authentication (the default boto3 credential chain).
 
@@ -1405,6 +1406,28 @@ Performs client credentials grants against any OIDC-compliant token endpoint for
 ### Auth Config Endpoint
 
 `GET /api/auth/config` returns the active identity provider configuration when an external IdP is active. The response includes `provider_type`, `issuer`, `authorization_endpoint`, `client_id`, and `scopes` — sufficient for the frontend to initiate an Authorization Code + PKCE flow. When no external IdP is active, the response falls back to the existing Cognito-only format for backward compatibility.
+
+### Per-User Authorizer Linking (`services/authorizer_linking.py`)
+
+When a user's login IdP differs from an agent's authorizer (cross-IdP scenario), the user must link their identity to the agent's authorizer via an OAuth popup flow. The linking service provides:
+
+- `check_link_status(auth_id, user_sub, region)` — checks if a user has linked credentials in Secrets Manager.
+- `store_user_tokens(auth_id, user_sub, refresh_token, region)` — stores the refresh token at `loom/authorizers/{auth_id}/user-tokens/{user_sub}`.
+- `resolve_access_token(auth_id, user_sub, region, discovery_url, client_id, client_secret)` — exchanges the stored refresh token for a fresh access token with in-memory caching keyed by `(auth_id, user_sub)`.
+- `exchange_code_for_tokens(auth_id, code, code_verifier, redirect_uri, region, discovery_url, client_id, client_secret)` — completes the OAuth code exchange for the popup callback.
+- `delete_user_tokens(auth_id, user_sub, region)` — removes linked credentials from Secrets Manager.
+
+Linking endpoints under `/api/security/authorizers/{auth_id}/link`: `GET .../status`, `GET .../authorize`, `POST .../callback`, `DELETE .../`.
+
+### Authorizer `allowed_audience` Field
+
+The `AuthorizerConfig` model includes an `allowed_audience` field (JSON array) for configuring the `allowedAudience` parameter on AgentCore runtimes. This is distinct from `allowedClients` — audience validates the `aud` claim, while clients validates the `azp` claim.
+
+**Entra ID compatibility:** Microsoft Entra ID v1.0 access tokens do not include the standard OAuth2 `azp` claim (they use a proprietary `appid` claim instead). AgentCore's `allowedClients` validates against `azp`, causing `UnrecognizedClientException` (401) for Entra ID tokens. The deploy paths for both custom and harness agents omit `allowedClients` when `authorizer_type == "entra_id"`, relying on `allowedAudience` alone for token validation.
+
+### Entra ID v1.0/v2.0 Issuer Handling
+
+Entra ID v2.0 token endpoints issue access tokens with a v1.0 issuer (`https://sts.windows.net/{tenant}/`). The backend auth dependency handles this by extracting the tenant ID from a v2.0 issuer URL and constructing the expected v1.0 issuer format for token validation. Agent authorizers should use the v1.0 discovery URL (`https://login.microsoftonline.com/{tenant}/.well-known/openid-configuration`) for consistency.
 
 ---
 
