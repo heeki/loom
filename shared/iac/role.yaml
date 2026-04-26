@@ -113,7 +113,9 @@ Resources:
                   - logs:FilterLogEvents
                   - logs:GetLogEvents
                   - logs:PutLogEvents
-                Resource: !Sub "arn:aws:logs:${pLogsRegion}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/${pAgentName}*"
+                Resource:
+                  - !Sub "arn:aws:logs:${pLogsRegion}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/${pAgentName}*"
+                  - !Sub "arn:aws:logs:${pLogsRegion}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/harness_${pAgentName}*"
         - !If
           - IncludeMemoryPolicy
           - PolicyName: memory
