@@ -11,6 +11,8 @@ export interface AuthConfig {
   scopes?: string;
   issuer_url?: string;
   redirect_uri?: string;
+  group_claim_path?: string;
+  group_mappings?: Record<string, string[]>;
 }
 
 export interface AuthTokens {
@@ -186,7 +188,7 @@ export async function startOIDCLogin(config: AuthConfig): Promise<void> {
 
   sessionStorage.setItem("oidc_code_verifier", codeVerifier);
 
-  const redirectUri = config.redirect_uri || `${window.location.origin}/`;
+  const redirectUri = config.redirect_uri || `${window.location.origin}/oauth/callback`;
   sessionStorage.setItem("oidc_redirect_uri", redirectUri);
 
   const params = new URLSearchParams({
@@ -209,7 +211,7 @@ export async function exchangeOIDCCode(
   config: AuthConfig,
 ): Promise<OIDCTokenResponse> {
   const codeVerifier = sessionStorage.getItem("oidc_code_verifier") || "";
-  const redirectUri = sessionStorage.getItem("oidc_redirect_uri") || `${window.location.origin}/`;
+  const redirectUri = sessionStorage.getItem("oidc_redirect_uri") || `${window.location.origin}/oauth/callback`;
 
   const params = new URLSearchParams({
     grant_type: "authorization_code",

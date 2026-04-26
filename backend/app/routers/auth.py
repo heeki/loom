@@ -33,6 +33,8 @@ def get_auth_config() -> dict:
                     "scopes": idp.scopes or "",
                     "issuer_url": idp.issuer_url,
                     "redirect_uri": os.getenv("LOOM_OIDC_REDIRECT_URI", ""),
+                    "group_claim_path": idp.group_claim_path or "groups",
+                    "group_mappings": idp.get_group_mappings(),
                     # Backward compat
                     "user_pool_id": user_pool_id,
                     "region": region,

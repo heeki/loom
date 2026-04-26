@@ -8,7 +8,7 @@ class IdentityProvider(Base):
     __tablename__ = "identity_providers"
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False, unique=True)
-    provider_type = Column(String, nullable=False)  # "cognito", "azure_ad", "okta", "auth0", "generic_oidc"
+    provider_type = Column(String, nullable=False)  # "cognito", "entra_id", "okta", "auth0", "generic_oidc"
     issuer_url = Column(String, nullable=False)  # OIDC issuer base URL
     client_id = Column(String, nullable=False)
     client_secret_arn = Column(String, nullable=True)  # Secrets Manager ARN (write-only)

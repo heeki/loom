@@ -28,7 +28,7 @@ def _get_region() -> str:
 
 class CreateIdPRequest(BaseModel):
     name: str
-    provider_type: str = Field(..., description="cognito, azure_ad, okta, auth0, generic_oidc")
+    provider_type: str = Field(..., description="cognito, entra_id, okta, auth0, generic_oidc")
     issuer_url: str
     client_id: str
     client_secret: str | None = None

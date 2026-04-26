@@ -278,7 +278,7 @@ class TestIdentityProviderCRUD(unittest.TestCase):
     def _idp_payload(self, **overrides) -> dict:
         defaults = {
             "name": "test-azure-ad",
-            "provider_type": "azure_ad",
+            "provider_type": "entra_id",
             "issuer_url": "https://login.microsoftonline.com/tenant-id/v2.0",
             "client_id": "app-client-id",
             "client_secret": "super-secret",
@@ -298,7 +298,7 @@ class TestIdentityProviderCRUD(unittest.TestCase):
         self.assertEqual(resp.status_code, 201)
         data = resp.json()
         self.assertEqual(data["name"], "test-azure-ad")
-        self.assertEqual(data["provider_type"], "azure_ad")
+        self.assertEqual(data["provider_type"], "entra_id")
         self.assertEqual(data["jwks_uri"], MOCK_DISCOVERY["jwks_uri"])
         self.assertTrue(data["has_client_secret"])
         mock_disc.assert_called_once()
@@ -437,7 +437,7 @@ class TestAuthConfigEndpoint(unittest.TestCase):
     def test_auth_config_active_idp(self, mock_session_local):
         """When an active IdP exists, should return its config."""
         mock_idp = MagicMock()
-        mock_idp.provider_type = "azure_ad"
+        mock_idp.provider_type = "entra_id"
         mock_idp.authorization_endpoint = "https://login.microsoftonline.com/authorize"
         mock_idp.token_endpoint = "https://login.microsoftonline.com/token"
         mock_idp.client_id = "my-client"
@@ -451,7 +451,7 @@ class TestAuthConfigEndpoint(unittest.TestCase):
         resp = self.client.get("/api/auth/config")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
-        self.assertEqual(data["provider_type"], "azure_ad")
+        self.assertEqual(data["provider_type"], "entra_id")
         self.assertEqual(data["client_id"], "my-client")
         self.assertEqual(data["authorization_endpoint"], "https://login.microsoftonline.com/authorize")
         self.assertEqual(data["token_endpoint"], "https://login.microsoftonline.com/token")

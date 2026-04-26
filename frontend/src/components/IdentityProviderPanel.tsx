@@ -18,21 +18,21 @@ import {
 } from "@/api/identity_providers";
 
 const PROVIDER_TYPES = [
-  { value: "azure_ad", label: "Microsoft Entra ID" },
+  { value: "entra_id", label: "Microsoft Entra ID" },
   { value: "okta", label: "Okta" },
   { value: "auth0", label: "Auth0" },
   { value: "generic_oidc", label: "Generic OIDC" },
 ];
 
 const PROVIDER_HINTS: Record<string, string> = {
-  azure_ad: "https://login.microsoftonline.com/{tenant-id}/v2.0",
+  entra_id: "https://login.microsoftonline.com/{tenant-id}/v2.0",
   okta: "https://{your-domain}.okta.com",
   auth0: "https://{your-domain}.auth0.com/",
   generic_oidc: "https://your-issuer.example.com",
 };
 
 const GROUP_CLAIM_HINTS: Record<string, string> = {
-  azure_ad: "roles",
+  entra_id: "roles",
   okta: "groups",
   auth0: "https://your-namespace/roles",
   generic_oidc: "groups",
@@ -69,7 +69,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
 
   // Form state
   const [formName, setFormName] = useState("");
-  const [formProviderType, setFormProviderType] = useState("azure_ad");
+  const [formProviderType, setFormProviderType] = useState("entra_id");
   const [formIssuerUrl, setFormIssuerUrl] = useState("");
   const [formClientId, setFormClientId] = useState("");
   const [formClientSecret, setFormClientSecret] = useState("");
@@ -95,7 +95,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
 
   const resetForm = () => {
     setFormName("");
-    setFormProviderType("azure_ad");
+    setFormProviderType("entra_id");
     setFormIssuerUrl("");
     setFormClientId("");
     setFormClientSecret("");
@@ -266,7 +266,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
       <JsonConfigSection
         onApply={handleJsonApply}
         onExport={handleJsonExport}
-        placeholder='{"name": "entra-id", "provider_type": "azure_ad", "issuer_url": "...", ...}'
+        placeholder='{"name": "entra-id", "provider_type": "entra_id", "issuer_url": "...", ...}'
       />
 
       <div className="grid grid-cols-2 gap-4">
