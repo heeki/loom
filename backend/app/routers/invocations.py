@@ -1185,6 +1185,18 @@ async def invoke_agent_endpoint(
                 except Exception as e:
                     logger.warning("Failed to get Cognito token for agent %s: %s", agent_id, e)
 
+    if access_token and token_source == "user":
+        try:
+            import base64, json as _json2
+            parts = access_token.split(".")
+            if len(parts) >= 2:
+                padded = parts[1] + "=" * (-len(parts[1]) % 4)
+                claims = _json2.loads(base64.urlsafe_b64decode(padded))
+                logger.info("User token claims: iss=%s, aud=%s, sub=%s, appid=%s, azp=%s, ver=%s, scp=%s, roles=%s, exp=%s",
+                            claims.get("iss"), claims.get("aud"), claims.get("sub"), claims.get("appid"),
+                            claims.get("azp"), claims.get("ver"), claims.get("scp"), claims.get("roles"), claims.get("exp"))
+        except Exception as e:
+            logger.warning("Could not decode user token for debugging: %s", e)
     logger.info("Invoking agent %s with token_source=%s, has_token=%s",
                 agent_id, token_source, bool(access_token))
 
