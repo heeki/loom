@@ -218,6 +218,7 @@ export function AgentDetailPage({
             authorizerPoolId={agent.authorizer_config?.pool_id}
             authorizerDiscoveryUrl={agent.authorizer_config?.discovery_url}
             isExternalIdp={Boolean(authConfig?.provider_type && authConfig.provider_type !== "cognito")}
+            loginIssuerUrl={authConfig?.issuer_url}
             currentUserId={user?.username ?? user?.sub}
             onInvoke={handleInvoke}
             onCancel={cancel}

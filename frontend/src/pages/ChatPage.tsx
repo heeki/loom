@@ -35,7 +35,7 @@ interface ChatPageProps {
 
 
 export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: ChatPageProps) {
-  const { user, browserSessionId } = useAuth();
+  const { user, browserSessionId, authConfig: loginAuthConfig } = useAuth();
   const { theme, setTheme } = useTheme();
 
   const userGroupNames = userGroups
@@ -108,7 +108,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
 
   // Authorizer linking state
   const [resolvedAuthorizerId, setResolvedAuthorizerId] = useState<number | null>(null);
-  const [linkStatus, setLinkStatus] = useState<"unknown" | "linked" | "unlinked" | "linking" | "not-configured">("unknown");
+  const [linkStatus, setLinkStatus] = useState<"unknown" | "linked" | "unlinked" | "linking" | "not-configured" | "same-idp">("unknown");
 
   // Resolve authorizer ID when selected agent changes
   useEffect(() => {
@@ -116,6 +116,27 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     const agent = agents.find((a) => a.id === selectedAgentId);
     const authConfig = agent?.authorizer_config;
     if (!authConfig?.type) { setResolvedAuthorizerId(null); setLinkStatus("not-configured"); return; }
+
+    // Same-IdP detection: login issuer matches agent's authorizer discovery URL
+    const isExternalLogin = loginAuthConfig?.provider_type && loginAuthConfig.provider_type !== "cognito";
+    if (isExternalLogin && authConfig.discovery_url && loginAuthConfig?.issuer_url) {
+      const entraPattern = /login\.microsoftonline\.com\/([^/]+)/i;
+      const issuerMatch = entraPattern.exec(loginAuthConfig.issuer_url);
+      const discoveryMatch = entraPattern.exec(authConfig.discovery_url);
+      let sameIdp = false;
+      if (issuerMatch && discoveryMatch) {
+        sameIdp = issuerMatch[1]!.toLowerCase() === discoveryMatch[1]!.toLowerCase();
+      } else {
+        const base = authConfig.discovery_url.replace(/\/?\.well-known\/openid-configuration\/?$/, "").replace(/\/+$/, "");
+        sameIdp = base.toLowerCase() === loginAuthConfig.issuer_url.replace(/\/+$/, "").toLowerCase();
+      }
+      if (sameIdp) {
+        setLinkStatus("same-idp");
+        setResolvedAuthorizerId(null);
+        return;
+      }
+    }
+
     listAuthorizerConfigs()
       .then((configs) => {
         const match = configs.find((c) =>
@@ -127,11 +148,12 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
         else setResolvedAuthorizerId(null);
       })
       .catch(() => setResolvedAuthorizerId(null));
-  }, [selectedAgentId, agents]);
+  }, [selectedAgentId, agents, loginAuthConfig]);
 
   // Check link status when authorizer is resolved
   useEffect(() => {
     if (!resolvedAuthorizerId) return;
+    if (linkStatus === "same-idp") return;
     checkAuthorizerLinkStatus(resolvedAuthorizerId)
       .then((r) => {
         if (r.linkable === false) setLinkStatus("not-configured");

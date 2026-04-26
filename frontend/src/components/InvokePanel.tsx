@@ -36,12 +36,23 @@ interface InvokePanelProps {
   authorizerPoolId?: string;
   authorizerDiscoveryUrl?: string;
   isExternalIdp?: boolean;
+  loginIssuerUrl?: string;
   currentUserId?: string;
   onInvoke: (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string, modelId?: string, connectorIds?: number[], useLinkedToken?: boolean) => void;
   onCancel: () => void;
 }
 
-export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelId, allowedModelIds = [], authorizerName, authorizerId, authorizerPoolId, authorizerDiscoveryUrl, isExternalIdp, currentUserId, onInvoke, onCancel }: InvokePanelProps) {
+function issuerMatchesDiscovery(issuerUrl?: string, discoveryUrl?: string): boolean {
+  if (!issuerUrl || !discoveryUrl) return false;
+  const entraPattern = /login\.microsoftonline\.com\/([^/]+)/i;
+  const issuerMatch = entraPattern.exec(issuerUrl);
+  const discoveryMatch = entraPattern.exec(discoveryUrl);
+  if (issuerMatch && discoveryMatch) return issuerMatch[1]!.toLowerCase() === discoveryMatch[1]!.toLowerCase();
+  const base = discoveryUrl.replace(/\/?\.well-known\/openid-configuration\/?$/, "").replace(/\/+$/, "");
+  return base.toLowerCase() === issuerUrl.replace(/\/+$/, "").toLowerCase();
+}
+
+export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelId, allowedModelIds = [], authorizerName, authorizerId, authorizerPoolId, authorizerDiscoveryUrl, isExternalIdp, loginIssuerUrl, currentUserId, onInvoke, onCancel }: InvokePanelProps) {
   const promptKey = `loom:invokePrompt:${agentId}`;
   const [prompt, setPrompt] = useState(() => sessionStorage.getItem(promptKey) ?? "");
 
@@ -59,6 +70,7 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
   );
   const [bearerToken, setBearerToken] = useState("");
   const [allCredentials, setAllCredentials] = useState<(AuthorizerCredential & { authorizer_name: string })[]>([]);
+  const [credentialsLoaded, setCredentialsLoaded] = useState(false);
   const [resolvedAuthorizerId, setResolvedAuthorizerId] = useState<number | undefined>(authorizerId);
   const [selectedModel, setSelectedModel] = useState(modelId ?? "");
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
@@ -76,9 +88,16 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
   const modelPickerRef = useRef<HTMLDivElement>(null);
 
   // Authorizer linking state (cross-IdP)
-  const [linkStatus, setLinkStatus] = useState<"unknown" | "linked" | "unlinked" | "linking" | "not-configured">("unknown");
+  const [linkStatus, setLinkStatus] = useState<"unknown" | "linked" | "unlinked" | "linking" | "not-configured" | "same-idp">("unknown");
+
+  const sameIdp = isExternalIdp && issuerMatchesDiscovery(loginIssuerUrl, authorizerDiscoveryUrl);
 
   useEffect(() => {
+    if (sameIdp) {
+      setLinkStatus("same-idp");
+      setSelectedCredential(USER_TOKEN);
+      return;
+    }
     if (!resolvedAuthorizerId) return;
     checkAuthorizerLinkStatus(resolvedAuthorizerId)
       .then((r) => {
@@ -86,7 +105,7 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
         else setLinkStatus(r.linked ? "linked" : "unlinked");
       })
       .catch(() => setLinkStatus("unknown"));
-  }, [resolvedAuthorizerId]);
+  }, [resolvedAuthorizerId, sameIdp]);
 
   // Auto-select linked token when linked
   useEffect(() => {
@@ -164,8 +183,14 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
     (async () => {
       try {
         const configs = await listAuthorizerConfigs();
+        const matchingConfig = configs.find((c) =>
+          (authorizerName && c.name === authorizerName) ||
+          (authorizerPoolId && c.pool_id === authorizerPoolId) ||
+          (authorizerDiscoveryUrl && c.discovery_url === authorizerDiscoveryUrl)
+        );
         const results: (AuthorizerCredential & { authorizer_name: string })[] = [];
-        for (const config of configs) {
+        const targetConfigs = matchingConfig ? [matchingConfig] : configs;
+        for (const config of targetConfigs) {
           const creds = await listAuthorizerCredentials(config.id);
           for (const cred of creds) {
             if (cred.has_secret) {
@@ -175,6 +200,7 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
         }
         if (!cancelled) {
           setAllCredentials(results);
+          setCredentialsLoaded(true);
           if (isExternalIdp && authorizerName && results.length > 0) {
             setSelectedCredential(String(results[0]!.id));
           }
@@ -400,17 +426,19 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
             <div className="space-y-1.5">
               <div className="flex items-center gap-1.5">
                 <Label className="text-xs text-muted-foreground">Credential</Label>
-                {linkStatus === "linked" && (
+                {(linkStatus === "linked" || linkStatus === "same-idp") && (
                   <>
-                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500" title="Account linked" />
-                    <button
-                      type="button"
-                      onClick={() => void handleUnlinkAccount()}
-                      className="text-muted-foreground/50 hover:text-destructive transition-colors"
-                      title="Unlink account"
-                    >
-                      <Unplug className="h-3 w-3" />
-                    </button>
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500" title={linkStatus === "same-idp" ? "Same identity provider" : "Account linked"} />
+                    {linkStatus === "linked" && (
+                      <button
+                        type="button"
+                        onClick={() => void handleUnlinkAccount()}
+                        className="text-muted-foreground/50 hover:text-destructive transition-colors"
+                        title="Unlink account"
+                      >
+                        <Unplug className="h-3 w-3" />
+                      </button>
+                    )}
                   </>
                 )}
               </div>
@@ -425,6 +453,9 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
                       {linkStatus === "linked" && (
                         <SelectItem value={LINKED_TOKEN}>{authorizerName} / linked user token</SelectItem>
                       )}
+                      {linkStatus === "same-idp" && (
+                        <SelectItem value={USER_TOKEN}>{authorizerName} / current user&apos;s token</SelectItem>
+                      )}
                       {!isExternalIdp && (
                         <SelectItem value={USER_TOKEN}>{authorizerName} / current user&apos;s token</SelectItem>
                       )}
@@ -434,7 +465,7 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
                         </SelectItem>
                       ))}
                       <SelectItem value={MANUAL_TOKEN}>{authorizerName} / manual token</SelectItem>
-                      {isExternalIdp && allCredentials.length === 0 && (
+                      {isExternalIdp && !credentialsLoaded && allCredentials.length === 0 && (
                         <SelectItem value={NO_CREDENTIAL} disabled>Loading credentials...</SelectItem>
                       )}
                     </>
