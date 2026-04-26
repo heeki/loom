@@ -98,13 +98,13 @@ export function AgentDetailPage({
   // Check if agent group matches any of the user's allowed groups
   const canInvokeThisAgent = isSuperAdmin || !agentGroup || allowedGroups.includes(agentGroup);
   const effectiveCanInvoke = canInvoke && canInvokeThisAgent;
-  const { user, browserSessionId } = useAuth();
+  const { user, browserSessionId, authConfig } = useAuth();
   const { streamedText, segments, sessionStart, sessionEnd, isStreaming, error, rawError, invoke, cancel } =
     useInvoke(agent.id, agent.authorizer_config?.name ?? undefined);
 
-  const handleInvoke = async (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string, modelId?: string, connectorIds?: number[]) => {
+  const handleInvoke = async (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string, modelId?: string, connectorIds?: number[], useLinkedToken?: boolean) => {
     if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'agent', 'invoke', agent.name ?? agent.runtime_id ?? String(agent.id));
-    await invoke(prompt, qualifier, sessionId, credentialId, bearerToken, modelId, connectorIds);
+    await invoke(prompt, qualifier, sessionId, credentialId, bearerToken, modelId, connectorIds, useLinkedToken);
     onSessionsRefresh();
   };
 
@@ -215,6 +215,10 @@ export function AgentDetailPage({
             modelId={agent.model_id}
             allowedModelIds={agent.allowed_model_ids}
             authorizerName={agent.authorizer_config?.name}
+            authorizerPoolId={agent.authorizer_config?.pool_id}
+            authorizerDiscoveryUrl={agent.authorizer_config?.discovery_url}
+            isExternalIdp={Boolean(authConfig?.provider_type && authConfig.provider_type !== "cognito")}
+            loginIssuerUrl={authConfig?.issuer_url}
             currentUserId={user?.username ?? user?.sub}
             onInvoke={handleInvoke}
             onCancel={cancel}

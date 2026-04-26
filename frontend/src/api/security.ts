@@ -100,6 +100,32 @@ export function getCredentialToken(authId: number, credId: number): Promise<{ ac
   return apiFetch(`/api/security/authorizers/${authId}/credentials/${credId}/token`, { method: "POST" });
 }
 
+// Authorizer Linking
+export function checkAuthorizerLinkStatus(authId: number): Promise<{ linked: boolean; linkable: boolean }> {
+  return apiFetch<{ linked: boolean; linkable: boolean }>(`/api/security/authorizers/${authId}/link/status`);
+}
+
+export function getAuthorizerLinkAuthorizeUrl(authId: number): Promise<{ authorize_url: string; code_verifier: string; state: string; redirect_uri: string }> {
+  return apiFetch(`/api/security/authorizers/${authId}/link/authorize`);
+}
+
+export function submitAuthorizerLinkCallback(
+  authId: number,
+  code: string,
+  codeVerifier: string,
+  redirectUri: string,
+): Promise<{ linked: boolean }> {
+  return apiFetch<{ linked: boolean }>(`/api/security/authorizers/${authId}/link/callback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code, code_verifier: codeVerifier, redirect_uri: redirectUri }),
+  });
+}
+
+export function deleteAuthorizerLink(authId: number): Promise<void> {
+  return apiFetch<void>(`/api/security/authorizers/${authId}/link`, { method: "DELETE" });
+}
+
 // Permission Requests
 export function listPermissionRequests(status?: string): Promise<PermissionRequestResponse[]> {
   const query = status ? `?status=${status}` : "";

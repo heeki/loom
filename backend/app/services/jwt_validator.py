@@ -1,4 +1,4 @@
-"""JWT token validation for Cognito user tokens."""
+"""JWT token validation — supports Cognito and generic OIDC issuers."""
 import json
 import logging
 import time
@@ -10,26 +10,25 @@ from jwt import algorithms as jwt_algorithms
 
 logger = logging.getLogger(__name__)
 
-# Cache for JWKS keys: {issuer_url: (keys, fetch_time)}
+# Cache for JWKS keys: {jwks_url: (keys, fetch_time)}
 _jwks_cache: dict[str, tuple[dict[str, Any], float]] = {}
 JWKS_CACHE_TTL = 3600  # 1 hour
 
 
-def _get_jwks(issuer: str) -> dict[str, Any]:
-    """Fetch and cache JWKS keys from the Cognito issuer."""
+def _get_jwks(jwks_url: str) -> dict[str, Any]:
+    """Fetch and cache JWKS keys from any JWKS endpoint."""
     now = time.time()
-    if issuer in _jwks_cache:
-        keys, fetch_time = _jwks_cache[issuer]
+    if jwks_url in _jwks_cache:
+        keys, fetch_time = _jwks_cache[jwks_url]
         if now - fetch_time < JWKS_CACHE_TTL:
             return keys
 
-    jwks_url = f"{issuer}/.well-known/jwks.json"
     logger.info("Fetching JWKS from %s", jwks_url)
     req = urllib.request.Request(jwks_url)
     with urllib.request.urlopen(req, timeout=10) as resp:
         jwks = json.loads(resp.read().decode())
 
-    _jwks_cache[issuer] = (jwks, now)
+    _jwks_cache[jwks_url] = (jwks, now)
     return jwks
 
 
@@ -41,42 +40,33 @@ def _get_signing_key(jwks: dict[str, Any], kid: str) -> jwt_algorithms.RSAAlgori
     raise ValueError(f"Key with kid={kid} not found in JWKS")
 
 
-def validate_cognito_token(
+def validate_token(
     token: str,
-    user_pool_id: str,
-    region: str,
-    client_id: str | None = None,
+    jwks_uri: str,
+    issuer: str,
+    audience: str | None = None,
 ) -> dict[str, Any]:
-    """
-    Validate a Cognito JWT token.
+    """Validate a JWT token against any OIDC-compliant JWKS endpoint.
 
     Args:
         token: The JWT token string
-        user_pool_id: Cognito User Pool ID
-        region: AWS region
-        client_id: Expected client_id (audience). If None, audience is not validated.
+        jwks_uri: URL to the JWKS endpoint
+        issuer: Expected issuer claim
+        audience: Expected audience. If None, audience is not validated.
 
     Returns:
         Decoded token claims
-
-    Raises:
-        jwt.InvalidTokenError: If the token is invalid
     """
-    issuer = f"https://cognito-idp.{region}.amazonaws.com/{user_pool_id}"
-
-    # Decode header to get kid
     unverified_header = jwt.get_unverified_header(token)
     kid = unverified_header.get("kid")
     if not kid:
         raise jwt.InvalidTokenError("Token header missing 'kid'")
 
-    # Get JWKS and find signing key
-    jwks = _get_jwks(issuer)
+    jwks = _get_jwks(jwks_uri)
     public_key = _get_signing_key(jwks, kid)
 
-    # Validate and decode
     options = {}
-    if client_id is None:
+    if audience is None:
         options["verify_aud"] = False
 
     claims = jwt.decode(
@@ -84,8 +74,20 @@ def validate_cognito_token(
         key=public_key,
         algorithms=["RS256"],
         issuer=issuer,
-        audience=client_id,
+        audience=audience,
         options=options,
     )
 
     return claims
+
+
+def validate_cognito_token(
+    token: str,
+    user_pool_id: str,
+    region: str,
+    client_id: str | None = None,
+) -> dict[str, Any]:
+    """Validate a Cognito JWT token (backward-compatible wrapper)."""
+    issuer = f"https://cognito-idp.{region}.amazonaws.com/{user_pool_id}"
+    jwks_uri = f"{issuer}/.well-known/jwks.json"
+    return validate_token(token, jwks_uri, issuer, audience=client_id)

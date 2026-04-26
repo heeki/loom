@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Send, Plus, Brain, LogOut, Bot, User, X, Loader2, Palette, RefreshCw, ChevronDown, Wrench, Plug, KeyRound, Unplug } from "lucide-react";
+import { Send, Plus, Brain, LogOut, Bot, User, X, Loader2, Palette, RefreshCw, ChevronDown, Wrench, Plug, KeyRound, Unplug, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import ReactMarkdown from "react-markdown";
@@ -14,6 +14,7 @@ import { useInvoke, clearInvokeState } from "@/hooks/useInvoke";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, isLightTheme, THEME_LABELS, type Theme } from "@/contexts/ThemeContext";
 import { listConnectors, setUserApiKey, deleteUserApiKey } from "@/api/mcp";
+import { listAuthorizerConfigs, checkAuthorizerLinkStatus, getAuthorizerLinkAuthorizeUrl, submitAuthorizerLinkCallback, deleteAuthorizerLink } from "@/api/security";
 import { Input } from "@/components/ui/input";
 import { groupModels } from "@/lib/models";
 import type { AgentResponse, SessionResponse, MemoryResponse, MemoryRecordItem, ModelOption, ConnectorInfo } from "@/api/types";
@@ -34,7 +35,7 @@ interface ChatPageProps {
 
 
 export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: ChatPageProps) {
-  const { user, browserSessionId } = useAuth();
+  const { user, browserSessionId, authConfig: loginAuthConfig } = useAuth();
   const { theme, setTheme } = useTheme();
 
   const userGroupNames = userGroups
@@ -105,8 +106,109 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showModelPicker]);
 
+  // Authorizer linking state
+  const [resolvedAuthorizerId, setResolvedAuthorizerId] = useState<number | null>(null);
+  const [linkStatus, setLinkStatus] = useState<"unknown" | "linked" | "unlinked" | "linking" | "not-configured" | "same-idp">("unknown");
+
+  // Resolve authorizer ID when selected agent changes
+  useEffect(() => {
+    if (!selectedAgentId) { setResolvedAuthorizerId(null); setLinkStatus("unknown"); return; }
+    const agent = agents.find((a) => a.id === selectedAgentId);
+    const authConfig = agent?.authorizer_config;
+    if (!authConfig?.type) { setResolvedAuthorizerId(null); setLinkStatus("not-configured"); return; }
+
+    // Same-IdP detection: login issuer matches agent's authorizer discovery URL
+    const isExternalLogin = loginAuthConfig?.provider_type && loginAuthConfig.provider_type !== "cognito";
+    if (isExternalLogin && authConfig.discovery_url && loginAuthConfig?.issuer_url) {
+      const entraPattern = /login\.microsoftonline\.com\/([^/]+)/i;
+      const issuerMatch = entraPattern.exec(loginAuthConfig.issuer_url);
+      const discoveryMatch = entraPattern.exec(authConfig.discovery_url);
+      let sameIdp = false;
+      if (issuerMatch && discoveryMatch) {
+        sameIdp = issuerMatch[1]!.toLowerCase() === discoveryMatch[1]!.toLowerCase();
+      } else {
+        const base = authConfig.discovery_url.replace(/\/?\.well-known\/openid-configuration\/?$/, "").replace(/\/+$/, "");
+        sameIdp = base.toLowerCase() === loginAuthConfig.issuer_url.replace(/\/+$/, "").toLowerCase();
+      }
+      if (sameIdp) {
+        setLinkStatus("same-idp");
+        setResolvedAuthorizerId(null);
+        return;
+      }
+    }
+
+    listAuthorizerConfigs()
+      .then((configs) => {
+        const match = configs.find((c) =>
+          (authConfig.name && c.name === authConfig.name) ||
+          (authConfig.pool_id && c.pool_id === authConfig.pool_id) ||
+          (authConfig.discovery_url && c.discovery_url === authConfig.discovery_url)
+        );
+        if (match) setResolvedAuthorizerId(match.id);
+        else setResolvedAuthorizerId(null);
+      })
+      .catch(() => setResolvedAuthorizerId(null));
+  }, [selectedAgentId, agents, loginAuthConfig]);
+
+  // Check link status when authorizer is resolved
+  useEffect(() => {
+    if (!resolvedAuthorizerId) return;
+    if (linkStatus === "same-idp") return;
+    checkAuthorizerLinkStatus(resolvedAuthorizerId)
+      .then((r) => {
+        if (r.linkable === false) setLinkStatus("not-configured");
+        else setLinkStatus(r.linked ? "linked" : "unlinked");
+      })
+      .catch(() => setLinkStatus("unknown"));
+  }, [resolvedAuthorizerId]);
+
+  // Complete pending link exchange after redirect
+  useEffect(() => {
+    const code = sessionStorage.getItem("loom_link_code");
+    if (!code || !resolvedAuthorizerId) return;
+    const codeVerifier = sessionStorage.getItem("loom_link_code_verifier") || "";
+    const redirectUri = sessionStorage.getItem("loom_link_redirect_uri") || "";
+    sessionStorage.removeItem("loom_link_code");
+    sessionStorage.removeItem("loom_link_code_verifier");
+    sessionStorage.removeItem("loom_link_state");
+    sessionStorage.removeItem("loom_link_redirect_uri");
+    sessionStorage.removeItem("loom_link_auth_id");
+    sessionStorage.removeItem("loom_link_return_url");
+    setLinkStatus("linking");
+    submitAuthorizerLinkCallback(resolvedAuthorizerId, code, codeVerifier, redirectUri)
+      .then(() => setLinkStatus("linked"))
+      .catch(() => setLinkStatus("unlinked"));
+  }, [resolvedAuthorizerId]);
+
+  const handleLinkAccount = async () => {
+    if (!resolvedAuthorizerId) return;
+    setLinkStatus("linking");
+    try {
+      const { authorize_url, code_verifier, state, redirect_uri } = await getAuthorizerLinkAuthorizeUrl(resolvedAuthorizerId);
+      sessionStorage.setItem("loom_link_code_verifier", code_verifier);
+      sessionStorage.setItem("loom_link_state", state);
+      sessionStorage.setItem("loom_link_redirect_uri", redirect_uri);
+      sessionStorage.setItem("loom_link_auth_id", String(resolvedAuthorizerId));
+      sessionStorage.setItem("loom_link_return_url", window.location.pathname);
+      if (selectedAgentId != null) sessionStorage.setItem("loom_link_agent_id", String(selectedAgentId));
+      window.location.href = authorize_url;
+    } catch {
+      setLinkStatus("unlinked");
+    }
+  };
+
+  const handleUnlinkAccount = async () => {
+    if (!resolvedAuthorizerId) return;
+    try {
+      await deleteAuthorizerLink(resolvedAuthorizerId);
+      setLinkStatus("unlinked");
+    } catch {
+      // Unlink failed silently
+    }
+  };
+
   // Connectors state (scoped per agent)
-  const connectorStorageKey = selectedAgentId != null ? `loom:enabledConnectors:${selectedAgentId}` : null;
+  const connectorStorageKey = selectedAgentId != null ? `loom:enabledConnectors:${selectedAgentId}:${currentUserId ?? "anonymous"}` : null;
   const [connectors, setConnectors] = useState<ConnectorInfo[]>([]);
   const [enabledConnectors, setEnabledConnectors] = useState<Set<number>>(new Set());
   const [showConnectors, setShowConnectors] = useState(false);
@@ -225,6 +327,15 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
           return !group || userGroupNames.includes(group);
         });
         setAgents(accessible);
+        const savedAgentId = sessionStorage.getItem("loom_link_agent_id");
+        if (savedAgentId) {
+          sessionStorage.removeItem("loom_link_agent_id");
+          const id = Number(savedAgentId);
+          if (accessible.some((a) => a.id === id)) {
+            setSelectedAgentId(id);
+            return;
+          }
+        }
         if (accessible.length === 1) {
           const first = accessible[0];
           if (first) setSelectedAgentId(first.id);
@@ -429,9 +540,9 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
       const agent = agents.find((a) => a.id === selectedAgentId);
       const rtModel = selectedModelId && agent && selectedModelId !== agent.model_id ? selectedModelId : undefined;
       const activeConnectorIds = enabledConnectors.size > 0 ? Array.from(enabledConnectors) : undefined;
-      invoke(prompt, "DEFAULT", currentSessionId ?? undefined, undefined, undefined, rtModel, activeConnectorIds);
+      invoke(prompt, "DEFAULT", currentSessionId ?? undefined, undefined, undefined, rtModel, activeConnectorIds, linkStatus === "linked" ? true : undefined);
     }
-  }, [isStreaming, queuedPrompt, error, selectedModelId, selectedAgentId, agents, enabledConnectors]);
+  }, [isStreaming, queuedPrompt, error, selectedModelId, selectedAgentId, agents, enabledConnectors, linkStatus]);
 
   // Scroll to bottom on new messages or streaming updates
   useEffect(() => {
@@ -453,8 +564,8 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "agent", "invoke", agentName);
     const runtimeModelId = selectedModelId && selectedAgent && selectedModelId !== selectedAgent.model_id ? selectedModelId : undefined;
     const activeConnectorIds = enabledConnectors.size > 0 ? Array.from(enabledConnectors) : undefined;
-    await invoke(prompt, "DEFAULT", currentSessionId ?? undefined, undefined, undefined, runtimeModelId, activeConnectorIds);
-  }, [input, isStreaming, selectedAgentId, currentSessionId, invoke, agents, user, browserSessionId, selectedModelId, selectedAgent, enabledConnectors]);
+    await invoke(prompt, "DEFAULT", currentSessionId ?? undefined, undefined, undefined, runtimeModelId, activeConnectorIds, linkStatus === "linked" ? true : undefined);
+  }, [input, isStreaming, selectedAgentId, currentSessionId, invoke, agents, user, browserSessionId, selectedModelId, selectedAgent, enabledConnectors, linkStatus]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -935,6 +1046,32 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                 )}
               </div>
 
+              {/* Auth linking banner */}
+              {resolvedAuthorizerId && linkStatus === "unlinked" && selectedAgent && (
+                <div className="px-4 pt-2 shrink-0">
+                  <div className="max-w-3xl mx-auto flex items-center gap-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-2.5">
+                    <Link2 className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-amber-800 dark:text-amber-300">
+                        <span className="font-medium">{selectedAgent.name}</span> requires authentication via <span className="font-medium">{selectedAgent.authorizer_config?.name ?? "an external provider"}</span>.
+                      </p>
+                      <p className="text-xs text-amber-800 dark:text-amber-300">
+                        Link your account to use this agent.
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0 h-7 text-xs border-amber-300 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/50"
+                      onClick={() => void handleLinkAccount()}
+                    >
+                      <Link2 className="h-3 w-3 mr-1" />
+                      Link Account
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               {/* Input area */}
               <div className="px-4 pt-2 pb-4 shrink-0">
                 <div className="max-w-3xl mx-auto rounded-xl border bg-background shadow-sm">
@@ -1055,6 +1192,32 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                       )}
                     </div>
                     <div className="flex items-center gap-2">
+                      {resolvedAuthorizerId && linkStatus === "linked" && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500" title="Account linked" />
+                          <span className="text-[10px] text-muted-foreground">Linked</span>
+                          <button
+                            onClick={() => void handleUnlinkAccount()}
+                            className="text-muted-foreground/50 hover:text-destructive transition-colors"
+                            title="Unlink account"
+                          >
+                            <Unplug className="h-3 w-3" />
+                          </button>
+                        </div>
+                      )}
+                      {resolvedAuthorizerId && linkStatus === "unlinked" && (
+                        <button
+                          onClick={() => void handleLinkAccount()}
+                          className="flex items-center gap-1 text-xs text-muted-foreground rounded-md border px-2 py-1 hover:text-foreground hover:border-foreground/30 cursor-pointer"
+                          title="Link your account to this agent's authorizer"
+                        >
+                          <Link2 className="h-3 w-3" />
+                          <span>Link Account</span>
+                        </button>
+                      )}
+                      {resolvedAuthorizerId && linkStatus === "linking" && (
+                        <span className="text-[10px] text-muted-foreground">Linking...</span>
+                      )}
                       {availableModels.length > 0 && (
                         <div className="relative" ref={modelPickerRef}>
                           <button

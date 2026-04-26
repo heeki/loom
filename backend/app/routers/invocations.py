@@ -51,6 +51,7 @@ class InvokeRequest(BaseModel):
     session_id: str | None = Field(default=None, description="Existing session ID to reuse (runtimeSessionId)")
     credential_id: int | None = Field(default=None, description="Authorizer credential ID for token generation")
     bearer_token: str | None = Field(default=None, description="Manual bearer token for agent invocation")
+    use_linked_token: bool = Field(default=False, description="Use linked user token for cross-IdP auth")
     model_id: str | None = Field(default=None, description="Runtime model override (must be in agent's allowed_model_ids)")
     connector_ids: list[int] | None = Field(default=None, description="User-enabled MCP connector IDs for runtime tool access")
 
@@ -711,6 +712,9 @@ async def invoke_agent_stream(
                 pass
         logger.error("Invocation failed for agent %s session %s (token_source=%s): %s",
                       agent.id, session_id, token_source, error_detail)
+        client_done_time = time.time()
+        invocation.client_done_time = client_done_time
+        invocation.client_duration_ms = compute_client_duration(client_invoke_time, client_done_time)
         invocation.status = "error"
         invocation.error_message = error_detail
         session.status = "error"
@@ -945,6 +949,9 @@ async def invoke_harness_agent_stream(
     except Exception as e:
         error_detail = str(e)
         logger.error("Harness invocation failed for agent %s session %s: %s", agent.id, session_id, error_detail)
+        client_done_time = time.time()
+        invocation.client_done_time = client_done_time
+        invocation.client_duration_ms = compute_client_duration(client_invoke_time, client_done_time)
         invocation.status = "error"
         invocation.error_message = error_detail
         session.status = "error"
@@ -1107,9 +1114,48 @@ async def invoke_agent_endpoint(
                 except Exception as e:
                     logger.warning("Failed to get token via credential %s: %s", request_body.credential_id, e)
 
+    # Priority 1.5: Linked user token (cross-IdP authorizer linking)
+    logger.info("Token resolution state: access_token=%s, use_linked_token=%s, user.sub=%s",
+                bool(access_token), request_body.use_linked_token, user.sub)
+    if not access_token:
+        agent_auth_config_15 = agent.get_authorizer_config()
+        logger.info("Priority 1.5: agent_auth_config=%s", agent_auth_config_15)
+        if agent_auth_config_15 and agent_auth_config_15.get("type"):
+            # Find the matching AuthorizerConfig by name, pool_id, or discovery_url
+            linked_auth = None
+            auth_name = agent_auth_config_15.get("name")
+            if auth_name:
+                linked_auth = db.query(AuthorizerConfig).filter(AuthorizerConfig.name == auth_name).first()
+            if not linked_auth and agent_auth_config_15.get("pool_id"):
+                linked_auth = db.query(AuthorizerConfig).filter(AuthorizerConfig.pool_id == agent_auth_config_15["pool_id"]).first()
+            if not linked_auth and agent_auth_config_15.get("discovery_url"):
+                linked_auth = db.query(AuthorizerConfig).filter(AuthorizerConfig.discovery_url == agent_auth_config_15["discovery_url"]).first()
+            if linked_auth and linked_auth.user_client_id and linked_auth.discovery_url:
+                try:
+                    from app.services.authorizer_linking import resolve_access_token as resolve_linked_token
+                    region = os.getenv("AWS_REGION", "us-east-1")
+                    user_client_secret = get_secret(linked_auth.user_client_secret_arn, region) if linked_auth.user_client_secret_arn else None
+                    logger.info("Attempting linked-user token resolution: auth_id=%s, user_sub=%s, authorizer=%s", linked_auth.id, user.sub, linked_auth.name)
+                    linked_token = resolve_linked_token(
+                        linked_auth.id, user.sub, region,
+                        linked_auth.discovery_url, linked_auth.user_client_id, user_client_secret,
+                    )
+                    if linked_token:
+                        access_token = linked_token
+                        token_source = "linked-user"
+                        logger.info("Using linked-user token for agent invocation (authorizer=%s)", linked_auth.name)
+                    else:
+                        logger.warning("Linked-user token resolution returned None for authorizer=%s user=%s", linked_auth.name, user.sub)
+                except Exception as e:
+                    logger.warning("Failed to resolve linked-user token: %s", e)
+            else:
+                logger.info("No linkable authorizer found for agent config: name=%s, pool_id=%s",
+                            auth_name, agent_auth_config_15.get("pool_id"))
+
     # Priority 2: Forward user's login token (same auth server as agent)
     # Only applies when the agent has an authorizer; non-OAuth agents use SigV4.
-    if not access_token:
+    # Skip if user explicitly requested linked token — don't mask linking failures.
+    if not access_token and not request_body.use_linked_token:
         agent_auth_config = agent.get_authorizer_config()
         if agent_auth_config and agent_auth_config.get("type"):
             auth_header = request.headers.get("Authorization", "")
@@ -1139,6 +1185,18 @@ async def invoke_agent_endpoint(
                 except Exception as e:
                     logger.warning("Failed to get Cognito token for agent %s: %s", agent_id, e)
 
+    if access_token and token_source == "user":
+        try:
+            import base64, json as _json2
+            parts = access_token.split(".")
+            if len(parts) >= 2:
+                padded = parts[1] + "=" * (-len(parts[1]) % 4)
+                claims = _json2.loads(base64.urlsafe_b64decode(padded))
+                logger.info("User token claims: iss=%s, aud=%s, sub=%s, appid=%s, azp=%s, ver=%s, scp=%s, roles=%s, exp=%s",
+                            claims.get("iss"), claims.get("aud"), claims.get("sub"), claims.get("appid"),
+                            claims.get("azp"), claims.get("ver"), claims.get("scp"), claims.get("roles"), claims.get("exp"))
+        except Exception as e:
+            logger.warning("Could not decode user token for debugging: %s", e)
     logger.info("Invoking agent %s with token_source=%s, has_token=%s",
                 agent_id, token_source, bool(access_token))
 

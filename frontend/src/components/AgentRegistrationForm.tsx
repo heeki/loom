@@ -247,6 +247,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
         authorizer_type: authConfig?.authorizer_type ?? null,
         authorizer_pool_id: authConfig?.pool_id ?? null,
         authorizer_discovery_url: authConfig?.discovery_url ?? null,
+        authorizer_allowed_audience: authConfig?.allowed_audience ?? [],
         authorizer_allowed_clients: authConfig?.allowed_clients ?? [],
         authorizer_allowed_scopes: authConfig?.allowed_scopes ?? [],
         authorizer_client_id: authConfig?.client_id ?? null,
@@ -286,6 +287,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
         authorizer_type: authConfig?.authorizer_type ?? null,
         authorizer_pool_id: authConfig?.pool_id ?? null,
         authorizer_discovery_url: authConfig?.discovery_url ?? null,
+        authorizer_allowed_audience: authConfig?.allowed_audience ?? [],
         authorizer_allowed_clients: authConfig?.allowed_clients ?? [],
         authorizer_allowed_scopes: authConfig?.allowed_scopes ?? [],
         authorizer_client_id: authConfig?.client_id ?? null,
@@ -774,6 +776,9 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                     <p><span className="text-muted-foreground">Type:</span> {selectedAuthConfig.authorizer_type}</p>
                     {selectedAuthConfig.pool_id && <p><span className="text-muted-foreground">Pool:</span> {selectedAuthConfig.pool_id}</p>}
                     {selectedAuthConfig.discovery_url && <p><span className="text-muted-foreground">Discovery URL:</span> {selectedAuthConfig.discovery_url}</p>}
+                    {selectedAuthConfig.allowed_audience.length > 0 && (
+                      <p><span className="text-muted-foreground">Allowed Audience:</span> {selectedAuthConfig.allowed_audience.join(", ")}</p>
+                    )}
                     {selectedAuthConfig.allowed_clients.length > 0 && (
                       <p><span className="text-muted-foreground">Allowed Clients:</span> {selectedAuthConfig.allowed_clients.join(", ")}</p>
                     )}

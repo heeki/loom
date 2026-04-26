@@ -5,20 +5,34 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { CognitoAuthResult } from "@/api/auth";
 
+const PROVIDER_LABELS: Record<string, string> = {
+  entra_id: "Microsoft Entra ID",
+  okta: "Okta",
+  auth0: "Auth0",
+  generic_oidc: "Single Sign-On",
+};
+
 export function LoginPage() {
-  const { login, completeNewPassword } = useAuth();
+  const { login, loginWithOIDC, completeNewPassword, authConfig } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // NEW_PASSWORD_REQUIRED challenge state
   const [challenge, setChallenge] = useState<{
     session: string;
     username: string;
   } | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+
+  const isExternalOIDC = authConfig?.provider_type && authConfig.provider_type !== "cognito";
+  const providerLabel = PROVIDER_LABELS[authConfig?.provider_type ?? ""] ?? "Single Sign-On";
+  const hasBothProviders = isExternalOIDC && authConfig?.user_pool_id;
+
+  const [selectedProvider, setSelectedProvider] = useState<"external" | "cognito">(
+    isExternalOIDC ? "external" : "cognito",
+  );
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,6 +51,17 @@ export function LoginPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOIDCLogin = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      await loginWithOIDC();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Login redirect failed");
       setLoading(false);
     }
   };
@@ -69,6 +94,9 @@ export function LoginPage() {
     }
   };
 
+  const showCognitoForm = !isExternalOIDC || selectedProvider === "cognito";
+  const showOIDCButton = isExternalOIDC && selectedProvider === "external";
+
   return (
     <div className="min-h-screen bg-background flex items-center justify-center pb-[25vh]">
       <div className="w-full max-w-sm space-y-6">
@@ -85,8 +113,54 @@ export function LoginPage() {
           />
         </div>
 
-        <div className="rounded-lg border bg-card p-6 shadow-sm">
-          {!challenge ? (
+        <div className="rounded-lg border bg-card p-6 shadow-sm space-y-4">
+          {hasBothProviders && !challenge && (
+            <div className="flex rounded-md border text-sm w-full" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={selectedProvider === "external"}
+                className={`flex-1 px-3 py-1.5 transition-colors rounded-l-md text-xs ${
+                  selectedProvider === "external"
+                    ? "bg-primary text-primary-foreground"
+                    : "hover:bg-accent"
+                }`}
+                onClick={() => { setSelectedProvider("external"); setError(null); }}
+              >
+                {providerLabel}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={selectedProvider === "cognito"}
+                className={`flex-1 px-3 py-1.5 transition-colors rounded-r-md text-xs ${
+                  selectedProvider === "cognito"
+                    ? "bg-primary text-primary-foreground"
+                    : "hover:bg-accent"
+                }`}
+                onClick={() => { setSelectedProvider("cognito"); setError(null); }}
+              >
+                Username / Password
+              </button>
+            </div>
+          )}
+
+          {showOIDCButton && !challenge && (
+            <div className="space-y-4">
+              <Button
+                className="w-full"
+                disabled={loading}
+                onClick={() => void handleOIDCLogin()}
+              >
+                {loading ? "Redirecting..." : `Sign in with ${providerLabel}`}
+              </Button>
+              {error && (
+                <p className="text-sm text-destructive">{error}</p>
+              )}
+            </div>
+          )}
+
+          {showCognitoForm && !challenge && (
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="username">Username</Label>
@@ -118,7 +192,9 @@ export function LoginPage() {
                 {loading ? "Signing in..." : "Sign in"}
               </Button>
             </form>
-          ) : (
+          )}
+
+          {challenge && (
             <form onSubmit={handleNewPassword} className="space-y-4">
               <p className="text-sm text-muted-foreground">
                 You must set a new password to continue.

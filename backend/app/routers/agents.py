@@ -102,6 +102,8 @@ class AgentDeployRequest(BaseModel):
     authorizer_type: str | None = Field(None, description="Authorizer type: 'cognito' or 'other'")
     authorizer_pool_id: str | None = Field(None, description="Cognito pool ID for authorizer (when type is 'cognito')")
     authorizer_discovery_url: str | None = Field(None, description="OIDC discovery URL (when type is 'other')")
+    authorizer_allowed_audience: list[str] = Field(default_factory=list, description="Allowed JWT audience values")
+    authorizer_allowed_audience: list[str] = Field(default_factory=list, description="Allowed JWT audience values")
     authorizer_allowed_clients: list[str] = Field(default_factory=list, description="Allowed client IDs")
     authorizer_allowed_scopes: list[str] = Field(default_factory=list, description="Allowed OAuth scopes")
     authorizer_client_id: str | None = Field(None, description="App client ID for Cognito token retrieval")
@@ -134,6 +136,7 @@ class AgentCreateRequest(BaseModel):
     authorizer_type: str | None = Field(None, description="Authorizer type: 'cognito' or 'other'")
     authorizer_pool_id: str | None = Field(None, description="Cognito pool ID for authorizer (when type is 'cognito')")
     authorizer_discovery_url: str | None = Field(None, description="OIDC discovery URL (when type is 'other')")
+    authorizer_allowed_audience: list[str] = Field(default_factory=list, description="Allowed JWT audience values")
     authorizer_allowed_clients: list[str] = Field(default_factory=list, description="Allowed client IDs")
     authorizer_allowed_scopes: list[str] = Field(default_factory=list, description="Allowed OAuth scopes")
     authorizer_client_id: str | None = Field(None, description="App client ID for Cognito token retrieval")
@@ -310,8 +313,12 @@ def _agent_response(agent: Agent, db: Session) -> AgentResponse:
 
     # Enrich authorizer_config with the matching AuthorizerConfig name
     auth_cfg = agent_dict.get("authorizer_config")
-    if auth_cfg and auth_cfg.get("pool_id"):
-        ac = db.query(AuthorizerConfig).filter(AuthorizerConfig.pool_id == auth_cfg["pool_id"]).first()
+    if auth_cfg:
+        ac = None
+        if auth_cfg.get("pool_id"):
+            ac = db.query(AuthorizerConfig).filter(AuthorizerConfig.pool_id == auth_cfg["pool_id"]).first()
+        if not ac and auth_cfg.get("discovery_url"):
+            ac = db.query(AuthorizerConfig).filter(AuthorizerConfig.discovery_url == auth_cfg["discovery_url"]).first()
         if ac:
             auth_cfg["name"] = ac.name
 
@@ -564,6 +571,7 @@ def _register_agent(request: AgentCreateRequest, db: Session) -> AgentResponse:
         imported_authorizer = {
             "type": auth_type,
             "discovery_url": discovery_url,
+            "allowed_audience": jwt_authorizer.get("allowedAudience", []),
             "allowed_clients": jwt_authorizer.get("allowedClients", []),
             "allowed_scopes": jwt_authorizer.get("allowedScopes", []),
         }
@@ -1106,18 +1114,26 @@ def _deploy_agent_background(
                 allowed_clients.append(user_client_id)
             if allowed_clients:
                 jwt_config["allowedClients"] = allowed_clients
+            if request.authorizer_allowed_audience:
+                jwt_config["allowedAudience"] = request.authorizer_allowed_audience
             if request.authorizer_allowed_scopes:
                 jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
             authorizer_config = {"customJWTAuthorizer": jwt_config}
-        elif request.authorizer_type == "other" and request.authorizer_discovery_url:
+        elif request.authorizer_type in ("other", "entra_id") and request.authorizer_discovery_url:
             jwt_config = {"discoveryUrl": request.authorizer_discovery_url}
-            if request.authorizer_allowed_clients:
+            if request.authorizer_allowed_audience:
+                jwt_config["allowedAudience"] = request.authorizer_allowed_audience
+            # Entra ID v1.0 tokens lack the standard 'azp' claim that AgentCore
+            # validates allowedClients against, so omit it for entra_id.
+            if request.authorizer_allowed_clients and request.authorizer_type != "entra_id":
                 jwt_config["allowedClients"] = request.authorizer_allowed_clients
             if request.authorizer_allowed_scopes:
                 jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
             authorizer_config = {"customJWTAuthorizer": jwt_config}
 
         # --- Step 4: Deploy to AgentCore ---
+        if authorizer_config:
+            logger.info("Deploying with authorizer_config: %s", authorizer_config)
         agent.deployment_status = "deploying"
         db.commit()
 
@@ -1179,6 +1195,7 @@ def _deploy_agent_background(
                     "type": request.authorizer_type,
                     "pool_id": request.authorizer_pool_id,
                     "discovery_url": request.authorizer_discovery_url,
+                    "allowed_audience": request.authorizer_allowed_audience,
                     "allowed_clients": stored_clients,
                     "allowed_scopes": request.authorizer_allowed_scopes,
                 })
@@ -1309,12 +1326,16 @@ def _deploy_harness(request: AgentCreateRequest, db: Session, background_tasks: 
             allowed_clients.append(user_client_id)
         if allowed_clients:
             jwt_config["allowedClients"] = allowed_clients
+        if request.authorizer_allowed_audience:
+            jwt_config["allowedAudience"] = request.authorizer_allowed_audience
         if request.authorizer_allowed_scopes:
             jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
         authorizer_config = {"customJWTAuthorizer": jwt_config}
-    elif request.authorizer_type == "other" and request.authorizer_discovery_url:
+    elif request.authorizer_type in ("other", "entra_id") and request.authorizer_discovery_url:
         jwt_config = {"discoveryUrl": request.authorizer_discovery_url}
-        if request.authorizer_allowed_clients:
+        if request.authorizer_allowed_audience:
+            jwt_config["allowedAudience"] = request.authorizer_allowed_audience
+        if request.authorizer_allowed_clients and request.authorizer_type != "entra_id":
             jwt_config["allowedClients"] = request.authorizer_allowed_clients
         if request.authorizer_allowed_scopes:
             jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
@@ -1344,6 +1365,7 @@ def _deploy_harness(request: AgentCreateRequest, db: Session, background_tasks: 
             "type": request.authorizer_type,
             "pool_id": request.authorizer_pool_id,
             "discovery_url": jwt.get("discoveryUrl"),
+            "allowed_audience": jwt.get("allowedAudience", []),
             "allowed_clients": jwt.get("allowedClients", []),
             "allowed_scopes": jwt.get("allowedScopes", []),
         })
@@ -2072,6 +2094,7 @@ def refresh_agent(agent_id: int, user: UserInfo = Depends(require_scopes("agent:
             agent.set_authorizer_config({
                 "type": auth_type,
                 "discovery_url": discovery_url,
+                "allowed_audience": jwt_authorizer.get("allowedAudience", []),
                 "allowed_clients": jwt_authorizer.get("allowedClients", []),
                 "allowed_scopes": jwt_authorizer.get("allowedScopes", []),
             })

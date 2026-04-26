@@ -591,7 +591,31 @@ Agents support runtime model selection, allowing users to choose from a set of a
 - **Frontend component:** `ExternalIntegrationSection` displays endpoint info with copy-to-clipboard buttons, protocol badges, network mode indicators, and syntax-highlighted code blocks. Only shown for agents with status READY.
 - **10 backend tests** in `test_integration_info.py` covering SigV4 custom/harness agents, OAuth2 Cognito/custom OIDC, MCP/A2A protocol URLs, multiple qualifiers, VPC network mode, and error cases.
 
-### Phase 27 — Advanced Operations
+### Phase 27 — 3rd-Party Identity Provider Support *(Complete)*
+- **Backend `IdentityProvider` model** (`backend/app/models/identity_provider.py`): stores OIDC configuration (issuer, client ID, discovery URL, authorization/token/JWKS endpoints), group claim mapping (external IdP groups to Loom groups via configurable JSON mapping), and cached discovery metadata with TTL-based refresh.
+- **CRUD endpoints** at `/api/settings/identity-providers` for managing identity provider configurations, plus `POST .../discover` for OIDC discovery and `POST .../test-discovery` for validating provider connectivity.
+- **OIDC discovery service** (`backend/app/services/oidc.py`): fetches `.well-known/openid-configuration` from any OIDC-compliant provider, extracts authorization, token, JWKS, and userinfo endpoints.
+- **Generic JWT validation** (`backend/app/services/jwt_validator.py`): validates tokens against any JWKS endpoint (not just Cognito). Supports key rotation via cached JWKS with automatic refresh on key-not-found.
+- **Group claim mapping**: maps external IdP group claims (e.g., Microsoft Entra ID `groups`, Okta `groups`) to Loom's internal group model (`g-admins-*`, `g-users-*`) via a configurable per-provider mapping table.
+- **`GET /api/auth/config`** extended to return the active identity provider configuration when an external IdP is active, backward-compatible with the existing Cognito-only response format.
+- **Generic token service** (`backend/app/services/token.py`): client credentials grant against any OIDC-compliant token endpoint (not just Cognito).
+- **Token endpoint** in the security router supports both Cognito and generic OIDC authorizers for agent invocation.
+- **Supported providers**: Microsoft Entra ID, Okta, Auth0, Generic OIDC. Cognito remains the default when no external IdP is configured.
+- **Frontend OIDC Authorization Code + PKCE flow**: `AuthContext` extended with `startOIDCLogin()` and `exchangeOIDCCode()` in `frontend/src/api/auth.ts` for standard browser-based OIDC login without client secrets.
+- **LoginPage**: shows provider-specific button (e.g., "Sign in with Microsoft Entra ID") when an external IdP is active, alongside the existing Cognito login form.
+- **Identity Provider management UI** (`frontend/src/components/IdentityProviderPanel.tsx`): CRUD for provider configurations, OIDC discovery test button, and group mapping table editor.
+- **Security Admin page**: new "Identity Providers" tab for managing external IdP configurations.
+- **API client** at `frontend/src/api/identity_providers.ts` for all identity provider CRUD operations.
+- **22 backend tests** in `backend/tests/test_identity_providers.py` covering CRUD, discovery, group mapping, token validation, and backward compatibility.
+- **Per-user authorizer linking** (`backend/app/services/authorizer_linking.py`): OAuth popup flow for cross-IdP scenarios where the user's login IdP differs from the agent's authorizer. Refresh tokens stored in Secrets Manager at `loom/authorizers/{auth_id}/user-tokens/{user_sub}`. Access tokens resolved at invocation time (Priority 1.5) with in-memory caching. Four linking endpoints under `/api/security/authorizers/{auth_id}/link`. Frontend `OAuthLinkCallbackPage` handles popup callback with `window.opener.postMessage`.
+- **Same-IdP detection**: When the user's login IdP matches the agent's authorizer (e.g., same Entra ID tenant), the frontend auto-detects this by comparing tenant IDs extracted from login issuer URL and agent authorizer discovery URL. Shows a green dot indicator and automatically selects the user's login token — no account linking required.
+- **`allowed_audience` field**: Added to the `AuthorizerConfig` model, DB migration, CRUD endpoints, deploy requests, and frontend forms. Maps to AgentCore's `allowedAudience` parameter (validates the `aud` JWT claim, separate from `allowedClients` which validates `azp`).
+- **Entra ID `allowedClients` fix**: Microsoft Entra ID v1.0 access tokens lack the standard `azp` claim (they use `appid` instead). AgentCore validates `allowedClients` against `azp`, causing `UnrecognizedClientException` (401). Deploy paths now omit `allowedClients` for `entra_id` authorizer type, relying on `allowedAudience` alone.
+- **Entra ID v1.0/v2.0 issuer handling**: Backend auth dependency detects v2.0 issuer URLs and constructs the expected v1.0 issuer (`https://sts.windows.net/{tenant}/`) for token validation, since Entra ID v2.0 token endpoints issue access tokens with v1.0 format issuers.
+- **Credential filtering per authorizer**: Frontend invoke panel filters M2M credentials to only show those from the agent's matching authorizer, preventing cross-authorizer credential selection.
+- **Harness IAM prefix fix**: IAM role policy and CloudFormation role template updated to include `harness_` prefix for workload identity resources and CloudWatch Logs permissions, supporting harness-deployed agents.
+
+### Phase 28 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

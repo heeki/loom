@@ -206,6 +206,7 @@ def build_base_policy(region: str, account_id: str, agent_name: str) -> dict:
                 "Resource": [
                     f"arn:aws:bedrock-agentcore:{region}:{account_id}:workload-identity-directory/default",
                     f"arn:aws:bedrock-agentcore:{region}:{account_id}:workload-identity-directory/default/workload-identity/{agent_name}-*",
+                    f"arn:aws:bedrock-agentcore:{region}:{account_id}:workload-identity-directory/default/workload-identity/harness_{agent_name}-*",
                 ],
             },
             {
@@ -215,6 +216,22 @@ def build_base_policy(region: str, account_id: str, agent_name: str) -> dict:
                 ],
                 "Resource": [
                     f"arn:aws:bedrock-agentcore:{region}:{account_id}:token-vault/default/oauth2credentialprovider/*",
+                ],
+            },
+            {
+                "Effect": "Allow",
+                "Action": [
+                    "logs:CreateLogGroup",
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents",
+                    "logs:DescribeLogGroups",
+                    "logs:DescribeLogStreams",
+                ],
+                "Resource": [
+                    f"arn:aws:logs:{region}:{account_id}:log-group:/aws/bedrock-agentcore/runtimes/{agent_name}*",
+                    f"arn:aws:logs:{region}:{account_id}:log-group:/aws/bedrock-agentcore/runtimes/{agent_name}*:*",
+                    f"arn:aws:logs:{region}:{account_id}:log-group:/aws/bedrock-agentcore/runtimes/harness_{agent_name}*",
+                    f"arn:aws:logs:{region}:{account_id}:log-group:/aws/bedrock-agentcore/runtimes/harness_{agent_name}*:*",
                 ],
             },
         ],

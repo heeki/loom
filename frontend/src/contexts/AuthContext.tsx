@@ -12,6 +12,8 @@ import {
   initiateAuth,
   respondToNewPasswordChallenge,
   refreshTokens,
+  exchangeOIDCCode,
+  startOIDCLogin,
   type AuthConfig,
   type AuthTokens,
   type CognitoAuthResult,
@@ -105,7 +107,9 @@ interface AuthContextValue {
   accessToken: string | null;
   scopes: Set<Scope>;
   hasScope: (scope: Scope) => boolean;
+  authConfig: AuthConfig | null;
   login: (username: string, password: string) => Promise<CognitoAuthResult>;
+  loginWithOIDC: () => Promise<void>;
   completeNewPassword: (
     session: string,
     username: string,
@@ -131,7 +135,9 @@ const AuthContext = createContext<AuthContextValue>({
   accessToken: null,
   scopes: EMPTY_SCOPES,
   hasScope: () => false,
+  authConfig: null,
   login: async () => ({}),
+  loginWithOIDC: async () => {},
   completeNewPassword: async () => {},
   logout: () => {},
   browserSessionId: null,
@@ -145,11 +151,43 @@ function decodeJwtPayload(token: string): Record<string, unknown> {
   return JSON.parse(decoded) as Record<string, unknown>;
 }
 
+function isExternalOIDC(cfg: AuthConfig | null): boolean {
+  return !!cfg?.provider_type && cfg.provider_type !== "cognito";
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [tokens, setTokens] = useState<AuthTokens | null>(null);
-  const [user, setUser] = useState<CognitoUser | null>(null);
+  const [tokens, setTokens] = useState<AuthTokens | null>(() => {
+    try {
+      const stored = sessionStorage.getItem("loom_auth_tokens");
+      return stored ? JSON.parse(stored) as AuthTokens : null;
+    } catch { return null; }
+  });
+  const [user, setUser] = useState<CognitoUser | null>(() => {
+    try {
+      const stored = sessionStorage.getItem("loom_auth_user");
+      return stored ? JSON.parse(stored) as CognitoUser : null;
+    } catch { return null; }
+  });
   const [config, setConfig] = useState<AuthConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Persist tokens and user to sessionStorage
+  useEffect(() => {
+    if (tokens) {
+      sessionStorage.setItem("loom_auth_tokens", JSON.stringify(tokens));
+      setAuthToken(tokens.accessToken);
+    } else {
+      sessionStorage.removeItem("loom_auth_tokens");
+    }
+  }, [tokens]);
+
+  useEffect(() => {
+    if (user) {
+      sessionStorage.setItem("loom_auth_user", JSON.stringify(user));
+    } else {
+      sessionStorage.removeItem("loom_auth_user");
+    }
+  }, [user]);
   const [browserSessionId, setBrowserSessionId] = useState<string | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tokensRef = useRef<AuthTokens | null>(null);
@@ -157,25 +195,101 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const configRef = useRef<AuthConfig | null>(null);
   configRef.current = config;
 
+  // Process OIDC callback code
+  const handleOIDCCallback = useCallback(async (code: string, cfg: AuthConfig) => {
+    try {
+      const tokenResponse = await exchangeOIDCCode(code, cfg);
+      const newTokens: AuthTokens = {
+        idToken: tokenResponse.id_token,
+        accessToken: tokenResponse.access_token,
+        refreshToken: tokenResponse.refresh_token || "",
+      };
+      setTokens(newTokens);
+      setAuthToken(newTokens.accessToken);
+
+      // Decode id_token for user info
+      try {
+        const claims = decodeJwtPayload(newTokens.idToken);
+        const claimPath = cfg.group_claim_path ?? "groups";
+        const rawGroups = (claims[claimPath] as string[] | undefined)
+          ?? (claims.groups as string[] | undefined)
+          ?? (claims.roles as string[] | undefined)
+          ?? (claims["cognito:groups"] as string[] | undefined)
+          ?? [];
+        const mappings = cfg.group_mappings;
+        const groups = mappings
+          ? rawGroups.flatMap((g) => mappings[g] ?? [])
+          : rawGroups;
+        setUser({
+          sub: claims.sub as string,
+          email: (claims.email as string | undefined) ?? (claims.preferred_username as string | undefined),
+          username:
+            (claims.preferred_username as string)
+            || (claims.email as string)
+            || (claims.name as string)
+            || (claims.sub as string),
+          groups,
+        });
+      } catch {
+        setUser({ sub: "unknown" });
+      }
+
+      const sessionId = crypto.randomUUID();
+      setBrowserSessionId(sessionId);
+      try {
+        const claims = decodeJwtPayload(newTokens.idToken);
+        const username = (claims.preferred_username as string) || (claims.email as string) || (claims.sub as string);
+        recordLogin(username, sessionId).catch(() => {});
+      } catch { /* ignore */ }
+
+      // Clean up URL — if we're on /oauth/callback, navigate to the saved return path
+      if (window.location.pathname === "/oauth/callback") {
+        const returnPath = sessionStorage.getItem("loom_link_return_url") || "/";
+        window.location.replace(returnPath);
+        return;
+      }
+      window.history.replaceState({}, "", window.location.pathname);
+    } catch (e) {
+      console.error("OIDC callback failed:", e);
+    }
+  }, []);
+
   // Fetch auth config on mount
   useEffect(() => {
     fetchAuthConfig()
       .then((cfg) => {
         setConfig(cfg);
-        // If no pool configured, skip auth
-        if (!cfg.user_pool_id || !import.meta.env.VITE_COGNITO_USER_CLIENT_ID) {
+
+        // Check for OIDC callback code in URL
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get("code");
+        if (code && isExternalOIDC(cfg)) {
+          void handleOIDCCallback(code, cfg).finally(() => setIsLoading(false));
+          return;
+        }
+
+        // If no Cognito pool and no external IdP, skip auth
+        if (!isExternalOIDC(cfg) && (!cfg.user_pool_id || !import.meta.env.VITE_COGNITO_USER_CLIENT_ID)) {
           setIsLoading(false);
         }
       })
       .catch(() => {
         setIsLoading(false);
       });
-  }, []);
+  }, [handleOIDCCallback]);
 
   // Mark loading done once config is loaded (if pool is configured, user must log in)
   useEffect(() => {
-    if (config && config.user_pool_id && import.meta.env.VITE_COGNITO_USER_CLIENT_ID) {
-      setIsLoading(false);
+    if (config) {
+      if (isExternalOIDC(config)) {
+        // For external IdP, loading is done after callback handling or immediately if no code
+        const params = new URLSearchParams(window.location.search);
+        if (!params.get("code")) {
+          setIsLoading(false);
+        }
+      } else if (config.user_pool_id && import.meta.env.VITE_COGNITO_USER_CLIENT_ID) {
+        setIsLoading(false);
+      }
     }
   }, [config]);
 
@@ -188,11 +302,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const claims = decodeJwtPayload(accessToken);
         const exp = claims.exp as number;
-        // Refresh 60 seconds before expiry
         const refreshIn = Math.max((exp - Date.now() / 1000 - 60) * 1000, 0);
 
         refreshTimerRef.current = setTimeout(async () => {
           if (!config) return;
+          // Only Cognito supports REFRESH_TOKEN_AUTH via direct API
+          if (isExternalOIDC(config)) {
+            // For external IdPs, force re-login when token expires
+            setTokens(null);
+            setUser(null);
+            setAuthToken(null);
+            return;
+          }
           try {
             const result = await refreshTokens(
               refreshToken,
@@ -203,7 +324,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               const newTokens: AuthTokens = {
                 idToken: result.AuthenticationResult.IdToken,
                 accessToken: result.AuthenticationResult.AccessToken,
-                // Refresh token is not returned on refresh; keep existing
                 refreshToken: refreshToken,
               };
               setTokens(newTokens);
@@ -211,7 +331,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               scheduleRefresh(newTokens.accessToken, newTokens.refreshToken);
             }
           } catch {
-            // Refresh failed - user must re-login
             setTokens(null);
             setUser(null);
             setAuthToken(null);
@@ -224,12 +343,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [config],
   );
 
-  // Register 401 interceptor: refresh the token and return the new access token
+  // Register 401 interceptor
   useEffect(() => {
     setOnUnauthorized(async () => {
       const currentTokens = tokensRef.current;
       const currentConfig = configRef.current;
       if (!currentTokens?.refreshToken || !currentConfig) return null;
+      if (isExternalOIDC(currentConfig)) return null;
       try {
         const result = await refreshTokens(
           currentTokens.refreshToken,
@@ -257,6 +377,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setOnUnauthorized(null);
   }, [scheduleRefresh]);
 
+  // Schedule refresh for restored session tokens
+  useEffect(() => {
+    if (tokens?.refreshToken && tokens?.accessToken && !refreshTimerRef.current) {
+      scheduleRefresh(tokens.accessToken, tokens.refreshToken);
+    }
+  }, [tokens, scheduleRefresh]);
+
   const processAuthResult = useCallback(
     (result: CognitoAuthResult) => {
       if (result.AuthenticationResult) {
@@ -268,7 +395,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setTokens(newTokens);
         setAuthToken(newTokens.accessToken);
 
-        // Decode id token for user info
         try {
           const claims = decodeJwtPayload(newTokens.idToken);
           const groups = (claims["cognito:groups"] as string[] | undefined) ?? [];
@@ -280,20 +406,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             groups,
           });
         } catch {
-          // Fallback user
           setUser({ sub: "unknown" });
         }
 
-        // Generate browser session ID and record login
         const sessionId = crypto.randomUUID();
         setBrowserSessionId(sessionId);
         try {
           const claims = decodeJwtPayload(newTokens.idToken);
           const username = (claims["cognito:username"] as string) || (claims.sub as string);
           recordLogin(username, sessionId).catch(() => {});
-        } catch {
-          // ignore
-        }
+        } catch { /* ignore */ }
 
         scheduleRefresh(newTokens.accessToken, newTokens.refreshToken);
       }
@@ -316,6 +438,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [config, processAuthResult],
   );
 
+  const loginWithOIDC = useCallback(async () => {
+    if (!config) throw new Error("Auth not configured");
+    await startOIDCLogin(config);
+  }, [config]);
+
   const completeNewPassword = useCallback(
     async (session: string, username: string, newPassword: string) => {
       if (!config) throw new Error("Auth not configured");
@@ -336,16 +463,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setAuthToken(null);
     setBrowserSessionId(null);
+    sessionStorage.removeItem("loom_auth_tokens");
+    sessionStorage.removeItem("loom_auth_user");
     if (refreshTimerRef.current) {
       clearTimeout(refreshTimerRef.current);
     }
-    // Clear per-agent invoke prompts stored in session storage
     Object.keys(sessionStorage)
       .filter((k) => k.startsWith("loom:invokePrompt:"))
       .forEach((k) => sessionStorage.removeItem(k));
   }, []);
 
-  // Cleanup timer on unmount
   useEffect(() => {
     return () => {
       if (refreshTimerRef.current) {
@@ -354,11 +481,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const isConfigured = Boolean(
+  const isCognitoConfigured = Boolean(
     config?.user_pool_id && import.meta.env.VITE_COGNITO_USER_CLIENT_ID,
   );
+  const isExternalConfigured = isExternalOIDC(config);
+  const isConfigured = isCognitoConfigured || isExternalConfigured;
 
-  // When auth is not configured, grant all scopes
   const scopes = !isConfigured
     ? ALL_SCOPES
     : user?.groups
@@ -379,7 +507,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         accessToken: tokens?.accessToken ?? null,
         scopes,
         hasScope,
+        authConfig: config,
         login,
+        loginWithOIDC,
         completeNewPassword,
         logout,
         browserSessionId,

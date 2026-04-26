@@ -1,6 +1,6 @@
 # Loom Backend
 
-FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, paginated CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, AWS Agent Registry integration (governance and discovery), security administration, tag policy management, tag profile management, cost estimation dashboard, actual runtime cost retrieval from CloudWatch usage logs, and admin audit tracking (login events, user actions, page views, per-session aggregation). Agent deploy applies resolved tags to the DB record immediately on creation so tag-based resource filtering (e.g., demo user group restrictions) is effective from CREATING status.
+FastAPI backend for the Loom Agent Builder Playground. Provides endpoints for agent registration, deployment, SSE streaming invocation, paginated CloudWatch log retrieval, cold-start latency measurement, session liveness tracking, memory resource management, MCP server management, A2A agent management, AWS Agent Registry integration (governance and discovery), security administration, 3rd-party identity provider management (Microsoft Entra ID, Okta, Auth0, Generic OIDC), per-user authorizer linking (cross-IdP OAuth popup flow with Secrets Manager token storage), tag policy management, tag profile management, cost estimation dashboard, actual runtime cost retrieval from CloudWatch usage logs, and admin audit tracking (login events, user actions, page views, per-session aggregation). Agent deploy applies resolved tags to the DB record immediately on creation so tag-based resource filtering (e.g., demo user group restrictions) is effective from CREATING status.
 
 ## Technology Stack
 
@@ -160,6 +160,7 @@ backend/
 │   │   ├── memory.py        # Memory ORM model (AgentCore Memory resources)
 │   │   ├── mcp.py           # McpServer, McpTool, McpServerAccess ORM models
 │   │   ├── a2a.py           # A2aAgent, A2aAgentSkill, A2aAgentAccess
+│   │   ├── identity_provider.py # IdentityProvider ORM model (3rd-party OIDC providers)
 │   │   ├── tag_policy.py    # TagPolicy ORM model (configurable tag policies)
 │   │   ├── tag_profile.py   # TagProfile ORM model (named tag presets)
 │   │   ├── site_setting.py    # SiteSetting ORM model (site-wide settings)
@@ -191,13 +192,16 @@ backend/
 │       ├── deployment.py    # Agent artifact build + runtime CRUD
 │       ├── harness.py       # AgentCore Harness API: create, get, delete, invoke stream
 │       ├── iam.py           # IAM role management + Cognito pool listing
-│       ├── jwt_validator.py # JWT validation against Cognito JWKS
+│       ├── jwt_validator.py # JWT validation against any JWKS endpoint (Cognito + external IdPs)
+│       ├── oidc.py          # OIDC discovery: fetch .well-known/openid-configuration
+│       ├── token.py         # Generic token service: client credentials grant against any OIDC token endpoint
 │       ├── latency.py       # Pure computation: cold_start_latency_ms, client_duration_ms
 │       ├── a2a.py           # A2A Agent Card fetching, parsing, connection test
 │       ├── mcp.py           # MCP connection test + tool fetch stubs
 │       ├── memory.py        # boto3 wrapper: AgentCore Memory CRUD + LTM record queries
 │       ├── secrets.py       # Secrets Manager wrapper with caching
 │       ├── tokens.py        # Bedrock CountTokens API with provider guard
+│       ├── authorizer_linking.py # Per-user authorizer linking: token storage/resolution via Secrets Manager
 │       ├── registry.py      # AWS Agent Registry: control/data plane wrapper, descriptor builders
 │       └── usage_poller.py  # Background poller: estimated → actual costs
 ├── scripts/
@@ -376,7 +380,21 @@ Runtime costs are recomputed from `client_duration_ms` at view time using curren
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/auth/config` | Return Cognito config (pool ID, region) for frontend |
+| `GET` | `/api/auth/config` | Return auth config (Cognito or active external IdP) for frontend |
+
+### Identity Provider Management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/settings/identity-providers` | Create an identity provider configuration |
+| `GET` | `/api/settings/identity-providers` | List all identity provider configurations |
+| `GET` | `/api/settings/identity-providers/{id}` | Get a specific identity provider |
+| `PUT` | `/api/settings/identity-providers/{id}` | Update an identity provider configuration |
+| `DELETE` | `/api/settings/identity-providers/{id}` | Delete an identity provider configuration |
+| `POST` | `/api/settings/identity-providers/discover` | Run OIDC discovery against a well-known URL |
+| `POST` | `/api/settings/identity-providers/{id}/test-discovery` | Test discovery for an existing provider |
+
+Supports Microsoft Entra ID, Okta, Auth0, and Generic OIDC providers. Includes OIDC discovery for auto-populating endpoints, configurable group claim mapping (external IdP groups to Loom groups), and generic JWT validation against any JWKS endpoint. Cognito remains the default when no external IdP is active. Scope enforcement: `settings:read` for GET, `settings:write` for POST/PUT/DELETE.
 
 ### Memory Resources
 

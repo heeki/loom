@@ -1,8 +1,18 @@
 import { apiFetch } from "./client";
 
 export interface AuthConfig {
+  provider_type?: string;
   user_pool_id: string;
   region: string;
+  // External IdP fields (present when provider_type != "cognito")
+  authorization_endpoint?: string;
+  token_endpoint?: string;
+  client_id?: string;
+  scopes?: string;
+  issuer_url?: string;
+  redirect_uri?: string;
+  group_claim_path?: string;
+  group_mappings?: Record<string, string[]>;
 }
 
 export interface AuthTokens {
@@ -21,6 +31,14 @@ export interface CognitoAuthResult {
     ExpiresIn: number;
     TokenType: string;
   };
+}
+
+export interface OIDCTokenResponse {
+  access_token: string;
+  id_token: string;
+  refresh_token?: string;
+  token_type: string;
+  expires_in: number;
 }
 
 export function fetchAuthConfig(): Promise<AuthConfig> {
@@ -140,4 +158,84 @@ export async function refreshTokens(
   }
 
   return response.json() as Promise<CognitoAuthResult>;
+}
+
+// ---------------------------------------------------------------------------
+// OIDC Authorization Code + PKCE helpers
+// ---------------------------------------------------------------------------
+
+function generateRandomString(length: number): string {
+  const array = new Uint8Array(length);
+  crypto.getRandomValues(array);
+  return Array.from(array, (b) => b.toString(16).padStart(2, "0")).join("").slice(0, length);
+}
+
+async function sha256(plain: string): Promise<ArrayBuffer> {
+  const encoder = new TextEncoder();
+  return crypto.subtle.digest("SHA-256", encoder.encode(plain));
+}
+
+function base64urlEncode(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+export async function startOIDCLogin(config: AuthConfig): Promise<void> {
+  const codeVerifier = generateRandomString(64);
+  const codeChallenge = base64urlEncode(await sha256(codeVerifier));
+
+  sessionStorage.setItem("oidc_code_verifier", codeVerifier);
+
+  const redirectUri = config.redirect_uri || `${window.location.origin}/oauth/callback`;
+  sessionStorage.setItem("oidc_redirect_uri", redirectUri);
+
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: config.client_id || "",
+    redirect_uri: redirectUri,
+    scope: config.scopes || "openid profile email",
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
+    state: generateRandomString(32),
+  });
+
+  sessionStorage.setItem("oidc_state", params.get("state")!);
+
+  window.location.href = `${config.authorization_endpoint}?${params.toString()}`;
+}
+
+export async function exchangeOIDCCode(
+  code: string,
+  config: AuthConfig,
+): Promise<OIDCTokenResponse> {
+  const codeVerifier = sessionStorage.getItem("oidc_code_verifier") || "";
+  const redirectUri = sessionStorage.getItem("oidc_redirect_uri") || `${window.location.origin}/oauth/callback`;
+
+  const params = new URLSearchParams({
+    grant_type: "authorization_code",
+    client_id: config.client_id || "",
+    code,
+    redirect_uri: redirectUri,
+    code_verifier: codeVerifier,
+  });
+
+  const response = await fetch(config.token_endpoint!, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Token exchange failed: ${text}`);
+  }
+
+  // Clean up PKCE state
+  sessionStorage.removeItem("oidc_code_verifier");
+  sessionStorage.removeItem("oidc_redirect_uri");
+  sessionStorage.removeItem("oidc_state");
+
+  return response.json() as Promise<OIDCTokenResponse>;
 }
