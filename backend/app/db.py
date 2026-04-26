@@ -116,6 +116,7 @@ def _migrate_add_columns(eng) -> None:
         ("agents", "registry_status", "VARCHAR"),
         ("agents", "allowed_model_ids", "TEXT"),
         ("agents", "harness_id", "VARCHAR"),
+        ("authorizer_configs", "allowed_audience", "TEXT"),
         ("authorizer_configs", "user_client_id", "VARCHAR"),
         ("authorizer_configs", "user_client_secret_arn", "VARCHAR"),
         ("authorizer_configs", "user_redirect_uri", "VARCHAR"),

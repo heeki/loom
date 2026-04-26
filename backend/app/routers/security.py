@@ -71,6 +71,7 @@ class CreateAuthorizerRequest(BaseModel):
     authorizer_type: str  # "cognito" or "other"
     pool_id: str | None = None
     discovery_url: str | None = None
+    allowed_audience: list[str] = Field(default_factory=list)
     allowed_clients: list[str] = Field(default_factory=list)
     allowed_scopes: list[str] = Field(default_factory=list)
     client_id: str | None = None
@@ -85,6 +86,7 @@ class UpdateAuthorizerRequest(BaseModel):
     authorizer_type: str | None = None
     pool_id: str | None = None
     discovery_url: str | None = None
+    allowed_audience: list[str] | None = None
     allowed_clients: list[str] | None = None
     allowed_scopes: list[str] | None = None
     client_id: str | None = None
@@ -352,6 +354,7 @@ def create_authorizer(request: CreateAuthorizerRequest, user: UserInfo = Depends
         authorizer_type=request.authorizer_type,
         pool_id=request.pool_id,
         discovery_url=request.discovery_url,
+        allowed_audience=json.dumps(request.allowed_audience),
         allowed_clients=json.dumps(request.allowed_clients),
         allowed_scopes=json.dumps(request.allowed_scopes),
         client_id=request.client_id,
@@ -402,6 +405,8 @@ def update_authorizer(
         auth.pool_id = request.pool_id
     if request.discovery_url is not None:
         auth.discovery_url = request.discovery_url
+    if request.allowed_audience is not None:
+        auth.allowed_audience = json.dumps(request.allowed_audience)
     if request.allowed_clients is not None:
         auth.allowed_clients = json.dumps(request.allowed_clients)
     if request.allowed_scopes is not None:

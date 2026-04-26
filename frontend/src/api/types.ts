@@ -22,7 +22,7 @@ export interface AgentResponse {
   endpoint_status: string | null;
   protocol: string | null;
   network_mode: string | null;
-  authorizer_config: { type?: string; name?: string; pool_id?: string; discovery_url?: string; allowed_clients?: string[]; allowed_scopes?: string[] } | null;
+  authorizer_config: { type?: string; name?: string; pool_id?: string; discovery_url?: string; allowed_audience?: string[]; allowed_clients?: string[]; allowed_scopes?: string[] } | null;
   model_id: string | null;
   allowed_model_ids: string[];
   deployed_at: string | null;
@@ -60,6 +60,7 @@ export interface AgentHarnessDeployRequest {
   authorizer_type: string | null;
   authorizer_pool_id: string | null;
   authorizer_discovery_url: string | null;
+  authorizer_allowed_audience: string[];
   authorizer_allowed_clients: string[];
   authorizer_allowed_scopes: string[];
   authorizer_client_id: string | null;
@@ -93,6 +94,7 @@ export interface AgentDeployRequest {
   authorizer_type: string | null;
   authorizer_pool_id: string | null;
   authorizer_discovery_url: string | null;
+  authorizer_allowed_audience: string[];
   authorizer_allowed_clients: string[];
   authorizer_allowed_scopes: string[];
   authorizer_client_id: string | null;
@@ -386,6 +388,7 @@ export interface AuthorizerConfigResponse {
   authorizer_type: string;
   pool_id: string | null;
   discovery_url: string | null;
+  allowed_audience: string[];
   allowed_clients: string[];
   allowed_scopes: string[];
   client_id: string | null;
@@ -403,6 +406,7 @@ export interface AuthorizerConfigCreateRequest {
   authorizer_type: string;
   pool_id?: string;
   discovery_url?: string;
+  allowed_audience?: string[];
   allowed_clients?: string[];
   allowed_scopes?: string[];
   user_client_id?: string;
@@ -415,6 +419,7 @@ export interface AuthorizerConfigUpdateRequest {
   authorizer_type?: string;
   pool_id?: string;
   discovery_url?: string;
+  allowed_audience?: string[];
   allowed_clients?: string[];
   allowed_scopes?: string[];
   user_client_id?: string;

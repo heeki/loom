@@ -12,6 +12,7 @@ class AuthorizerConfig(Base):
     authorizer_type = Column(String, nullable=False)  # "cognito" or "other"
     pool_id = Column(String, nullable=True)
     discovery_url = Column(String, nullable=True)
+    allowed_audience = Column(Text, default="[]")  # JSON array
     allowed_clients = Column(Text, default="[]")  # JSON array
     allowed_scopes = Column(Text, default="[]")  # JSON array
     client_id = Column(String, nullable=True)
@@ -38,6 +39,7 @@ class AuthorizerConfig(Base):
             "authorizer_type": self.authorizer_type,
             "pool_id": self.pool_id,
             "discovery_url": self.discovery_url,
+            "allowed_audience": json.loads(self.allowed_audience) if self.allowed_audience else [],
             "allowed_clients": json.loads(self.allowed_clients) if self.allowed_clients else [],
             "allowed_scopes": json.loads(self.allowed_scopes) if self.allowed_scopes else [],
             "client_id": self.client_id,

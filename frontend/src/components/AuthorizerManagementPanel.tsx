@@ -155,6 +155,7 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
   const [formName, setFormName] = useState("");
   const [formPoolId, setFormPoolId] = useState("");
   const [formDiscoveryUrl, setFormDiscoveryUrl] = useState("");
+  const [formAllowedAudience, setFormAllowedAudience] = useState<string[]>([]);
   const [formAllowedClients, setFormAllowedClients] = useState<string[]>([]);
   const [formAllowedScopes, setFormAllowedScopes] = useState<string[]>([]);
   const [formUserClientId, setFormUserClientId] = useState("");
@@ -208,6 +209,7 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
         authorizer_type: formType,
         pool_id: formPoolId || undefined,
         discovery_url: formDiscoveryUrl || undefined,
+        allowed_audience: formAllowedAudience,
         allowed_clients: formAllowedClients,
         allowed_scopes: formAllowedScopes,
         user_client_id: formUserClientId || undefined,
@@ -232,6 +234,7 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
     setFormName(config.name);
     setFormPoolId(config.pool_id ?? "");
     setFormDiscoveryUrl(config.discovery_url ?? "");
+    setFormAllowedAudience(config.allowed_audience);
     setFormAllowedClients(config.allowed_clients);
     setFormAllowedScopes(config.allowed_scopes);
     setFormUserClientId(config.user_client_id ?? "");
@@ -247,6 +250,7 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
         authorizer_type: formType,
         pool_id: formPoolId || undefined,
         discovery_url: formDiscoveryUrl || undefined,
+        allowed_audience: formAllowedAudience,
         allowed_clients: formAllowedClients,
         allowed_scopes: formAllowedScopes,
         user_client_id: formUserClientId || undefined,
@@ -295,6 +299,7 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
       if (obj.authorizer_type) setFormType(obj.authorizer_type);
       if (obj.pool_id) setFormPoolId(obj.pool_id);
       if (obj.discovery_url) setFormDiscoveryUrl(obj.discovery_url);
+      if (Array.isArray(obj.allowed_audience)) setFormAllowedAudience(obj.allowed_audience);
       if (Array.isArray(obj.allowed_clients)) setFormAllowedClients(obj.allowed_clients);
       if (Array.isArray(obj.allowed_scopes)) setFormAllowedScopes(obj.allowed_scopes);
       if (obj.user_client_id) setFormUserClientId(obj.user_client_id);
@@ -312,6 +317,7 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
       authorizer_type: formType,
       pool_id: formPoolId || undefined,
       discovery_url: formDiscoveryUrl || undefined,
+      allowed_audience: formAllowedAudience.length > 0 ? formAllowedAudience : undefined,
       allowed_clients: formAllowedClients.length > 0 ? formAllowedClients : undefined,
       allowed_scopes: formAllowedScopes.length > 0 ? formAllowedScopes : undefined,
       user_client_id: formUserClientId || undefined,
@@ -336,7 +342,8 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
           <Select value={formType} onValueChange={(v) => { setFormType(v); setFormPoolId(""); setFormDiscoveryUrl(""); }}>
             <SelectTrigger className="w-full text-sm"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="cognito">Cognito</SelectItem>
+              <SelectItem value="cognito">Amazon Cognito</SelectItem>
+              <SelectItem value="entra_id">Microsoft Entra ID</SelectItem>
               <SelectItem value="other">Other</SelectItem>
             </SelectContent>
           </Select>
@@ -366,6 +373,12 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
           readOnly={formType === "cognito"}
           className={formType === "cognito" ? "bg-muted/50" : ""}
         />
+      </div>
+      <div className="space-y-3">
+        <div className="min-h-[5.5rem]">
+          <label className="text-xs text-muted-foreground">Allowed Audience (press Enter to add)</label>
+          <TagInput values={formAllowedAudience} onChange={setFormAllowedAudience} placeholder="Audience URI" />
+        </div>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="min-h-[5.5rem]">
@@ -474,7 +487,7 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium">{config.name}</span>
                         <Badge variant="outline" className="text-[10px]">
-                          {config.authorizer_type === "cognito" ? "Amazon Cognito" : config.authorizer_type}
+                          {config.authorizer_type === "cognito" ? "Amazon Cognito" : config.authorizer_type === "entra_id" ? "Microsoft Entra ID" : config.authorizer_type}
                         </Badge>
                         {config.user_client_id && (
                           <Badge variant="outline" className="text-[10px] border-green-500/50 text-green-600 dark:text-green-400">Linkable</Badge>
@@ -538,6 +551,7 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
                     <div className="rounded border bg-input-bg p-3 space-y-1 text-xs">
                       {config.pool_id && <div><span className="text-muted-foreground">Pool: </span>{config.pool_id}</div>}
                       {config.discovery_url && <div><span className="text-muted-foreground">Discovery URL: </span><span className="break-all">{config.discovery_url}</span></div>}
+                      {config.allowed_audience.length > 0 && <div><span className="text-muted-foreground">Allowed Audience: </span>{config.allowed_audience.join(", ")}</div>}
                       {config.allowed_clients.length > 0 && <div><span className="text-muted-foreground">Allowed Clients: </span>{config.allowed_clients.join(", ")}</div>}
                       {config.allowed_scopes.length > 0 && <div><span className="text-muted-foreground">Allowed Scopes: </span>{config.allowed_scopes.join(", ")}</div>}
                     </div>

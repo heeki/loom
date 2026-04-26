@@ -215,10 +215,15 @@ def get_current_user(request: Request) -> UserInfo:
     # Try external IdP first if active
     if active_idp and active_idp.get("jwks_uri"):
         try:
+            issuer = active_idp["issuer_url"]
+            # Azure AD v2.0 token endpoint issues access tokens with v1.0 issuer
+            if active_idp.get("provider_type") == "entra_id" and "/v2.0" in issuer:
+                tid = issuer.split("/")[-2]
+                issuer = f"https://sts.windows.net/{tid}/"
             claims = validate_token(
                 token,
                 jwks_uri=active_idp["jwks_uri"],
-                issuer=active_idp["issuer_url"],
+                issuer=issuer,
                 audience=active_idp.get("audience") or active_idp.get("client_id"),
             )
             return _build_user_from_external_claims(claims, active_idp)
