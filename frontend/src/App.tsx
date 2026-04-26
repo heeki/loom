@@ -38,6 +38,7 @@ import { LoginPage } from "@/pages/LoginPage";
 import { BookOpen, Shield, Bot, Brain, Network, Users, LogOut, User, Settings, Eye, Tags, DollarSign, BarChart3, Palette, Library } from "lucide-react";
 import { AdminDashboardPage } from "./pages/AdminDashboardPage";
 import { ChatPage } from "./pages/ChatPage";
+import { OAuthLinkCallbackPage } from "./pages/OAuthLinkCallbackPage";
 import { recordPageView, sendBeaconPageView, trackAction } from "./api/audit";
 
 type Persona = "catalog" | "security" | "builder" | "memory" | "tagging" | "settings" | "mcp" | "a2a" | "costs" | "admin" | "registry";
@@ -341,6 +342,16 @@ function AppContent() {
         <p className="text-muted-foreground">Loading...</p>
       </div>
     );
+  }
+
+  if (window.location.pathname === "/oauth/link-callback") {
+    return <OAuthLinkCallbackPage />;
+  }
+
+  if (window.location.pathname === "/oauth/callback" && isAuthenticated) {
+    const returnPath = sessionStorage.getItem("loom_link_return_url") || "/";
+    window.location.replace(returnPath);
+    return null;
   }
 
   if (!isAuthenticated) {

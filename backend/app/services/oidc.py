@@ -24,7 +24,8 @@ def fetch_discovery(issuer_url: str) -> dict[str, Any]:
     Raises:
         OIDCDiscoveryError: If the document is unreachable or missing required fields
     """
-    url = issuer_url.rstrip("/") + "/.well-known/openid-configuration"
+    stripped = issuer_url.rstrip("/")
+    url = stripped if "/.well-known/openid-configuration" in stripped else stripped + "/.well-known/openid-configuration"
     logger.info("Fetching OIDC discovery from %s", url)
 
     try:

@@ -156,10 +156,38 @@ function isExternalOIDC(cfg: AuthConfig | null): boolean {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [tokens, setTokens] = useState<AuthTokens | null>(null);
-  const [user, setUser] = useState<CognitoUser | null>(null);
+  const [tokens, setTokens] = useState<AuthTokens | null>(() => {
+    try {
+      const stored = sessionStorage.getItem("loom_auth_tokens");
+      return stored ? JSON.parse(stored) as AuthTokens : null;
+    } catch { return null; }
+  });
+  const [user, setUser] = useState<CognitoUser | null>(() => {
+    try {
+      const stored = sessionStorage.getItem("loom_auth_user");
+      return stored ? JSON.parse(stored) as CognitoUser : null;
+    } catch { return null; }
+  });
   const [config, setConfig] = useState<AuthConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Persist tokens and user to sessionStorage
+  useEffect(() => {
+    if (tokens) {
+      sessionStorage.setItem("loom_auth_tokens", JSON.stringify(tokens));
+      setAuthToken(tokens.accessToken);
+    } else {
+      sessionStorage.removeItem("loom_auth_tokens");
+    }
+  }, [tokens]);
+
+  useEffect(() => {
+    if (user) {
+      sessionStorage.setItem("loom_auth_user", JSON.stringify(user));
+    } else {
+      sessionStorage.removeItem("loom_auth_user");
+    }
+  }, [user]);
   const [browserSessionId, setBrowserSessionId] = useState<string | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tokensRef = useRef<AuthTokens | null>(null);
@@ -182,10 +210,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Decode id_token for user info
       try {
         const claims = decodeJwtPayload(newTokens.idToken);
-        const groups = (claims.groups as string[] | undefined)
+        const claimPath = cfg.group_claim_path ?? "groups";
+        const rawGroups = (claims[claimPath] as string[] | undefined)
+          ?? (claims.groups as string[] | undefined)
           ?? (claims.roles as string[] | undefined)
           ?? (claims["cognito:groups"] as string[] | undefined)
           ?? [];
+        const mappings = cfg.group_mappings;
+        const groups = mappings
+          ? rawGroups.flatMap((g) => mappings[g] ?? [])
+          : rawGroups;
         setUser({
           sub: claims.sub as string,
           email: (claims.email as string | undefined) ?? (claims.preferred_username as string | undefined),
@@ -208,7 +242,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         recordLogin(username, sessionId).catch(() => {});
       } catch { /* ignore */ }
 
-      // Clean up URL
+      // Clean up URL — if we're on /oauth/callback, navigate to the saved return path
+      if (window.location.pathname === "/oauth/callback") {
+        const returnPath = sessionStorage.getItem("loom_link_return_url") || "/";
+        window.location.replace(returnPath);
+        return;
+      }
       window.history.replaceState({}, "", window.location.pathname);
     } catch (e) {
       console.error("OIDC callback failed:", e);
@@ -338,6 +377,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setOnUnauthorized(null);
   }, [scheduleRefresh]);
 
+  // Schedule refresh for restored session tokens
+  useEffect(() => {
+    if (tokens?.refreshToken && tokens?.accessToken && !refreshTimerRef.current) {
+      scheduleRefresh(tokens.accessToken, tokens.refreshToken);
+    }
+  }, [tokens, scheduleRefresh]);
+
   const processAuthResult = useCallback(
     (result: CognitoAuthResult) => {
       if (result.AuthenticationResult) {
@@ -417,6 +463,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setAuthToken(null);
     setBrowserSessionId(null);
+    sessionStorage.removeItem("loom_auth_tokens");
+    sessionStorage.removeItem("loom_auth_user");
     if (refreshTimerRef.current) {
       clearTimeout(refreshTimerRef.current);
     }

@@ -11,8 +11,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plug, Unplug, KeyRound, ChevronDown, Send, X } from "lucide-react";
-import { listAuthorizerConfigs, listAuthorizerCredentials } from "@/api/security";
+import { Plug, Unplug, KeyRound, ChevronDown, Send, X, Link2 } from "lucide-react";
+import { listAuthorizerConfigs, listAuthorizerCredentials, checkAuthorizerLinkStatus, getAuthorizerLinkAuthorizeUrl, submitAuthorizerLinkCallback, deleteAuthorizerLink } from "@/api/security";
 import { fetchModels } from "@/api/agents";
 import { listConnectors, setUserApiKey, deleteUserApiKey } from "@/api/mcp";
 import { groupModels } from "@/lib/models";
@@ -20,6 +20,7 @@ import type { SessionResponse, AuthorizerCredential, ModelOption, ConnectorInfo 
 
 const NEW_SESSION = "__new__";
 const USER_TOKEN = "__user__";
+const LINKED_TOKEN = "__linked__";
 const NO_CREDENTIAL = "__none__";
 const MANUAL_TOKEN = "__manual__";
 
@@ -31,12 +32,14 @@ interface InvokePanelProps {
   modelId?: string | null;
   allowedModelIds?: string[];
   authorizerName?: string;
+  authorizerId?: number;
+  isExternalIdp?: boolean;
   currentUserId?: string;
-  onInvoke: (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string, modelId?: string, connectorIds?: number[]) => void;
+  onInvoke: (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string, modelId?: string, connectorIds?: number[], useLinkedToken?: boolean) => void;
   onCancel: () => void;
 }
 
-export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelId, allowedModelIds = [], authorizerName, currentUserId, onInvoke, onCancel }: InvokePanelProps) {
+export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelId, allowedModelIds = [], authorizerName, authorizerId, isExternalIdp, currentUserId, onInvoke, onCancel }: InvokePanelProps) {
   const promptKey = `loom:invokePrompt:${agentId}`;
   const [prompt, setPrompt] = useState(() => sessionStorage.getItem(promptKey) ?? "");
 
@@ -49,14 +52,17 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
   }, [prompt, promptKey]);
   const [qualifier, setQualifier] = useState(qualifiers[0] ?? "DEFAULT");
   const [selectedSession, setSelectedSession] = useState(NEW_SESSION);
-  const [selectedCredential, setSelectedCredential] = useState(authorizerName ? USER_TOKEN : NO_CREDENTIAL);
+  const [selectedCredential, setSelectedCredential] = useState(
+    authorizerName && !isExternalIdp ? USER_TOKEN : NO_CREDENTIAL,
+  );
   const [bearerToken, setBearerToken] = useState("");
   const [allCredentials, setAllCredentials] = useState<(AuthorizerCredential & { authorizer_name: string })[]>([]);
+  const [resolvedAuthorizerId, setResolvedAuthorizerId] = useState<number | undefined>(authorizerId);
   const [selectedModel, setSelectedModel] = useState(modelId ?? "");
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
 
   // Connector state
-  const connectorStorageKey = `loom:enabledConnectors:${agentId}`;
+  const connectorStorageKey = `loom:enabledConnectors:${agentId}:${currentUserId ?? "anonymous"}`;
   const [connectors, setConnectors] = useState<ConnectorInfo[]>([]);
   const [enabledConnectors, setEnabledConnectors] = useState<Set<number>>(new Set());
   const [showConnectors, setShowConnectors] = useState(false);
@@ -66,6 +72,71 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
   const [savingApiKey, setSavingApiKey] = useState(false);
   const connectorsRef = useRef<HTMLDivElement>(null);
   const modelPickerRef = useRef<HTMLDivElement>(null);
+
+  // Authorizer linking state (cross-IdP)
+  const [linkStatus, setLinkStatus] = useState<"unknown" | "linked" | "unlinked" | "linking" | "not-configured">("unknown");
+
+  useEffect(() => {
+    if (!resolvedAuthorizerId) return;
+    checkAuthorizerLinkStatus(resolvedAuthorizerId)
+      .then((r) => {
+        if (r.linkable === false) setLinkStatus("not-configured");
+        else setLinkStatus(r.linked ? "linked" : "unlinked");
+      })
+      .catch(() => setLinkStatus("unknown"));
+  }, [resolvedAuthorizerId]);
+
+  // Auto-select linked token when linked
+  useEffect(() => {
+    if (linkStatus === "linked") {
+      setSelectedCredential(LINKED_TOKEN);
+    }
+  }, [linkStatus]);
+
+  // Complete pending link exchange after redirect
+  useEffect(() => {
+    const code = sessionStorage.getItem("loom_link_code");
+    if (!code || !resolvedAuthorizerId) return;
+    const codeVerifier = sessionStorage.getItem("loom_link_code_verifier") || "";
+    const redirectUri = sessionStorage.getItem("loom_link_redirect_uri") || "";
+    sessionStorage.removeItem("loom_link_code");
+    sessionStorage.removeItem("loom_link_code_verifier");
+    sessionStorage.removeItem("loom_link_state");
+    sessionStorage.removeItem("loom_link_redirect_uri");
+    sessionStorage.removeItem("loom_link_auth_id");
+    sessionStorage.removeItem("loom_link_return_url");
+    setLinkStatus("linking");
+    submitAuthorizerLinkCallback(resolvedAuthorizerId, code, codeVerifier, redirectUri)
+      .then(() => setLinkStatus("linked"))
+      .catch(() => setLinkStatus("unlinked"));
+  }, [resolvedAuthorizerId]);
+
+  const handleLinkAccount = async () => {
+    if (!resolvedAuthorizerId) return;
+    setLinkStatus("linking");
+    try {
+      const { authorize_url, code_verifier, state, redirect_uri } = await getAuthorizerLinkAuthorizeUrl(resolvedAuthorizerId);
+      sessionStorage.setItem("loom_link_code_verifier", code_verifier);
+      sessionStorage.setItem("loom_link_state", state);
+      sessionStorage.setItem("loom_link_redirect_uri", redirect_uri);
+      sessionStorage.setItem("loom_link_auth_id", String(resolvedAuthorizerId));
+      sessionStorage.setItem("loom_link_return_url", window.location.pathname);
+      window.location.href = authorize_url;
+    } catch {
+      setLinkStatus("unlinked");
+    }
+  };
+
+  const handleUnlinkAccount = async () => {
+    if (!resolvedAuthorizerId) return;
+    try {
+      await deleteAuthorizerLink(resolvedAuthorizerId);
+      setLinkStatus("unlinked");
+      setSelectedCredential(authorizerName && !isExternalIdp ? USER_TOKEN : NO_CREDENTIAL);
+    } catch {
+      // Unlink failed silently
+    }
+  };
 
   useEffect(() => {
     setSelectedModel(modelId ?? "");
@@ -100,7 +171,16 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
             }
           }
         }
-        if (!cancelled) setAllCredentials(results);
+        if (!cancelled) {
+          setAllCredentials(results);
+          if (isExternalIdp && authorizerName && results.length > 0) {
+            setSelectedCredential(String(results[0]!.id));
+          }
+          if (!authorizerId && authorizerName) {
+            const match = configs.find((c) => c.name === authorizerName);
+            if (match) setResolvedAuthorizerId(match.id);
+          }
+        }
       } catch {
         // Silently fail — credentials are optional
       }
@@ -212,48 +292,37 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
   // Filter sessions that match the selected qualifier, are not expired,
   // and belong to the current user (or have no owner recorded yet)
   const matchingSessions = sessions.filter(
-    (s) => s.qualifier === qualifier &&
-      s.live_status !== "expired" &&
-      (!s.user_id || !currentUserId || s.user_id === currentUserId)
+    (s) => s.live_status !== "expired"
   );
 
-  // Track the baseline session IDs so we can detect genuinely new ones
-  const prevSessionIdsRef = useRef<Set<string>>(new Set<string>());
-  // True until the first session batch for this agent has been seen
-  const initialLoadDoneRef = useRef(false);
+  // Track whether the user has manually changed the session selector
+  const userPickedRef = useRef(false);
 
-  // Reset state when the agent changes
+  // Reset when agent changes
   useEffect(() => {
     setSelectedSession(NEW_SESSION);
-    prevSessionIdsRef.current = new Set();
-    initialLoadDoneRef.current = false;
+    userPickedRef.current = false;
   }, [agentId]);
 
-  // Auto-select only a genuinely new session (created by an invocation), not
-  // sessions that were already there when the component first rendered.
+  // Auto-select the most recent session when sessions load or a new one appears,
+  // unless the user has manually picked a session in this mount cycle.
   useEffect(() => {
-    if (!initialLoadDoneRef.current) {
-      // First batch: populate the baseline without triggering auto-select
-      prevSessionIdsRef.current = new Set(matchingSessions.map((s) => s.session_id));
-      initialLoadDoneRef.current = true;
+    if (userPickedRef.current) {
+      // User made a deliberate choice — only reset if their selection disappeared
+      if (
+        selectedSession !== NEW_SESSION &&
+        !matchingSessions.some((s) => s.session_id === selectedSession)
+      ) {
+        setSelectedSession(NEW_SESSION);
+        userPickedRef.current = false;
+      }
       return;
     }
-    const prevIds = prevSessionIdsRef.current;
-    const newSession = matchingSessions.find((s) => !prevIds.has(s.session_id));
-    if (newSession && selectedSession === NEW_SESSION) {
-      setSelectedSession(newSession.session_id);
-    }
-    prevSessionIdsRef.current = new Set(matchingSessions.map((s) => s.session_id));
-  }, [matchingSessions, selectedSession]);
-
-  // If the currently selected session expires and is filtered out, reset to NEW_SESSION
-  useEffect(() => {
-    if (
-      selectedSession !== NEW_SESSION &&
-      matchingSessions.length > 0 &&
-      !matchingSessions.some((s) => s.session_id === selectedSession)
-    ) {
-      setSelectedSession(NEW_SESSION);
+    if (matchingSessions.length > 0) {
+      const sorted = [...matchingSessions].sort((a, b) =>
+        (b.created_at ?? "").localeCompare(a.created_at ?? ""),
+      );
+      setSelectedSession(sorted[0]!.session_id);
     }
   }, [matchingSessions, selectedSession]);
 
@@ -261,13 +330,14 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
     e.preventDefault();
     if (!prompt.trim() || isStreaming) return;
     const sessionId = selectedSession === NEW_SESSION ? undefined : selectedSession;
-    const credentialId = selectedCredential === USER_TOKEN || selectedCredential === NO_CREDENTIAL || selectedCredential === MANUAL_TOKEN
+    const credentialId = selectedCredential === USER_TOKEN || selectedCredential === LINKED_TOKEN || selectedCredential === NO_CREDENTIAL || selectedCredential === MANUAL_TOKEN
       ? undefined : Number(selectedCredential);
     const token = selectedCredential === MANUAL_TOKEN && bearerToken.trim()
       ? bearerToken.trim() : undefined;
     const runtimeModelId = selectedModel && selectedModel !== modelId ? selectedModel : undefined;
     const activeConnectorIds = enabledConnectors.size > 0 ? [...enabledConnectors] : undefined;
-    onInvoke(prompt.trim(), qualifier, sessionId, credentialId, token, runtimeModelId, activeConnectorIds);
+    const useLinkedToken = selectedCredential === LINKED_TOKEN ? true : undefined;
+    onInvoke(prompt.trim(), qualifier, sessionId, credentialId, token, runtimeModelId, activeConnectorIds, useLinkedToken);
   };
 
   const handleQualifierChange = (value: string) => {
@@ -307,7 +377,7 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
             )}
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">Session Identifier</Label>
-              <Select value={selectedSession} onValueChange={setSelectedSession}>
+              <Select value={selectedSession} onValueChange={(v) => { userPickedRef.current = true; setSelectedSession(v); }}>
                 <SelectTrigger className="w-80">
                   <SelectValue placeholder="New session" />
                 </SelectTrigger>
@@ -322,7 +392,23 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Credential</Label>
+              <div className="flex items-center gap-1.5">
+                <Label className="text-xs text-muted-foreground">Credential</Label>
+                {linkStatus === "linked" && (
+                  <>
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500" title="Account linked" />
+                    <button
+                      type="button"
+                      onClick={() => void handleUnlinkAccount()}
+                      className="text-muted-foreground/50 hover:text-destructive transition-colors"
+                      title="Unlink account"
+                    >
+                      <Unplug className="h-3 w-3" />
+                    </button>
+                  </>
+                )}
+              </div>
+              <div className="flex items-center gap-4">
               <Select value={selectedCredential} onValueChange={(v) => { setSelectedCredential(v); if (v !== MANUAL_TOKEN) setBearerToken(""); }}>
                 <SelectTrigger className="w-96">
                   <SelectValue />
@@ -330,19 +416,43 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
                 <SelectContent>
                   {authorizerName ? (
                     <>
-                      <SelectItem value={USER_TOKEN}>{authorizerName} / current user&apos;s token</SelectItem>
+                      {linkStatus === "linked" && (
+                        <SelectItem value={LINKED_TOKEN}>{authorizerName} / linked user token</SelectItem>
+                      )}
+                      {!isExternalIdp && (
+                        <SelectItem value={USER_TOKEN}>{authorizerName} / current user&apos;s token</SelectItem>
+                      )}
                       {allCredentials.map((c) => (
                         <SelectItem key={c.id} value={String(c.id)}>
                           {c.authorizer_name} / {c.label}
                         </SelectItem>
                       ))}
                       <SelectItem value={MANUAL_TOKEN}>{authorizerName} / manual token</SelectItem>
+                      {isExternalIdp && allCredentials.length === 0 && (
+                        <SelectItem value={NO_CREDENTIAL} disabled>Loading credentials...</SelectItem>
+                      )}
                     </>
                   ) : (
                     <SelectItem value={NO_CREDENTIAL}>No credentials (SigV4)</SelectItem>
                   )}
                 </SelectContent>
               </Select>
+              {resolvedAuthorizerId && linkStatus === "unlinked" && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="flex items-center gap-1.5 h-9"
+                  onClick={() => void handleLinkAccount()}
+                >
+                  <Link2 className="h-3.5 w-3.5" />
+                  Link Account
+                </Button>
+              )}
+              {resolvedAuthorizerId && linkStatus === "linking" && (
+                <span className="text-xs text-muted-foreground">Linking...</span>
+              )}
+              </div>
             </div>
             {selectedCredential === MANUAL_TOKEN && (
               <div className="space-y-1.5">

@@ -787,6 +787,13 @@ Resources:
       SupportedIdentityProviders:
         - COGNITO
 
+  ManagedLoginBranding:
+    Type: AWS::Cognito::ManagedLoginBranding
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      ClientId: !Ref UserClient
+      UseCognitoProvidedValues: true
+
 Outputs:
   oCognitoUserPoolId:
     Description: Cognito UserPool ID

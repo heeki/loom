@@ -201,6 +201,7 @@ export interface InvokeRequest {
   bearer_token?: string;
   model_id?: string;
   connector_ids?: number[];
+  use_linked_token?: boolean;
 }
 
 export interface InvocationResponse {
@@ -389,6 +390,9 @@ export interface AuthorizerConfigResponse {
   allowed_scopes: string[];
   client_id: string | null;
   has_client_secret: boolean;
+  user_client_id: string | null;
+  has_user_client_secret: boolean;
+  user_redirect_uri: string | null;
   tags: Record<string, string>;
   created_at: string | null;
   updated_at: string | null;
@@ -401,6 +405,9 @@ export interface AuthorizerConfigCreateRequest {
   discovery_url?: string;
   allowed_clients?: string[];
   allowed_scopes?: string[];
+  user_client_id?: string;
+  user_client_secret?: string;
+  user_redirect_uri?: string;
 }
 
 export interface AuthorizerConfigUpdateRequest {
@@ -410,6 +417,9 @@ export interface AuthorizerConfigUpdateRequest {
   discovery_url?: string;
   allowed_clients?: string[];
   allowed_scopes?: string[];
+  user_client_id?: string;
+  user_client_secret?: string;
+  user_redirect_uri?: string;
 }
 
 export interface PermissionRequestResponse {

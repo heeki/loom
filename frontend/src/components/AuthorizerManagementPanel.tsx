@@ -12,10 +12,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SortableCardGrid, SortButton, loadSortDirection, toggleSortDirection, saveSortDirection, type SortDirection } from "@/components/SortableCardGrid";
+import { JsonConfigSection } from "@/components/JsonConfigSection";
 import { useAuthorizerConfigs } from "@/hooks/useSecurity";
 import { listCognitoPools, listAuthorizerCredentials, createAuthorizerCredential, deleteAuthorizerCredential } from "@/api/security";
 import { Badge } from "@/components/ui/badge";
-import { Pencil, Trash2, Plus, ChevronDown, ChevronRight, Key } from "lucide-react";
+import { Pencil, Trash2, Plus, ChevronDown, ChevronRight, Key, Link2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { trackAction } from "@/api/audit";
@@ -156,6 +157,9 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
   const [formDiscoveryUrl, setFormDiscoveryUrl] = useState("");
   const [formAllowedClients, setFormAllowedClients] = useState<string[]>([]);
   const [formAllowedScopes, setFormAllowedScopes] = useState<string[]>([]);
+  const [formUserClientId, setFormUserClientId] = useState("");
+  const [formUserClientSecret, setFormUserClientSecret] = useState("");
+  const [formUserRedirectUri, setFormUserRedirectUri] = useState("");
 
   const fetchPools = () => {
     setPoolsLoading(true);
@@ -189,6 +193,9 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
     setFormDiscoveryUrl("");
     setFormAllowedClients([]);
     setFormAllowedScopes([]);
+    setFormUserClientId("");
+    setFormUserClientSecret("");
+    setFormUserRedirectUri("");
   };
 
   const handleCreate = async () => {
@@ -203,6 +210,9 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
         discovery_url: formDiscoveryUrl || undefined,
         allowed_clients: formAllowedClients,
         allowed_scopes: formAllowedScopes,
+        user_client_id: formUserClientId || undefined,
+        user_client_secret: formUserClientSecret || undefined,
+        user_redirect_uri: formUserRedirectUri || undefined,
       });
       resetForm();
       setShowAddForm(false);
@@ -224,6 +234,9 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
     setFormDiscoveryUrl(config.discovery_url ?? "");
     setFormAllowedClients(config.allowed_clients);
     setFormAllowedScopes(config.allowed_scopes);
+    setFormUserClientId(config.user_client_id ?? "");
+    setFormUserClientSecret("");
+    setFormUserRedirectUri(config.user_redirect_uri ?? "");
   };
 
   const handleUpdate = async (id: number) => {
@@ -236,6 +249,9 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
         discovery_url: formDiscoveryUrl || undefined,
         allowed_clients: formAllowedClients,
         allowed_scopes: formAllowedScopes,
+        user_client_id: formUserClientId || undefined,
+        user_client_secret: formUserClientSecret || undefined,
+        user_redirect_uri: formUserRedirectUri || undefined,
       });
       setEditingId(null);
       resetForm();
@@ -272,8 +288,44 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
     label: `${p.pool_name} (${p.pool_id})`,
   }));
 
+  const handleJsonApply = (json: string): string | null => {
+    try {
+      const obj = JSON.parse(json);
+      if (obj.name) setFormName(obj.name);
+      if (obj.authorizer_type) setFormType(obj.authorizer_type);
+      if (obj.pool_id) setFormPoolId(obj.pool_id);
+      if (obj.discovery_url) setFormDiscoveryUrl(obj.discovery_url);
+      if (Array.isArray(obj.allowed_clients)) setFormAllowedClients(obj.allowed_clients);
+      if (Array.isArray(obj.allowed_scopes)) setFormAllowedScopes(obj.allowed_scopes);
+      if (obj.user_client_id) setFormUserClientId(obj.user_client_id);
+      if (obj.user_client_secret) setFormUserClientSecret(obj.user_client_secret);
+      if (obj.user_redirect_uri) setFormUserRedirectUri(obj.user_redirect_uri);
+      return null;
+    } catch {
+      return "Invalid JSON. Expected an authorizer configuration object.";
+    }
+  };
+
+  const handleJsonExport = (): string => {
+    return JSON.stringify({
+      name: formName || undefined,
+      authorizer_type: formType,
+      pool_id: formPoolId || undefined,
+      discovery_url: formDiscoveryUrl || undefined,
+      allowed_clients: formAllowedClients.length > 0 ? formAllowedClients : undefined,
+      allowed_scopes: formAllowedScopes.length > 0 ? formAllowedScopes : undefined,
+      user_client_id: formUserClientId || undefined,
+      user_redirect_uri: formUserRedirectUri || undefined,
+    }, null, 2);
+  };
+
   const renderForm = (isEdit: boolean, id?: number) => (
     <div className="space-y-3">
+      <JsonConfigSection
+        onApply={handleJsonApply}
+        onExport={handleJsonExport}
+        placeholder='{"name": "my-cognito", "authorizer_type": "cognito", "pool_id": "us-east-1_xxx", ...}'
+      />
       <div className="flex gap-3">
         <div className="w-[30%] min-w-0">
           <label className="text-xs text-muted-foreground">Config Name</label>
@@ -323,6 +375,23 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
         <div className="min-h-[5.5rem]">
           <label className="text-xs text-muted-foreground">Allowed Scopes (press Enter to add)</label>
           <TagInput values={formAllowedScopes} onChange={setFormAllowedScopes} placeholder="Scope" />
+        </div>
+      </div>
+      <div className="border-t pt-3 mt-3">
+        <label className="text-xs font-medium text-muted-foreground">User Authentication (for cross-IdP linking)</label>
+        <div className="grid grid-cols-3 gap-3 mt-2">
+          <div>
+            <label className="text-xs text-muted-foreground">User Client ID</label>
+            <Input value={formUserClientId} onChange={(e) => setFormUserClientId(e.target.value)} placeholder="OAuth client ID for user auth" className="text-sm" />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">User Client Secret</label>
+            <Input type="password" value={formUserClientSecret} onChange={(e) => setFormUserClientSecret(e.target.value)} placeholder="(optional)" className="text-sm" />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">User Redirect URI</label>
+            <Input value={formUserRedirectUri} onChange={(e) => setFormUserRedirectUri(e.target.value)} placeholder="https://your-app/oauth/link-callback" className="text-sm" />
+          </div>
         </div>
       </div>
       <div className="flex gap-2">
@@ -402,8 +471,16 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
                       {expandedId === config.id ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                     </button>
                     <div className="min-w-0">
-                      <div className="text-sm font-medium">{config.name}</div>
-                      <div className="text-xs text-muted-foreground">{config.authorizer_type === "cognito" ? "Amazon Cognito" : config.authorizer_type}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">{config.name}</span>
+                        <Badge variant="outline" className="text-[10px]">
+                          {config.authorizer_type === "cognito" ? "Amazon Cognito" : config.authorizer_type}
+                        </Badge>
+                        {config.user_client_id && (
+                          <Badge variant="outline" className="text-[10px] border-green-500/50 text-green-600 dark:text-green-400">Linkable</Badge>
+                        )}
+                      </div>
+                      {config.discovery_url && <div className="text-xs text-muted-foreground">{config.discovery_url}</div>}
                     </div>
                   </div>
                   {!readOnly && (
@@ -464,6 +541,20 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
                       {config.allowed_clients.length > 0 && <div><span className="text-muted-foreground">Allowed Clients: </span>{config.allowed_clients.join(", ")}</div>}
                       {config.allowed_scopes.length > 0 && <div><span className="text-muted-foreground">Allowed Scopes: </span>{config.allowed_scopes.join(", ")}</div>}
                     </div>
+
+                    {(config.user_client_id || config.has_user_client_secret || config.user_redirect_uri) && (
+                      <div>
+                        <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-2">
+                          <Link2 className="h-3.5 w-3.5" />
+                          User Linking
+                        </div>
+                        <div className="rounded border bg-input-bg p-3 space-y-1 text-xs">
+                          {config.user_client_id && <div><span className="text-muted-foreground">Client ID: </span>{config.user_client_id}</div>}
+                          {config.has_user_client_secret && <div><span className="text-muted-foreground">Client Secret: </span>(stored in Secrets Manager)</div>}
+                          {config.user_redirect_uri && <div><span className="text-muted-foreground">Redirect URI: </span>{config.user_redirect_uri}</div>}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Credentials section */}
                     <div>

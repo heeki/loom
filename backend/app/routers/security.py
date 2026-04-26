@@ -6,7 +6,7 @@ from typing import Any
 
 import boto3
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -75,6 +75,9 @@ class CreateAuthorizerRequest(BaseModel):
     allowed_scopes: list[str] = Field(default_factory=list)
     client_id: str | None = None
     client_secret: str | None = None
+    user_client_id: str | None = None
+    user_client_secret: str | None = None
+    user_redirect_uri: str | None = None
 
 
 class UpdateAuthorizerRequest(BaseModel):
@@ -86,6 +89,15 @@ class UpdateAuthorizerRequest(BaseModel):
     allowed_scopes: list[str] | None = None
     client_id: str | None = None
     client_secret: str | None = None
+    user_client_id: str | None = None
+    user_client_secret: str | None = None
+    user_redirect_uri: str | None = None
+
+
+class LinkCallbackRequest(BaseModel):
+    code: str
+    code_verifier: str
+    redirect_uri: str
 
 
 class CreatePermissionRequestBody(BaseModel):
@@ -321,6 +333,20 @@ def create_authorizer(request: CreateAuthorizerRequest, user: UserInfo = Depends
         except Exception as e:
             logger.warning("Could not fetch tags for Cognito pool %s: %s", request.pool_id, e)
 
+    user_client_secret_arn = None
+    if request.user_client_secret:
+        region = _get_region()
+        user_secret_name = f"loom/authorizers/{request.name}/user-client-secret"
+        try:
+            user_client_secret_arn = store_secret(
+                name=user_secret_name,
+                secret_value=request.user_client_secret,
+                region=region,
+                description=f"User client secret for Loom authorizer '{request.name}'",
+            )
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Failed to store user client secret: {e}")
+
     auth = AuthorizerConfig(
         name=request.name,
         authorizer_type=request.authorizer_type,
@@ -330,6 +356,9 @@ def create_authorizer(request: CreateAuthorizerRequest, user: UserInfo = Depends
         allowed_scopes=json.dumps(request.allowed_scopes),
         client_id=request.client_id,
         client_secret_arn=client_secret_arn,
+        user_client_id=request.user_client_id,
+        user_client_secret_arn=user_client_secret_arn,
+        user_redirect_uri=request.user_redirect_uri,
     )
     auth.set_tags(tags)
     db.add(auth)
@@ -392,6 +421,23 @@ def update_authorizer(
             auth.client_secret_arn = client_secret_arn
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"Failed to store client secret: {e}")
+    if request.user_client_id is not None:
+        auth.user_client_id = request.user_client_id
+    if request.user_redirect_uri is not None:
+        auth.user_redirect_uri = request.user_redirect_uri
+    if request.user_client_secret is not None:
+        region = _get_region()
+        user_secret_name = f"loom/authorizers/{auth.name}/user-client-secret"
+        try:
+            user_client_secret_arn = store_secret(
+                name=user_secret_name,
+                secret_value=request.user_client_secret,
+                region=region,
+                description=f"User client secret for Loom authorizer '{auth.name}'",
+            )
+            auth.user_client_secret_arn = user_client_secret_arn
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Failed to store user client secret: {e}")
 
     db.commit()
     db.refresh(auth)
@@ -422,6 +468,8 @@ def delete_authorizer(auth_id: int, user: UserInfo = Depends(require_scopes("sec
 
     if auth.client_secret_arn:
         delete_secret(auth.client_secret_arn, region)
+    if auth.user_client_secret_arn:
+        delete_secret(auth.user_client_secret_arn, region)
 
     db.delete(auth)
     db.commit()
@@ -545,6 +593,114 @@ def get_credential_token(auth_id: int, cred_id: int, user: UserInfo = Depends(re
         raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to get token: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Authorizer Linking (per-user cross-IdP token storage)
+# ---------------------------------------------------------------------------
+@router.get("/authorizers/{auth_id}/link/status")
+def get_link_status(auth_id: int, user: UserInfo = Depends(require_scopes("agent:read")), db: Session = Depends(get_db)) -> dict:
+    """Check if the current user has linked their account to this authorizer."""
+    from app.services.authorizer_linking import check_link_status
+    auth = db.query(AuthorizerConfig).filter(AuthorizerConfig.id == auth_id).first()
+    if not auth:
+        raise HTTPException(status_code=404, detail="Authorizer not found")
+    linkable = bool(auth.user_client_id and auth.discovery_url)
+    if not linkable:
+        return {"linked": False, "linkable": False}
+    region = _get_region()
+    linked = check_link_status(auth_id, user.sub, region)
+    return {"linked": linked, "linkable": True}
+
+
+@router.get("/authorizers/{auth_id}/link/authorize")
+def get_link_authorize_url(auth_id: int, request: Request, user: UserInfo = Depends(require_scopes("agent:read")), db: Session = Depends(get_db)) -> dict:
+    """Return the authorization URL for the user to link their account via OAuth popup."""
+    from app.services.oidc import fetch_discovery
+    auth = db.query(AuthorizerConfig).filter(AuthorizerConfig.id == auth_id).first()
+    if not auth:
+        raise HTTPException(status_code=404, detail="Authorizer not found")
+    if not auth.user_client_id or not auth.discovery_url:
+        raise HTTPException(status_code=400, detail="Authorizer not configured for user linking")
+
+    disc = fetch_discovery(auth.discovery_url)
+    origin = request.headers.get("origin") or request.headers.get("referer", "")
+    if origin:
+        redirect_uri = origin.rstrip("/") + "/oauth/link-callback"
+    else:
+        redirect_uri = auth.user_redirect_uri or ""
+
+    import secrets, hashlib, base64
+    code_verifier = secrets.token_urlsafe(64)
+    code_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode()).digest()
+    ).rstrip(b"=").decode()
+    state = secrets.token_urlsafe(32)
+
+    scope = "openid"
+    params = {
+        "response_type": "code",
+        "client_id": auth.user_client_id,
+        "redirect_uri": redirect_uri,
+        "scope": scope,
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
+        "state": state,
+        "prompt": "login",
+    }
+    import urllib.parse
+    authorize_url = f"{disc['authorization_endpoint']}?{urllib.parse.urlencode(params)}"
+
+    return {
+        "authorize_url": authorize_url,
+        "code_verifier": code_verifier,
+        "state": state,
+        "redirect_uri": redirect_uri,
+    }
+
+
+@router.post("/authorizers/{auth_id}/link/callback")
+def link_callback(auth_id: int, request: LinkCallbackRequest, user: UserInfo = Depends(require_scopes("agent:read")), db: Session = Depends(get_db)) -> dict:
+    """Exchange authorization code for tokens and store the refresh token."""
+    from app.services.authorizer_linking import exchange_code_for_tokens, store_user_tokens
+    auth = db.query(AuthorizerConfig).filter(AuthorizerConfig.id == auth_id).first()
+    if not auth:
+        raise HTTPException(status_code=404, detail="Authorizer not found")
+    if not auth.user_client_id or not auth.discovery_url:
+        raise HTTPException(status_code=400, detail="Authorizer not configured for user linking")
+
+    region = _get_region()
+    user_client_secret = get_secret(auth.user_client_secret_arn, region) if auth.user_client_secret_arn else None
+
+    try:
+        token_response = exchange_code_for_tokens(
+            discovery_url=auth.discovery_url,
+            user_client_id=auth.user_client_id,
+            user_client_secret=user_client_secret,
+            code=request.code,
+            code_verifier=request.code_verifier,
+            redirect_uri=request.redirect_uri,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Token exchange failed: {e}")
+
+    refresh_token = token_response.get("refresh_token")
+    if not refresh_token:
+        raise HTTPException(status_code=400, detail="No refresh token received; ensure offline_access scope is granted")
+
+    store_user_tokens(auth_id, user.sub, refresh_token, region)
+    return {"linked": True}
+
+
+@router.delete("/authorizers/{auth_id}/link", status_code=status.HTTP_204_NO_CONTENT)
+def delete_link(auth_id: int, user: UserInfo = Depends(require_scopes("agent:read")), db: Session = Depends(get_db)) -> None:
+    """Remove the current user's linked tokens for this authorizer."""
+    from app.services.authorizer_linking import delete_user_tokens
+    auth = db.query(AuthorizerConfig).filter(AuthorizerConfig.id == auth_id).first()
+    if not auth:
+        raise HTTPException(status_code=404, detail="Authorizer not found")
+    region = _get_region()
+    delete_user_tokens(auth_id, user.sub, region)
 
 
 # ---------------------------------------------------------------------------

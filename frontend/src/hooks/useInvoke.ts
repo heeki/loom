@@ -71,6 +71,7 @@ async function _startInvoke(
   bearerToken?: string,
   modelId?: string,
   connectorIds?: number[],
+  useLinkedToken?: boolean,
 ) {
   // Abort any in-flight stream for this agent
   _controllers.get(agentId)?.abort();
@@ -100,6 +101,7 @@ async function _startInvoke(
         ...(bearerToken ? { bearer_token: bearerToken } : {}),
         ...(modelId ? { model_id: modelId } : {}),
         ...(connectorIds && connectorIds.length > 0 ? { connector_ids: connectorIds } : {}),
+        ...(useLinkedToken ? { use_linked_token: true } : {}),
       },
       {
         onSessionStart: (data) => _update(agentId, { sessionStart: data }),
@@ -186,8 +188,8 @@ export function useInvoke(agentId: number, authorizerName?: string) {
   }, [agentId]);
 
   const invoke = useCallback(
-    async (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string, modelId?: string, connectorIds?: number[]) => {
-      await _startInvoke(agentId, prompt, qualifier, authorizerRef.current, sessionId, credentialId, bearerToken, modelId, connectorIds);
+    async (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string, modelId?: string, connectorIds?: number[], useLinkedToken?: boolean) => {
+      await _startInvoke(agentId, prompt, qualifier, authorizerRef.current, sessionId, credentialId, bearerToken, modelId, connectorIds, useLinkedToken);
     },
     [agentId],
   );

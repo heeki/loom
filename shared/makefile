@@ -63,7 +63,7 @@ cognito.deploy:
 			pDomain=$(P_COGNITO_DOMAIN) \
 			pResourceServerIdentifier=$(P_COGNITO_RESOURCE_SERVER) \
 			pScopes=$(P_COGNITO_SCOPES) \
-			pCallbackUrls=$(P_COGNITO_CALLBACK_URLS) \
+			pCallbackUrls="$(P_COGNITO_CALLBACK_URLS)" \
 			pTagApplication=$(P_TAG_APPLICATION) \
 			pTagGroup=$(P_TAG_GROUP) \
 			pTagOwner=$(P_TAG_OWNER) \

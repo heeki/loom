@@ -5,13 +5,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Trash2, Plus, RefreshCw, FlaskConical, X } from "lucide-react";
+import { Trash2, Plus, FlaskConical, ChevronDown, ChevronRight, Pencil, ArrowRightLeft } from "lucide-react";
+import { JsonConfigSection } from "@/components/JsonConfigSection";
 import {
   listIdentityProviders,
   createIdentityProvider,
   updateIdentityProvider,
   deleteIdentityProvider,
-  discoverIdentityProvider,
   testDiscovery,
   type IdentityProviderResponse,
   type CreateIdentityProviderRequest,
@@ -32,11 +32,26 @@ const PROVIDER_HINTS: Record<string, string> = {
 };
 
 const GROUP_CLAIM_HINTS: Record<string, string> = {
-  azure_ad: "groups",
+  azure_ad: "roles",
   okta: "groups",
   auth0: "https://your-namespace/roles",
   generic_oidc: "groups",
 };
+
+const LOOM_GROUPS = [
+  "t-admin",
+  "t-user",
+  "g-admins-super",
+  "g-admins-demo",
+  "g-admins-security",
+  "g-admins-memory",
+  "g-admins-mcp",
+  "g-admins-a2a",
+  "g-admins-registry",
+  "g-users-demo",
+  "g-users-test",
+  "g-users-strategics",
+];
 
 interface IdentityProviderPanelProps {
   readOnly?: boolean;
@@ -47,8 +62,10 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [editing, setEditing] = useState<IdentityProviderResponse | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [discoveryStatus, setDiscoveryStatus] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
   // Form state
   const [formName, setFormName] = useState("");
@@ -60,7 +77,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
   const [formAudience, setFormAudience] = useState("");
   const [formGroupClaimPath, setFormGroupClaimPath] = useState("");
   const [formStatus, setFormStatus] = useState("active");
-  const [formMappings, setFormMappings] = useState<{ external: string; loom: string }[]>([]);
+  const [formMappings, setFormMappings] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
   const fetchProviders = async () => {
@@ -86,13 +103,66 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
     setFormAudience("");
     setFormGroupClaimPath("");
     setFormStatus("active");
-    setFormMappings([]);
-    setEditing(null);
+    setFormMappings({});
     setDiscoveryStatus(null);
   };
 
+  const handleJsonApply = (json: string): string | null => {
+    try {
+      const obj = JSON.parse(json);
+      if (obj.name) setFormName(obj.name);
+      if (obj.provider_type) {
+        setFormProviderType(obj.provider_type);
+        setFormGroupClaimPath(obj.group_claim_path ?? GROUP_CLAIM_HINTS[obj.provider_type] ?? "groups");
+      }
+      if (obj.issuer_url) setFormIssuerUrl(obj.issuer_url);
+      if (obj.client_id) setFormClientId(obj.client_id);
+      if (obj.client_secret) setFormClientSecret(obj.client_secret);
+      if (obj.scopes) setFormScopes(obj.scopes);
+      if (obj.audience) setFormAudience(obj.audience);
+      if (obj.group_claim_path) setFormGroupClaimPath(obj.group_claim_path);
+      if (obj.status) setFormStatus(obj.status);
+      if (obj.group_mappings && typeof obj.group_mappings === "object") {
+        const reversed: Record<string, string> = {};
+        for (const [key, val] of Object.entries(obj.group_mappings)) {
+          if (Array.isArray(val)) {
+            for (const g of val as string[]) reversed[g] = key;
+          } else if (typeof val === "string") {
+            reversed[key] = val;
+          }
+        }
+        setFormMappings(reversed);
+      }
+      setError(null);
+      return null;
+    } catch {
+      return "Invalid JSON. Expected an identity provider configuration object.";
+    }
+  };
+
+  const handleJsonExport = (): string => {
+    const groupMappings: Record<string, string[]> = {};
+    for (const [loomGroup, uuid] of Object.entries(formMappings)) {
+      const trimmed = uuid.trim();
+      if (!trimmed) continue;
+      if (!groupMappings[trimmed]) groupMappings[trimmed] = [];
+      groupMappings[trimmed].push(loomGroup);
+    }
+    return JSON.stringify({
+      name: formName,
+      provider_type: formProviderType,
+      issuer_url: formIssuerUrl,
+      client_id: formClientId,
+      scopes: formScopes || undefined,
+      audience: formAudience || undefined,
+      group_claim_path: formGroupClaimPath || undefined,
+      group_mappings: Object.keys(groupMappings).length > 0 ? groupMappings : undefined,
+      status: formStatus,
+    }, null, 2);
+  };
+
   const openEdit = (idp: IdentityProviderResponse) => {
-    setEditing(idp);
+    setEditingId(idp.id);
     setFormName(idp.name);
     setFormProviderType(idp.provider_type);
     setFormIssuerUrl(idp.issuer_url);
@@ -102,12 +172,14 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
     setFormAudience(idp.audience || "");
     setFormGroupClaimPath(idp.group_claim_path || "");
     setFormStatus(idp.status);
-    const mappings = Object.entries(idp.group_mappings).map(([ext, loom]) => ({
-      external: ext,
-      loom: loom.join(", "),
-    }));
-    setFormMappings(mappings.length > 0 ? mappings : []);
-    setShowForm(true);
+    const reversed: Record<string, string> = {};
+    for (const [uuid, loomGroups] of Object.entries(idp.group_mappings)) {
+      for (const g of loomGroups) {
+        reversed[g] = uuid;
+      }
+    }
+    setFormMappings(reversed);
+    setShowForm(false);
     setDiscoveryStatus(null);
   };
 
@@ -131,14 +203,15 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
     setError(null);
     try {
       const groupMappings: Record<string, string[]> = {};
-      for (const m of formMappings) {
-        if (m.external.trim()) {
-          groupMappings[m.external.trim()] = m.loom.split(",").map((s) => s.trim()).filter(Boolean);
-        }
+      for (const [loomGroup, uuid] of Object.entries(formMappings)) {
+        const trimmed = uuid.trim();
+        if (!trimmed) continue;
+        if (!groupMappings[trimmed]) groupMappings[trimmed] = [];
+        groupMappings[trimmed].push(loomGroup);
       }
 
-      if (editing) {
-        await updateIdentityProvider(editing.id, {
+      if (editingId) {
+        await updateIdentityProvider(editingId, {
           name: formName,
           provider_type: formProviderType,
           issuer_url: formIssuerUrl,
@@ -167,6 +240,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
       }
       resetForm();
       setShowForm(false);
+      setEditingId(null);
       await fetchProviders();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save identity provider");
@@ -185,220 +259,269 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
     }
   };
 
-  const handleRefreshDiscovery = async (idp: IdentityProviderResponse) => {
-    try {
-      await discoverIdentityProvider(idp.id);
-      await fetchProviders();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Discovery refresh failed");
-    }
-  };
+  const editingProvider = editingId ? providers.find((p) => p.id === editingId) : null;
+
+  const renderForm = (isEdit: boolean) => (
+    <div className="space-y-4">
+      <JsonConfigSection
+        onApply={handleJsonApply}
+        onExport={handleJsonExport}
+        placeholder='{"name": "entra-id", "provider_type": "azure_ad", "issuer_url": "...", ...}'
+      />
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Name</Label>
+          <Input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. entra-id-prod" />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Provider Type</Label>
+          <Select value={formProviderType} onValueChange={(v) => { setFormProviderType(v); setFormGroupClaimPath(GROUP_CLAIM_HINTS[v] ?? "groups"); }}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {PROVIDER_TYPES.map((p) => (
+                <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs">Issuer URL</Label>
+        <div className="flex gap-2">
+          <Input
+            value={formIssuerUrl}
+            onChange={(e) => setFormIssuerUrl(e.target.value)}
+            placeholder={PROVIDER_HINTS[formProviderType] ?? ""}
+            className="flex-1"
+          />
+          <Button type="button" size="sm" variant="outline" onClick={() => void handleTestDiscovery()}>
+            <FlaskConical className="h-3.5 w-3.5 mr-1" />
+            Test
+          </Button>
+        </div>
+        {discoveryStatus && (
+          <p className={`text-xs ${discoveryStatus.startsWith("OK") ? "text-green-600" : "text-destructive"}`}>
+            {discoveryStatus}
+          </p>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Client ID</Label>
+          <Input value={formClientId} onChange={(e) => setFormClientId(e.target.value)} placeholder="App registration client ID" />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Client Secret</Label>
+          <Input
+            type="password"
+            value={formClientSecret}
+            onChange={(e) => setFormClientSecret(e.target.value)}
+            placeholder={editingProvider?.has_client_secret ? "(stored — leave blank to keep)" : "Client secret value"}
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Scopes</Label>
+          <Input value={formScopes} onChange={(e) => setFormScopes(e.target.value)} placeholder="openid profile email" />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Audience</Label>
+          <Input value={formAudience} onChange={(e) => setFormAudience(e.target.value)} placeholder="api://client-id (optional, defaults to client_id)" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Group Claim Path</Label>
+          <Input value={formGroupClaimPath} onChange={(e) => setFormGroupClaimPath(e.target.value)} placeholder="groups" />
+          <p className="text-[10px] text-muted-foreground">JWT claim containing group membership</p>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Status</Label>
+          <Select value={formStatus} onValueChange={setFormStatus}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="inactive">Inactive</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-xs">Group Mappings</Label>
+        <p className="text-[10px] text-muted-foreground">Map each Loom group to its external IdP group identifier (e.g. Entra security group Object ID).</p>
+        {LOOM_GROUPS.map((group) => (
+          <div key={group} className="flex gap-2 items-center">
+            <span className="text-xs font-mono w-40 shrink-0">{group}</span>
+            <span className="text-xs text-muted-foreground shrink-0">&larr;</span>
+            <Input
+              value={formMappings[group] ?? ""}
+              onChange={(e) => setFormMappings({ ...formMappings, [group]: e.target.value })}
+              placeholder="External group ID (e.g. UUID)"
+              className="flex-1 text-xs font-mono"
+            />
+          </div>
+        ))}
+      </div>
+
+      <div className="flex gap-2">
+        <Button size="sm" className="min-w-[120px]" onClick={() => void handleSave()} disabled={saving || !formName.trim() || !formIssuerUrl.trim() || !formClientId.trim()}>
+          {saving ? "Saving..." : isEdit ? "Save" : "Create"}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => { isEdit ? setEditingId(null) : setShowForm(false); resetForm(); }}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading identity providers...</p>;
 
   return (
     <div className="space-y-4">
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-medium">Identity Providers</h3>
+          <p className="text-xs text-muted-foreground mt-1">
+            Configure external identity providers for federated authentication.<br />
+            Users can sign in via these providers instead of (or in addition to) Cognito.<br />
+            Only one identity provider can be active at a time.
+          </p>
+        </div>
+        <div className="shrink-0 ml-4">
+          <Button size="sm" variant="outline" onClick={() => { resetForm(); setEditingId(null); setShowForm(true); }} disabled={readOnly || showForm}>
+            <Plus className="h-3.5 w-3.5 mr-1" />
+            Add Identity Provider
+          </Button>
+        </div>
+      </div>
 
-      {!showForm && !readOnly && (
-        <Button size="sm" onClick={() => { resetForm(); setShowForm(true); }}>
-          <Plus className="h-3.5 w-3.5 mr-1" />
-          Add Identity Provider
-        </Button>
-      )}
+      {error && <p className="text-sm text-destructive">{error}</p>}
 
       {showForm && (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium">
-              {editing ? `Edit: ${editing.name}` : "New Identity Provider"}
-            </CardTitle>
+            <CardTitle className="text-sm font-medium">New Identity Provider</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Name</Label>
-                <Input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. entra-id-prod" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Provider Type</Label>
-                <Select value={formProviderType} onValueChange={(v) => { setFormProviderType(v); setFormGroupClaimPath(GROUP_CLAIM_HINTS[v] ?? "groups"); }}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {PROVIDER_TYPES.map((p) => (
-                      <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-xs">Issuer URL</Label>
-              <div className="flex gap-2">
-                <Input
-                  value={formIssuerUrl}
-                  onChange={(e) => setFormIssuerUrl(e.target.value)}
-                  placeholder={PROVIDER_HINTS[formProviderType] ?? ""}
-                  className="flex-1"
-                />
-                <Button type="button" size="sm" variant="outline" onClick={() => void handleTestDiscovery()}>
-                  <FlaskConical className="h-3.5 w-3.5 mr-1" />
-                  Test
-                </Button>
-              </div>
-              {discoveryStatus && (
-                <p className={`text-xs ${discoveryStatus.startsWith("OK") ? "text-green-600" : "text-destructive"}`}>
-                  {discoveryStatus}
-                </p>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Client ID</Label>
-                <Input value={formClientId} onChange={(e) => setFormClientId(e.target.value)} placeholder="App registration client ID" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Client Secret</Label>
-                <Input
-                  type="password"
-                  value={formClientSecret}
-                  onChange={(e) => setFormClientSecret(e.target.value)}
-                  placeholder={editing?.has_client_secret ? "(stored — leave blank to keep)" : "Client secret value"}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Scopes</Label>
-                <Input value={formScopes} onChange={(e) => setFormScopes(e.target.value)} placeholder="openid profile email" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Audience</Label>
-                <Input value={formAudience} onChange={(e) => setFormAudience(e.target.value)} placeholder="api://client-id (optional, defaults to client_id)" />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs">Group Claim Path</Label>
-                <Input value={formGroupClaimPath} onChange={(e) => setFormGroupClaimPath(e.target.value)} placeholder="groups" />
-                <p className="text-[10px] text-muted-foreground">JWT claim containing group membership</p>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Status</Label>
-                <Select value={formStatus} onValueChange={setFormStatus}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="inactive">Inactive</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Group mappings */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs">Group Mappings</Label>
-                <Button type="button" size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setFormMappings([...formMappings, { external: "", loom: "" }])}>
-                  <Plus className="h-3 w-3 mr-0.5" /> Add Mapping
-                </Button>
-              </div>
-              {formMappings.length === 0 && (
-                <p className="text-[10px] text-muted-foreground italic">No mappings. External group names will be used directly.</p>
-              )}
-              {formMappings.map((m, i) => (
-                <div key={i} className="flex gap-2 items-center">
-                  <Input
-                    value={m.external}
-                    onChange={(e) => {
-                      const next = [...formMappings];
-                      next[i] = { ...m, external: e.target.value };
-                      setFormMappings(next);
-                    }}
-                    placeholder="External group (e.g. Loom-Admins)"
-                    className="flex-1 text-xs"
-                  />
-                  <span className="text-xs text-muted-foreground shrink-0">&rarr;</span>
-                  <Input
-                    value={m.loom}
-                    onChange={(e) => {
-                      const next = [...formMappings];
-                      next[i] = { ...m, loom: e.target.value };
-                      setFormMappings(next);
-                    }}
-                    placeholder="Loom groups (e.g. t-admin, g-admins-super)"
-                    className="flex-1 text-xs"
-                  />
-                  <Button type="button" size="icon" variant="ghost" className="h-6 w-6 shrink-0" onClick={() => setFormMappings(formMappings.filter((_, j) => j !== i))}>
-                    <X className="h-3 w-3" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex gap-2 justify-end">
-              <Button size="sm" variant="ghost" onClick={() => { resetForm(); setShowForm(false); }}>Cancel</Button>
-              <Button size="sm" onClick={() => void handleSave()} disabled={saving || !formName.trim() || !formIssuerUrl.trim() || !formClientId.trim()}>
-                {saving ? "Saving..." : editing ? "Update" : "Create"}
-              </Button>
-            </div>
+          <CardContent>
+            {renderForm(false)}
           </CardContent>
         </Card>
       )}
 
-      {/* Provider list */}
       {providers.length === 0 && !showForm && (
-        <p className="text-sm text-muted-foreground">No identity providers configured. Loom uses Cognito for authentication.</p>
+        <p className="text-sm text-muted-foreground py-8">No identity providers configured. Loom uses Cognito for authentication.</p>
       )}
 
       {providers.map((idp) => (
-        <Card key={idp.id}>
-          <CardContent className="pt-4">
-            <div className="flex items-start justify-between">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-sm">{idp.name}</span>
-                  <Badge variant="outline" className="text-[10px]">
-                    {PROVIDER_TYPES.find((p) => p.value === idp.provider_type)?.label ?? idp.provider_type}
-                  </Badge>
-                  <Badge variant={idp.status === "active" ? "default" : "secondary"} className="text-[10px]">
-                    {idp.status}
-                  </Badge>
-                </div>
-                <p className="text-xs text-muted-foreground font-mono">{idp.issuer_url}</p>
-                <div className="flex gap-4 text-xs text-muted-foreground mt-1">
-                  <span>Client: <code className="bg-black/5 dark:bg-white/10 px-1 rounded">{idp.client_id}</code></span>
-                  {idp.group_claim_path && <span>Groups: <code className="bg-black/5 dark:bg-white/10 px-1 rounded">{idp.group_claim_path}</code></span>}
-                </div>
-                {Object.keys(idp.group_mappings).length > 0 && (
-                  <div className="mt-2 text-xs">
-                    <span className="text-muted-foreground">Mappings: </span>
-                    {Object.entries(idp.group_mappings).map(([ext, loom]) => (
-                      <span key={ext} className="inline-flex items-center gap-1 mr-3">
-                        <Badge variant="outline" className="text-[10px]">{ext}</Badge>
-                        <span className="text-muted-foreground">&rarr;</span>
-                        {loom.map((g) => <Badge key={g} variant="secondary" className="text-[10px]">{g}</Badge>)}
-                      </span>
-                    ))}
+        <Card key={idp.id} className="relative py-3 gap-1 transition-colors hover:bg-accent/50">
+          <CardHeader className="gap-1 pb-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setExpandedId(expandedId === idp.id ? null : idp.id)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  {expandedId === idp.id ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                </button>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{idp.name}</span>
+                    <Badge variant="outline" className="text-[10px]">
+                      {PROVIDER_TYPES.find((p) => p.value === idp.provider_type)?.label ?? idp.provider_type}
+                    </Badge>
                   </div>
-                )}
+                  <div className="text-xs text-muted-foreground">{idp.issuer_url}</div>
+                </div>
               </div>
               {!readOnly && (
-                <div className="flex gap-1 shrink-0">
-                  <Button size="icon" variant="ghost" className="h-7 w-7" title="Refresh discovery" onClick={() => void handleRefreshDiscovery(idp)}>
-                    <RefreshCw className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => openEdit(idp)}>Edit</Button>
-                  <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => void handleDelete(idp)}>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => openEdit(idp)}
+                    className="text-muted-foreground/50 hover:text-foreground transition-colors"
+                    title="Edit"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeleteId(idp.id)}
+                    className="text-muted-foreground/50 hover:text-destructive transition-colors"
+                    title="Delete"
+                  >
                     <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  </button>
                 </div>
               )}
             </div>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {confirmDeleteId === idp.id && (
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setConfirmDeleteId(null)}>
+                  Cancel
+                </Button>
+                <Button size="sm" variant="destructive" className="h-6 text-xs" onClick={() => void handleDelete(idp)}>
+                  Confirm
+                </Button>
+              </div>
+            )}
+
+            {editingId === idp.id && (
+              <div className="rounded border border-dashed p-3">
+                {renderForm(true)}
+              </div>
+            )}
+
+            {expandedId === idp.id && editingId !== idp.id && (
+              <div className="pl-6 space-y-3">
+                <div className="rounded border bg-input-bg p-3 space-y-1 text-xs">
+                  <div><span className="text-muted-foreground">Client ID: </span><span className="font-mono">{idp.client_id}</span></div>
+                  {idp.has_client_secret && <div><span className="text-muted-foreground">Client Secret: </span><span className="text-muted-foreground italic">(redacted)</span></div>}
+                  {idp.scopes && <div><span className="text-muted-foreground">Scopes: </span><span className="break-all">{idp.scopes}</span></div>}
+                  {idp.audience && <div><span className="text-muted-foreground">Audience: </span><span className="font-mono break-all">{idp.audience}</span></div>}
+                  {idp.group_claim_path && <div><span className="text-muted-foreground">Group Claim Path: </span><span className="font-mono">{idp.group_claim_path}</span></div>}
+                  {idp.jwks_uri && <div><span className="text-muted-foreground">JWKS URI: </span><span className="break-all">{idp.jwks_uri}</span></div>}
+                  {idp.authorization_endpoint && <div><span className="text-muted-foreground">Authorization: </span><span className="break-all">{idp.authorization_endpoint}</span></div>}
+                  {idp.token_endpoint && <div><span className="text-muted-foreground">Token: </span><span className="break-all">{idp.token_endpoint}</span></div>}
+                </div>
+
+                {Object.keys(idp.group_mappings).length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-2">
+                      <ArrowRightLeft className="h-3.5 w-3.5" />
+                      Mappings
+                    </div>
+                    <table className="text-xs w-full border-collapse border border-border rounded">
+                      <thead>
+                        <tr className="text-muted-foreground bg-accent">
+                          <th className="text-left font-medium px-2 py-1 border border-border">Loom Group</th>
+                          <th className="text-left font-medium px-2 py-1 border border-border">External ID</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(idp.group_mappings).flatMap(([ext, loom]) =>
+                          loom.map((g) => (
+                            <tr key={`${ext}-${g}`} className="bg-background">
+                              <td className="px-2 py-0.5 font-mono border border-border">{g}</td>
+                              <td className="px-2 py-0.5 font-mono text-muted-foreground border border-border">{ext}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
       ))}

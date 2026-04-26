@@ -16,6 +16,9 @@ class AuthorizerConfig(Base):
     allowed_scopes = Column(Text, default="[]")  # JSON array
     client_id = Column(String, nullable=True)
     client_secret_arn = Column(String, nullable=True)  # ARN in Secrets Manager
+    user_client_id = Column(String, nullable=True)
+    user_client_secret_arn = Column(String, nullable=True)
+    user_redirect_uri = Column(String, nullable=True)
     tags = Column(Text, nullable=True)  # JSON dict
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -39,6 +42,9 @@ class AuthorizerConfig(Base):
             "allowed_scopes": json.loads(self.allowed_scopes) if self.allowed_scopes else [],
             "client_id": self.client_id,
             "has_client_secret": bool(self.client_secret_arn),
+            "user_client_id": self.user_client_id,
+            "has_user_client_secret": bool(self.user_client_secret_arn),
+            "user_redirect_uri": self.user_redirect_uri,
             "tags": self.get_tags(),
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
