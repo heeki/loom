@@ -13,7 +13,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 };
 
 export function LoginPage() {
-  const { login, loginWithOIDC, completeNewPassword, authConfig } = useAuth();
+  const { login, loginWithOIDC, completeNewPassword, authConfig, logoutIdP } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -29,6 +29,7 @@ export function LoginPage() {
   const isExternalOIDC = authConfig?.provider_type && authConfig.provider_type !== "cognito";
   const providerLabel = PROVIDER_LABELS[authConfig?.provider_type ?? ""] ?? "Single Sign-On";
   const hasBothProviders = isExternalOIDC && authConfig?.user_pool_id;
+  const lastOidcUser = isExternalOIDC ? localStorage.getItem("loom_last_oidc_user") : null;
 
   const [selectedProvider, setSelectedProvider] = useState<"external" | "cognito">(
     isExternalOIDC ? "external" : "cognito",
@@ -154,6 +155,22 @@ export function LoginPage() {
               >
                 {loading ? "Redirecting..." : `Sign in with ${providerLabel}`}
               </Button>
+              {lastOidcUser ? (
+                <p className="text-xs text-muted-foreground text-center">
+                  Currently logged in as <span className="font-medium text-foreground">{lastOidcUser}</span>
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground text-center">
+                  You may be signed in automatically if you have an active {providerLabel} session.
+                </p>
+              )}
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:text-foreground underline w-full text-center"
+                onClick={() => { try { localStorage.removeItem("loom_last_oidc_user"); } catch { /* ignore */ } logoutIdP(); }}
+              >
+                Sign in as a different user
+              </button>
               {error && (
                 <p className="text-sm text-destructive">{error}</p>
               )}

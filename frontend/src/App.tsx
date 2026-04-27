@@ -402,6 +402,10 @@ function AppContent() {
       // bleed into a new agent that might reuse the same DB id.
       clearInvokeState(id);
       sessionStorage.removeItem(`loom:invokePrompt:${id}`);
+      // Remove persisted connector preferences for this agent
+      Object.keys(localStorage)
+        .filter((k) => k.startsWith(`loom:enabledConnectors:${id}:`))
+        .forEach((k) => localStorage.removeItem(k));
       // If the deleted agent was selected, clear all drill-down state
       if (selectedAgentId === id) {
         setSelectedAgentId(null);

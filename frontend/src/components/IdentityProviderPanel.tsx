@@ -259,6 +259,16 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
     }
   };
 
+  const handleToggleStatus = async (idp: IdentityProviderResponse) => {
+    try {
+      const newStatus = idp.status === "active" ? "inactive" : "active";
+      await updateIdentityProvider(idp.id, { status: newStatus });
+      await fetchProviders();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update status");
+    }
+  };
+
   const editingProvider = editingId ? providers.find((p) => p.id === editingId) : null;
 
   const renderForm = (isEdit: boolean) => (
@@ -433,16 +443,31 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
                 </button>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
+                    <span
+                      className={`inline-block h-2 w-2 rounded-full shrink-0 ${idp.status === "active" ? "bg-green-500" : "bg-muted-foreground/30"}`}
+                      title={idp.status === "active" ? "Active — login enabled" : "Inactive"}
+                    />
                     <span className="text-sm font-medium">{idp.name}</span>
                     <Badge variant="outline" className="text-[10px]">
                       {PROVIDER_TYPES.find((p) => p.value === idp.provider_type)?.label ?? idp.provider_type}
                     </Badge>
+                    {idp.status === "active" && (
+                      <Badge variant="outline" className="text-[10px] border-green-500/50 text-green-600 dark:text-green-400">Active</Badge>
+                    )}
                   </div>
                   <div className="text-xs text-muted-foreground">{idp.issuer_url}</div>
                 </div>
               </div>
               {!readOnly && (
-                <div className="flex items-center gap-1 shrink-0">
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    size="sm"
+                    variant={idp.status === "active" ? "outline" : "default"}
+                    className="h-6 text-xs"
+                    onClick={() => void handleToggleStatus(idp)}
+                  >
+                    {idp.status === "active" ? "Deactivate" : "Activate"}
+                  </Button>
                   <button
                     type="button"
                     onClick={() => openEdit(idp)}

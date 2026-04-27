@@ -323,6 +323,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     listAgents()
       .then((all) => {
         const accessible = all.filter((a) => {
+          if (a.deployment_status === "removing") return false;
           const group = (a.tags["loom:group"] as string | undefined) ?? "";
           return !group || userGroupNames.includes(group);
         });

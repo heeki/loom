@@ -99,7 +99,7 @@ class AgentDeployRequest(BaseModel):
     network_mode: str = Field(default="PUBLIC", description="PUBLIC or VPC")
     idle_timeout: int | None = Field(None, description="Idle runtime session timeout (seconds)")
     max_lifetime: int | None = Field(None, description="Max lifetime (seconds)")
-    authorizer_type: str | None = Field(None, description="Authorizer type: 'cognito' or 'other'")
+    authorizer_type: str | None = Field(None, description="Authorizer type: 'cognito', 'entra_id', 'okta', or 'other'")
     authorizer_pool_id: str | None = Field(None, description="Cognito pool ID for authorizer (when type is 'cognito')")
     authorizer_discovery_url: str | None = Field(None, description="OIDC discovery URL (when type is 'other')")
     authorizer_allowed_audience: list[str] = Field(default_factory=list, description="Allowed JWT audience values")
@@ -133,7 +133,7 @@ class AgentCreateRequest(BaseModel):
     network_mode: str = Field(default="PUBLIC", description="PUBLIC or VPC")
     idle_timeout: int | None = Field(None, description="Idle runtime session timeout (seconds)")
     max_lifetime: int | None = Field(None, description="Max lifetime (seconds)")
-    authorizer_type: str | None = Field(None, description="Authorizer type: 'cognito' or 'other'")
+    authorizer_type: str | None = Field(None, description="Authorizer type: 'cognito', 'entra_id', 'okta', or 'other'")
     authorizer_pool_id: str | None = Field(None, description="Cognito pool ID for authorizer (when type is 'cognito')")
     authorizer_discovery_url: str | None = Field(None, description="OIDC discovery URL (when type is 'other')")
     authorizer_allowed_audience: list[str] = Field(default_factory=list, description="Allowed JWT audience values")
@@ -1119,13 +1119,14 @@ def _deploy_agent_background(
             if request.authorizer_allowed_scopes:
                 jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
             authorizer_config = {"customJWTAuthorizer": jwt_config}
-        elif request.authorizer_type in ("other", "entra_id") and request.authorizer_discovery_url:
+        elif request.authorizer_type in ("other", "entra_id", "okta") and request.authorizer_discovery_url:
             jwt_config = {"discoveryUrl": request.authorizer_discovery_url}
             if request.authorizer_allowed_audience:
                 jwt_config["allowedAudience"] = request.authorizer_allowed_audience
-            # Entra ID v1.0 tokens lack the standard 'azp' claim that AgentCore
-            # validates allowedClients against, so omit it for entra_id.
-            if request.authorizer_allowed_clients and request.authorizer_type != "entra_id":
+            # Entra ID v1.0 tokens use 'appid' and Okta tokens use 'cid'
+            # instead of the standard 'azp' claim that AgentCore validates
+            # allowedClients against, so omit it for these providers.
+            if request.authorizer_allowed_clients and request.authorizer_type not in ("entra_id", "okta"):
                 jwt_config["allowedClients"] = request.authorizer_allowed_clients
             if request.authorizer_allowed_scopes:
                 jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
@@ -1331,11 +1332,11 @@ def _deploy_harness(request: AgentCreateRequest, db: Session, background_tasks: 
         if request.authorizer_allowed_scopes:
             jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
         authorizer_config = {"customJWTAuthorizer": jwt_config}
-    elif request.authorizer_type in ("other", "entra_id") and request.authorizer_discovery_url:
+    elif request.authorizer_type in ("other", "entra_id", "okta") and request.authorizer_discovery_url:
         jwt_config = {"discoveryUrl": request.authorizer_discovery_url}
         if request.authorizer_allowed_audience:
             jwt_config["allowedAudience"] = request.authorizer_allowed_audience
-        if request.authorizer_allowed_clients and request.authorizer_type != "entra_id":
+        if request.authorizer_allowed_clients and request.authorizer_type not in ("entra_id", "okta"):
             jwt_config["allowedClients"] = request.authorizer_allowed_clients
         if request.authorizer_allowed_scopes:
             jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
@@ -1916,6 +1917,16 @@ def delete_agent(
     # Clean up Cognito client secret from Secrets Manager
     if _secret_arn:
         delete_secret(_secret_arn, _region)
+
+    # Delete sessions/invocations immediately so they don't appear if a new
+    # agent reuses the same ID or the DELETING agent is still visible.
+    session_ids = [
+        s.session_id for s in
+        db.query(InvocationSession.session_id).filter(InvocationSession.agent_id == agent.id).all()
+    ]
+    if session_ids:
+        db.query(Invocation).filter(Invocation.session_id.in_(session_ids)).delete(synchronize_session="fetch")
+    db.query(InvocationSession).filter(InvocationSession.agent_id == agent.id).delete()
 
     # Mark as DELETING so frontend can poll for completion
     agent.status = "DELETING"
