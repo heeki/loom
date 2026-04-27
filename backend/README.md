@@ -527,7 +527,7 @@ Model and IAM role are required fields. The deployment supports configurable pro
 
 Tags are resolved from the tag policy system at deploy time. Deploy-time tags are auto-applied from their default values; build-time tags are resolved from the selected tag profile. Required tags that are missing cause deployment to fail with a 400 error. Resolved tags are applied to all created AWS resources (AgentCore runtimes, endpoints, IAM execution roles, memory resources) and stored locally on Agent and Memory records. For registered agents and imported memories, tags are fetched from AWS via `list_tags_for_resource`; missing required tags are filled with `"missing"`.
 
-Deletion with `cleanup_aws=true` initiates background async AWS deletion (endpoint + runtime + MCP and A2A credential providers + Secrets Manager cleanup), explicitly deletes sessions/invocations,, marks the agent as DELETING, and returns the updated agent. The frontend polls the status endpoint until AWS confirms deletion (404), then calls the purge endpoint to remove the local record. Credential providers cascade delete when the agent is deleted.
+Deletion with `cleanup_aws=true` immediately deletes all sessions and invocations for the agent (preventing stale data on admin pages), then initiates background async AWS deletion (endpoint + runtime + MCP and A2A credential providers + Secrets Manager cleanup), marks the agent as DELETING, and returns the updated agent. The frontend polls the status endpoint until AWS confirms deletion (404), then calls the purge endpoint to remove the local record. Credential providers cascade delete when the agent is deleted.
 
 ## Authenticated Invocation
 
