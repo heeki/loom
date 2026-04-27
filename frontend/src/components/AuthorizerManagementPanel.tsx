@@ -344,6 +344,7 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
             <SelectContent>
               <SelectItem value="cognito">Amazon Cognito</SelectItem>
               <SelectItem value="entra_id">Microsoft Entra ID</SelectItem>
+              <SelectItem value="okta">Okta</SelectItem>
               <SelectItem value="other">Other</SelectItem>
             </SelectContent>
           </Select>
@@ -487,7 +488,7 @@ export function AuthorizerManagementPanel({ readOnly }: { readOnly?: boolean }) 
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium">{config.name}</span>
                         <Badge variant="outline" className="text-[10px]">
-                          {config.authorizer_type === "cognito" ? "Amazon Cognito" : config.authorizer_type === "entra_id" ? "Microsoft Entra ID" : config.authorizer_type}
+                          {config.authorizer_type === "cognito" ? "Amazon Cognito" : config.authorizer_type === "entra_id" ? "Microsoft Entra ID" : config.authorizer_type === "okta" ? "Okta" : config.authorizer_type}
                         </Badge>
                         {config.user_client_id && (
                           <Badge variant="outline" className="text-[10px] border-green-500/50 text-green-600 dark:text-green-400">Linkable</Badge>

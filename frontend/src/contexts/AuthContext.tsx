@@ -116,6 +116,7 @@ interface AuthContextValue {
     newPassword: string,
   ) => Promise<void>;
   logout: () => void;
+  logoutIdP: () => void;
   browserSessionId: string | null;
 }
 
@@ -140,6 +141,7 @@ const AuthContext = createContext<AuthContextValue>({
   loginWithOIDC: async () => {},
   completeNewPassword: async () => {},
   logout: () => {},
+  logoutIdP: () => {},
   browserSessionId: null,
 });
 
@@ -217,19 +219,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           ?? (claims["cognito:groups"] as string[] | undefined)
           ?? [];
         const mappings = cfg.group_mappings;
-        const groups = mappings
+        const hasMappings = mappings && Object.keys(mappings).length > 0;
+        const groups = hasMappings
           ? rawGroups.flatMap((g) => mappings[g] ?? [])
           : rawGroups;
-        setUser({
-          sub: claims.sub as string,
-          email: (claims.email as string | undefined) ?? (claims.preferred_username as string | undefined),
-          username:
+        const oidcUsername =
             (claims.preferred_username as string)
             || (claims.email as string)
             || (claims.name as string)
-            || (claims.sub as string),
+            || (claims.sub as string);
+        setUser({
+          sub: claims.sub as string,
+          email: (claims.email as string | undefined) ?? (claims.preferred_username as string | undefined),
+          username: oidcUsername,
           groups,
         });
+        try { localStorage.setItem("loom_last_oidc_user", oidcUsername); } catch { /* ignore */ }
       } catch {
         setUser({ sub: "unknown" });
       }
@@ -473,6 +478,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .forEach((k) => sessionStorage.removeItem(k));
   }, []);
 
+  const logoutIdP = useCallback(() => {
+    const currentConfig = configRef.current;
+    const idToken = tokens?.idToken;
+    logout();
+    if (currentConfig && isExternalOIDC(currentConfig) && currentConfig.issuer_url) {
+      const issuer = currentConfig.issuer_url.replace(/\/+$/, "");
+      const returnUrl = window.location.origin;
+      if (currentConfig.provider_type === "okta") {
+        const params = new URLSearchParams({ post_logout_redirect_uri: returnUrl });
+        if (idToken) params.set("id_token_hint", idToken);
+        window.location.href = `${issuer}/v1/logout?${params.toString()}`;
+      } else if (currentConfig.provider_type === "entra_id") {
+        const params = new URLSearchParams({ post_logout_redirect_uri: returnUrl });
+        window.location.href = `${issuer}/oauth2/v2.0/logout?${params.toString()}`;
+      }
+    }
+  }, [tokens, logout]);
+
   useEffect(() => {
     return () => {
       if (refreshTimerRef.current) {
@@ -512,6 +535,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loginWithOIDC,
         completeNewPassword,
         logout,
+        logoutIdP,
         browserSessionId,
       }}
     >

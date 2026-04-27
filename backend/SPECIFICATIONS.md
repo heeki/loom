@@ -554,7 +554,7 @@ The `/api/auth/config` endpoint returns only the pool ID and region. The user cl
 
 **`DELETE /api/agents/{agent_id}` behavior:**
 - When `cleanup_aws=false` or agent has no `runtime_id`: immediately deletes from local DB, returns the `AgentResponse` with HTTP 200.
-- When `cleanup_aws=true` and agent has a `runtime_id`: initiates async deletion via `BackgroundTasks`. The background task:
+- When `cleanup_aws=true` and agent has a `runtime_id`: immediately deletes all sessions and invocations for the agent from the local database (preventing stale session data from appearing on admin pages), then initiates async deletion via `BackgroundTasks`. The background task:
   1. Deletes non-DEFAULT runtime endpoints (AWS automatically handles DEFAULT endpoints).
   2. Deletes the runtime.
   3. Cleans up Secrets Manager secrets.
@@ -1423,7 +1423,7 @@ Linking endpoints under `/api/security/authorizers/{auth_id}/link`: `GET .../sta
 
 The `AuthorizerConfig` model includes an `allowed_audience` field (JSON array) for configuring the `allowedAudience` parameter on AgentCore runtimes. This is distinct from `allowedClients` — audience validates the `aud` claim, while clients validates the `azp` claim.
 
-**Entra ID compatibility:** Microsoft Entra ID v1.0 access tokens do not include the standard OAuth2 `azp` claim (they use a proprietary `appid` claim instead). AgentCore's `allowedClients` validates against `azp`, causing `UnrecognizedClientException` (401) for Entra ID tokens. The deploy paths for both custom and harness agents omit `allowedClients` when `authorizer_type == "entra_id"`, relying on `allowedAudience` alone for token validation.
+**Entra ID and Okta compatibility:** Microsoft Entra ID v1.0 access tokens use a proprietary `appid` claim instead of the standard OAuth2 `azp` claim, and Okta access tokens use `cid` instead of `azp`. AgentCore's `allowedClients` validates against `azp`, causing `UnrecognizedClientException` (401) for both providers. The deploy paths for both custom and harness agents omit `allowedClients` when `authorizer_type` is `"entra_id"` or `"okta"`, relying on `allowedAudience` alone for token validation.
 
 ### Entra ID v1.0/v2.0 Issuer Handling
 

@@ -205,7 +205,7 @@ Clicking the Trash2 icon triggers an overlay confirmation panel:
 - Cancel and Confirm buttons (right-aligned)
 - Clicks within the overlay are stopped from propagating to the card's `onClick`
 
-When deletion is confirmed with "Also delete in AgentCore" checked, the agent transitions to DELETING status with a spinner and timer on the card. The `useAgents` hook polls the agent status at 5-second intervals. When the poll returns 404, the hook calls the purge endpoint to remove the agent from the local database and shows a success toast.
+When deletion is confirmed with "Also delete in AgentCore" checked, the agent transitions to DELETING status with a spinner and timer on the card. The `useAgents` hook polls the agent status at 5-second intervals. When the poll returns 404, the hook calls the purge endpoint to remove the agent from the local database and shows a success toast. On deletion, persisted connector preferences (`loom:enabledConnectors:{agentId}:*`) are also cleaned up from `localStorage`.
 
 ---
 
@@ -310,8 +310,8 @@ Full deployment form with sections:
 **Content:**
 - `SecurityAdminPage` with sections for:
   - **Managed Roles**: list, create (import existing / wizard), view policy document, delete. Uses `SortableCardGrid` with drag-to-reorder (storage key `security-roles`), full-width single-column layout (role cards contain long ARNs and expandable policy documents), default alphabetical sort by role name, and A-Z/Z-A sort toggle.
-  - **Authorizer Configs**: list, create (Cognito type with pool selection and auto-populated discovery URL), update, delete. Uses `SortableCardGrid` with drag-to-reorder (storage key `security-authorizers`), default alphabetical sort by config name, and A-Z/Z-A sort toggle.
-  - **Authorizer Credentials**: per-config credential management (add label + client_id + client_secret, list, delete). Credential form uses 1/4 / 1/4 / 1/2 field widths. Authorizer type displayed as "Amazon Cognito" for cognito type.
+  - **Authorizer Configs**: list, create (Amazon Cognito, Microsoft Entra ID, Okta, or Other type with auto-populated discovery URL for Cognito), update, delete. Uses `SortableCardGrid` with drag-to-reorder (storage key `security-authorizers`), default alphabetical sort by config name, and A-Z/Z-A sort toggle.
+  - **Authorizer Credentials**: per-config credential management (add label + client_id + client_secret, list, delete). Credential form uses 1/4 / 1/4 / 1/2 field widths. Authorizer type displayed as "Amazon Cognito", "Microsoft Entra ID", or "Okta" for known types.
   - **Permission Requests**: create requests for additional IAM permissions, review (approve/deny) with role application. Uses `SortableCardGrid` with drag-to-reorder (storage key `security-permissions`), default alphabetical sort by role name, and A-Z/Z-A sort toggle.
 
 ---
@@ -614,7 +614,8 @@ Inline component for adding/removing tag-style values (clients, scopes). Single 
 Cognito client secrets are password-masked in forms. Secrets are sent to the backend which stores them in AWS Secrets Manager — they never persist in the frontend or local database.
 
 ### User Authentication
-- `AuthContext` provides login, logout, token refresh, user state, and scope-based authorization to the entire app.
+- `AuthContext` provides login, logout, logoutIdP, token refresh, user state, and scope-based authorization to the entire app.
+- `logout()` clears local state only (tokens, user, session storage). `logoutIdP()` calls `logout()` then redirects to the external IdP's logout endpoint (Okta or Entra ID) so the browser session is also cleared. Regular logout uses `logout()`; "Sign in as a different user" on the login page uses `logoutIdP()`.
 - Tokens (id, access, refresh) are stored in React state only — never in localStorage or cookies.
 - On logout, all `loom:invokePrompt:*` keys are cleared from `sessionStorage` so per-agent prompt drafts do not persist across user sessions.
 - The `AuthProvider` wraps the app at the top level (outside `TimezoneProvider`). If Cognito is not configured (empty pool ID from backend or missing `VITE_COGNITO_USER_CLIENT_ID`), authentication is bypassed and all scopes are granted.
@@ -804,7 +805,7 @@ A "Previewing end-user experience as [user]" banner is shown to admins when in v
 - "My Memory" button (shown only when the selected agent has memory resources attached)
 - User indicator and logout button
 
-**Agent filtering:** Agents are filtered client-side by comparing the agent's `loom:group` tag against the user's `g-users-*` group names. An agent with no `loom:group` tag is visible to all users.
+**Agent filtering:** Agents are filtered client-side by comparing the agent's `loom:group` tag against the user's `g-users-*` group names. An agent with no `loom:group` tag is visible to all users. Agents with `deployment_status === "removing"` (DELETING) are excluded from the list.
 
 **Chat area:**
 - Header with agent name and "responding..." indicator while streaming (scoped to the active conversation)
@@ -880,7 +881,7 @@ When an external IdP is active, `AuthContext` uses the standard Authorization Co
 
 1. `startOIDCLogin()` generates a cryptographic code verifier and challenge, stores state in `sessionStorage`, and redirects to the provider's authorization endpoint.
 2. On callback, `exchangeOIDCCode()` exchanges the authorization code for tokens at the provider's token endpoint using the stored code verifier.
-3. Group claims are extracted from the ID token using the provider's configured `group_claim` and mapped to Loom groups via the `group_mapping` from the auth config.
+3. Group claims are extracted from the ID token using the provider's configured `group_claim` and mapped to Loom groups via the `group_mapping` from the auth config. Empty group mappings (`{}`) are treated as "no mappings" — raw groups are passed through unchanged. This prevents the JavaScript truthiness of `{}` from discarding all groups.
 
 Functions are implemented in `frontend/src/api/auth.ts`.
 
@@ -889,7 +890,9 @@ Functions are implemented in `frontend/src/api/auth.ts`.
 When an external IdP is active:
 - A provider-branded button is shown (e.g., "Sign in with Microsoft Entra ID", "Sign in with Okta").
 - Clicking the button initiates the OIDC redirect flow.
-- The existing Cognito username/password form is hidden.
+- Below the button, the last OIDC username is displayed if available (persisted in `localStorage` as `loom_last_oidc_user`): "Currently logged in as [username]".
+- A "Sign in as a different user" link triggers `logoutIdP()` which redirects to the IdP's logout endpoint (Okta `/v1/logout` or Entra ID `/oauth2/v2.0/logout`) with `post_logout_redirect_uri` back to the app.
+- When both an external IdP and Cognito are configured, a tab bar allows switching between providers. The existing Cognito username/password form is shown on the Cognito tab.
 
 When no external IdP is active, the login page behaves identically to the existing Cognito flow.
 
@@ -900,7 +903,8 @@ When no external IdP is active, the login page behaves identically to the existi
 - **OIDC Discovery button**: fetches `.well-known/openid-configuration` and auto-populates authorization, token, JWKS, and userinfo endpoints.
 - **Test Discovery button**: validates that the provider's discovery endpoint is reachable and returns valid metadata.
 - **Group Mapping table**: editable table for mapping external IdP group names/IDs to Loom groups. Each row has external group (text input) and Loom group (dropdown of known groups).
-- **Active toggle**: at most one provider can be active. Activating a provider deactivates any previously active one.
+- **Status indicators**: each provider card shows a green/gray status dot (green for active, gray for inactive) and an "Active" badge when active.
+- **Activate/Deactivate button**: each provider card has an "Activate" or "Deactivate" button. At most one external provider can be active; deactivating all falls back to Cognito.
 
 ### API Client
 
