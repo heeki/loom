@@ -234,7 +234,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           username: oidcUsername,
           groups,
         });
-        try { localStorage.setItem("loom_last_oidc_user", oidcUsername); } catch { /* ignore */ }
+        try {
+          localStorage.setItem("loom_last_oidc_user", oidcUsername);
+          localStorage.setItem("loom_last_oidc_provider", cfg.provider_type ?? "");
+        } catch { /* ignore */ }
       } catch {
         setUser({ sub: "unknown" });
       }
@@ -476,6 +479,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     Object.keys(sessionStorage)
       .filter((k) => k.startsWith("loom:invokePrompt:"))
       .forEach((k) => sessionStorage.removeItem(k));
+    fetchAuthConfig().then((cfg) => setConfig(cfg)).catch(() => {});
   }, []);
 
   const logoutIdP = useCallback(() => {

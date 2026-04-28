@@ -29,7 +29,10 @@ export function LoginPage() {
   const isExternalOIDC = authConfig?.provider_type && authConfig.provider_type !== "cognito";
   const providerLabel = PROVIDER_LABELS[authConfig?.provider_type ?? ""] ?? "Single Sign-On";
   const hasBothProviders = isExternalOIDC && authConfig?.user_pool_id;
-  const lastOidcUser = isExternalOIDC ? localStorage.getItem("loom_last_oidc_user") : null;
+  const lastOidcProvider = isExternalOIDC ? localStorage.getItem("loom_last_oidc_provider") : null;
+  const lastOidcUser = isExternalOIDC && lastOidcProvider === authConfig?.provider_type
+    ? localStorage.getItem("loom_last_oidc_user")
+    : null;
 
   const [selectedProvider, setSelectedProvider] = useState<"external" | "cognito">(
     isExternalOIDC ? "external" : "cognito",
@@ -167,7 +170,7 @@ export function LoginPage() {
               <button
                 type="button"
                 className="text-xs text-muted-foreground hover:text-foreground underline w-full text-center"
-                onClick={() => { try { localStorage.removeItem("loom_last_oidc_user"); } catch { /* ignore */ } logoutIdP(); }}
+                onClick={() => { try { localStorage.removeItem("loom_last_oidc_user"); localStorage.removeItem("loom_last_oidc_provider"); } catch { /* ignore */ } logoutIdP(); }}
               >
                 Sign in as a different user
               </button>
