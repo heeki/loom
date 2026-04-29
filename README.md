@@ -51,6 +51,8 @@ Loom seamlessly weaves together agents, memory stores, MCP servers, and agent-to
 - Two-dimensional group-based authorization: Type groups (t-admin, t-user) for UI view and Resource groups (g-admins-*, g-users-*) for access control (21 scopes total)
 - IAM role, authorizer, and credential management
 - Admin user view switching to preview scoped experiences
+- Human-in-the-loop (HITL) approval policies: configurable policies for tool-level human oversight with four methods — agentic loop hooks, tool context interrupts, MCP elicitation, and harness inline functions
+- Approval audit trail with per-agent queryable log
 
 ### Platform Catalog and Tagging
 - Unified catalog view across agents, memory, MCP servers, and platform resources

@@ -111,6 +111,7 @@ Detailed specifications for each component are maintained in their respective di
 - The backend retrieves secrets at invocation time with in-memory caching (5-minute TTL).
 - Secrets are cleaned up from Secrets Manager when authorizer credentials or agents are deleted.
 - Security administration (roles, authorizers, credentials, permissions) is managed through a dedicated persona workflow.
+- Human-in-the-loop (HITL) approval policies enforce human oversight for sensitive tool calls. Four HITL methods are supported: agentic loop hooks (custom agents), tool context interrupts (custom agents), MCP elicitation (custom agents with MCP), and harness inline functions (managed agents).
 
 ### User Authentication
 

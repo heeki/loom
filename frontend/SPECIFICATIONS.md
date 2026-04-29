@@ -929,7 +929,49 @@ When no external IdP is configured, the entire authentication flow remains uncha
 
 ---
 
-## 15. Future Work
+## 15. Human-in-the-Loop (HITL) Approvals
+
+### 15.1 SSE Event Handling
+
+The `useInvoke` hook handles three HITL-related SSE event types:
+- `approval_request` — Adds an `ApprovalRequestBubble` segment to the stream.
+- `approval_resolved` — Triggers `flushTools()` (no separate bubble — status shown inline).
+- `elicitation_request` — Adds an `ElicitationRequestBubble` segment to the stream.
+
+The `StreamSegment` union type includes these variants with typed data payloads. Elicitation segments also carry an optional `resolvedSummary` field persisted when the user responds.
+
+### 15.2 Approval Dialog (`ApprovalDialog.tsx`)
+
+- `ApprovalRequestBubble`: Displays tool name, input summary, policy name, countdown timer, Approve/Reject buttons. Supports `resolved` prop for post-stream re-rendering.
+- `notify_only` mode renders as an informational blue bubble without action buttons.
+- Buttons are disabled after interaction to prevent double-submission.
+
+### 15.3 Elicitation Dialog (`ElicitationDialog.tsx`)
+
+- `ElicitationRequestBubble`: Renders dynamic forms from JSON Schema (text inputs, enum selectors, boolean yes/no).
+- After submission, displays the actual response value (not generic "Response submitted").
+- Accepts `resolvedSummary` prop for consistent display after stream completion.
+
+### 15.4 HITL Segment Persistence
+
+HITL segments are persisted in a `hitlSegmentsMap` ref (keyed by invocation ID) so they survive message re-fetches after stream completion. When messages are rendered from history, `hitlSegments` are passed to `MessageBubble` and displayed with `resolved={true}`.
+
+### 15.5 Approval Policy Administration
+
+The Security Admin page includes an "Approval Policies" section (`ApprovalPolicyPanel.tsx`) with:
+- Card-based list of configured policies.
+- Create/edit form with fields: name, type, tool pattern (glob), mode, timeout, agent filter.
+
+### 15.6 Harness Human Confirmation
+
+The Agent Registration Form includes a "Enable human confirmation (inline function HITL)" checkbox under Harness Parameters. When enabled:
+- A customizable "Confirmation Policy" textarea defines when the agent should seek confirmation.
+- The policy text becomes the `description` of the `user_confirmation` inline function tool deployed with the harness.
+- The JSON config export/import includes `human_confirmation` and `confirmation_policy` fields.
+
+---
+
+## 16. Future Work
 
 - **VPC network mode** support
 - **Operate Tab** — aggregate dashboard with summary cards, per-agent latency charts
