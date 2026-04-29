@@ -112,6 +112,7 @@ Detailed specifications for each component are maintained in their respective di
 - Secrets are cleaned up from Secrets Manager when authorizer credentials or agents are deleted.
 - Security administration (roles, authorizers, credentials, permissions) is managed through a dedicated persona workflow.
 - Human-in-the-loop (HITL) approval policies enforce human oversight for sensitive tool calls. Four HITL methods are supported: agentic loop hooks (custom agents), tool context interrupts (custom agents), MCP elicitation (custom agents with MCP), and harness inline functions (managed agents).
+- On-behalf-of (OBO) token exchange (RFC 8693) enables agents to access downstream OAuth2 resources with the invoking user's scoped permissions. Configurable per MCP server and A2A agent via `delegation_mode` (m2m or obo).
 
 ### User Authentication
 

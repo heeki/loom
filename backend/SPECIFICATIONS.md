@@ -1480,7 +1480,48 @@ All approval events are recorded in `approval_logs` table: `request_id`, `sessio
 
 ---
 
-## 14. Makefile Targets
+## 14. On-Behalf-Of (OBO) Token Exchange
+
+Loom supports RFC 8693 on-behalf-of token exchange, enabling agents to access downstream OAuth2-protected resources with the invoking user's scoped permissions rather than a shared M2M identity.
+
+### 14.1 Delegation Mode
+
+MCP servers and A2A agents have a `delegation_mode` field (`m2m` or `obo`, default `m2m`):
+- **m2m**: Existing client_credentials flow — agent identity used for all downstream calls.
+- **obo**: RFC 8693 token exchange — user's access token is exchanged for a downstream token carrying the user's permissions.
+
+### 14.2 Credential Provider Creation
+
+`create_oauth2_credential_provider()` in `app/services/credential.py` accepts `delegation_mode`. When `"obo"`, it adds `oauth2Flow="ON_BEHALF_OF_TOKEN_EXCHANGE"` to the ACPS `create-oauth2-credential-provider` request. M2M path unchanged.
+
+### 14.3 Subject Token Forwarding
+
+The invocation endpoint scans `AGENT_CONFIG_JSON` integrations for `delegation_mode=="obo"`. When OBO is active:
+- Extracts the user's Bearer token from the incoming request `Authorization` header.
+- Passes `user_access_token` to `invoke_agent_stream` / `invoke_harness_agent_stream`.
+- Custom agents receive it in the invoke payload; harness agents receive it via `X-Loom-User-Access-Token` header.
+- If the token is missing, the invocation aborts with SSE error `code: "obo_missing_user_token"`.
+
+### 14.4 Runtime Token Exchange (Agent)
+
+The `_OAuth2Auth` handler in `agents/strands_agent/src/integrations/mcp_client.py`:
+1. Calls `acps.get_workload_access_token_for_jwt(workloadName, userToken)` to get an OBO workload token.
+2. Calls `acps.get_resource_oauth2_token(..., oauth2Flow="ON_BEHALF_OF_TOKEN_EXCHANGE")` to get the downstream token.
+3. Caches by `(credential_provider_name, user_sub)` with TTL from `expiresIn`.
+
+### 14.5 Validation Endpoint
+
+`POST /api/agents/{id}/test-obo` performs a dry-run token exchange using the caller's Bearer token. Returns decoded JWT claims for admin inspection.
+
+### 14.6 Observability
+
+- `session_start` SSE includes `delegation_mode` and `has_user_access_token` (when OBO).
+- Agent runtime logs OBO exchange attempts at INFO level (provider name, user sub, success/failure).
+- OBO failures surface as user-friendly SSE errors, not 500s.
+
+---
+
+## 15. Makefile Targets
 
 The backend `makefile` sources `etc/environment.sh` and provides:
 

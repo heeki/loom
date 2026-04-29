@@ -53,6 +53,7 @@ Loom seamlessly weaves together agents, memory stores, MCP servers, and agent-to
 - Admin user view switching to preview scoped experiences
 - Human-in-the-loop (HITL) approval policies: configurable policies for tool-level human oversight with four methods — agentic loop hooks, tool context interrupts, MCP elicitation, and harness inline functions
 - Approval audit trail with per-agent queryable log
+- On-behalf-of (OBO) token exchange: RFC 8693 delegation enabling agents to access downstream resources with user-scoped permissions, configurable per MCP server and A2A agent
 
 ### Platform Catalog and Tagging
 - Unified catalog view across agents, memory, MCP servers, and platform resources

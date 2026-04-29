@@ -971,7 +971,31 @@ The Agent Registration Form includes a "Enable human confirmation (inline functi
 
 ---
 
-## 16. Future Work
+## 16. On-Behalf-Of (OBO) Delegation UI
+
+### 16.1 Delegation Mode Selector
+
+MCP server and A2A agent forms include a "Delegation Mode" select within the OAuth2 authentication section:
+- Options: **M2M** (client credentials, default) or **On-Behalf-Of** (RFC 8693 token exchange).
+- Only visible when `auth_type` is "oauth2".
+- Stored as `delegation_mode` field on the server/agent model.
+
+### 16.2 Deploy Form Integration Badges
+
+The agent registration form shows M2M/OBO badges next to each OAuth2 MCP server and A2A agent in the integration selection lists, so admins can see which delegation mode each integration uses at deploy time.
+
+### 16.3 Invoke/Chat OBO Indicators
+
+- **InvokePanel**: When the agent has OBO-configured integrations and a user token is available, displays a blue "User identity delegated" indicator. If the user is not authenticated, shows an amber "OBO requires authentication" warning.
+- **ChatPage**: Same indicators rendered near the model/connector row above the message input.
+
+### 16.4 Types
+
+`delegation_mode?: "m2m" | "obo"` added to: `McpServer`, `McpServerCreateRequest`, `McpServerUpdateRequest`, `A2aAgent`, `A2aAgentCreateRequest`, `A2aAgentUpdateRequest`, and `ConnectorInfo`.
+
+---
+
+## 17. Future Work
 
 - **VPC network mode** support
 - **Operate Tab** — aggregate dashboard with summary cards, per-agent latency charts
