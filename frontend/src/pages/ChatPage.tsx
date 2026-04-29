@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Send, Plus, Brain, LogOut, Bot, User, X, Loader2, Palette, RefreshCw, ChevronDown, Wrench, Plug, KeyRound, Unplug, Link2 } from "lucide-react";
-import { ApprovalRequestBubble, ApprovalResolvedBubble } from "@/components/ApprovalDialog";
+import { ApprovalRequestBubble } from "@/components/ApprovalDialog";
 import { ElicitationRequestBubble } from "@/components/ElicitationDialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,6 +26,7 @@ interface ChatMessage {
   role: "user" | "assistant";
   text: string;
   toolNames?: string[];
+  hitlSegments?: StreamSegment[];
 }
 
 interface ChatPageProps {
@@ -44,7 +45,10 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     .filter((g) => g.startsWith("g-users-"))
     .map((g) => g.replace("g-users-", ""));
 
-  const currentUserId = user?.username ?? user?.sub;
+  const currentUserIdLocal = user?.username ?? user?.sub;
+  // Backend-authoritative user_id: set from session_start to ensure consistency
+  const [backendUserId, setBackendUserId] = useState<string | null>(null);
+  const currentUserId = backendUserId ?? currentUserIdLocal;
 
   // Agent state
   const [agents, setAgents] = useState<AgentResponse[]>([]);
@@ -78,6 +82,8 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [queuedPrompt, setQueuedPrompt] = useState<string | null>(null);
   const [input, setInput] = useState("");
+  // Persist HITL segments per invocation ID so they survive re-fetches
+  const hitlSegmentsMap = useRef<Map<string, StreamSegment[]>>(new Map());
 
   // Memory panel state
   const [showMemory, setShowMemory] = useState(false);
@@ -120,7 +126,15 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     if (!authConfig?.type) { setResolvedAuthorizerId(null); setLinkStatus("not-configured"); return; }
 
     // Same-IdP detection: login issuer matches agent's authorizer discovery URL
+    // Only applies when user logged in via Cognito directly (not external IdP),
+    // since an Entra user's token is NOT valid for a Cognito authorizer.
     const isExternalLogin = loginAuthConfig?.provider_type && loginAuthConfig.provider_type !== "cognito";
+    if (!isExternalLogin && loginAuthConfig?.user_pool_id && authConfig.pool_id &&
+        loginAuthConfig.user_pool_id === authConfig.pool_id) {
+      setLinkStatus("same-idp");
+      setResolvedAuthorizerId(null);
+      return;
+    }
     if (isExternalLogin && authConfig.discovery_url && loginAuthConfig?.issuer_url) {
       const entraPattern = /login\.microsoftonline\.com\/([^/]+)/i;
       const issuerMatch = entraPattern.exec(loginAuthConfig.issuer_url);
@@ -463,13 +477,17 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     if (sessionStart && sessionStart !== lastSessionStartRef.current && selectedAgentId !== null) {
       lastSessionStartRef.current = sessionStart;
       setCurrentSessionId(sessionStart.session_id);
-      listSessions(selectedAgentId, currentUserId ?? undefined)
+      // Use the backend's authoritative user_id for future session queries
+      if (sessionStart.user_id && sessionStart.user_id !== backendUserId) {
+        setBackendUserId(sessionStart.user_id);
+      }
+      listSessions(selectedAgentId, sessionStart.user_id ?? currentUserId ?? undefined)
         .then((data) => {
           setSessions(data);
         })
         .catch(() => {});
     }
-  }, [sessionStart, selectedAgentId, currentUserId]);
+  }, [sessionStart, selectedAgentId, currentUserId, backendUserId]);
 
   // When invocation completes, load the authoritative session from the backend
   // and use it to populate the chat history. setPendingPrompt(null) is deferred
@@ -480,6 +498,8 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
   pendingPromptRef.current = pendingPrompt;
   const toolNamesRef = useRef<string[]>([]);
   toolNamesRef.current = toolNames;
+  const segmentsRef = useRef<StreamSegment[]>([]);
+  segmentsRef.current = segments;
   const streamedTextRef = useRef<string>("");
   streamedTextRef.current = streamedText;
 
@@ -499,16 +519,29 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
         // the async fetch completes.
         const capturedPending = pendingPromptRef.current;
         const capturedToolNames = toolNamesRef.current.length > 0 ? [...toolNamesRef.current] : undefined;
+        const capturedHitlSegments = segmentsRef.current.filter(
+          s => s.type === "approval_request" || s.type === "approval_resolved" || s.type === "elicitation_request"
+        );
         getSession(selectedAgentId, sessionId)
           .then((session) => {
             const msgs: ChatMessage[] = [];
+            const lastInv = session.invocations[session.invocations.length - 1];
+            // Store HITL segments for this invocation
+            if (lastInv && capturedHitlSegments.length > 0) {
+              hitlSegmentsMap.current.set(lastInv.invocation_id, capturedHitlSegments);
+            }
             for (const inv of session.invocations) {
               if (inv.prompt_text)
                 msgs.push({ id: `user-${inv.invocation_id}`, role: "user", text: inv.prompt_text });
               if (inv.response_text)
-                msgs.push({ id: `assistant-${inv.invocation_id}`, role: "assistant", text: inv.response_text });
+                msgs.push({
+                  id: `assistant-${inv.invocation_id}`,
+                  role: "assistant",
+                  text: inv.response_text,
+                  hitlSegments: hitlSegmentsMap.current.get(inv.invocation_id),
+                });
             }
-            // Attach tool names from the just-completed stream to the last assistant message
+            // Attach tool names to the last assistant message
             if (capturedToolNames) {
               for (let i = msgs.length - 1; i >= 0; i--) {
                 if (msgs[i]!.role === "assistant") { msgs[i]!.toolNames = capturedToolNames; break; }
@@ -667,6 +700,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
               id: `assistant-${inv.invocation_id}`,
               role: "assistant",
               text: inv.response_text,
+              hitlSegments: hitlSegmentsMap.current.get(inv.invocation_id),
             });
           }
         }
@@ -1004,7 +1038,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                 ) : (
                   <div className="max-w-3xl mx-auto px-6 py-6 space-y-4">
                     {messages.map((msg) => (
-                      <MessageBubble key={msg.id} role={msg.role} text={msg.text} toolNames={msg.toolNames} />
+                      <MessageBubble key={msg.id} role={msg.role} text={msg.text} toolNames={msg.toolNames} hitlSegments={msg.hitlSegments} />
                     ))}
 
                     {/* In-flight user message */}
@@ -1017,7 +1051,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
 
                     {/* Streaming bubble — renders segments inline (text + tool calls) */}
                     {((isCurrentlyStreaming && segments.length > 0) ||
-                      (!isCurrentlyStreaming && pendingPrompt !== null && !!streamedText)) && (
+                      (!isCurrentlyStreaming && pendingPrompt !== null && (!!streamedText || segments.length > 0))) && (
                       <StreamingBubble
                         segments={segments}
                         isStreaming={isCurrentlyStreaming}
@@ -1428,7 +1462,7 @@ function StreamingBubble({
               blocks.push(<ApprovalRequestBubble key={`approval-${i}`} data={seg.data} />);
             } else if (seg.type === "approval_resolved") {
               flushTools();
-              blocks.push(<ApprovalResolvedBubble key={`resolved-${i}`} data={seg.data} />);
+              // Skip render — approval status is already shown inline in the ApprovalRequestBubble
             } else if (seg.type === "elicitation_request") {
               flushTools();
               blocks.push(<ElicitationRequestBubble key={`elicit-${i}`} data={seg.data} onRespond={onElicitationRespond} />);
@@ -1497,11 +1531,13 @@ function MessageBubble({
   text,
   isStreaming,
   toolNames,
+  hitlSegments,
 }: {
   role: "user" | "assistant";
   text: string;
   isStreaming?: boolean;
   toolNames?: string[];
+  hitlSegments?: StreamSegment[];
 }) {
   const isUser = role === "user";
   return (
@@ -1520,6 +1556,15 @@ function MessageBubble({
               {toolNames.map((name, i) => (
                 <div key={i} className="pl-[18px] font-medium text-foreground/70">{formatToolName(name)}</div>
               ))}
+            </div>
+          )}
+          {hitlSegments && hitlSegments.length > 0 && (
+            <div className="mb-2 space-y-2">
+              {hitlSegments.map((seg, i) => {
+                if (seg.type === "approval_request") return <ApprovalRequestBubble key={`h-approval-${i}`} data={seg.data} resolved />;
+                if (seg.type === "elicitation_request") return <ElicitationRequestBubble key={`h-elicit-${i}`} data={seg.data} resolved />;
+                return null;
+              })}
             </div>
           )}
           <ReactMarkdown

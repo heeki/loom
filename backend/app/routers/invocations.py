@@ -503,6 +503,7 @@ async def invoke_agent_stream(
         "session_id": session_id,
         "invocation_id": invocation_id,
         "client_invoke_time": client_invoke_time,
+        "user_id": session.user_id,
     }
     if token_source:
         session_start_data["token_source"] = token_source
@@ -994,6 +995,7 @@ async def invoke_harness_agent_stream(
         "session_id": session_id,
         "invocation_id": invocation_id,
         "client_invoke_time": client_invoke_time,
+        "user_id": session.user_id,
         "has_token": bool(access_token),
         "token_source": token_source,
     })
@@ -1621,7 +1623,10 @@ def list_sessions(
         InvocationSession.agent_id == agent_id,
         InvocationSession.hidden_at.is_(None),
     ]
-    if user_id:
+    # Non-admin users always see only their own sessions (server-side enforcement)
+    if "t-admin" not in user.groups:
+        filters.append(InvocationSession.user_id == user.username)
+    elif user_id:
         filters.append(InvocationSession.user_id == user_id)
 
     sessions = db.query(InvocationSession).filter(

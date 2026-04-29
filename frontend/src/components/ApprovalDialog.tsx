@@ -8,11 +8,13 @@ import type { SSEApprovalRequest, SSEApprovalResolved } from "@/api/types";
 export function ApprovalRequestBubble({
   data,
   onDecided,
+  resolved,
 }: {
   data: SSEApprovalRequest;
   onDecided?: (requestId: string, decision: string) => void;
+  resolved?: boolean;
 }) {
-  const [decision, setDecision] = useState<string | null>(null);
+  const [decision, setDecision] = useState<string | null>(resolved ? "approved" : null);
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [showReason, setShowReason] = useState(false);

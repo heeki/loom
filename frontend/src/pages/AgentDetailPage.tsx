@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Key, Pencil, Check, X, Wrench } from "lucide-react";
-import { ApprovalRequestBubble, ApprovalResolvedBubble } from "@/components/ApprovalDialog";
+import { ApprovalRequestBubble } from "@/components/ApprovalDialog";
 import { ElicitationRequestBubble } from "@/components/ElicitationDialog";
 import { fetchModels } from "@/api/agents";
 import type { ModelOption } from "@/api/types";
@@ -321,7 +321,7 @@ export function AgentDetailPage({
                       blocks.push(<ApprovalRequestBubble key={`approval-${i}`} data={seg.data} />);
                     } else if (seg.type === "approval_resolved") {
                       flushTools();
-                      blocks.push(<ApprovalResolvedBubble key={`resolved-${i}`} data={seg.data} />);
+                      // Skip render — approval status is already shown inline in the ApprovalRequestBubble
                     } else if (seg.type === "elicitation_request") {
                       flushTools();
                       blocks.push(<ElicitationRequestBubble key={`elicit-${i}`} data={seg.data} onRespond={(id, action, content) => sendElicitationResponse(agent.id, id, action, content)} />);

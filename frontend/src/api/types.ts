@@ -518,6 +518,7 @@ export interface SSESessionStart {
   session_id: string;
   invocation_id: string;
   client_invoke_time: number;
+  user_id?: string;
   token_source?: string;
   has_token?: boolean;
 }

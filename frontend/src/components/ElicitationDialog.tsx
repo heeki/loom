@@ -9,14 +9,17 @@ import type { SSEElicitationRequest } from "@/api/types";
 interface ElicitationRequestBubbleProps {
   data: SSEElicitationRequest;
   onRespond?: (elicitationId: string, action: "accept" | "decline", content?: Record<string, unknown>) => void;
+  resolved?: boolean;
 }
 
 export function ElicitationRequestBubble({
   data,
   onRespond,
+  resolved,
 }: ElicitationRequestBubbleProps) {
   const [response, setResponse] = useState<Record<string, string>>({});
-  const [submitted, setSubmitted] = useState(false);
+  const [submitted, setSubmitted] = useState(resolved ?? false);
+  const [submittedSummary, setSubmittedSummary] = useState<string | null>(null);
   const [selectedChoice, setSelectedChoice] = useState<string | null>(null);
 
   const properties = (data.schema?.properties ?? {}) as Record<
@@ -30,6 +33,14 @@ export function ElicitationRequestBubble({
 
   const handleAccept = (content?: Record<string, unknown>) => {
     setSubmitted(true);
+    if (content) {
+      const summary = Object.entries(content)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(", ");
+      setSubmittedSummary(summary);
+    } else {
+      setSubmittedSummary("Approved");
+    }
     if (data.request_id) {
       submitApprovalDecision(data.request_id, "approved", undefined, content);
     }
@@ -38,6 +49,7 @@ export function ElicitationRequestBubble({
 
   const handleDecline = () => {
     setSubmitted(true);
+    setSubmittedSummary("Declined");
     if (data.request_id) {
       submitApprovalDecision(data.request_id, "rejected");
     }
@@ -51,6 +63,7 @@ export function ElicitationRequestBubble({
   const handleChoiceSubmit = (choice: string) => {
     setSelectedChoice(choice);
     setSubmitted(true);
+    setSubmittedSummary(choice === "yes" ? "Yes" : "No");
     if (data.request_id) {
       if (choice === "yes") {
         submitApprovalDecision(data.request_id, "approved", undefined, { approved: true });
@@ -76,13 +89,14 @@ export function ElicitationRequestBubble({
         {submitted ? (
           <div className="flex items-center gap-1.5 text-xs text-purple-700 dark:text-purple-400 font-medium">
             <CheckCircle className="h-3.5 w-3.5" />
-            {selectedChoice ? `Responded: ${selectedChoice}` : "Response submitted"}
+            {submittedSummary ?? (selectedChoice ? `Responded: ${selectedChoice}` : "Response submitted")}
           </div>
         ) : isSimpleChoice ? (
           <div className="flex items-center gap-2 mt-2">
             <Button
               size="sm"
               className="h-7 text-xs"
+              disabled={submitted}
               onClick={() => handleChoiceSubmit("yes")}
             >
               Yes
@@ -91,6 +105,7 @@ export function ElicitationRequestBubble({
               size="sm"
               variant="outline"
               className="h-7 text-xs"
+              disabled={submitted}
               onClick={() => handleChoiceSubmit("no")}
             >
               No
@@ -99,6 +114,7 @@ export function ElicitationRequestBubble({
               size="sm"
               variant="ghost"
               className="h-7 text-xs text-muted-foreground"
+              disabled={submitted}
               onClick={handleDecline}
             >
               <XCircle className="h-3 w-3 mr-1" />
@@ -140,6 +156,7 @@ export function ElicitationRequestBubble({
               <Button
                 size="sm"
                 className="h-7 text-xs"
+                disabled={submitted}
                 onClick={handleSubmitFields}
               >
                 Submit
@@ -148,6 +165,7 @@ export function ElicitationRequestBubble({
                 size="sm"
                 variant="ghost"
                 className="h-7 text-xs text-muted-foreground"
+                disabled={submitted}
                 onClick={handleDecline}
               >
                 Cancel
@@ -159,6 +177,7 @@ export function ElicitationRequestBubble({
             <Button
               size="sm"
               className="h-7 text-xs"
+              disabled={submitted}
               onClick={() => handleAccept()}
             >
               Approve
@@ -167,6 +186,7 @@ export function ElicitationRequestBubble({
               size="sm"
               variant="ghost"
               className="h-7 text-xs text-muted-foreground"
+              disabled={submitted}
               onClick={handleDecline}
             >
               Decline
