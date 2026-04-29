@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -755,6 +755,7 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
             "oauth2_client_id": s.oauth2_client_id,
             "oauth2_client_secret": s.oauth2_client_secret,
             "oauth2_scopes": s.oauth2_scopes,
+            "delegation_mode": (s.delegation_mode or "m2m"),
             "api_key_header_name": s.api_key_header_name,
             "supports_elicitation": s.supports_elicitation == "true",
         }
@@ -771,6 +772,7 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
             "oauth2_client_id": a.oauth2_client_id,
             "oauth2_client_secret": a.oauth2_client_secret,
             "oauth2_scopes": a.oauth2_scopes,
+            "delegation_mode": (a.delegation_mode or "m2m"),
         }
         for a in a2a_records
     ]
@@ -933,6 +935,7 @@ def _deploy_agent_background(
                 entry["dynamic_only"] = True
             if server["auth_type"] == "oauth2":
                 cp_name = f"loom-{request.name}-mcp-{server['name']}"
+                mcp_delegation = server.get("delegation_mode") or "m2m"
                 try:
                     cp_response = create_oauth2_credential_provider(
                         name=cp_name,
@@ -941,10 +944,11 @@ def _deploy_agent_background(
                         auth_server_url=server["oauth2_well_known_url"] or "",
                         region=region,
                         tags=resolved_tags,
+                        delegation_mode=mcp_delegation,
                     )
                     logger.info(
-                        "Created credential provider '%s' for MCP server '%s' (callback: %s)",
-                        cp_name, server["name"], cp_response.get("callbackUrl"),
+                        "Created credential provider '%s' for MCP server '%s' (delegation=%s callback=%s)",
+                        cp_name, server["name"], mcp_delegation, cp_response.get("callbackUrl"),
                     )
                 except Exception as e:
                     logger.error(
@@ -958,6 +962,7 @@ def _deploy_agent_background(
                 auth_entry: dict[str, str] = {
                     "type": "oauth2",
                     "credential_provider_name": cp_name,
+                    "delegation_mode": mcp_delegation,
                 }
                 if server["oauth2_well_known_url"]:
                     auth_entry["well_known_endpoint"] = server["oauth2_well_known_url"]
@@ -971,6 +976,7 @@ def _deploy_agent_background(
                     "credentials_secret_arn": secret_name,
                     "api_key_header_name": server["api_key_header_name"] or "x-api-key",
                 }
+            entry["delegation_mode"] = server.get("delegation_mode") or "m2m"
             mcp_server_configs.append(entry)
 
         # Build A2A agent configs from snapshots
@@ -983,6 +989,7 @@ def _deploy_agent_background(
             }
             if a2a["auth_type"] == "oauth2":
                 cp_name = f"loom-{request.name}-a2a-{a2a['name']}"
+                a2a_delegation = a2a.get("delegation_mode") or "m2m"
                 try:
                     cp_response = create_oauth2_credential_provider(
                         name=cp_name,
@@ -991,10 +998,11 @@ def _deploy_agent_background(
                         auth_server_url=a2a["oauth2_well_known_url"] or "",
                         region=region,
                         tags=resolved_tags,
+                        delegation_mode=a2a_delegation,
                     )
                     logger.info(
-                        "Created credential provider '%s' for A2A agent '%s' (callback: %s)",
-                        cp_name, a2a["name"], cp_response.get("callbackUrl"),
+                        "Created credential provider '%s' for A2A agent '%s' (delegation=%s callback=%s)",
+                        cp_name, a2a["name"], a2a_delegation, cp_response.get("callbackUrl"),
                     )
                 except Exception as e:
                     logger.error(
@@ -1008,12 +1016,14 @@ def _deploy_agent_background(
                 a2a_auth: dict[str, str] = {
                     "type": "oauth2",
                     "credential_provider_name": cp_name,
+                    "delegation_mode": a2a_delegation,
                 }
                 if a2a["oauth2_well_known_url"]:
                     a2a_auth["well_known_endpoint"] = a2a["oauth2_well_known_url"]
                 if a2a["oauth2_scopes"]:
                     a2a_auth["scopes"] = a2a["oauth2_scopes"]
                 entry["auth"] = a2a_auth
+            entry["delegation_mode"] = a2a.get("delegation_mode") or "m2m"
             a2a_agent_configs.append(entry)
 
         # Build memory configs from snapshots
@@ -1311,6 +1321,7 @@ def _deploy_harness(request: AgentCreateRequest, db: Session, background_tasks: 
                 "oauth2_client_secret": server.oauth2_client_secret,
                 "oauth2_well_known_url": server.oauth2_well_known_url,
                 "oauth2_scopes": server.oauth2_scopes,
+                "delegation_mode": (server.delegation_mode or "m2m"),
                 "api_key_header_name": server.api_key_header_name,
                 "supports_elicitation": server.supports_elicitation == "true",
             })
@@ -1459,6 +1470,7 @@ def _deploy_harness_background(
             cp_arn: str | None = None
             if server["auth_type"] == "oauth2":
                 cp_name = f"loom-{name}-mcp-{server['name']}"
+                mcp_delegation = server.get("delegation_mode") or "m2m"
                 try:
                     cp_response = create_oauth2_credential_provider(
                         name=cp_name,
@@ -1467,6 +1479,7 @@ def _deploy_harness_background(
                         auth_server_url=server["oauth2_well_known_url"] or "",
                         region=region,
                         tags=resolved_tags if resolved_tags else None,
+                        delegation_mode=mcp_delegation,
                     )
                     cp_arn = cp_response.get("arn") or cp_response.get("credentialProviderArn")
                     logger.info(
@@ -1496,7 +1509,12 @@ def _deploy_harness_background(
             if server.get("supports_elicitation"):
                 mcp_entry["dynamic_only"] = True
             if cp_name:
-                mcp_entry["auth"] = {"type": "oauth2", "credential_provider_name": cp_name}
+                mcp_entry["auth"] = {
+                    "type": "oauth2",
+                    "credential_provider_name": cp_name,
+                    "delegation_mode": server.get("delegation_mode") or "m2m",
+                }
+            mcp_entry["delegation_mode"] = server.get("delegation_mode") or "m2m"
             mcp_server_configs.append(mcp_entry)
 
         harness_tools.extend(extra_harness_tools)
@@ -2515,3 +2533,121 @@ async def get_agent_integration(
     if agent.status != "READY":
         raise HTTPException(status_code=400, detail="Integration info is only available for agents with status READY")
     return _build_integration_info(agent, db)
+
+
+# ---------------------------------------------------------------------------
+# OBO validation / dry-run test endpoint (R7)
+# ---------------------------------------------------------------------------
+class TestOboRequest(BaseModel):
+    credential_provider_name: str = Field(..., description="Name of the OBO credential provider to exercise")
+    scopes: list[str] = Field(default_factory=list, description="Scopes requested on the downstream token")
+    workload_name: str | None = Field(default=None, description="Optional ACPS workload identity name (defaults to agent-derived)")
+
+
+class TestOboResponse(BaseModel):
+    success: bool
+    message: str
+    access_token_present: bool = False
+    claims: dict | None = None
+    scopes: str | None = None
+    error: str | None = None
+
+
+def _decode_jwt_claims(token: str) -> dict | None:
+    """Best-effort decode of a JWT's payload (no signature verification)."""
+    import base64
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return None
+        padded = parts[1] + "=" * (-len(parts[1]) % 4)
+        return json.loads(base64.urlsafe_b64decode(padded))
+    except Exception:
+        return None
+
+
+@router.post("/{agent_id}/test-obo", response_model=TestOboResponse)
+def test_obo_exchange(
+    agent_id: int,
+    body: TestOboRequest,
+    request: Request,
+    user: UserInfo = Depends(require_scopes("agent:write")),
+    db: Session = Depends(get_db),
+) -> TestOboResponse:
+    """Dry-run an OBO token exchange for a given credential provider.
+
+    Uses the caller's Authorization bearer token as the user subject token,
+    calls ACPS ``get-resource-oauth2-token`` with
+    ``oauth2Flow=ON_BEHALF_OF_TOKEN_EXCHANGE``, and returns the decoded claims.
+    """
+    agent = get_agent_or_404(agent_id, db)
+
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User access token required in Authorization header",
+        )
+    user_token = auth_header[7:]
+
+    region = agent.region or os.getenv("AWS_REGION", "us-east-1")
+    workload_name = body.workload_name or f"loom-{agent.name}"
+
+    import boto3
+    try:
+        acps = boto3.client("acps", region_name=region)
+    except Exception as e:
+        logger.warning("ACPS client not available: %s", e)
+        return TestOboResponse(
+            success=False,
+            message="ACPS client is not configured in this environment",
+            error=str(e),
+        )
+
+    try:
+        wl = acps.get_workload_access_token_for_jwt(
+            workloadName=workload_name,
+            userToken=user_token,
+        )
+        workload_token = wl.get("workloadAccessToken")
+        if not workload_token:
+            return TestOboResponse(
+                success=False,
+                message="ACPS returned no workload access token",
+                error="missing workloadAccessToken",
+            )
+
+        kwargs: dict[str, Any] = {
+            "workloadIdentityToken": workload_token,
+            "resourceCredentialProviderName": body.credential_provider_name,
+            "oauth2Flow": "ON_BEHALF_OF_TOKEN_EXCHANGE",
+        }
+        if body.scopes:
+            kwargs["scopes"] = body.scopes
+
+        token_resp = acps.get_resource_oauth2_token(**kwargs)
+        access_token = token_resp.get("accessToken")
+        if not access_token:
+            return TestOboResponse(
+                success=False,
+                message="OBO exchange did not return an access token",
+                error="missing accessToken",
+            )
+
+        claims = _decode_jwt_claims(access_token)
+        scp = claims.get("scp") if isinstance(claims, dict) else None
+        return TestOboResponse(
+            success=True,
+            message="OBO token exchange succeeded",
+            access_token_present=True,
+            claims=claims,
+            scopes=scp,
+        )
+    except Exception as e:
+        logger.exception("OBO dry-run failed for agent=%s provider=%s: %s",
+                         agent_id, body.credential_provider_name, e)
+        return TestOboResponse(
+            success=False,
+            message="OBO token exchange failed",
+            error=str(e),
+        )

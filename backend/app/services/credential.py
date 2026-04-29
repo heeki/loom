@@ -22,6 +22,7 @@ def create_oauth2_credential_provider(
     auth_server_url: str,
     region: str,
     tags: dict[str, str] | None = None,
+    delegation_mode: str = "m2m",
 ) -> dict[str, Any]:
     """
     Create an OAuth2 credential provider via the AgentCore control plane.
@@ -36,6 +37,9 @@ def create_oauth2_credential_provider(
         auth_server_url: OAuth2 authorization server URL
         region: AWS region name
         tags: Optional dict of tags to apply to the credential provider
+        delegation_mode: "m2m" (default, client_credentials) or "obo" for
+            RFC 8693 on-behalf-of token exchange. When "obo", adds
+            oauth2Flow="ON_BEHALF_OF_TOKEN_EXCHANGE" to the request.
 
     Returns:
         Dictionary with provider details from the API response,
@@ -61,6 +65,8 @@ def create_oauth2_credential_provider(
             }
         },
     }
+    if delegation_mode == "obo":
+        kwargs['oauth2Flow'] = 'ON_BEHALF_OF_TOKEN_EXCHANGE'
     if tags:
         kwargs['tags'] = tags
 
