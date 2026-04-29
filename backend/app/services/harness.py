@@ -115,6 +115,7 @@ def invoke_harness_stream(
     max_tokens: int | None = None,
     actor_id: str | None = None,
     access_token: str | None = None,
+    user_access_token: str | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """Invoke a harness and yield translated SSE events.
 
@@ -168,6 +169,14 @@ def invoke_harness_stream(
         params["maxTokens"] = max_tokens
     if actor_id:
         params["actorId"] = actor_id
+
+    if user_access_token:
+        def _add_user_token_header(request, **kwargs):
+            request.headers["X-Loom-User-Access-Token"] = user_access_token
+
+        client.meta.events.register(
+            "before-send.bedrock-agentcore.InvokeHarness", _add_user_token_header,
+        )
 
     response = client.invoke_harness(**params)
 
@@ -261,6 +270,7 @@ def resume_harness_stream(
     tools: list[dict[str, Any]] | None = None,
     access_token: str | None = None,
     actor_id: str | None = None,
+    user_access_token: str | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """Re-invoke a harness with a toolResult to resume after an inline function call.
 
@@ -323,6 +333,14 @@ def resume_harness_stream(
         params["tools"] = tools
     if actor_id:
         params["actorId"] = actor_id
+
+    if user_access_token:
+        def _add_user_token_header(request, **kwargs):
+            request.headers["X-Loom-User-Access-Token"] = user_access_token
+
+        client.meta.events.register(
+            "before-send.bedrock-agentcore.InvokeHarness", _add_user_token_header,
+        )
 
     response = client.invoke_harness(**params)
 

@@ -457,6 +457,8 @@ async def invoke_agent_stream(
     dynamic_mcp_servers: list[dict[str, Any]] | None = None,
     approval_policies: list[dict[str, Any]] | None = None,
     supports_elicitation: bool = False,
+    user_access_token: str | None = None,
+    delegation_mode: str = "m2m",
 ) -> AsyncGenerator[str, None]:
     """
     Invoke the agent and yield SSE events as the response streams.
@@ -509,7 +511,28 @@ async def invoke_agent_stream(
         session_start_data["token_source"] = token_source
     if access_token:
         session_start_data["has_token"] = True
+    session_start_data["delegation_mode"] = delegation_mode
+    if delegation_mode == "obo":
+        session_start_data["has_user_access_token"] = bool(user_access_token)
     yield format_sse_event("session_start", session_start_data)
+
+    # Validate OBO precondition: user access token must be present
+    if delegation_mode == "obo" and not user_access_token:
+        error_msg = (
+            "OBO delegation is configured for this agent but no user access token "
+            "is available. Sign in via the same identity provider as the agent "
+            "authorizer, or select a credential that forwards the user token."
+        )
+        logger.error(
+            "OBO precondition failed for agent %s session %s: missing user_access_token",
+            agent.id, session_id,
+        )
+        invocation.status = "error"
+        invocation.error_message = error_msg
+        session.status = "error"
+        db.commit()
+        yield format_sse_event("error", {"message": error_msg, "code": "obo_missing_user_token"})
+        return
 
     # Shared state between streaming and finalization
     response_chunks: list[str] = []
@@ -532,6 +555,7 @@ async def invoke_agent_stream(
             runtime_model_id=runtime_model_id,
             approval_policies=approval_policies,
             supports_elicitation=supports_elicitation,
+            user_access_token=user_access_token,
         )
 
         # Stream chunks to frontend. Each next() call on the synchronous
@@ -601,6 +625,7 @@ async def invoke_agent_stream(
                             runtime_model_id=runtime_model_id,
                             supports_elicitation=True,
                             elicitation_response={"action": elicit_action, "content": elicit_content},
+                            user_access_token=user_access_token,
                         )
 
                         def _next_elicit_resume():
@@ -680,6 +705,7 @@ async def invoke_agent_stream(
                                 dynamic_mcp_servers=None,
                                 runtime_model_id=runtime_model_id,
                                 interrupt_response=interrupt_response_payload,
+                                user_access_token=user_access_token,
                             )
 
                             def _next_resume():
@@ -915,6 +941,8 @@ async def invoke_harness_agent_stream(
     access_token: str | None = None,
     token_source: str | None = None,
     dynamic_tools: list[dict[str, Any]] | None = None,
+    user_access_token: str | None = None,
+    delegation_mode: str = "m2m",
 ) -> AsyncGenerator[str, None]:
     """Invoke a harness-deployed agent and yield SSE events.
 
@@ -1000,7 +1028,25 @@ async def invoke_harness_agent_stream(
         "user_id": session.user_id,
         "has_token": bool(access_token),
         "token_source": token_source,
+        "delegation_mode": delegation_mode,
+        "has_user_access_token": bool(user_access_token) if delegation_mode == "obo" else None,
     })
+
+    if delegation_mode == "obo" and not user_access_token:
+        error_msg = (
+            "OBO delegation is configured for this harness agent but no user "
+            "access token is available. Sign in via the agent's identity provider."
+        )
+        logger.error(
+            "OBO precondition failed for harness agent %s session %s: missing user_access_token",
+            agent.id, session_id,
+        )
+        invocation.status = "error"
+        invocation.error_message = error_msg
+        session.status = "error"
+        db.commit()
+        yield format_sse_event("error", {"message": error_msg, "code": "obo_missing_user_token"})
+        return
 
     response_chunks: list[str] = []
     harness_input_tokens = 0
@@ -1016,6 +1062,7 @@ async def invoke_harness_agent_stream(
             actor_id=actor_id,
             access_token=access_token,
             tools=invoke_tools,
+            user_access_token=user_access_token,
         )
 
         _sentinel = object()
@@ -1088,6 +1135,7 @@ async def invoke_harness_agent_stream(
                         tools=invoke_tools,
                         access_token=access_token,
                         actor_id=actor_id,
+                        user_access_token=user_access_token,
                     )
 
                     def _next_resume():
@@ -1490,6 +1538,39 @@ async def invoke_agent_endpoint(
                 has_elicitation_connector = True
         logger.info("Resolved %d dynamic MCP connectors for invocation (elicitation=%s)", len(dynamic_mcp_servers), has_elicitation_connector)
 
+    # ---- Detect OBO delegation mode from stored AGENT_CONFIG_JSON ----
+    # If any integration has delegation_mode="obo", we must forward the user's
+    # access token so the runtime can perform RFC 8693 token exchange.
+    delegation_mode = "m2m"
+    try:
+        config_map_agent = {e.key: e.value for e in agent.config_entries}
+        raw_cfg = config_map_agent.get("AGENT_CONFIG_JSON", "")
+        if raw_cfg:
+            cfg = json.loads(raw_cfg)
+            integrations = cfg.get("integrations", {}) or {}
+            mcp_list = integrations.get("mcp_servers", []) or []
+            a2a_list = integrations.get("a2a_agents", []) or []
+            if any((i.get("delegation_mode") or "m2m") == "obo" for i in (mcp_list + a2a_list)):
+                delegation_mode = "obo"
+    except (ValueError, TypeError) as e:
+        logger.warning("Failed to parse AGENT_CONFIG_JSON for delegation_mode detection: %s", e)
+
+    # Resolve user access token for OBO: prefer Authorization header from the
+    # incoming request (the frontend user's login token). This is the
+    # subject_token for RFC 8693 exchange.
+    user_access_token: str | None = None
+    if delegation_mode == "obo":
+        incoming_auth = request.headers.get("Authorization", "")
+        if incoming_auth.startswith("Bearer "):
+            user_access_token = incoming_auth[7:]
+        # If the resolved agent bearer came from the user's login token, reuse it.
+        elif token_source == "user" and access_token:
+            user_access_token = access_token
+        logger.info(
+            "OBO delegation active for agent %s: user_access_token_present=%s",
+            agent_id, bool(user_access_token),
+        )
+
     # Resolve active approval policies for the agent
     approval_policies_payload: list[dict[str, Any]] | None = None
     active_policies = db.query(ApprovalPolicy).filter(ApprovalPolicy.enabled == True).all()  # noqa: E712
@@ -1515,6 +1596,8 @@ async def invoke_agent_endpoint(
             request_body.prompt, user.username or user.sub or "loom-agent",
             runtime_model_id, access_token, token_source,
             dynamic_harness_tools,
+            user_access_token=user_access_token,
+            delegation_mode=delegation_mode,
         )
     else:
         stream_gen = invoke_agent_stream(
@@ -1524,6 +1607,8 @@ async def invoke_agent_endpoint(
             runtime_model_id, dynamic_mcp_servers,
             approval_policies=approval_policies_payload,
             supports_elicitation=has_elicitation_connector,
+            user_access_token=user_access_token,
+            delegation_mode=delegation_mode,
         )
 
     return StreamingResponse(

@@ -90,6 +90,7 @@ def invoke_agent(
     approval_policies: list[dict[str, Any]] | None = None,
     supports_elicitation: bool = False,
     elicitation_response: dict[str, Any] | None = None,
+    user_access_token: str | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """
     Invoke an AgentCore Runtime agent and stream the response.
@@ -131,6 +132,8 @@ def invoke_agent(
         payload["supports_elicitation"] = True
     if elicitation_response:
         payload["elicitationResponse"] = elicitation_response
+    if user_access_token:
+        payload["user_access_token"] = user_access_token
     payload_bytes = json.dumps(payload).encode('utf-8')
 
     params: dict[str, Any] = {
