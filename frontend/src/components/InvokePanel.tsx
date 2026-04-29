@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plug, Unplug, KeyRound, ChevronDown, Send, X, Link2 } from "lucide-react";
+import { Plug, Unplug, KeyRound, ChevronDown, Send, X, Link2, UserCheck, AlertTriangle } from "lucide-react";
 import { listAuthorizerConfigs, listAuthorizerCredentials, checkAuthorizerLinkStatus, getAuthorizerLinkAuthorizeUrl, submitAuthorizerLinkCallback, deleteAuthorizerLink } from "@/api/security";
 import { fetchModels } from "@/api/agents";
 import { listConnectors, setUserApiKey, deleteUserApiKey } from "@/api/mcp";
@@ -390,6 +390,18 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
     setSelectedSession(NEW_SESSION);
   };
 
+  // OBO delegation detection: any MCP connector on this agent using OBO mode
+  const oboConnectorNames = connectors
+    .filter((c) => c.delegation_mode === "obo" && mcpNames.includes(c.name))
+    .map((c) => c.name);
+  const hasObo = oboConnectorNames.length > 0;
+  const userTokenAvailable = (linkStatus === "linked" || linkStatus === "same-idp") ||
+    selectedCredential === USER_TOKEN ||
+    selectedCredential === LINKED_TOKEN ||
+    (selectedCredential === MANUAL_TOKEN && bearerToken.trim().length > 0) ||
+    allCredentials.some((c) => String(c.id) === selectedCredential);
+  const oboWarning = hasObo && !userTokenAvailable;
+
   const groupedModels = groupModels(filteredModels);
 
   const currentModelName = selectedModel
@@ -534,7 +546,7 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
         />
         <div className="flex items-center justify-between px-3 py-2 bg-background rounded-b-xl">
           {/* Left: Connectors */}
-          <div className="relative" ref={connectorsRef}>
+          <div className="relative flex items-center gap-2" ref={connectorsRef}>
             {connectors.length > 0 && (
               <button
                 type="button"
@@ -548,6 +560,24 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
                   <span className="ml-0.5 text-[10px] text-green-600 dark:text-green-400">{enabledConnectors.size}</span>
                 )}
               </button>
+            )}
+            {hasObo && !oboWarning && (
+              <span
+                className="flex items-center gap-1 text-[10px] text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-900 rounded-md px-1.5 py-1"
+                title={`User identity will be delegated to: ${oboConnectorNames.join(", ")}`}
+              >
+                <UserCheck className="h-3 w-3" />
+                User identity delegated
+              </span>
+            )}
+            {oboWarning && (
+              <span
+                className="flex items-center gap-1 text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-900 rounded-md px-1.5 py-1"
+                title="OBO delegation requires a user token — select a user credential to invoke."
+              >
+                <AlertTriangle className="h-3 w-3" />
+                OBO requires authentication
+              </span>
             )}
             {showConnectors && (
               <div className="absolute bottom-8 left-0 z-50 w-72 rounded-lg border bg-background shadow-md py-1">

@@ -33,6 +33,7 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
   const [clientId, setClientId] = useState(initialData?.oauth2_client_id ?? "");
   const [clientSecret, setClientSecret] = useState("");
   const [scopes, setScopes] = useState(initialData?.oauth2_scopes ?? "");
+  const [delegationMode, setDelegationMode] = useState<"m2m" | "obo">(initialData?.delegation_mode ?? "m2m");
   const [apiKeyHeaderName, setApiKeyHeaderName] = useState(initialData?.api_key_header_name ?? "x-api-key");
   const [apiKey, setApiKey] = useState("");
   const [supportsElicitation, setSupportsElicitation] = useState(initialData?.supports_elicitation ?? false);
@@ -56,6 +57,7 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
         if (clientId.trim()) request.oauth2_client_id = clientId.trim();
         if (clientSecret) request.oauth2_client_secret = clientSecret;
         if (scopes.trim()) request.oauth2_scopes = scopes.trim();
+        request.delegation_mode = delegationMode;
       }
       if (authType === "api_key") {
         request.api_key_header_name = apiKeyHeaderName;
@@ -121,6 +123,7 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
             if (parsed.oauth2_client_id !== undefined) setClientId(parsed.oauth2_client_id);
             if (parsed.oauth2_client_secret !== undefined) setClientSecret(parsed.oauth2_client_secret);
             if (parsed.oauth2_scopes !== undefined) setScopes(parsed.oauth2_scopes);
+            if (parsed.delegation_mode === "m2m" || parsed.delegation_mode === "obo") setDelegationMode(parsed.delegation_mode);
             if (parsed.api_key_header_name !== undefined) setApiKeyHeaderName(parsed.api_key_header_name);
             if (parsed.api_key !== undefined) setApiKey(parsed.api_key);
             if (parsed.supports_elicitation !== undefined) setSupportsElicitation(!!parsed.supports_elicitation);
@@ -141,6 +144,7 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
             if (clientId) result.oauth2_client_id = clientId;
             result.oauth2_client_secret = "(redacted)";
             if (scopes) result.oauth2_scopes = scopes;
+            result.delegation_mode = delegationMode;
           }
           if (authType === "api_key") {
             result.api_key_header_name = apiKeyHeaderName;
@@ -251,6 +255,21 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
             <div>
               <label className="text-xs text-muted-foreground">Scopes</label>
               <Input value={scopes} onChange={(e) => setScopes(e.target.value)} placeholder="openid profile (space-separated)" />
+            </div>
+            <div className="w-[220px]">
+              <label className="text-xs text-muted-foreground">Delegation Mode</label>
+              <Select value={delegationMode} onValueChange={(v) => setDelegationMode(v as "m2m" | "obo")}>
+                <SelectTrigger className="w-full text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="m2m">M2M (shared agent identity)</SelectItem>
+                  <SelectItem value="obo">On-Behalf-Of (user identity)</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                OBO uses RFC 8693 token exchange to delegate the invoking user&apos;s identity downstream.
+              </p>
             </div>
           </div>
         )}

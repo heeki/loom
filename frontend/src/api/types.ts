@@ -666,6 +666,7 @@ export interface ConnectorInfo {
   auth_type: "none" | "oauth2" | "api_key";
   has_user_api_key: boolean;
   supports_elicitation: boolean;
+  delegation_mode?: "m2m" | "obo";
 }
 
 // MCP Server types
@@ -681,6 +682,7 @@ export interface McpServer {
   oauth2_client_id: string | null;
   oauth2_scopes: string | null;
   has_oauth2_secret: boolean;
+  delegation_mode?: "m2m" | "obo";
   api_key_header_name: string | null;
   has_admin_api_key: boolean;
   supports_elicitation: boolean;
@@ -701,6 +703,7 @@ export interface McpServerCreateRequest {
   oauth2_client_id?: string;
   oauth2_client_secret?: string;
   oauth2_scopes?: string;
+  delegation_mode?: "m2m" | "obo";
   api_key_header_name?: string;
   api_key?: string;
   supports_elicitation?: boolean;
@@ -718,6 +721,7 @@ export interface McpServerUpdateRequest {
   oauth2_client_id?: string;
   oauth2_client_secret?: string;
   oauth2_scopes?: string;
+  delegation_mode?: "m2m" | "obo";
   api_key_header_name?: string;
   api_key?: string;
   supports_elicitation?: boolean;
@@ -793,6 +797,7 @@ export interface A2aAgent {
   oauth2_client_id: string | null;
   oauth2_scopes: string | null;
   has_oauth2_secret: boolean;
+  delegation_mode?: "m2m" | "obo";
   agentcore_session_id: string | null;
   last_fetched_at: string | null;
   created_at: string | null;
@@ -809,6 +814,7 @@ export interface A2aAgentCreateRequest {
   oauth2_client_id?: string;
   oauth2_client_secret?: string;
   oauth2_scopes?: string;
+  delegation_mode?: "m2m" | "obo";
 }
 
 export interface A2aAgentUpdateRequest {
@@ -820,6 +826,7 @@ export interface A2aAgentUpdateRequest {
   oauth2_client_id?: string;
   oauth2_client_secret?: string;
   oauth2_scopes?: string;
+  delegation_mode?: "m2m" | "obo";
 }
 
 export interface A2aAgentSkill {

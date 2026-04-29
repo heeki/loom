@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Send, Plus, Brain, LogOut, Bot, User, X, Loader2, Palette, RefreshCw, ChevronDown, Wrench, Plug, KeyRound, Unplug, Link2 } from "lucide-react";
+import { Send, Plus, Brain, LogOut, Bot, User, X, Loader2, Palette, RefreshCw, ChevronDown, Wrench, Plug, KeyRound, Unplug, Link2, UserCheck, AlertTriangle } from "lucide-react";
 import { ApprovalRequestBubble } from "@/components/ApprovalDialog";
 import { ElicitationRequestBubble } from "@/components/ElicitationDialog";
 import { Button } from "@/components/ui/button";
@@ -722,6 +722,15 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
 
   const hasMemory = selectedAgent && selectedAgent.memory_names.length > 0;
 
+  // OBO delegation detection: any MCP connector tied to this agent uses OBO mode
+  const agentMcpNames = selectedAgent?.mcp_names ?? [];
+  const oboConnectorNames = connectors
+    .filter((c) => c.delegation_mode === "obo" && agentMcpNames.includes(c.name))
+    .map((c) => c.name);
+  const hasObo = oboConnectorNames.length > 0;
+  const userTokenAvailable = linkStatus === "linked" || linkStatus === "same-idp";
+  const oboWarning = hasObo && !userTokenAvailable;
+
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
       {/* View-as banner for admins previewing the end-user experience */}
@@ -1271,6 +1280,24 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                       )}
                     </div>
                     <div className="flex items-center gap-2">
+                      {hasObo && !oboWarning && (
+                        <span
+                          className="flex items-center gap-1 text-[10px] text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-900 rounded-md px-1.5 py-1"
+                          title={`User identity will be delegated to: ${oboConnectorNames.join(", ")}`}
+                        >
+                          <UserCheck className="h-3 w-3" />
+                          User identity delegated
+                        </span>
+                      )}
+                      {oboWarning && (
+                        <span
+                          className="flex items-center gap-1 text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-900 rounded-md px-1.5 py-1"
+                          title="OBO delegation requires authentication — link your account to use this agent."
+                        >
+                          <AlertTriangle className="h-3 w-3" />
+                          OBO requires authentication
+                        </span>
+                      )}
                       {resolvedAuthorizerId && linkStatus === "linked" && (
                         <div className="flex items-center gap-1.5">
                           <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500" title="Account linked" />

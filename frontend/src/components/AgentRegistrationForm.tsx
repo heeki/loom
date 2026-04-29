@@ -940,6 +940,12 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                             {server.auth_type === "oauth2" && (
                               <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded shrink-0">OAuth2</span>
                             )}
+                            {server.auth_type === "oauth2" && server.delegation_mode === "obo" && (
+                              <span className="text-[10px] text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-950 px-1 rounded shrink-0" title="User identity delegated via RFC 8693 token exchange">OBO</span>
+                            )}
+                            {server.auth_type === "oauth2" && server.delegation_mode !== "obo" && (
+                              <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded shrink-0" title="Shared agent identity">M2M</span>
+                            )}
                           </label>
                         ))}
                       </div>
@@ -970,6 +976,12 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                             <span className="text-muted-foreground/60 truncate min-w-0" title={agent.base_url}>{agent.base_url}</span>
                             {agent.auth_type === "oauth2" && (
                               <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded shrink-0">OAuth2</span>
+                            )}
+                            {agent.auth_type === "oauth2" && agent.delegation_mode === "obo" && (
+                              <span className="text-[10px] text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-950 px-1 rounded shrink-0" title="User identity delegated via RFC 8693 token exchange">OBO</span>
+                            )}
+                            {agent.auth_type === "oauth2" && agent.delegation_mode !== "obo" && (
+                              <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded shrink-0" title="Shared agent identity">M2M</span>
                             )}
                           </label>
                         ))}
