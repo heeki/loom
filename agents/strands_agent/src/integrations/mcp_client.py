@@ -1,9 +1,13 @@
 """Dynamic MCP tool client creation from agent configuration."""
 
+import base64
+import json as _json
 import logging
 import os
+import threading
+import time
 from functools import partial
-from typing import Any, Generator
+from typing import Any, Generator, Optional
 
 import boto3
 import httpx
@@ -16,6 +20,32 @@ from bedrock_agentcore.services.identity import IdentityClient
 from src.config import MCPServerConfig
 
 logger = logging.getLogger(__name__)
+
+
+# Process-wide cache for OBO downstream tokens, keyed by
+# (credential_provider_name, user_sub). Each entry stores (token, expires_at).
+_OBO_TOKEN_CACHE: dict[tuple[str, str], tuple[str, float]] = {}
+_OBO_TOKEN_CACHE_LOCK = threading.Lock()
+_TOKEN_EXPIRY_SKEW_SECS = 30
+
+
+def _decode_jwt_sub(token: str) -> str:
+    """Decode the ``sub`` claim from a JWT without signature verification.
+
+    Used only to derive a cache key for OBO downstream tokens. Returns an
+    empty string if the token cannot be decoded.
+    """
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return ""
+        payload = parts[1]
+        padding = "=" * (-len(payload) % 4)
+        decoded = base64.urlsafe_b64decode(payload + padding)
+        claims = _json.loads(decoded)
+        return str(claims.get("sub", ""))
+    except Exception:
+        return ""
 
 
 class _OAuth2Auth(httpx.Auth):
@@ -32,18 +62,91 @@ class _OAuth2Auth(httpx.Auth):
     MCP request carries a fresh, valid credential.
     """
 
-    def __init__(self, credential_provider_name: str, scopes: list[str]) -> None:
+    def __init__(
+        self,
+        credential_provider_name: str,
+        scopes: list[str],
+        delegation_mode: str = "m2m",
+        user_access_token: Optional[str] = None,
+        workload_name: Optional[str] = None,
+    ) -> None:
         self._credential_provider_name = credential_provider_name
         self._scopes = scopes
         self._region = os.environ.get("AWS_REGION", "us-east-1")
+        self._delegation_mode = (delegation_mode or "m2m").lower()
+        self._user_access_token = user_access_token
+        self._workload_name = workload_name or os.environ.get("AGENTCORE_WORKLOAD_NAME") or os.environ.get("WORKLOAD_NAME") or ""
+        self._user_sub = _decode_jwt_sub(user_access_token) if user_access_token else ""
 
-    def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
-        workload_token = BedrockAgentCoreContext.get_workload_access_token()
-        if not workload_token:
-            logger.warning("No workload access token in context; sending unauthenticated request")
-            yield request
-            return
+    def _fetch_obo_token(self) -> Optional[str]:
+        if not self._user_access_token:
+            logger.warning(
+                "OBO delegation requested for '%s' but no user access token is available",
+                self._credential_provider_name,
+            )
+            return None
+        if not self._workload_name:
+            logger.warning(
+                "OBO delegation requested for '%s' but workload name is not configured "
+                "(set AGENTCORE_WORKLOAD_NAME env var)",
+                self._credential_provider_name,
+            )
+            return None
 
+        cache_key = (self._credential_provider_name, self._user_sub)
+        now = time.time()
+        with _OBO_TOKEN_CACHE_LOCK:
+            cached = _OBO_TOKEN_CACHE.get(cache_key)
+            if cached and cached[1] > now + _TOKEN_EXPIRY_SKEW_SECS:
+                return cached[0]
+
+        try:
+            identity_client = IdentityClient(self._region)
+            # Step 1: Exchange user JWT for an OBO workload identity token.
+            wl_resp = identity_client.dp_client.get_workload_access_token_for_jwt(
+                workloadName=self._workload_name,
+                userToken=self._user_access_token,
+            )
+            obo_wl_token = wl_resp.get("workloadAccessToken")
+            if not obo_wl_token:
+                logger.warning(
+                    "OBO exchange failed: no workloadAccessToken returned for '%s'",
+                    self._credential_provider_name,
+                )
+                return None
+
+            # Step 2: Exchange the OBO workload token for the downstream resource token.
+            resp = identity_client.dp_client.get_resource_oauth2_token(
+                workloadIdentityToken=obo_wl_token,
+                resourceCredentialProviderName=self._credential_provider_name,
+                scopes=self._scopes,
+                oauth2Flow="ON_BEHALF_OF_TOKEN_EXCHANGE",
+            )
+            token = resp.get("accessToken")
+            if not token:
+                logger.warning(
+                    "OBO exchange failed: no accessToken returned for '%s' (user_sub=%s)",
+                    self._credential_provider_name, self._user_sub,
+                )
+                return None
+
+            expires_in = int(resp.get("expiresIn") or 300)
+            with _OBO_TOKEN_CACHE_LOCK:
+                _OBO_TOKEN_CACHE[cache_key] = (token, now + expires_in)
+
+            logger.info(
+                "OBO token exchange success: credential_provider=%s user_sub=%s expires_in=%ds",
+                self._credential_provider_name, self._user_sub, expires_in,
+            )
+            return token
+        except Exception as e:
+            logger.info(
+                "OBO token exchange failed: credential_provider=%s user_sub=%s error=%s",
+                self._credential_provider_name, self._user_sub, e,
+            )
+            return None
+
+    def _fetch_m2m_token(self, workload_token: str) -> Optional[str]:
         try:
             identity_client = IdentityClient(self._region)
             resp = identity_client.dp_client.get_resource_oauth2_token(
@@ -52,14 +155,35 @@ class _OAuth2Auth(httpx.Auth):
                 scopes=self._scopes,
                 oauth2Flow="M2M",
             )
-            token = resp.get("accessToken")
-            if token:
-                request.headers["Authorization"] = f"Bearer {token}"
-                logger.debug("Injected OAuth2 token for credential provider '%s'", self._credential_provider_name)
-            else:
-                logger.warning("No accessToken in response for credential provider '%s'", self._credential_provider_name)
+            return resp.get("accessToken")
         except Exception as e:
-            logger.warning("Failed to acquire OAuth2 token for '%s': %s", self._credential_provider_name, e)
+            logger.warning("Failed to acquire OAuth2 M2M token for '%s': %s", self._credential_provider_name, e)
+            return None
+
+    def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
+        token: Optional[str] = None
+
+        if self._delegation_mode == "obo":
+            token = self._fetch_obo_token()
+        else:
+            workload_token = BedrockAgentCoreContext.get_workload_access_token()
+            if not workload_token:
+                logger.warning("No workload access token in context; sending unauthenticated request")
+                yield request
+                return
+            token = self._fetch_m2m_token(workload_token)
+
+        if token:
+            request.headers["Authorization"] = f"Bearer {token}"
+            logger.debug(
+                "Injected OAuth2 token for credential provider '%s' (mode=%s)",
+                self._credential_provider_name, self._delegation_mode,
+            )
+        else:
+            logger.warning(
+                "No accessToken available for credential provider '%s' (mode=%s); sending unauthenticated",
+                self._credential_provider_name, self._delegation_mode,
+            )
 
         yield request
 
@@ -93,7 +217,16 @@ class _ApiKeyAuth(httpx.Auth):
         yield request
 
 
-def _build_transport_callable(config: MCPServerConfig) -> Any:
+def _get_user_access_token() -> Optional[str]:
+    """Read the user's access token from the environment.
+
+    The backend injects ``USER_ACCESS_TOKEN`` into the agent runtime per
+    invocation when OBO-configured integrations require a subject token.
+    """
+    return os.environ.get("USER_ACCESS_TOKEN") or None
+
+
+def _build_transport_callable(config: MCPServerConfig, user_access_token: Optional[str] = None) -> Any:
     """Build a transport callable for the given MCP server configuration.
 
     For OAuth2-authenticated servers, attaches an ``_OAuth2Auth`` handler
@@ -108,15 +241,20 @@ def _build_transport_callable(config: MCPServerConfig) -> Any:
     """
     if config.auth and config.auth.type == "oauth2" and config.auth.credential_provider_name:
         scope_list = config.auth.scopes.split() if config.auth.scopes else []
+        delegation_mode = (config.auth.delegation_mode or "m2m").lower()
+        obo_user_token = user_access_token if user_access_token is not None else _get_user_access_token()
         auth = _OAuth2Auth(
             credential_provider_name=config.auth.credential_provider_name,
             scopes=scope_list,
+            delegation_mode=delegation_mode,
+            user_access_token=obo_user_token if delegation_mode == "obo" else None,
         )
         logger.info(
-            "MCP server '%s' configured with OAuth2 auth (credential_provider=%s, scopes=%s)",
+            "MCP server '%s' configured with OAuth2 auth (credential_provider=%s, scopes=%s, delegation_mode=%s)",
             config.name,
             config.auth.credential_provider_name,
             scope_list,
+            delegation_mode,
         )
         return partial(streamablehttp_client, url=config.endpoint_url, auth=auth)
 

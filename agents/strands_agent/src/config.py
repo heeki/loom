@@ -16,6 +16,7 @@ class AuthConfig:
     credential_provider_name: str = ""
     scopes: str = ""
     api_key_header_name: str = "x-api-key"
+    delegation_mode: str = "m2m"
 
 
 @dataclass
@@ -87,6 +88,7 @@ def _parse_auth(data: Optional[dict]) -> Optional[AuthConfig]:
         credential_provider_name=data.get("credential_provider_name", ""),
         scopes=data.get("scopes", ""),
         api_key_header_name=data.get("api_key_header_name", "x-api-key"),
+        delegation_mode=(data.get("delegation_mode") or "m2m").lower(),
     )
 
 

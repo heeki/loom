@@ -145,6 +145,7 @@ def _attach_dynamic_mcp_servers(agent_instance, dynamic_servers: list[dict[str, 
                 well_known_endpoint=auth_data.get("well_known_endpoint", ""),
                 credential_provider_name=auth_data.get("credential_provider_name", ""),
                 scopes=auth_data.get("scopes", ""),
+                delegation_mode=(auth_data.get("delegation_mode") or "m2m").lower(),
             )
 
         # Skip OAuth2 servers with no usable credentials — they would connect
@@ -205,6 +206,15 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
 
     session_id = payload.get("session_id", "")
     actor_id = payload.get("actor_id") or "loom-agent"
+
+    # Forward the user's access token (if provided) to the OAuth2 auth
+    # handlers via USER_ACCESS_TOKEN env var so OBO-configured integrations
+    # can present it as the subject token in RFC 8693 exchange.
+    user_access_token = payload.get("user_access_token")
+    if user_access_token:
+        os.environ["USER_ACCESS_TOKEN"] = user_access_token
+    else:
+        os.environ.pop("USER_ACCESS_TOKEN", None)
 
     _ensure_mcp_tools(actor_id)
 
@@ -481,6 +491,12 @@ async def ws_invoke(websocket, context) -> None:
             session_id = data.get("session_id", "")
             actor_id = data.get("actor_id") or "loom-agent"
 
+            user_access_token = data.get("user_access_token")
+            if user_access_token:
+                os.environ["USER_ACCESS_TOKEN"] = user_access_token
+            else:
+                os.environ.pop("USER_ACCESS_TOKEN", None)
+
             _ensure_mcp_tools(actor_id)
 
             dynamic_servers = data.get("dynamic_mcp_servers")
@@ -567,6 +583,7 @@ def _attach_dynamic_mcp_servers_ws(
                 well_known_endpoint=auth_data.get("well_known_endpoint", ""),
                 credential_provider_name=auth_data.get("credential_provider_name", ""),
                 scopes=auth_data.get("scopes", ""),
+                delegation_mode=(auth_data.get("delegation_mode") or "m2m").lower(),
             )
 
         config = MCPServerConfig(

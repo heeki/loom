@@ -8,6 +8,7 @@ agent can invoke during a conversation.
 
 import json as _json
 import logging
+import os
 from collections.abc import AsyncIterator
 from typing import Any
 from uuid import uuid4
@@ -350,15 +351,20 @@ def _build_a2a_tool(config: A2AAgentConfig) -> Any:
     """
     if config.auth and config.auth.type == "oauth2" and config.auth.credential_provider_name:
         scope_list = config.auth.scopes.split() if config.auth.scopes else []
+        delegation_mode = (config.auth.delegation_mode or "m2m").lower()
+        user_access_token = os.environ.get("USER_ACCESS_TOKEN") or None
         auth = _OAuth2Auth(
             credential_provider_name=config.auth.credential_provider_name,
             scopes=scope_list,
+            delegation_mode=delegation_mode,
+            user_access_token=user_access_token if delegation_mode == "obo" else None,
         )
         logger.info(
-            "A2A agent '%s' configured with OAuth2 auth (credential_provider=%s, scopes=%s)",
+            "A2A agent '%s' configured with OAuth2 auth (credential_provider=%s, scopes=%s, delegation_mode=%s)",
             config.name,
             config.auth.credential_provider_name,
             scope_list,
+            delegation_mode,
         )
 
         # Long-lived authenticated httpx client used for both agent card
