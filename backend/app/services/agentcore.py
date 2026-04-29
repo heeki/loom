@@ -3,11 +3,13 @@ Bedrock AgentCore Runtime API wrapper.
 
 This module provides functions to interact with AWS Bedrock AgentCore Runtime API
 for describing runtimes, listing endpoints, and invoking agents with streaming responses.
+Supports both HTTP streaming (for hook-based HITL) and WebSocket (for MCP elicitation).
 """
 
+import asyncio
 import json
 import logging
-from typing import Any, Generator
+from typing import Any, AsyncGenerator, Generator
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +86,10 @@ def invoke_agent(
     actor_id: str | None = None,
     dynamic_mcp_servers: list[dict[str, Any]] | None = None,
     runtime_model_id: str | None = None,
+    interrupt_response: list[dict[str, Any]] | None = None,
+    approval_policies: list[dict[str, Any]] | None = None,
+    supports_elicitation: bool = False,
+    elicitation_response: dict[str, Any] | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """
     Invoke an AgentCore Runtime agent and stream the response.
@@ -113,10 +119,18 @@ def invoke_agent(
     from botocore.config import Config
 
     payload: dict[str, Any] = {"prompt": prompt, "session_id": session_id, "actor_id": actor_id or "loom-agent"}
+    if interrupt_response:
+        payload["interruptResponse"] = interrupt_response
     if dynamic_mcp_servers:
         payload["dynamic_mcp_servers"] = dynamic_mcp_servers
     if runtime_model_id:
         payload["model_id"] = runtime_model_id
+    if approval_policies:
+        payload["approval_policies"] = approval_policies
+    if supports_elicitation:
+        payload["supports_elicitation"] = True
+    if elicitation_response:
+        payload["elicitationResponse"] = elicitation_response
     payload_bytes = json.dumps(payload).encode('utf-8')
 
     params: dict[str, Any] = {
@@ -160,7 +174,7 @@ def invoke_agent(
         if not decoded:
             continue
         line_count += 1
-        if line_count <= 10:
+        if line_count <= 10 or "elicitation" in decoded.lower() or "interrupt" in decoded.lower():
             logger.info("Stream line %d: %s", line_count, decoded[:500])
         if not decoded.startswith('data:'):
             logger.info("Non-data stream line: %s", decoded[:500])
@@ -178,3 +192,97 @@ def invoke_agent(
             if payload:
                 yield {"type": "text", "content": payload}
     logger.info("Stream completed: %d total lines received", line_count)
+
+
+async def invoke_agent_ws(
+    arn: str,
+    qualifier: str,
+    session_id: str,
+    prompt: str,
+    region: str,
+    access_token: str | None = None,
+    actor_id: str | None = None,
+    dynamic_mcp_servers: list[dict[str, Any]] | None = None,
+    runtime_model_id: str | None = None,
+) -> AsyncGenerator[dict[str, Any], str | None]:
+    """Invoke an AgentCore Runtime agent via WebSocket for MCP elicitation support.
+
+    Uses a bidirectional WebSocket connection so elicitation requests from the
+    agent can be relayed to the caller and responses sent back inline.
+
+    This is an async generator that yields events. The caller can send
+    elicitation responses back via generator.asend(response_json).
+
+    Args:
+        arn: AgentCore Runtime ARN
+        qualifier: Endpoint qualifier
+        session_id: Session ID for this invocation
+        prompt: Input prompt
+        region: AWS region
+        access_token: Optional OAuth Bearer token
+        actor_id: Actor identity
+        dynamic_mcp_servers: MCP servers to attach with elicitation support
+        runtime_model_id: Optional model override
+
+    Yields:
+        Structured dicts with "type" field:
+        - {"type": "text", "content": str}
+        - {"type": "elicitation", "id": str, "message": str}
+        - {"type": "result", "content": str}
+        - {"type": "error", "content": str}
+
+    Send:
+        JSON string with elicitation response to resume tool execution
+    """
+    import websockets
+    from botocore.auth import SigV4Auth
+    from botocore.credentials import Credentials
+    import boto3
+
+    runtime_id = arn.split('/')[-1]
+    encoded_arn = arn.replace(":", "%3A").replace("/", "%2F")
+    ws_url = f"wss://bedrock-agentcore.{region}.amazonaws.com/runtimes/{encoded_arn}/ws?qualifier={qualifier}"
+
+    headers = {}
+    if access_token:
+        headers["Authorization"] = f"Bearer {access_token}"
+
+    try:
+        async with websockets.connect(ws_url, additional_headers=headers) as ws:
+            payload: dict[str, Any] = {
+                "type": "prompt",
+                "prompt": prompt,
+                "session_id": session_id,
+                "actor_id": actor_id or "loom-agent",
+            }
+            if dynamic_mcp_servers:
+                payload["dynamic_mcp_servers_elicit"] = dynamic_mcp_servers
+            if runtime_model_id:
+                payload["model_id"] = runtime_model_id
+
+            await ws.send(json.dumps(payload))
+            logger.info("WebSocket prompt sent session_id=%s", session_id)
+
+            while True:
+                msg = await ws.recv()
+                data = json.loads(msg)
+                msg_type = data.get("type", "")
+
+                if msg_type == "elicitation":
+                    response = yield data
+                    if response:
+                        await ws.send(response)
+                elif msg_type == "result":
+                    yield data
+                    return
+                elif msg_type == "error":
+                    yield data
+                    return
+                elif msg_type == "text":
+                    yield data
+                else:
+                    yield {"type": "structured", "content": data}
+
+    except Exception as e:
+        logger.error("WebSocket invocation failed: %s", e)
+        yield {"type": "error", "content": str(e)}

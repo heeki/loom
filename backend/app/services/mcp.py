@@ -102,12 +102,23 @@ def _jsonrpc_request(method: str, params: dict | None = None, req_id: int = 1) -
 
 
 def _call_streamable_http(server: Any, method: str, params: dict | None = None, api_key: str | None = None) -> dict | None:
-    """Call an MCP server using Streamable HTTP (POST JSON-RPC)."""
+    """Call an MCP server using Streamable HTTP (POST JSON-RPC).
+
+    Always initializes a session first (works for both stateless and stateful
+    servers). Stateless servers accept initialize but don't return a session ID.
+    Stateful servers require it and return a Mcp-Session-Id header.
+    """
     headers = _build_headers(server, api_key)
     headers["Accept"] = "application/json, text/event-stream"
-    body = _jsonrpc_request(method, params)
 
     try:
+        # Initialize session (no-op for stateless servers, required for stateful)
+        if method != "initialize":
+            session_id = _initialize_session(server, headers)
+            if session_id:
+                headers["Mcp-Session-Id"] = session_id
+
+        body = _jsonrpc_request(method, params)
         resp = httpx.post(
             server.endpoint_url,
             json=body,
@@ -118,12 +129,35 @@ def _call_streamable_http(server: Any, method: str, params: dict | None = None, 
 
         content_type = resp.headers.get("content-type", "")
         if "text/event-stream" in content_type:
-            # Server responded with SSE — parse the stream for JSON-RPC result
             return _parse_sse_response(resp.text)
         else:
             return resp.json()
     except Exception as e:
         logger.error("Streamable HTTP call to %s failed: %s", server.endpoint_url, e)
+        return None
+
+
+def _initialize_session(server: Any, headers: dict[str, str]) -> str | None:
+    """Send MCP initialize and return the session ID if the server is stateful."""
+    init_body = _jsonrpc_request("initialize", {
+        "protocolVersion": "2025-03-26",
+        "capabilities": {},
+        "clientInfo": {"name": "loom", "version": "1.0.0"},
+    })
+
+    try:
+        resp = httpx.post(
+            server.endpoint_url,
+            json=init_body,
+            headers=headers,
+            timeout=MCP_REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        session_id = resp.headers.get("mcp-session-id")
+        if session_id:
+            logger.debug("MCP session established: %s", session_id)
+        return session_id
+    except Exception:
         return None
 
 

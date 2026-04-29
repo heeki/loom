@@ -134,6 +134,8 @@ def _migrate_add_columns(eng) -> None:
         ("identity_providers", "authorization_endpoint", "VARCHAR"),
         ("identity_providers", "token_endpoint", "VARCHAR"),
         ("identity_providers", "discovery_scopes", "TEXT"),
+        ("mcp_servers", "supports_elicitation", "VARCHAR"),
+        ("mcp_servers", "runtime_endpoint_url", "VARCHAR"),
     ]
 
     is_postgres = eng.dialect.name == "postgresql"

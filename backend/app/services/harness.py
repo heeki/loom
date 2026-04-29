@@ -178,6 +178,9 @@ def invoke_harness_stream(
     total_input_tokens = 0
     total_output_tokens = 0
     current_tool_name: str | None = None
+    current_tool_use_id: str | None = None
+    current_tool_input_chunks: list[str] = []
+    stop_reason: str | None = None
 
     for event in stream:
         if "contentBlockStart" in event:
@@ -185,6 +188,8 @@ def invoke_harness_stream(
             tool_use = start.get("toolUse")
             if tool_use:
                 current_tool_name = tool_use.get("name")
+                current_tool_use_id = tool_use.get("toolUseId")
+                current_tool_input_chunks = []
                 if current_tool_name:
                     yield {"type": "structured", "content": {"tool_use": {"name": current_tool_name}}}
 
@@ -193,6 +198,11 @@ def invoke_harness_stream(
             text = delta.get("text")
             if text:
                 yield {"type": "text", "content": text}
+            tool_use_delta = delta.get("toolUse")
+            if tool_use_delta:
+                input_chunk = tool_use_delta.get("input", "")
+                if input_chunk:
+                    current_tool_input_chunks.append(input_chunk)
 
         elif "contentBlockStop" in event:
             current_tool_name = None
@@ -201,7 +211,7 @@ def invoke_harness_stream(
             pass
 
         elif "messageStop" in event:
-            pass
+            stop_reason = event["messageStop"].get("stopReason")
 
         elif "metadata" in event:
             meta = event["metadata"]
@@ -216,5 +226,177 @@ def invoke_harness_stream(
                 "input_tokens": total_input_tokens,
                 "output_tokens": total_output_tokens,
                 "total_tokens": total_input_tokens + total_output_tokens,
+            },
+        }
+
+    # When the stream stops for an inline tool_use, yield a special event
+    # so the caller can handle the HITL loop (wait for user, then resume).
+    if stop_reason == "tool_use" and current_tool_use_id:
+        tool_input_str = "".join(current_tool_input_chunks)
+        tool_input: dict[str, Any] = {}
+        if tool_input_str:
+            try:
+                tool_input = json.loads(tool_input_str)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        yield {
+            "type": "tool_use_stop",
+            "content": {
+                "tool_use_id": current_tool_use_id,
+                "tool_name": current_tool_name,
+                "tool_input": tool_input,
+            },
+        }
+
+
+def resume_harness_stream(
+    harness_arn: str,
+    session_id: str,
+    tool_use_id: str,
+    tool_name: str,
+    tool_input: dict[str, Any],
+    tool_result_content: str,
+    tool_result_status: str = "success",
+    region: str = "us-east-1",
+    tools: list[dict[str, Any]] | None = None,
+    access_token: str | None = None,
+    actor_id: str | None = None,
+) -> Generator[dict[str, Any], None, None]:
+    """Re-invoke a harness with a toolResult to resume after an inline function call.
+
+    Sends the assistant toolUse turn followed by the user toolResult turn so the
+    Converse API sees a matching pair.
+
+    Yields the same event format as invoke_harness_stream.
+    """
+    import boto3
+
+    if access_token:
+        from botocore import UNSIGNED
+        from botocore.config import Config
+
+        client = boto3.client(
+            "bedrock-agentcore",
+            region_name=region,
+            config=Config(signature_version=UNSIGNED),
+        )
+
+        def _add_auth_header(request, **kwargs):
+            request.headers["Authorization"] = f"Bearer {access_token}"
+
+        client.meta.events.register("before-send.bedrock-agentcore.InvokeHarness", _add_auth_header)
+    else:
+        client = boto3.client("bedrock-agentcore", region_name=region)
+
+    params: dict[str, Any] = {
+        "harnessArn": harness_arn,
+        "runtimeSessionId": session_id,
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "toolUse": {
+                            "toolUseId": tool_use_id,
+                            "name": tool_name,
+                            "input": tool_input,
+                        }
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "toolResult": {
+                            "toolUseId": tool_use_id,
+                            "content": [{"text": tool_result_content}],
+                            "status": tool_result_status,
+                        }
+                    }
+                ],
+            },
+        ],
+    }
+
+    if tools:
+        params["tools"] = tools
+    if actor_id:
+        params["actorId"] = actor_id
+
+    response = client.invoke_harness(**params)
+
+    stream = response.get("stream") or response.get("body") or response.get("response")
+    if stream is None:
+        return
+
+    total_input_tokens = 0
+    total_output_tokens = 0
+    current_tool_name_r: str | None = None
+    current_tool_use_id_r: str | None = None
+    current_tool_input_chunks_r: list[str] = []
+    stop_reason_r: str | None = None
+
+    for event in stream:
+        if "contentBlockStart" in event:
+            start = event["contentBlockStart"].get("start", {})
+            tool_use = start.get("toolUse")
+            if tool_use:
+                current_tool_name_r = tool_use.get("name")
+                current_tool_use_id_r = tool_use.get("toolUseId")
+                current_tool_input_chunks_r = []
+                if current_tool_name_r:
+                    yield {"type": "structured", "content": {"tool_use": {"name": current_tool_name_r}}}
+
+        elif "contentBlockDelta" in event:
+            delta = event["contentBlockDelta"].get("delta", {})
+            text = delta.get("text")
+            if text:
+                yield {"type": "text", "content": text}
+            tool_use_delta = delta.get("toolUse")
+            if tool_use_delta:
+                input_chunk = tool_use_delta.get("input", "")
+                if input_chunk:
+                    current_tool_input_chunks_r.append(input_chunk)
+
+        elif "contentBlockStop" in event:
+            current_tool_name_r = None
+
+        elif "messageStart" in event:
+            pass
+
+        elif "messageStop" in event:
+            stop_reason_r = event["messageStop"].get("stopReason")
+
+        elif "metadata" in event:
+            meta = event["metadata"]
+            usage = meta.get("usage", {})
+            total_input_tokens += usage.get("inputTokens", 0)
+            total_output_tokens += usage.get("outputTokens", 0)
+
+    if total_input_tokens > 0 or total_output_tokens > 0:
+        yield {
+            "type": "metadata",
+            "content": {
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
+                "total_tokens": total_input_tokens + total_output_tokens,
+            },
+        }
+
+    if stop_reason_r == "tool_use" and current_tool_use_id_r:
+        tool_input_str = "".join(current_tool_input_chunks_r)
+        tool_input: dict[str, Any] = {}
+        if tool_input_str:
+            try:
+                tool_input = json.loads(tool_input_str)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        yield {
+            "type": "tool_use_stop",
+            "content": {
+                "tool_use_id": current_tool_use_id_r,
+                "tool_name": current_tool_name_r,
+                "tool_input": tool_input,
             },
         }

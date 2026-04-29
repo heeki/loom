@@ -10,6 +10,7 @@ dependencies = [
     "boto3>=1.34.0",
     "pydantic>=2.6.0",
     "python-multipart>=0.0.9",
+    "websockets>=13.0",
 ]
 
 [project.optional-dependencies]

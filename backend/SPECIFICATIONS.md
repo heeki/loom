@@ -1431,7 +1431,56 @@ Entra ID v2.0 token endpoints issue access tokens with a v1.0 issuer (`https://s
 
 ---
 
-## 13. Makefile Targets
+## 13. Human-in-the-Loop (HITL) Approvals
+
+Loom supports three HITL patterns for pausing agent execution at sensitive tool calls and requiring human approval:
+
+### 13.1 Agentic Loop Hook (Custom Agents — Method 1)
+
+The Strands Agent framework `before_tool_call` hook intercepts tool calls. When a matching approval policy exists:
+1. The hook emits an `approval_request` SSE event via the streaming queue.
+2. The backend (`invocations.py`) detects the interrupt, calls `create_approval_request()` and `wait_for_approval()`.
+3. The user's decision is submitted via `POST /api/approvals/{request_id}/decision`.
+4. The agent is resumed with `interruptResponse` containing the decision.
+
+### 13.2 Tool Context Interrupt (Custom Agents — Method 2)
+
+Individual tools embed approval logic using `agents/strands_agent/src/integrations/approval.py`. Tools call `require_approval()` to pause and wait for human input. Approval decisions can be cached per session via `approval_cache_ttl`.
+
+### 13.3 MCP Elicitation (Custom Agents — Method 3)
+
+MCP servers use `ctx.elicit()` to request structured input. The handler (`handler.py`) uses a `threading.Event` for cross-thread synchronization:
+1. The elicitation request is put on the streaming queue as an `elicitation_request` SSE event.
+2. The backend waits on the event until the user submits a response via `POST /api/approvals/{request_id}/decision`.
+3. The response content is passed back to the MCP server's elicitation callback.
+
+### 13.4 Harness Inline Function (Managed Agents — Method 4)
+
+Managed harness agents use an `inline_function` tool (`user_confirmation`) defined at deploy time. When the agent calls this tool:
+1. The harness stream stops with `stopReason: "tool_use"`.
+2. `invoke_harness_agent_stream` detects the `tool_use_stop` event and emits `approval_request` SSE.
+3. After user decision, the backend calls `resume_harness_stream()` with both the assistant `toolUse` turn and user `toolResult` turn.
+4. Multiple consecutive HITL rounds are supported via a loop.
+
+### 13.5 Approval Policies
+
+Stored in `approval_policies` table. Fields: `name`, `policy_type` (loop_hook/tool_context/mcp_elicitation), `tool_pattern` (glob), `approval_mode` (require_approval/notify_only), `timeout_seconds`, `agent_filter`. CRUD via `/api/settings/approval-policies`.
+
+### 13.6 Approval Audit Log
+
+All approval events are recorded in `approval_logs` table: `request_id`, `session_id`, `agent_id`, `tool_name`, `policy_name`, `pattern_type`, `status`, timestamps, `decided_by`, `reason`. Queryable via `GET /api/agents/{agent_id}/approvals`.
+
+### 13.7 SSE Event Types
+
+| Event | Description |
+|-------|-------------|
+| `approval_request` | Agent paused — awaiting user decision. Contains `request_id`, `tool_name`, `tool_input_summary`, `timeout_seconds`. |
+| `approval_resolved` | Decision made. Contains `request_id`, `status` (approved/rejected/timeout), `decided_by`, `reason`. |
+| `elicitation_request` | MCP server requesting structured input. Contains `elicitation_id`, `server_name`, `schema`, `message`. |
+
+---
+
+## 14. Makefile Targets
 
 The backend `makefile` sources `etc/environment.sh` and provides:
 

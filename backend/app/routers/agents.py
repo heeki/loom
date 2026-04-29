@@ -756,6 +756,7 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
             "oauth2_client_secret": s.oauth2_client_secret,
             "oauth2_scopes": s.oauth2_scopes,
             "api_key_header_name": s.api_key_header_name,
+            "supports_elicitation": s.supports_elicitation == "true",
         }
         for s in mcp_records
     ]
@@ -928,6 +929,8 @@ def _deploy_agent_background(
                 "transport": server["transport_type"],
                 "endpoint_url": server["endpoint_url"],
             }
+            if server.get("supports_elicitation"):
+                entry["dynamic_only"] = True
             if server["auth_type"] == "oauth2":
                 cp_name = f"loom-{request.name}-mcp-{server['name']}"
                 try:
@@ -1302,11 +1305,14 @@ def _deploy_harness(request: AgentCreateRequest, db: Session, background_tasks: 
             mcp_snapshots.append({
                 "name": server.name,
                 "endpoint_url": server.endpoint_url,
+                "transport_type": server.transport_type,
                 "auth_type": server.auth_type,
                 "oauth2_client_id": server.oauth2_client_id,
                 "oauth2_client_secret": server.oauth2_client_secret,
                 "oauth2_well_known_url": server.oauth2_well_known_url,
                 "oauth2_scopes": server.oauth2_scopes,
+                "api_key_header_name": server.api_key_header_name,
+                "supports_elicitation": server.supports_elicitation == "true",
             })
 
     extra_harness_tools = request.harness_tools or []
@@ -1487,6 +1493,8 @@ def _deploy_harness_background(
                 "endpoint_url": server["endpoint_url"],
                 "auth_type": server["auth_type"],
             }
+            if server.get("supports_elicitation"):
+                mcp_entry["dynamic_only"] = True
             if cp_name:
                 mcp_entry["auth"] = {"type": "oauth2", "credential_provider_name": cp_name}
             mcp_server_configs.append(mcp_entry)

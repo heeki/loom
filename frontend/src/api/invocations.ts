@@ -8,6 +8,9 @@ import type {
   SSEToolUse,
   SSESessionEnd,
   SSEError,
+  SSEApprovalRequest,
+  SSEApprovalResolved,
+  SSEElicitationRequest,
 } from "./types";
 
 export function listSessions(agentId: number, userId?: string): Promise<SessionResponse[]> {
@@ -46,6 +49,9 @@ export interface StreamCallbacks {
   onToolUse?: (data: SSEToolUse) => void;
   onSessionEnd?: (data: SSESessionEnd) => void;
   onError?: (data: SSEError) => void;
+  onApprovalRequest?: (data: SSEApprovalRequest) => void;
+  onApprovalResolved?: (data: SSEApprovalResolved) => void;
+  onElicitationRequest?: (data: SSEElicitationRequest) => void;
 }
 
 export async function invokeAgentStream(
@@ -148,6 +154,15 @@ export async function invokeAgentStream(
             case "error":
               callbacks.onError?.(parsed as SSEError);
               break;
+            case "approval_request":
+              callbacks.onApprovalRequest?.(parsed as SSEApprovalRequest);
+              break;
+            case "approval_resolved":
+              callbacks.onApprovalResolved?.(parsed as SSEApprovalResolved);
+              break;
+            case "elicitation_request":
+              callbacks.onElicitationRequest?.(parsed as SSEElicitationRequest);
+              break;
           }
         } catch {
           // Skip malformed JSON
@@ -157,4 +172,98 @@ export async function invokeAgentStream(
   } finally {
     reader.releaseLock();
   }
+}
+
+/**
+ * WebSocket-based agent invocation for MCP elicitation support.
+ *
+ * Returns a controller object that allows sending elicitation responses
+ * back to the agent while it's running.
+ */
+export interface WsInvokeCallbacks {
+  onSessionStart?: (data: { session_id: string }) => void;
+  onText?: (text: string) => void;
+  onToolUse?: (data: SSEToolUse) => void;
+  onElicitation?: (data: { id: string; message: string }) => void;
+  onResult?: (content: string) => void;
+  onError?: (message: string) => void;
+  onClose?: () => void;
+}
+
+export interface WsInvokeController {
+  sendElicitationResponse: (id: string, action: "accept" | "decline" | "cancel", content?: Record<string, unknown>) => void;
+  close: () => void;
+}
+
+export function invokeAgentWs(
+  agentId: number,
+  request: InvokeRequest & { connector_ids?: number[] },
+  callbacks: WsInvokeCallbacks,
+): WsInvokeController {
+  const token = getAuthToken();
+  const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const wsBase = BASE_URL.replace(/^http/, "ws");
+  const wsUrl = `${wsBase || `${wsProtocol}//${window.location.host}`}/api/agents/${agentId}/ws`;
+
+  const ws = new WebSocket(wsUrl);
+
+  ws.onopen = () => {
+    // Send auth + prompt as first message
+    ws.send(JSON.stringify({
+      type: "prompt",
+      token,
+      prompt: request.prompt,
+      qualifier: request.qualifier,
+      session_id: request.session_id,
+      model_id: request.model_id,
+      connector_ids: request.connector_ids,
+    }));
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      switch (data.type) {
+        case "session_start":
+          callbacks.onSessionStart?.(data);
+          break;
+        case "text":
+          callbacks.onText?.(data.content);
+          break;
+        case "tool_use":
+          callbacks.onToolUse?.(data);
+          break;
+        case "elicitation":
+          callbacks.onElicitation?.(data);
+          break;
+        case "result":
+          callbacks.onResult?.(data.content);
+          break;
+        case "error":
+          callbacks.onError?.(data.content);
+          break;
+      }
+    } catch {
+      // Skip malformed messages
+    }
+  };
+
+  ws.onerror = () => {
+    callbacks.onError?.("WebSocket connection error");
+  };
+
+  ws.onclose = () => {
+    callbacks.onClose?.();
+  };
+
+  return {
+    sendElicitationResponse(id, action, content) {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "elicitation_response", id, action, content: content ?? {} }));
+      }
+    },
+    close() {
+      ws.close();
+    },
+  };
 }

@@ -40,6 +40,8 @@ class McpServerCreateRequest(BaseModel):
     oauth2_scopes: str | None = Field(None, description="OAuth2 scopes (space-separated)")
     api_key_header_name: str | None = Field(None, description="Header name for API key auth")
     api_key: str | None = Field(None, description="Admin API key (stored in Secrets Manager)")
+    supports_elicitation: bool = Field(default=False, description="Whether this server supports MCP elicitation")
+    runtime_endpoint_url: str | None = Field(None, description="Direct runtime URL for WebSocket elicitation (bypasses Gateway)")
 
     @model_validator(mode="after")
     def validate_auth_fields(self):
@@ -67,6 +69,8 @@ class McpServerUpdateRequest(BaseModel):
     oauth2_scopes: str | None = None
     api_key_header_name: str | None = None
     api_key: str | None = None
+    supports_elicitation: bool | None = None
+    runtime_endpoint_url: str | None = None
 
 
 class McpServerResponse(BaseModel):
@@ -83,6 +87,8 @@ class McpServerResponse(BaseModel):
     has_oauth2_secret: bool = False
     api_key_header_name: str | None = None
     has_admin_api_key: bool = False
+    supports_elicitation: bool = False
+    runtime_endpoint_url: str | None = None
     registry_record_id: str | None = None
     registry_status: str | None = None
     created_at: str | None = None
@@ -104,6 +110,7 @@ class ConnectorInfo(BaseModel):
     description: str | None = None
     auth_type: str
     has_user_api_key: bool = False
+    supports_elicitation: bool = False
 
 
 class McpAccessRuleResponse(BaseModel):
@@ -177,6 +184,8 @@ def create_mcp_server(
         oauth2_scopes=request.oauth2_scopes,
     )
     server.api_key_header_name = request.api_key_header_name
+    server.supports_elicitation = "true" if request.supports_elicitation else "false"
+    server.runtime_endpoint_url = request.runtime_endpoint_url
     if request.auth_type == "api_key" and request.api_key:
         region = os.getenv("AWS_REGION", "us-east-1")
         store_secret(f"loom/mcp/{request.name}/admin-api-key", request.api_key, region, description=f"Admin API key for MCP server {request.name}")
@@ -227,6 +236,7 @@ def list_connectors(
             description=server.description,
             auth_type=server.auth_type,
             has_user_api_key=has_key,
+            supports_elicitation=server.supports_elicitation == "true",
         ))
     return results
 
@@ -252,6 +262,8 @@ def update_mcp_server(
 
     update_data = request.model_dump(exclude_unset=True)
     new_api_key = update_data.pop("api_key", None)
+    if "supports_elicitation" in update_data:
+        update_data["supports_elicitation"] = "true" if update_data["supports_elicitation"] else "false"
     for field, value in update_data.items():
         setattr(server, field, value)
 

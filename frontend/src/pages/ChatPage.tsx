@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Send, Plus, Brain, LogOut, Bot, User, X, Loader2, Palette, RefreshCw, ChevronDown, Wrench, Plug, KeyRound, Unplug, Link2 } from "lucide-react";
+import { ApprovalRequestBubble } from "@/components/ApprovalDialog";
+import { ElicitationRequestBubble } from "@/components/ElicitationDialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import ReactMarkdown from "react-markdown";
@@ -10,7 +12,7 @@ import { listAgents, fetchModels } from "@/api/agents";
 import { listSessions, getSession, hideSession } from "@/api/invocations";
 import { listMemories, getMemoryRecords } from "@/api/memories";
 import { trackAction } from "@/api/audit";
-import { useInvoke, clearInvokeState } from "@/hooks/useInvoke";
+import { useInvoke, clearInvokeState, sendElicitationResponse, type StreamSegment } from "@/hooks/useInvoke";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, isLightTheme, THEME_LABELS, type Theme } from "@/contexts/ThemeContext";
 import { listConnectors, setUserApiKey, deleteUserApiKey } from "@/api/mcp";
@@ -24,6 +26,7 @@ interface ChatMessage {
   role: "user" | "assistant";
   text: string;
   toolNames?: string[];
+  hitlSegments?: StreamSegment[];
 }
 
 interface ChatPageProps {
@@ -42,7 +45,10 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     .filter((g) => g.startsWith("g-users-"))
     .map((g) => g.replace("g-users-", ""));
 
-  const currentUserId = user?.username ?? user?.sub;
+  const currentUserIdLocal = user?.username ?? user?.sub;
+  // Backend-authoritative user_id: set from session_start to ensure consistency
+  const [backendUserId, setBackendUserId] = useState<string | null>(null);
+  const currentUserId = backendUserId ?? currentUserIdLocal;
 
   // Agent state
   const [agents, setAgents] = useState<AgentResponse[]>([]);
@@ -76,6 +82,8 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [queuedPrompt, setQueuedPrompt] = useState<string | null>(null);
   const [input, setInput] = useState("");
+  // Persist HITL segments per invocation ID so they survive re-fetches
+  const hitlSegmentsMap = useRef<Map<string, StreamSegment[]>>(new Map());
 
   // Memory panel state
   const [showMemory, setShowMemory] = useState(false);
@@ -118,7 +126,15 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     if (!authConfig?.type) { setResolvedAuthorizerId(null); setLinkStatus("not-configured"); return; }
 
     // Same-IdP detection: login issuer matches agent's authorizer discovery URL
+    // Only applies when user logged in via Cognito directly (not external IdP),
+    // since an Entra user's token is NOT valid for a Cognito authorizer.
     const isExternalLogin = loginAuthConfig?.provider_type && loginAuthConfig.provider_type !== "cognito";
+    if (!isExternalLogin && loginAuthConfig?.user_pool_id && authConfig.pool_id &&
+        loginAuthConfig.user_pool_id === authConfig.pool_id) {
+      setLinkStatus("same-idp");
+      setResolvedAuthorizerId(null);
+      return;
+    }
     if (isExternalLogin && authConfig.discovery_url && loginAuthConfig?.issuer_url) {
       const entraPattern = /login\.microsoftonline\.com\/([^/]+)/i;
       const issuerMatch = entraPattern.exec(loginAuthConfig.issuer_url);
@@ -219,11 +235,25 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
 
   useEffect(() => {
     if (!connectorStorageKey) { setEnabledConnectors(new Set()); return; }
-    try {
-      const stored = JSON.parse(localStorage.getItem(connectorStorageKey) || "[]") as number[];
-      setEnabledConnectors(new Set(stored));
-    } catch { setEnabledConnectors(new Set()); }
-  }, [connectorStorageKey]);
+    const stored = localStorage.getItem(connectorStorageKey);
+    if (stored) {
+      try {
+        setEnabledConnectors(new Set(JSON.parse(stored) as number[]));
+      } catch { setEnabledConnectors(new Set()); }
+    } else {
+      // No user preference saved yet — pre-enable connectors configured on the agent
+      const agent = agents.find((a) => a.id === selectedAgentId);
+      const agentMcpNames = agent?.mcp_names ?? [];
+      if (agentMcpNames.length > 0 && connectors.length > 0) {
+        const preEnabled = connectors
+          .filter((c) => agentMcpNames.includes(c.name))
+          .map((c) => c.id);
+        setEnabledConnectors(new Set(preEnabled));
+      } else {
+        setEnabledConnectors(new Set());
+      }
+    }
+  }, [connectorStorageKey, agents, selectedAgentId, connectors]);
 
   const toggleConnector = (c: ConnectorInfo) => {
     const isEnabled = enabledConnectors.has(c.id);
@@ -447,13 +477,17 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     if (sessionStart && sessionStart !== lastSessionStartRef.current && selectedAgentId !== null) {
       lastSessionStartRef.current = sessionStart;
       setCurrentSessionId(sessionStart.session_id);
-      listSessions(selectedAgentId, currentUserId ?? undefined)
+      // Use the backend's authoritative user_id for future session queries
+      if (sessionStart.user_id && sessionStart.user_id !== backendUserId) {
+        setBackendUserId(sessionStart.user_id);
+      }
+      listSessions(selectedAgentId, sessionStart.user_id ?? currentUserId ?? undefined)
         .then((data) => {
           setSessions(data);
         })
         .catch(() => {});
     }
-  }, [sessionStart, selectedAgentId, currentUserId]);
+  }, [sessionStart, selectedAgentId, currentUserId, backendUserId]);
 
   // When invocation completes, load the authoritative session from the backend
   // and use it to populate the chat history. setPendingPrompt(null) is deferred
@@ -464,6 +498,8 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
   pendingPromptRef.current = pendingPrompt;
   const toolNamesRef = useRef<string[]>([]);
   toolNamesRef.current = toolNames;
+  const segmentsRef = useRef<StreamSegment[]>([]);
+  segmentsRef.current = segments;
   const streamedTextRef = useRef<string>("");
   streamedTextRef.current = streamedText;
 
@@ -483,16 +519,29 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
         // the async fetch completes.
         const capturedPending = pendingPromptRef.current;
         const capturedToolNames = toolNamesRef.current.length > 0 ? [...toolNamesRef.current] : undefined;
+        const capturedHitlSegments = segmentsRef.current.filter(
+          s => s.type === "approval_request" || s.type === "approval_resolved" || s.type === "elicitation_request"
+        );
         getSession(selectedAgentId, sessionId)
           .then((session) => {
             const msgs: ChatMessage[] = [];
+            const lastInv = session.invocations[session.invocations.length - 1];
+            // Store HITL segments for this invocation
+            if (lastInv && capturedHitlSegments.length > 0) {
+              hitlSegmentsMap.current.set(lastInv.invocation_id, capturedHitlSegments);
+            }
             for (const inv of session.invocations) {
               if (inv.prompt_text)
                 msgs.push({ id: `user-${inv.invocation_id}`, role: "user", text: inv.prompt_text });
               if (inv.response_text)
-                msgs.push({ id: `assistant-${inv.invocation_id}`, role: "assistant", text: inv.response_text });
+                msgs.push({
+                  id: `assistant-${inv.invocation_id}`,
+                  role: "assistant",
+                  text: inv.response_text,
+                  hitlSegments: hitlSegmentsMap.current.get(inv.invocation_id),
+                });
             }
-            // Attach tool names from the just-completed stream to the last assistant message
+            // Attach tool names to the last assistant message
             if (capturedToolNames) {
               for (let i = msgs.length - 1; i >= 0; i--) {
                 if (msgs[i]!.role === "assistant") { msgs[i]!.toolNames = capturedToolNames; break; }
@@ -651,6 +700,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
               id: `assistant-${inv.invocation_id}`,
               role: "assistant",
               text: inv.response_text,
+              hitlSegments: hitlSegmentsMap.current.get(inv.invocation_id),
             });
           }
         }
@@ -988,7 +1038,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                 ) : (
                   <div className="max-w-3xl mx-auto px-6 py-6 space-y-4">
                     {messages.map((msg) => (
-                      <MessageBubble key={msg.id} role={msg.role} text={msg.text} toolNames={msg.toolNames} />
+                      <MessageBubble key={msg.id} role={msg.role} text={msg.text} toolNames={msg.toolNames} hitlSegments={msg.hitlSegments} />
                     ))}
 
                     {/* In-flight user message */}
@@ -1001,10 +1051,38 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
 
                     {/* Streaming bubble — renders segments inline (text + tool calls) */}
                     {((isCurrentlyStreaming && segments.length > 0) ||
-                      (!isCurrentlyStreaming && pendingPrompt !== null && !!streamedText)) && (
+                      (!isCurrentlyStreaming && pendingPrompt !== null && (!!streamedText || segments.length > 0))) && (
                       <StreamingBubble
                         segments={segments}
                         isStreaming={isCurrentlyStreaming}
+                        onElicitationRespond={
+                          selectedAgentId != null
+                            ? (id, action, content) => {
+                                // Annotate the segment with the user's response for persistence
+                                const seg = segments.find(
+                                  (s) => s.type === "elicitation_request" && s.data.elicitation_id === id
+                                );
+                                if (seg && seg.type === "elicitation_request") {
+                                  if (action === "decline") {
+                                    seg.resolvedSummary = "Declined";
+                                  } else if (content) {
+                                    // Match display format: yes/no choices show as "Yes"/"No"
+                                    const keys = Object.keys(content);
+                                    if (keys.length === 1 && keys[0] === "response") {
+                                      seg.resolvedSummary = content.response === "yes" ? "Yes" : "No";
+                                    } else if (keys.length === 1 && keys[0] === "approved") {
+                                      seg.resolvedSummary = content.approved ? "Yes" : "No";
+                                    } else {
+                                      seg.resolvedSummary = Object.entries(content).map(([k, v]) => `${k}: ${v}`).join(", ");
+                                    }
+                                  } else {
+                                    seg.resolvedSummary = "Approved";
+                                  }
+                                }
+                                sendElicitationResponse(selectedAgentId, id, action, content);
+                              }
+                            : undefined
+                        }
                       />
                     )}
 
@@ -1377,9 +1455,11 @@ function ChatToolUseBlock({ tools, isActive }: { tools: { name: string; index: n
 function StreamingBubble({
   segments,
   isStreaming,
+  onElicitationRespond,
 }: {
-  segments: { type: string; content?: string; name?: string; index?: number; total?: number; timestamp?: number }[];
+  segments: StreamSegment[];
   isStreaming: boolean;
+  onElicitationRespond?: (id: string, action: "accept" | "decline", content?: Record<string, unknown>) => void;
 }) {
   return (
     <div className="flex justify-start">
@@ -1399,7 +1479,16 @@ function StreamingBubble({
           segments.forEach((seg, i) => {
             if (seg.type === "tool_use") {
               if (toolGroup.length === 0) toolGroupStart = i;
-              toolGroup.push({ name: seg.name!, index: seg.index!, total: seg.total!, timestamp: seg.timestamp! });
+              toolGroup.push({ name: seg.name, index: seg.index, total: seg.total, timestamp: seg.timestamp });
+            } else if (seg.type === "approval_request") {
+              flushTools();
+              blocks.push(<ApprovalRequestBubble key={`approval-${i}`} data={seg.data} />);
+            } else if (seg.type === "approval_resolved") {
+              flushTools();
+              // Skip render — approval status is already shown inline in the ApprovalRequestBubble
+            } else if (seg.type === "elicitation_request") {
+              flushTools();
+              blocks.push(<ElicitationRequestBubble key={`elicit-${i}`} data={seg.data} onRespond={onElicitationRespond} />);
             } else {
               flushTools();
               blocks.push(
@@ -1465,11 +1554,13 @@ function MessageBubble({
   text,
   isStreaming,
   toolNames,
+  hitlSegments,
 }: {
   role: "user" | "assistant";
   text: string;
   isStreaming?: boolean;
   toolNames?: string[];
+  hitlSegments?: StreamSegment[];
 }) {
   const isUser = role === "user";
   return (
@@ -1488,6 +1579,15 @@ function MessageBubble({
               {toolNames.map((name, i) => (
                 <div key={i} className="pl-[18px] font-medium text-foreground/70">{formatToolName(name)}</div>
               ))}
+            </div>
+          )}
+          {hitlSegments && hitlSegments.length > 0 && (
+            <div className="mb-2 space-y-2">
+              {hitlSegments.map((seg, i) => {
+                if (seg.type === "approval_request") return <ApprovalRequestBubble key={`h-approval-${i}`} data={seg.data} resolved />;
+                if (seg.type === "elicitation_request") return <ElicitationRequestBubble key={`h-elicit-${i}`} data={seg.data} resolved resolvedSummary={seg.resolvedSummary} />;
+                return null;
+              })}
             </div>
           )}
           <ReactMarkdown

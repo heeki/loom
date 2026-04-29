@@ -27,6 +27,7 @@ class MCPServerConfig:
     transport: str = "streamable_http"
     endpoint_url: str = ""
     auth: Optional[AuthConfig] = None
+    dynamic_only: bool = False
 
 
 @dataclass
@@ -99,6 +100,7 @@ def _parse_mcp_servers(data: list[dict]) -> list[MCPServerConfig]:
             transport=entry.get("transport", "streamable_http"),
             endpoint_url=entry.get("endpoint_url", ""),
             auth=_parse_auth(entry.get("auth")),
+            dynamic_only=entry.get("dynamic_only", False),
         ))
     return servers
 

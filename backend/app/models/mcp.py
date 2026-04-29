@@ -22,6 +22,8 @@ class McpServer(Base):
     oauth2_scopes = Column(String, nullable=True)  # space-separated
     api_key_header_name = Column(String, nullable=True)  # e.g. 'x-api-key', 'Authorization'
     has_admin_api_key = Column(String, nullable=True)  # 'true' or 'false'
+    supports_elicitation = Column(String, nullable=True, default="false")  # 'true' or 'false'
+    runtime_endpoint_url = Column(String, nullable=True)  # direct runtime URL for WebSocket (bypasses Gateway)
     registry_record_id = Column(String, nullable=True)
     registry_status = Column(String, nullable=True)  # DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, DEPRECATED
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -45,6 +47,8 @@ class McpServer(Base):
             "has_oauth2_secret": self.oauth2_client_secret is not None and self.oauth2_client_secret != "",
             "api_key_header_name": self.api_key_header_name,
             "has_admin_api_key": self.has_admin_api_key == "true",
+            "supports_elicitation": self.supports_elicitation == "true",
+            "runtime_endpoint_url": self.runtime_endpoint_url,
             "registry_record_id": self.registry_record_id,
             "registry_status": self.registry_status,
             "created_at": (self.created_at.isoformat() + "Z") if self.created_at else None,

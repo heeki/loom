@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Key, Pencil, Check, X, Wrench } from "lucide-react";
+import { ApprovalRequestBubble } from "@/components/ApprovalDialog";
+import { ElicitationRequestBubble } from "@/components/ElicitationDialog";
 import { fetchModels } from "@/api/agents";
 import type { ModelOption } from "@/api/types";
 import { groupModels } from "@/lib/models";
@@ -18,7 +20,7 @@ import { DeploymentPanel } from "@/components/DeploymentPanel";
 import { RegistryStatusBadge } from "@/components/RegistryStatusBadge";
 import { RegistryActions } from "@/components/RegistryActions";
 import { ExternalIntegrationSection } from "@/components/ExternalIntegrationSection";
-import { useInvoke } from "@/hooks/useInvoke";
+import { useInvoke, sendElicitationResponse } from "@/hooks/useInvoke";
 import { useAuth } from "@/contexts/AuthContext";
 import { trackAction } from "@/api/audit";
 import type { AgentResponse, SessionResponse } from "@/api/types";
@@ -214,6 +216,7 @@ export function AgentDetailPage({
             isStreaming={isStreaming}
             modelId={agent.model_id}
             allowedModelIds={agent.allowed_model_ids}
+            mcpNames={agent.mcp_names}
             authorizerName={agent.authorizer_config?.name}
             authorizerPoolId={agent.authorizer_config?.pool_id}
             authorizerDiscoveryUrl={agent.authorizer_config?.discovery_url}
@@ -313,6 +316,15 @@ export function AgentDetailPage({
                     if (seg.type === "tool_use") {
                       if (toolGroup.length === 0) toolGroupStart = i;
                       toolGroup.push({ name: seg.name, index: seg.index, total: seg.total, timestamp: seg.timestamp });
+                    } else if (seg.type === "approval_request") {
+                      flushTools();
+                      blocks.push(<ApprovalRequestBubble key={`approval-${i}`} data={seg.data} />);
+                    } else if (seg.type === "approval_resolved") {
+                      flushTools();
+                      // Skip render — approval status is already shown inline in the ApprovalRequestBubble
+                    } else if (seg.type === "elicitation_request") {
+                      flushTools();
+                      blocks.push(<ElicitationRequestBubble key={`elicit-${i}`} data={seg.data} onRespond={(id, action, content) => sendElicitationResponse(agent.id, id, action, content)} />);
                     } else {
                       flushTools();
                       blocks.push(<MarkdownBlock key={i} text={seg.content} />);

@@ -148,6 +148,8 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
   // Harness-specific state
   const [harnessMaxIterations, setHarnessMaxIterations] = useState("");
   const [harnessMaxTokens, setHarnessMaxTokens] = useState("");
+  const [enableHumanConfirmation, setEnableHumanConfirmation] = useState(false);
+  const [confirmationPolicy, setConfirmationPolicy] = useState("Ask the user to confirm before performing any destructive, irreversible, or high-impact action. Always call this tool before deleting data, modifying production resources, or executing financial transactions.");
 
   // Discovery data
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -258,6 +260,24 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
         ),
         harness_max_iterations: harnessMaxIterations ? parseInt(harnessMaxIterations, 10) : null,
         harness_max_tokens: harnessMaxTokens ? parseInt(harnessMaxTokens, 10) : null,
+        harness_tools: enableHumanConfirmation ? [{
+          name: "user_confirmation",
+          type: "inline_function",
+          config: {
+            inlineFunction: {
+              description: confirmationPolicy,
+              inputSchema: {
+                type: "object",
+                properties: {
+                  action_summary: { type: "string", description: "Brief description of what you are about to do" },
+                  risk_level: { type: "string", enum: ["low", "medium", "high"], description: "Risk level of the action" },
+                  details: { type: "string", description: "Additional context about impact and scope" },
+                },
+                required: ["action_summary"],
+              },
+            },
+          },
+        }] : undefined,
       };
       await onDeployHarness(request);
     } else {
@@ -430,6 +450,8 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                     }
                     if (parsed.max_iterations != null) setHarnessMaxIterations(String(parsed.max_iterations));
                     if (parsed.max_tokens != null) setHarnessMaxTokens(String(parsed.max_tokens));
+                    if (parsed.human_confirmation != null) setEnableHumanConfirmation(!!parsed.human_confirmation);
+                    if (parsed.confirmation_policy != null) setConfirmationPolicy(parsed.confirmation_policy);
                     return null;
                   } catch {
                     return "Invalid JSON. Please check the format and try again.";
@@ -483,10 +505,14 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                   if (deploymentType === "managed") {
                     if (harnessMaxIterations) result.max_iterations = parseInt(harnessMaxIterations, 10);
                     if (harnessMaxTokens) result.max_tokens = parseInt(harnessMaxTokens, 10);
+                    if (enableHumanConfirmation) {
+                      result.human_confirmation = true;
+                      result.confirmation_policy = confirmationPolicy;
+                    }
                   }
                   return JSON.stringify(result, null, 2);
                 }}
-                placeholder='{"deployment_type": "custom|managed", "name": "...", "description": "...", "persona": "...", "instructions": "...", "behavior": "...", "model": "... (default)", "allowed_models": ["..."], "role": "...", "authorizer": "...", "tags": "...", "mcp_servers": ["..."], "a2a_agents": ["..."], "memories": ["..."], "max_iterations": 75, "max_tokens": 4096}'
+                placeholder='{"deployment_type": "custom|managed", "name": "...", "description": "...", "persona": "...", "instructions": "...", "behavior": "...", "model": "... (default)", "allowed_models": ["..."], "role": "...", "authorizer": "...", "tags": "...", "mcp_servers": ["..."], "a2a_agents": ["..."], "memories": ["..."], "max_iterations": 75, "max_tokens": 4096, "human_confirmation": true, "confirmation_policy": "..."}'
               />
 
               {/* Deployment Type Selector */}
@@ -814,6 +840,32 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                         min={1}
                       />
                     </div>
+                  </div>
+                  <div className="space-y-2 pt-2">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="enable-human-confirmation"
+                        checked={enableHumanConfirmation}
+                        onChange={(e) => setEnableHumanConfirmation(e.target.checked)}
+                        className="h-4 w-4 rounded border-border"
+                      />
+                      <label htmlFor="enable-human-confirmation" className="text-xs text-muted-foreground">
+                        Enable human confirmation (inline function HITL)
+                      </label>
+                    </div>
+                    {enableHumanConfirmation && (
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Confirmation Policy</label>
+                        <Textarea
+                          placeholder="Describe when the agent should ask for human confirmation..."
+                          value={confirmationPolicy}
+                          onChange={(e) => setConfirmationPolicy(e.target.value)}
+                          rows={3}
+                          className="text-xs"
+                        />
+                      </div>
+                    )}
                   </div>
                 </section>
               )}
