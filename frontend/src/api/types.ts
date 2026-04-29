@@ -560,6 +560,63 @@ export interface SSEError {
   message: string;
 }
 
+export interface SSEApprovalRequest {
+  request_id: string;
+  tool_name: string;
+  tool_input_summary: string;
+  policy_name: string;
+  policy_type: string;
+  approval_mode: string;
+  timeout_seconds: number;
+  session_id?: string;
+}
+
+export interface SSEApprovalResolved {
+  request_id: string;
+  status: string;
+  decided_by?: string;
+  reason?: string;
+}
+
+export interface SSEElicitationRequest {
+  elicitation_id: string;
+  request_id?: string;
+  server_name?: string;
+  tool_name?: string;
+  schema?: Record<string, unknown>;
+  message: string;
+}
+
+export interface ApprovalPolicy {
+  id: number;
+  name: string;
+  policy_type: string;
+  tool_match_rules: string[];
+  approval_mode: string;
+  timeout_seconds: number;
+  agent_scope: Record<string, unknown>;
+  approval_cache_ttl: number;
+  enabled: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface ApprovalLog {
+  id: number;
+  request_id: string;
+  session_id: string | null;
+  agent_id: number | null;
+  tool_name: string;
+  tool_input_summary: string | null;
+  policy_name: string | null;
+  pattern_type: string;
+  status: string;
+  requested_at: string | null;
+  decided_at: string | null;
+  decided_by: string | null;
+  reason: string | null;
+}
+
 // Tag policy types
 export interface TagPolicy {
   id: number;
@@ -606,6 +663,7 @@ export interface ConnectorInfo {
   description: string | null;
   auth_type: "none" | "oauth2" | "api_key";
   has_user_api_key: boolean;
+  supports_elicitation: boolean;
 }
 
 // MCP Server types
@@ -623,6 +681,8 @@ export interface McpServer {
   has_oauth2_secret: boolean;
   api_key_header_name: string | null;
   has_admin_api_key: boolean;
+  supports_elicitation: boolean;
+  runtime_endpoint_url: string | null;
   created_at: string | null;
   updated_at: string | null;
   registry_record_id: string | null;
@@ -641,6 +701,8 @@ export interface McpServerCreateRequest {
   oauth2_scopes?: string;
   api_key_header_name?: string;
   api_key?: string;
+  supports_elicitation?: boolean;
+  runtime_endpoint_url?: string;
 }
 
 export interface McpServerUpdateRequest {
@@ -656,6 +718,8 @@ export interface McpServerUpdateRequest {
   oauth2_scopes?: string;
   api_key_header_name?: string;
   api_key?: string;
+  supports_elicitation?: boolean;
+  runtime_endpoint_url?: string;
 }
 
 export interface McpTool {

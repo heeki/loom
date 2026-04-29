@@ -147,6 +147,7 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly, initialSe
                   oauth2_client_id: editingServer.oauth2_client_id ?? undefined,
                   oauth2_scopes: editingServer.oauth2_scopes ?? undefined,
                   api_key_header_name: editingServer.api_key_header_name ?? undefined,
+                  supports_elicitation: editingServer.supports_elicitation,
                 }}
               />
             </CardContent>
@@ -323,6 +324,7 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly, initialSe
                   <div className="truncate" title={server.endpoint_url}><span className="text-muted-foreground/70">Endpoint:</span> {server.endpoint_url}</div>
                   <div><span className="text-muted-foreground/70">Transport:</span> {server.transport_type === "streamable_http" ? "Streamable HTTP" : "SSE"}</div>
                   <div><span className="text-muted-foreground/70">Authentication:</span> {server.auth_type === "oauth2" ? "OAuth2" : server.auth_type === "api_key" ? "API Key" : "None"}</div>
+                  <div><span className="text-muted-foreground/70">Elicitation:</span> {server.supports_elicitation ? "Supported" : "Not supported"}</div>
                   {server.created_at && (
                     <div><span className="text-muted-foreground/70">Created:</span> {formatTimestamp(server.created_at, timezone)}</div>
                   )}

@@ -35,6 +35,7 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
   const [scopes, setScopes] = useState(initialData?.oauth2_scopes ?? "");
   const [apiKeyHeaderName, setApiKeyHeaderName] = useState(initialData?.api_key_header_name ?? "x-api-key");
   const [apiKey, setApiKey] = useState("");
+  const [supportsElicitation, setSupportsElicitation] = useState(initialData?.supports_elicitation ?? false);
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
@@ -60,6 +61,7 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
         request.api_key_header_name = apiKeyHeaderName;
         if (apiKey) request.api_key = apiKey;
       }
+      request.supports_elicitation = supportsElicitation;
       await onSubmit(request);
     } finally {
       setSubmitting(false);
@@ -121,6 +123,7 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
             if (parsed.oauth2_scopes !== undefined) setScopes(parsed.oauth2_scopes);
             if (parsed.api_key_header_name !== undefined) setApiKeyHeaderName(parsed.api_key_header_name);
             if (parsed.api_key !== undefined) setApiKey(parsed.api_key);
+            if (parsed.supports_elicitation !== undefined) setSupportsElicitation(!!parsed.supports_elicitation);
             return null;
           } catch {
             return "Invalid JSON. Please check the format and try again.";
@@ -143,6 +146,7 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
             result.api_key_header_name = apiKeyHeaderName;
             result.api_key = "(redacted)";
           }
+          if (supportsElicitation) result.supports_elicitation = true;
           return JSON.stringify(result, null, 2);
         }}
         placeholder={'{"name": "...", "endpoint_url": "https://...", "transport_type": "sse", "auth_type": "oauth2|api_key", "oauth2_well_known_url": "https://...", "oauth2_client_id": "...", "oauth2_client_secret": "...", "oauth2_scopes": "...", "api_key_header_name": "x-api-key", "api_key": "..."}'}
@@ -278,6 +282,18 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
             </div>
           </div>
         )}
+      </div>
+
+      <div className="space-y-2">
+        <label className="flex items-center gap-2 text-sm cursor-pointer">
+          <input
+            type="checkbox"
+            checked={supportsElicitation}
+            onChange={(e) => setSupportsElicitation(e.target.checked)}
+            className="h-3.5 w-3.5"
+          />
+          Supports MCP elicitation (requires WebSocket invocation)
+        </label>
       </div>
 
       <div className="flex items-center gap-2">

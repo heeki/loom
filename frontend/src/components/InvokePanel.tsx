@@ -31,6 +31,7 @@ interface InvokePanelProps {
   isStreaming: boolean;
   modelId?: string | null;
   allowedModelIds?: string[];
+  mcpNames?: string[];
   authorizerName?: string;
   authorizerId?: number;
   authorizerPoolId?: string;
@@ -52,7 +53,7 @@ function issuerMatchesDiscovery(issuerUrl?: string, discoveryUrl?: string): bool
   return base.toLowerCase() === issuerUrl.replace(/\/+$/, "").toLowerCase();
 }
 
-export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelId, allowedModelIds = [], authorizerName, authorizerId, authorizerPoolId, authorizerDiscoveryUrl, isExternalIdp, loginIssuerUrl, currentUserId, onInvoke, onCancel }: InvokePanelProps) {
+export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelId, allowedModelIds = [], mcpNames = [], authorizerName, authorizerId, authorizerPoolId, authorizerDiscoveryUrl, isExternalIdp, loginIssuerUrl, currentUserId, onInvoke, onCancel }: InvokePanelProps) {
   const promptKey = `loom:invokePrompt:${agentId}`;
   const [prompt, setPrompt] = useState(() => sessionStorage.getItem(promptKey) ?? "");
 
@@ -107,12 +108,14 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
       .catch(() => setLinkStatus("unknown"));
   }, [resolvedAuthorizerId, sameIdp]);
 
-  // Auto-select linked token when linked
+  // Auto-select credential based on link status
   useEffect(() => {
     if (linkStatus === "linked") {
       setSelectedCredential(LINKED_TOKEN);
+    } else if (linkStatus === "unlinked" && credentialsLoaded && allCredentials.length > 0) {
+      setSelectedCredential(String(allCredentials[0]!.id));
     }
-  }, [linkStatus]);
+  }, [linkStatus, credentialsLoaded, allCredentials]);
 
   // Complete pending link exchange after redirect
   useEffect(() => {
@@ -225,13 +228,22 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
     listConnectors().then(setConnectors).catch(() => {});
   }, []);
 
-  // Restore enabled connectors from localStorage
+  // Restore enabled connectors from localStorage, or pre-enable from agent config
   useEffect(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem(connectorStorageKey) || "[]") as number[];
-      setEnabledConnectors(new Set(stored));
-    } catch { setEnabledConnectors(new Set()); }
-  }, [connectorStorageKey]);
+    const stored = localStorage.getItem(connectorStorageKey);
+    if (stored) {
+      try {
+        setEnabledConnectors(new Set(JSON.parse(stored) as number[]));
+      } catch { setEnabledConnectors(new Set()); }
+    } else if (mcpNames.length > 0 && connectors.length > 0) {
+      const preEnabled = connectors
+        .filter((c) => mcpNames.includes(c.name))
+        .map((c) => c.id);
+      setEnabledConnectors(new Set(preEnabled));
+    } else {
+      setEnabledConnectors(new Set());
+    }
+  }, [connectorStorageKey, connectors, mcpNames]);
 
   // Close connector popover on outside click
   useEffect(() => {

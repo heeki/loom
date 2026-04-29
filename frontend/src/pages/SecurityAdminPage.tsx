@@ -3,8 +3,9 @@ import { RoleManagementPanel } from "@/components/RoleManagementPanel";
 import { AuthorizerManagementPanel } from "@/components/AuthorizerManagementPanel";
 import { PermissionRequestsPanel } from "@/components/PermissionRequestsPanel";
 import { IdentityProviderPanel } from "@/components/IdentityProviderPanel";
+import { ApprovalPolicyPanel } from "@/components/ApprovalPolicyPanel";
 
-type SecurityTab = "identity" | "roles" | "authorizers" | "permissions";
+type SecurityTab = "identity" | "roles" | "authorizers" | "permissions" | "approvals";
 
 export function SecurityAdminPage({ readOnly }: { readOnly?: boolean }) {
   const [activeTab, setActiveTab] = useState<SecurityTab>("identity");
@@ -13,6 +14,7 @@ export function SecurityAdminPage({ readOnly }: { readOnly?: boolean }) {
     { key: "identity", label: "Identity Providers" },
     { key: "roles", label: "IAM Roles" },
     { key: "authorizers", label: "Authorizers" },
+    { key: "approvals", label: "Approval Policies" },
     { key: "permissions", label: "Permission Requests" },
   ];
 
@@ -50,6 +52,7 @@ export function SecurityAdminPage({ readOnly }: { readOnly?: boolean }) {
       {activeTab === "roles" && <RoleManagementPanel readOnly={readOnly} />}
       {activeTab === "authorizers" && <AuthorizerManagementPanel readOnly={readOnly} />}
       {activeTab === "permissions" && <PermissionRequestsPanel readOnly={readOnly} />}
+      {activeTab === "approvals" && <ApprovalPolicyPanel readOnly={readOnly} />}
     </div>
   );
 }

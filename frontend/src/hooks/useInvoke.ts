@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { SSESessionStart, SSESessionEnd } from "@/api/types";
-import { invokeAgentStream } from "@/api/invocations";
+import type { SSESessionStart, SSESessionEnd, SSEApprovalRequest, SSEApprovalResolved, SSEElicitationRequest } from "@/api/types";
+import { invokeAgentStream, invokeAgentWs, type WsInvokeController } from "@/api/invocations";
 import { friendlyInvokeError } from "@/lib/errors";
 
 /**
@@ -11,7 +11,10 @@ import { friendlyInvokeError } from "@/lib/errors";
 
 export type StreamSegment =
   | { type: "text"; content: string }
-  | { type: "tool_use"; name: string; index: number; total: number; timestamp: number };
+  | { type: "tool_use"; name: string; index: number; total: number; timestamp: number }
+  | { type: "approval_request"; data: SSEApprovalRequest }
+  | { type: "approval_resolved"; data: SSEApprovalResolved }
+  | { type: "elicitation_request"; data: SSEElicitationRequest };
 
 interface InvokeSnapshot {
   streamedText: string;
@@ -41,6 +44,7 @@ type Listener = () => void;
 
 const _state = new Map<number, InvokeSnapshot>();
 const _controllers = new Map<number, AbortController>();
+const _wsControllers = new Map<number, WsInvokeController>();
 const _listeners = new Map<number, Set<Listener>>();
 
 function _get(agentId: number): InvokeSnapshot {
@@ -72,9 +76,11 @@ async function _startInvoke(
   modelId?: string,
   connectorIds?: number[],
   useLinkedToken?: boolean,
+  useWebSocket?: boolean,
 ) {
-  // Abort any in-flight stream for this agent
+  // Abort any in-flight stream/ws for this agent
   _controllers.get(agentId)?.abort();
+  _wsControllers.get(agentId)?.close();
   const controller = new AbortController();
   _controllers.set(agentId, controller);
 
@@ -89,6 +95,11 @@ async function _startInvoke(
     error: null,
     rawError: null,
   });
+
+  if (useWebSocket) {
+    _startInvokeWs(agentId, prompt, qualifier, authorizerName, sessionId, modelId, connectorIds);
+    return;
+  }
 
   try {
     await invokeAgentStream(
@@ -126,6 +137,21 @@ async function _startInvoke(
           segs.push({ type: "tool_use", name: data.name, index: newTotal, total: newTotal, timestamp: Date.now() });
           _update(agentId, { currentToolName: data.name, toolNames: newToolNames, segments: segs });
         },
+        onApprovalRequest: (data) => {
+          const cur = _get(agentId);
+          const segs = [...cur.segments, { type: "approval_request" as const, data }];
+          _update(agentId, { segments: segs });
+        },
+        onApprovalResolved: (data) => {
+          const cur = _get(agentId);
+          const segs = [...cur.segments, { type: "approval_resolved" as const, data }];
+          _update(agentId, { segments: segs });
+        },
+        onElicitationRequest: (data) => {
+          const cur = _get(agentId);
+          const segs = [...cur.segments, { type: "elicitation_request" as const, data }];
+          _update(agentId, { segments: segs });
+        },
         onSessionEnd: (data) => {
           _update(agentId, { sessionEnd: data, isStreaming: false, currentToolName: null });
         },
@@ -153,14 +179,139 @@ async function _startInvoke(
   }
 }
 
+function _startInvokeWs(
+  agentId: number,
+  prompt: string,
+  qualifier: string,
+  authorizerName: string | undefined,
+  sessionId?: string,
+  modelId?: string,
+  connectorIds?: number[],
+) {
+  const wsCtrl = invokeAgentWs(
+    agentId,
+    {
+      prompt,
+      qualifier,
+      ...(sessionId ? { session_id: sessionId } : {}),
+      ...(modelId ? { model_id: modelId } : {}),
+      ...(connectorIds && connectorIds.length > 0 ? { connector_ids: connectorIds } : {}),
+    },
+    {
+      onSessionStart: (data) => {
+        _update(agentId, { sessionStart: { session_id: data.session_id, invocation_id: "", client_invoke_time: Date.now() } });
+      },
+      onText: (text) => {
+        const cur = _get(agentId);
+        const segs = [...cur.segments];
+        const last = segs[segs.length - 1];
+        if (last && last.type === "text") {
+          segs[segs.length - 1] = { type: "text", content: last.content + text };
+        } else {
+          segs.push({ type: "text", content: text });
+        }
+        _update(agentId, { streamedText: cur.streamedText + text, segments: segs, currentToolName: null });
+      },
+      onToolUse: (data) => {
+        const cur = _get(agentId);
+        const newToolNames = [...cur.toolNames, data.name];
+        const newTotal = newToolNames.length;
+        const segs: StreamSegment[] = cur.segments.map((s) =>
+          s.type === "tool_use" ? { ...s, total: newTotal } : s,
+        );
+        segs.push({ type: "tool_use", name: data.name, index: newTotal, total: newTotal, timestamp: Date.now() });
+        _update(agentId, { currentToolName: data.name, toolNames: newToolNames, segments: segs });
+      },
+      onElicitation: (data) => {
+        const cur = _get(agentId);
+        const elicitData: SSEElicitationRequest = {
+          elicitation_id: data.id,
+          message: data.message,
+        };
+        const segs = [...cur.segments, { type: "elicitation_request" as const, data: elicitData }];
+        _update(agentId, { segments: segs });
+      },
+      onResult: (content) => {
+        const cur = _get(agentId);
+        const segs = [...cur.segments];
+        const last = segs[segs.length - 1];
+        if (last && last.type === "text") {
+          segs[segs.length - 1] = { type: "text", content: last.content + content };
+        } else {
+          segs.push({ type: "text", content });
+        }
+        const now = Date.now();
+        const startTime = cur.sessionStart?.client_invoke_time ?? now;
+        const sessionId = cur.sessionStart?.session_id ?? "";
+        _update(agentId, {
+          streamedText: cur.streamedText + content,
+          segments: segs,
+          sessionEnd: {
+            session_id: sessionId,
+            invocation_id: "",
+            request_id: null,
+            qualifier: "DEFAULT",
+            client_invoke_time: startTime,
+            client_done_time: now,
+            client_duration_ms: now - startTime,
+            cold_start_latency_ms: null,
+            agent_start_time: null,
+            input_tokens: null,
+            output_tokens: null,
+            estimated_cost: null,
+            compute_cost: null,
+            compute_cpu_cost: null,
+            compute_memory_cost: null,
+            idle_timeout_cost: null,
+            idle_cpu_cost: null,
+            idle_memory_cost: null,
+            memory_retrievals: null,
+            memory_events_sent: null,
+            memory_estimated_cost: null,
+            stm_cost: null,
+            ltm_cost: null,
+          },
+          isStreaming: false,
+          currentToolName: null,
+        });
+      },
+      onError: (message) => {
+        _update(agentId, {
+          error: friendlyInvokeError(message, authorizerName),
+          rawError: message,
+          isStreaming: false,
+          currentToolName: null,
+        });
+      },
+      onClose: () => {
+        const cur = _get(agentId);
+        if (cur.isStreaming) {
+          _update(agentId, { isStreaming: false, currentToolName: null });
+        }
+      },
+    },
+  );
+  _wsControllers.set(agentId, wsCtrl);
+}
+
+export function sendElicitationResponse(agentId: number, id: string, action: "accept" | "decline" | "cancel", content?: Record<string, unknown>) {
+  const wsCtrl = _wsControllers.get(agentId);
+  if (wsCtrl) {
+    wsCtrl.sendElicitationResponse(id, action, content);
+  }
+}
+
 function _cancel(agentId: number) {
   _controllers.get(agentId)?.abort();
+  _wsControllers.get(agentId)?.close();
   _update(agentId, { isStreaming: false });
 }
 
 export function clearInvokeState(agentId: number) {
   _controllers.get(agentId)?.abort();
+  _wsControllers.get(agentId)?.close();
   _controllers.delete(agentId);
+  _wsControllers.delete(agentId);
   // Reset state to EMPTY and notify subscribers — do NOT delete listeners so
   // the component stays subscribed and sees subsequent invocations.
   _update(agentId, { ...EMPTY });
@@ -188,8 +339,8 @@ export function useInvoke(agentId: number, authorizerName?: string) {
   }, [agentId]);
 
   const invoke = useCallback(
-    async (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string, modelId?: string, connectorIds?: number[], useLinkedToken?: boolean) => {
-      await _startInvoke(agentId, prompt, qualifier, authorizerRef.current, sessionId, credentialId, bearerToken, modelId, connectorIds, useLinkedToken);
+    async (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string, modelId?: string, connectorIds?: number[], useLinkedToken?: boolean, useWebSocket?: boolean) => {
+      await _startInvoke(agentId, prompt, qualifier, authorizerRef.current, sessionId, credentialId, bearerToken, modelId, connectorIds, useLinkedToken, useWebSocket);
     },
     [agentId],
   );

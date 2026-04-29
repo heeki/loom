@@ -7,7 +7,7 @@ import time
 import uuid
 from datetime import datetime
 from typing import Any, List, AsyncGenerator, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func
@@ -25,8 +25,9 @@ from app.models.invocation import Invocation
 from app.models.authorizer_config import AuthorizerConfig
 from app.models.authorizer_credential import AuthorizerCredential
 from app.models.mcp import McpServer
+from app.models.approval_policy import ApprovalPolicy
 
-from app.services.agentcore import invoke_agent
+from app.services.agentcore import invoke_agent, invoke_agent_ws
 from app.services.harness import invoke_harness_stream
 from app.services.cloudwatch import (
     get_log_events, get_usage_log_events,
@@ -454,6 +455,8 @@ async def invoke_agent_stream(
     actor_id: str | None = None,
     runtime_model_id: str | None = None,
     dynamic_mcp_servers: list[dict[str, Any]] | None = None,
+    approval_policies: list[dict[str, Any]] | None = None,
+    supports_elicitation: bool = False,
 ) -> AsyncGenerator[str, None]:
     """
     Invoke the agent and yield SSE events as the response streams.
@@ -526,6 +529,8 @@ async def invoke_agent_stream(
             actor_id=actor_id,
             dynamic_mcp_servers=dynamic_mcp_servers,
             runtime_model_id=runtime_model_id,
+            approval_policies=approval_policies,
+            supports_elicitation=supports_elicitation,
         )
 
         # Stream chunks to frontend. Each next() call on the synchronous
@@ -549,11 +554,164 @@ async def invoke_agent_stream(
             elif chunk.get("type") == "structured":
                 structured = chunk["content"]
                 if isinstance(structured, dict):
+                    logger.info("Structured event keys: %s", list(structured.keys()))
                     # Tool use event forwarded from the agent handler
                     tool_use = structured.get("tool_use")
                     if isinstance(tool_use, dict) and tool_use.get("name"):
                         logger.info("Tool use event: %s", tool_use["name"])
                         yield format_sse_event("tool_use", {"name": tool_use["name"]})
+                        continue
+                    # MCP elicitation: tool paused waiting for user input
+                    elicitation_data = structured.get("elicitation")
+                    if isinstance(elicitation_data, dict):
+                        elicit_id = elicitation_data.get("id", "")
+                        logger.info("MCP elicitation request: id=%s", elicit_id)
+
+                        from app.routers.approvals import create_approval_request, wait_for_approval
+                        request_id = create_approval_request()
+
+                        yield format_sse_event("elicitation_request", {
+                            "elicitation_id": elicit_id,
+                            "request_id": request_id,
+                            "message": elicitation_data.get("message", ""),
+                            "schema": elicitation_data.get("schema"),
+                        })
+
+                        decision = await wait_for_approval(request_id, timeout=300.0)
+                        decision_str = decision.get("decision", "timeout")
+
+                        if decision_str == "approved":
+                            elicit_action = "accept"
+                            elicit_content = decision.get("content", {})
+                        else:
+                            elicit_action = "decline"
+                            elicit_content = None
+
+                        # Re-invoke agent to unblock the elicitation callback
+                        resume_generator = invoke_agent(
+                            arn=agent.arn,
+                            qualifier=qualifier,
+                            session_id=session_id,
+                            prompt="",
+                            region=region,
+                            access_token=access_token,
+                            actor_id=actor_id,
+                            dynamic_mcp_servers=None,
+                            runtime_model_id=runtime_model_id,
+                            supports_elicitation=True,
+                            elicitation_response={"action": elicit_action, "content": elicit_content},
+                        )
+
+                        def _next_elicit_resume():
+                            return next(resume_generator, _sentinel)
+
+                        while True:
+                            rchunk = await asyncio.to_thread(_next_elicit_resume)
+                            if rchunk is _sentinel:
+                                break
+                            if rchunk.get("type") == "text":
+                                text_c = rchunk["content"]
+                                response_chunks.append(text_c)
+                                yield format_sse_event("chunk", {"text": text_c})
+                            elif rchunk.get("type") == "structured":
+                                rs = rchunk["content"]
+                                if isinstance(rs, dict):
+                                    rtool = rs.get("tool_use")
+                                    if isinstance(rtool, dict) and rtool.get("name"):
+                                        yield format_sse_event("tool_use", {"name": rtool["name"]})
+                                    rdata = rs.get("data")
+                                    if isinstance(rdata, str) and rdata:
+                                        response_chunks.append(rdata)
+                                        yield format_sse_event("chunk", {"text": rdata})
+                        continue
+                    # Strands interrupt: agent paused waiting for approval
+                    interrupt_data = structured.get("interrupt")
+                    if isinstance(interrupt_data, dict):
+                        interrupts = interrupt_data.get("interrupts", [])
+                        logger.info("Agent interrupted with %d pending approval(s)", len(interrupts))
+                        for intr in interrupts:
+                            from app.routers.approvals import create_approval_request, wait_for_approval
+                            request_id = create_approval_request()
+                            approval_event = {
+                                "request_id": request_id,
+                                "interrupt_id": intr.get("id", ""),
+                                "interrupt_name": intr.get("name", ""),
+                                "tool_name": intr.get("reason", {}).get("tool_name", intr.get("name", "")),
+                                "tool_input_summary": intr.get("reason", {}).get("tool_input_summary", ""),
+                                "policy_name": intr.get("reason", {}).get("policy_name", ""),
+                                "policy_type": intr.get("reason", {}).get("policy_type", "loop_hook"),
+                                "approval_mode": intr.get("reason", {}).get("approval_mode", "require_approval"),
+                                "timeout_seconds": intr.get("reason", {}).get("timeout_seconds", 300),
+                                "session_id": session_id,
+                            }
+                            yield format_sse_event("approval_request", approval_event)
+
+                            timeout = intr.get("reason", {}).get("timeout_seconds", 300)
+                            decision = await wait_for_approval(request_id, timeout=float(timeout))
+                            decision_str = decision.get("decision", "timeout")
+                            yield format_sse_event("approval_resolved", {
+                                "request_id": request_id,
+                                "status": decision_str,
+                                "decided_by": decision.get("decided_by"),
+                                "reason": decision.get("reason"),
+                            })
+
+                            # Map decision to interrupt response value
+                            if decision_str == "approved":
+                                response_value = "y"
+                            elif decision_str == "trusted":
+                                response_value = "t"
+                            else:
+                                response_value = "n"
+
+                            # Re-invoke agent with interruptResponse to resume
+                            interrupt_response_payload = [
+                                {"interruptResponse": {"interruptId": intr["id"], "name": intr["name"], "response": response_value}}
+                            ]
+                            resume_generator = invoke_agent(
+                                arn=agent.arn,
+                                qualifier=qualifier,
+                                session_id=session_id,
+                                prompt="",
+                                region=region,
+                                access_token=access_token,
+                                actor_id=actor_id,
+                                dynamic_mcp_servers=None,
+                                runtime_model_id=runtime_model_id,
+                                interrupt_response=interrupt_response_payload,
+                            )
+
+                            def _next_resume():
+                                return next(resume_generator, _sentinel)
+
+                            while True:
+                                rchunk = await asyncio.to_thread(_next_resume)
+                                if rchunk is _sentinel:
+                                    break
+                                if rchunk.get("type") == "text":
+                                    text_c = rchunk["content"]
+                                    response_chunks.append(text_c)
+                                    yield format_sse_event("chunk", {"text": text_c})
+                                elif rchunk.get("type") == "structured":
+                                    rs = rchunk["content"]
+                                    if isinstance(rs, dict):
+                                        rtool = rs.get("tool_use")
+                                        if isinstance(rtool, dict) and rtool.get("name"):
+                                            yield format_sse_event("tool_use", {"name": rtool["name"]})
+                                        rdata = rs.get("data")
+                                        if isinstance(rdata, str) and rdata:
+                                            response_chunks.append(rdata)
+                                            yield format_sse_event("chunk", {"text": rdata})
+                        continue
+                    # Legacy: direct approval_request events (harness mode)
+                    approval_req = structured.get("approval_request")
+                    if isinstance(approval_req, dict):
+                        logger.info("Approval request: %s", approval_req.get("request_id"))
+                        yield format_sse_event("approval_request", approval_req)
+                        continue
+                    approval_res = structured.get("approval_resolved")
+                    if isinstance(approval_res, dict):
+                        yield format_sse_event("approval_resolved", approval_res)
                         continue
                     # Strands SDK text delta: {"data": "token"}
                     data = structured.get("data")
@@ -876,6 +1034,15 @@ async def invoke_harness_agent_stream(
                     tool_use = structured.get("tool_use")
                     if isinstance(tool_use, dict) and tool_use.get("name"):
                         yield format_sse_event("tool_use", {"name": tool_use["name"]})
+                    approval_req = structured.get("approval_request")
+                    if isinstance(approval_req, dict):
+                        yield format_sse_event("approval_request", approval_req)
+                    approval_res = structured.get("approval_resolved")
+                    if isinstance(approval_res, dict):
+                        yield format_sse_event("approval_resolved", approval_res)
+                    elicitation_req = structured.get("elicitation_request")
+                    if isinstance(elicitation_req, dict):
+                        yield format_sse_event("elicitation_request", elicitation_req)
             elif chunk.get("type") == "metadata":
                 meta = chunk.get("content", {})
                 harness_input_tokens = meta.get("input_tokens", 0)
@@ -1202,10 +1369,12 @@ async def invoke_agent_endpoint(
 
     # Resolve dynamic MCP connector configs for user-enabled connectors
     dynamic_mcp_servers: list[dict[str, Any]] | None = None
+    has_elicitation_connector = False
     if request_body.connector_ids:
         actor_id = user.username or user.sub or "loom-agent"
         mcp_records = db.query(McpServer).filter(McpServer.id.in_(request_body.connector_ids)).all()
         dynamic_mcp_servers = []
+
         for server in mcp_records:
             entry: dict[str, Any] = {
                 "name": server.name,
@@ -1221,12 +1390,24 @@ async def invoke_agent_endpoint(
                     "api_key_header_name": server.api_key_header_name or "x-api-key",
                 }
             elif server.auth_type == "oauth2":
-                entry["auth"] = {
+                auth_entry: dict[str, str] = {
                     "type": "oauth2",
                     "well_known_endpoint": server.oauth2_well_known_url or "",
+                    "credential_provider_name": f"loom-{agent.name}-mcp-{server.name}",
                 }
+                if server.oauth2_scopes:
+                    auth_entry["scopes"] = server.oauth2_scopes
+                entry["auth"] = auth_entry
             dynamic_mcp_servers.append(entry)
-        logger.info("Resolved %d dynamic MCP connectors for invocation", len(dynamic_mcp_servers))
+            if server.supports_elicitation == "true":
+                has_elicitation_connector = True
+        logger.info("Resolved %d dynamic MCP connectors for invocation (elicitation=%s)", len(dynamic_mcp_servers), has_elicitation_connector)
+
+    # Resolve active approval policies for the agent
+    approval_policies_payload: list[dict[str, Any]] | None = None
+    active_policies = db.query(ApprovalPolicy).filter(ApprovalPolicy.enabled == True).all()  # noqa: E712
+    if active_policies:
+        approval_policies_payload = [p.to_dict() for p in active_policies]
 
     # Dispatch to harness or standard invoke path
     if agent.source == "harness" and agent.harness_id:
@@ -1254,6 +1435,8 @@ async def invoke_agent_endpoint(
             request_body.prompt, access_token, token_source,
             user.username or user.sub or "loom-agent",
             runtime_model_id, dynamic_mcp_servers,
+            approval_policies=approval_policies_payload,
+            supports_elicitation=has_elicitation_connector,
         )
 
     return StreamingResponse(
@@ -1265,6 +1448,107 @@ async def invoke_agent_endpoint(
             "X-Accel-Buffering": "no",
         }
     )
+
+
+@router.websocket("/{agent_id}/ws")
+async def invoke_agent_websocket(
+    websocket: WebSocket,
+    agent_id: int,
+):
+    """WebSocket endpoint for agent invocation with MCP elicitation support.
+
+    Enables bidirectional communication so MCP elicitation requests from the
+    agent can be relayed to the frontend and responses sent back inline.
+
+    Protocol:
+    - Client sends: {"type": "prompt", "prompt": "...", "session_id": "...", ...}
+    - Server sends: {"type": "text", "content": "..."}
+    - Server sends: {"type": "elicitation", "id": "...", "message": "..."}
+    - Client sends: {"type": "elicitation_response", "id": "...", "action": "accept|decline", "content": {...}}
+    - Server sends: {"type": "result", "content": "..."}
+    - Server sends: {"type": "error", "content": "..."}
+    """
+    await websocket.accept()
+
+    db = SessionLocal()
+    try:
+        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        if not agent:
+            await websocket.send_json({"type": "error", "content": f"Agent {agent_id} not found"})
+            await websocket.close()
+            return
+
+        region = agent.region or os.environ.get("AWS_REGION", "us-east-1")
+
+        while True:
+            data = await websocket.receive_json()
+            msg_type = data.get("type", "prompt")
+
+            if msg_type != "prompt":
+                continue
+
+            prompt = data.get("prompt", "")
+            qualifier = data.get("qualifier", "DEFAULT")
+            session_id = data.get("session_id") or str(uuid.uuid4())
+            actor_id = data.get("actor_id", "loom-agent")
+
+            # Resolve dynamic MCP servers for elicitation
+            connector_ids = data.get("connector_ids")
+            dynamic_mcp_servers = None
+            if connector_ids:
+                mcp_servers = db.query(McpServer).filter(McpServer.id.in_(connector_ids)).all()
+                dynamic_mcp_servers = []
+                for s in mcp_servers:
+                    server_data: dict[str, Any] = {
+                        "name": s.name,
+                        "transport": s.transport_type,
+                        "endpoint_url": s.endpoint_url,
+                    }
+                    dynamic_mcp_servers.append(server_data)
+
+            # Resolve access token (simplified — reuses same logic as HTTP path)
+            access_token = data.get("bearer_token")
+
+            await websocket.send_json({"type": "session_start", "session_id": session_id})
+
+            gen = invoke_agent_ws(
+                arn=agent.arn,
+                qualifier=qualifier,
+                session_id=session_id,
+                prompt=prompt,
+                region=region,
+                access_token=access_token,
+                actor_id=actor_id,
+                dynamic_mcp_servers=dynamic_mcp_servers,
+                runtime_model_id=data.get("model_id"),
+            )
+
+            try:
+                event = await gen.__anext__()
+                while True:
+                    await websocket.send_json(event)
+
+                    if event.get("type") == "elicitation":
+                        # Wait for client to send elicitation response
+                        response_data = await websocket.receive_json()
+                        response_json = json.dumps(response_data)
+                        event = await gen.asend(response_json)
+                    elif event.get("type") in ("result", "error"):
+                        break
+                    else:
+                        event = await gen.__anext__()
+            except StopAsyncIteration:
+                pass
+            except Exception as e:
+                logger.error("WebSocket invocation error: %s", e)
+                await websocket.send_json({"type": "error", "content": str(e)})
+
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected for agent %d", agent_id)
+    except Exception as e:
+        logger.error("WebSocket handler error: %s", e)
+    finally:
+        db.close()
 
 
 @router.post("/{agent_id}/token")

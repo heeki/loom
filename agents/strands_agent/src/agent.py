@@ -7,6 +7,7 @@ from strands import Agent
 from strands.models.bedrock import BedrockModel
 
 from src.config import AgentConfig, MCPServerConfig
+from src.integrations.approval import ApprovalHook
 from src.integrations.mcp_client import build_mcp_clients, create_mcp_clients, has_oauth2_servers
 from src.integrations.a2a_client import create_a2a_clients
 from src.integrations.memory import MemoryHook
@@ -15,7 +16,7 @@ from src.telemetry import TelemetryHook
 logger = logging.getLogger(__name__)
 
 
-def build_agent(config: AgentConfig, defer_mcp: bool = False) -> Agent:
+def build_agent(config: AgentConfig, defer_mcp: bool = False) -> tuple[Agent, ApprovalHook]:
     """Build a Strands Agent from the provided configuration.
 
     Initializes the Bedrock model, loads enabled integrations
@@ -59,6 +60,12 @@ def build_agent(config: AgentConfig, defer_mcp: bool = False) -> Agent:
                 tools.extend(a2a_clients)
                 logger.info("Loaded %d A2A client(s)", len(a2a_clients))
 
+    # Approval hook (HITL Method 1) — policies injected at invocation time
+    approval_hook = ApprovalHook(agent_tags=config.tags if hasattr(config, "tags") else None)
+    hooks.append(approval_hook)
+    if approval_hook.policies:
+        logger.info("Enabled approval hook with %d static policy(ies)", len(approval_hook.policies))
+
     # Telemetry hook (R7)
     telemetry_hook = TelemetryHook()
     hooks.append(telemetry_hook)
@@ -101,7 +108,7 @@ def build_agent(config: AgentConfig, defer_mcp: bool = False) -> Agent:
         else:
             raise
     logger.info("Agent initialized with %d tool(s) and %d hook(s)", len(agent.tool_registry.registry), len(hooks))
-    return agent
+    return agent, approval_hook
 
 
 def attach_mcp_tools(agent: Agent, servers: list[MCPServerConfig]) -> None:

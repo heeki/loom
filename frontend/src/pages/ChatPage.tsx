@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Send, Plus, Brain, LogOut, Bot, User, X, Loader2, Palette, RefreshCw, ChevronDown, Wrench, Plug, KeyRound, Unplug, Link2 } from "lucide-react";
+import { ApprovalRequestBubble, ApprovalResolvedBubble } from "@/components/ApprovalDialog";
+import { ElicitationRequestBubble } from "@/components/ElicitationDialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import ReactMarkdown from "react-markdown";
@@ -10,7 +12,7 @@ import { listAgents, fetchModels } from "@/api/agents";
 import { listSessions, getSession, hideSession } from "@/api/invocations";
 import { listMemories, getMemoryRecords } from "@/api/memories";
 import { trackAction } from "@/api/audit";
-import { useInvoke, clearInvokeState } from "@/hooks/useInvoke";
+import { useInvoke, clearInvokeState, sendElicitationResponse, type StreamSegment } from "@/hooks/useInvoke";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, isLightTheme, THEME_LABELS, type Theme } from "@/contexts/ThemeContext";
 import { listConnectors, setUserApiKey, deleteUserApiKey } from "@/api/mcp";
@@ -219,11 +221,25 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
 
   useEffect(() => {
     if (!connectorStorageKey) { setEnabledConnectors(new Set()); return; }
-    try {
-      const stored = JSON.parse(localStorage.getItem(connectorStorageKey) || "[]") as number[];
-      setEnabledConnectors(new Set(stored));
-    } catch { setEnabledConnectors(new Set()); }
-  }, [connectorStorageKey]);
+    const stored = localStorage.getItem(connectorStorageKey);
+    if (stored) {
+      try {
+        setEnabledConnectors(new Set(JSON.parse(stored) as number[]));
+      } catch { setEnabledConnectors(new Set()); }
+    } else {
+      // No user preference saved yet — pre-enable connectors configured on the agent
+      const agent = agents.find((a) => a.id === selectedAgentId);
+      const agentMcpNames = agent?.mcp_names ?? [];
+      if (agentMcpNames.length > 0 && connectors.length > 0) {
+        const preEnabled = connectors
+          .filter((c) => agentMcpNames.includes(c.name))
+          .map((c) => c.id);
+        setEnabledConnectors(new Set(preEnabled));
+      } else {
+        setEnabledConnectors(new Set());
+      }
+    }
+  }, [connectorStorageKey, agents, selectedAgentId, connectors]);
 
   const toggleConnector = (c: ConnectorInfo) => {
     const isEnabled = enabledConnectors.has(c.id);
@@ -1005,6 +1021,11 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                       <StreamingBubble
                         segments={segments}
                         isStreaming={isCurrentlyStreaming}
+                        onElicitationRespond={
+                          selectedAgentId != null
+                            ? (id, action, content) => sendElicitationResponse(selectedAgentId, id, action, content)
+                            : undefined
+                        }
                       />
                     )}
 
@@ -1377,9 +1398,11 @@ function ChatToolUseBlock({ tools, isActive }: { tools: { name: string; index: n
 function StreamingBubble({
   segments,
   isStreaming,
+  onElicitationRespond,
 }: {
-  segments: { type: string; content?: string; name?: string; index?: number; total?: number; timestamp?: number }[];
+  segments: StreamSegment[];
   isStreaming: boolean;
+  onElicitationRespond?: (id: string, action: "accept" | "decline", content?: Record<string, unknown>) => void;
 }) {
   return (
     <div className="flex justify-start">
@@ -1399,7 +1422,16 @@ function StreamingBubble({
           segments.forEach((seg, i) => {
             if (seg.type === "tool_use") {
               if (toolGroup.length === 0) toolGroupStart = i;
-              toolGroup.push({ name: seg.name!, index: seg.index!, total: seg.total!, timestamp: seg.timestamp! });
+              toolGroup.push({ name: seg.name, index: seg.index, total: seg.total, timestamp: seg.timestamp });
+            } else if (seg.type === "approval_request") {
+              flushTools();
+              blocks.push(<ApprovalRequestBubble key={`approval-${i}`} data={seg.data} />);
+            } else if (seg.type === "approval_resolved") {
+              flushTools();
+              blocks.push(<ApprovalResolvedBubble key={`resolved-${i}`} data={seg.data} />);
+            } else if (seg.type === "elicitation_request") {
+              flushTools();
+              blocks.push(<ElicitationRequestBubble key={`elicit-${i}`} data={seg.data} onRespond={onElicitationRespond} />);
             } else {
               flushTools();
               blocks.push(
