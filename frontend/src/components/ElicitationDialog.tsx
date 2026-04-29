@@ -10,16 +10,18 @@ interface ElicitationRequestBubbleProps {
   data: SSEElicitationRequest;
   onRespond?: (elicitationId: string, action: "accept" | "decline", content?: Record<string, unknown>) => void;
   resolved?: boolean;
+  resolvedSummary?: string;
 }
 
 export function ElicitationRequestBubble({
   data,
   onRespond,
   resolved,
+  resolvedSummary,
 }: ElicitationRequestBubbleProps) {
   const [response, setResponse] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState(resolved ?? false);
-  const [submittedSummary, setSubmittedSummary] = useState<string | null>(null);
+  const [submittedSummary, setSubmittedSummary] = useState<string | null>(resolvedSummary ?? null);
   const [selectedChoice, setSelectedChoice] = useState<string | null>(null);
 
   const properties = (data.schema?.properties ?? {}) as Record<

@@ -983,8 +983,10 @@ async def invoke_harness_agent_stream(
     if dynamic_tools:
         if invoke_tools is None:
             invoke_tools = []
+        existing_names = {t.get("name") for t in invoke_tools}
         for tool in dynamic_tools:
-            invoke_tools.append(_json.loads(_json.dumps(tool)))
+            if tool.get("name") not in existing_names:
+                invoke_tools.append(_json.loads(_json.dumps(tool)))
 
     invocation.client_invoke_time = client_invoke_time
     invocation.status = "streaming"
@@ -1030,6 +1032,89 @@ async def invoke_harness_agent_stream(
                 text_content = chunk["content"]
                 response_chunks.append(text_content)
                 yield format_sse_event("chunk", {"text": text_content})
+            elif chunk.get("type") == "tool_use_stop":
+                # Inline function HITL: the harness paused waiting for a tool result.
+                # Loop to handle multiple consecutive HITL rounds.
+                from app.routers.approvals import create_approval_request, wait_for_approval
+                from app.services.harness import resume_harness_stream
+
+                pending_tool_stop = chunk["content"]
+
+                while pending_tool_stop is not None:
+                    tool_use_id = pending_tool_stop["tool_use_id"]
+                    tool_name = pending_tool_stop.get("tool_name") or "user_confirmation"
+                    tool_input = pending_tool_stop.get("tool_input", {})
+                    pending_tool_stop = None
+
+                    request_id = create_approval_request()
+                    approval_event = {
+                        "request_id": request_id,
+                        "tool_name": tool_name,
+                        "tool_input_summary": tool_input.get("action_summary") or tool_input.get("message") or json.dumps(tool_input)[:200],
+                        "policy_name": tool_input.get("risk_level", ""),
+                        "policy_type": "inline_function",
+                        "approval_mode": "require_approval",
+                        "timeout_seconds": 300,
+                        "session_id": session_id,
+                    }
+                    yield format_sse_event("approval_request", approval_event)
+
+                    decision = await wait_for_approval(request_id, timeout=300.0)
+                    decision_str = decision.get("decision", "timeout")
+                    yield format_sse_event("approval_resolved", {
+                        "request_id": request_id,
+                        "status": decision_str,
+                        "decided_by": decision.get("decided_by"),
+                        "reason": decision.get("reason"),
+                    })
+
+                    if decision_str == "approved":
+                        tool_result_content = json.dumps({"approved": True, "message": "User approved the action."})
+                        tool_result_status = "success"
+                    else:
+                        reason = decision.get("reason", "User denied the action.")
+                        tool_result_content = json.dumps({"approved": False, "message": reason})
+                        tool_result_status = "error"
+
+                    resume_generator = resume_harness_stream(
+                        harness_arn=agent.arn,
+                        session_id=session_id,
+                        tool_use_id=tool_use_id,
+                        tool_name=tool_name,
+                        tool_input=tool_input,
+                        tool_result_content=tool_result_content,
+                        tool_result_status=tool_result_status,
+                        region=agent.region,
+                        tools=invoke_tools,
+                        access_token=access_token,
+                        actor_id=actor_id,
+                    )
+
+                    def _next_resume():
+                        return next(resume_generator, _sentinel)
+
+                    while True:
+                        rchunk = await asyncio.to_thread(_next_resume)
+                        if rchunk is _sentinel:
+                            break
+                        if rchunk.get("type") == "text":
+                            text_c = rchunk["content"]
+                            response_chunks.append(text_c)
+                            yield format_sse_event("chunk", {"text": text_c})
+                        elif rchunk.get("type") == "structured":
+                            rs = rchunk["content"]
+                            if isinstance(rs, dict):
+                                rtool = rs.get("tool_use")
+                                if isinstance(rtool, dict) and rtool.get("name"):
+                                    yield format_sse_event("tool_use", {"name": rtool["name"]})
+                        elif rchunk.get("type") == "metadata":
+                            rmeta = rchunk.get("content", {})
+                            harness_input_tokens += rmeta.get("input_tokens", 0)
+                            harness_output_tokens += rmeta.get("output_tokens", 0)
+                        elif rchunk.get("type") == "tool_use_stop":
+                            pending_tool_stop = rchunk["content"]
+                            break
+
             elif chunk.get("type") == "structured":
                 structured = chunk["content"]
                 if isinstance(structured, dict):

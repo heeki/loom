@@ -14,7 +14,7 @@ export type StreamSegment =
   | { type: "tool_use"; name: string; index: number; total: number; timestamp: number }
   | { type: "approval_request"; data: SSEApprovalRequest }
   | { type: "approval_resolved"; data: SSEApprovalResolved }
-  | { type: "elicitation_request"; data: SSEElicitationRequest };
+  | { type: "elicitation_request"; data: SSEElicitationRequest; resolvedSummary?: string };
 
 interface InvokeSnapshot {
   streamedText: string;

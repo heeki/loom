@@ -1057,7 +1057,30 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                         isStreaming={isCurrentlyStreaming}
                         onElicitationRespond={
                           selectedAgentId != null
-                            ? (id, action, content) => sendElicitationResponse(selectedAgentId, id, action, content)
+                            ? (id, action, content) => {
+                                // Annotate the segment with the user's response for persistence
+                                const seg = segments.find(
+                                  (s) => s.type === "elicitation_request" && s.data.elicitation_id === id
+                                );
+                                if (seg && seg.type === "elicitation_request") {
+                                  if (action === "decline") {
+                                    seg.resolvedSummary = "Declined";
+                                  } else if (content) {
+                                    // Match display format: yes/no choices show as "Yes"/"No"
+                                    const keys = Object.keys(content);
+                                    if (keys.length === 1 && keys[0] === "response") {
+                                      seg.resolvedSummary = content.response === "yes" ? "Yes" : "No";
+                                    } else if (keys.length === 1 && keys[0] === "approved") {
+                                      seg.resolvedSummary = content.approved ? "Yes" : "No";
+                                    } else {
+                                      seg.resolvedSummary = Object.entries(content).map(([k, v]) => `${k}: ${v}`).join(", ");
+                                    }
+                                  } else {
+                                    seg.resolvedSummary = "Approved";
+                                  }
+                                }
+                                sendElicitationResponse(selectedAgentId, id, action, content);
+                              }
                             : undefined
                         }
                       />
@@ -1562,7 +1585,7 @@ function MessageBubble({
             <div className="mb-2 space-y-2">
               {hitlSegments.map((seg, i) => {
                 if (seg.type === "approval_request") return <ApprovalRequestBubble key={`h-approval-${i}`} data={seg.data} resolved />;
-                if (seg.type === "elicitation_request") return <ElicitationRequestBubble key={`h-elicit-${i}`} data={seg.data} resolved />;
+                if (seg.type === "elicitation_request") return <ElicitationRequestBubble key={`h-elicit-${i}`} data={seg.data} resolved resolvedSummary={seg.resolvedSummary} />;
                 return null;
               })}
             </div>

@@ -69,6 +69,7 @@ export interface AgentHarnessDeployRequest {
   tags?: Record<string, string>;
   harness_max_iterations: number | null;
   harness_max_tokens: number | null;
+  harness_tools?: Record<string, unknown>[];
 }
 
 export interface AgentRegisterRequest {
