@@ -52,7 +52,7 @@ class _OAuth2Auth(httpx.Auth):
         self._scopes = scopes
         self._region = os.environ.get("AWS_REGION", "us-east-1")
         self._delegation_mode = (delegation_mode or "m2m").lower()
-        self._oauth2_flow = "USER_FEDERATION" if self._delegation_mode == "obo" else "M2M"
+        self._oauth2_flow = "ON_BEHALF_OF_TOKEN_EXCHANGE" if self._delegation_mode == "obo" else "M2M"
         # Capture the workload token eagerly — auth_flow runs in the MCP
         # client's background thread where ContextVar is not propagated.
         self._workload_token = BedrockAgentCoreContext.get_workload_access_token()
