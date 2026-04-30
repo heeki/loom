@@ -25,6 +25,8 @@ from app.models.mcp import McpServer, McpServerAccess
 from app.models.session import InvocationSession
 from app.models.invocation import Invocation
 from app.models.tag_policy import TagPolicy
+from app.models.tag_profile import TagProfile
+from app.models.managed_role import ManagedRole
 from app.routers.utils import get_agent_or_404
 
 from app.services.agentcore import describe_runtime, list_runtime_endpoints
@@ -2201,6 +2203,107 @@ def get_agent_config(agent_id: int, user: UserInfo = Depends(require_scopes("age
             d["value"] = "********"
         result.append(ConfigEntryResponse(**d))
     return result
+
+
+@router.get("/{agent_id}/export")
+def export_agent(agent_id: int, user: UserInfo = Depends(require_scopes("admin:write")), db: Session = Depends(get_db)):
+    """Export agent config in form-compatible format. Super admin only."""
+    agent = get_agent_or_404(agent_id, db)
+    data: dict[str, Any] = {}
+
+    # Extract from AGENT_CONFIG_JSON
+    entries = db.query(ConfigEntry).filter(ConfigEntry.agent_id == agent_id).all()
+    agent_config: dict = {}
+    for entry in entries:
+        if entry.key == "AGENT_CONFIG_JSON":
+            try:
+                agent_config = json.loads(entry.value)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    # Order matches form layout
+    data["deployment_type"] = "managed" if agent.source == "harness" else "custom"
+    data["name"] = agent.name
+    if agent.description:
+        data["description"] = agent.description
+
+    system_prompt = agent_config.get("system_prompt", "")
+    if system_prompt:
+        data["system_prompt"] = system_prompt
+
+    if agent_config.get("model_id"):
+        data["model"] = agent_config["model_id"]
+    allowed = agent.get_allowed_model_ids()
+    if allowed:
+        data["allowed_models"] = allowed
+
+    if agent.network_mode and agent.network_mode != "PUBLIC":
+        data["network_mode"] = agent.network_mode
+
+    if agent.execution_role_arn:
+        managed_role = db.query(ManagedRole).filter(ManagedRole.role_arn == agent.execution_role_arn).first()
+        if managed_role:
+            data["role"] = managed_role.role_name
+        else:
+            data["role_arn"] = agent.execution_role_arn
+
+    tags = agent.get_tags()
+    if tags:
+        profiles = db.query(TagProfile).all()
+        matched_profile = None
+        best_match_size = 0
+        for profile in profiles:
+            profile_tags = profile.get_tags()
+            if not profile_tags:
+                continue
+            if all(tags.get(k) == v for k, v in profile_tags.items()) and len(profile_tags) > best_match_size:
+                matched_profile = profile
+                best_match_size = len(profile_tags)
+        if matched_profile:
+            data["tags"] = matched_profile.name
+        else:
+            data["tags"] = tags
+
+    auth_config = agent.get_authorizer_config()
+    if auth_config:
+        ac = None
+        if auth_config.get("pool_id"):
+            ac = db.query(AuthorizerConfig).filter(AuthorizerConfig.pool_id == auth_config["pool_id"]).first()
+        if not ac and auth_config.get("discovery_url"):
+            ac = db.query(AuthorizerConfig).filter(AuthorizerConfig.discovery_url == auth_config["discovery_url"]).first()
+        if ac:
+            data["authorizer"] = ac.name
+
+    if agent.source == "harness":
+        max_iterations = agent_config.get("max_iterations") or agent_config.get("harness", {}).get("max_iterations")
+        if max_iterations:
+            data["max_iterations"] = max_iterations
+        max_tokens = agent_config.get("max_tokens") or agent_config.get("harness", {}).get("max_tokens")
+        if max_tokens:
+            data["max_tokens"] = max_tokens
+
+    integrations = agent_config.get("integrations", {})
+    mcp_servers = integrations.get("mcp_servers", [])
+    if mcp_servers:
+        names = [s.get("name", "") for s in mcp_servers if s.get("name")]
+        verified = [n for n in names if db.query(McpServer).filter(McpServer.name == n).first()]
+        if verified:
+            data["mcp_servers"] = verified
+    a2a_agents = integrations.get("a2a_agents", [])
+    if a2a_agents:
+        names = [a.get("name", "") for a in a2a_agents if a.get("name")]
+        verified = [n for n in names if db.query(A2aAgentModel).filter(A2aAgentModel.name == n).first()]
+        if verified:
+            data["a2a_agents"] = verified
+    memory_cfg = integrations.get("memory", {})
+    memory_resources = memory_cfg.get("resources", [])
+    if memory_resources:
+        names = [m.get("name", "") for m in memory_resources if m.get("name")]
+        verified = [n for n in names if db.query(Memory).filter(Memory.name == n).first()]
+        if verified:
+            data["memories"] = verified
+
+    return data
 
 
 @router.patch("/{agent_id}", response_model=AgentResponse)

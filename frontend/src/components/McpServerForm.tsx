@@ -11,8 +11,9 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
-import { testConnection, testConnectionPreCreate } from "@/api/mcp";
+import { testConnection, testConnectionPreCreate, exportMcpServer } from "@/api/mcp";
 import { JsonConfigSection } from "./JsonConfigSection";
+import { useAuth } from "@/contexts/AuthContext";
 import type { McpServerCreateRequest, TestConnectionResult } from "@/api/types";
 
 interface McpServerFormProps {
@@ -22,6 +23,7 @@ interface McpServerFormProps {
 }
 
 export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerFormProps) {
+  const { hasScope } = useAuth();
   const [name, setName] = useState(initialData?.name ?? "");
   const [description, setDescription] = useState(initialData?.description ?? "");
   const [endpointUrl, setEndpointUrl] = useState(initialData?.endpoint_url ?? "");
@@ -133,7 +135,11 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
             return "Invalid JSON. Please check the format and try again.";
           }
         }}
-        onExport={() => {
+        onExport={async () => {
+          if (initialData?.id && hasScope("admin:write")) {
+            const data = await exportMcpServer(initialData.id);
+            return JSON.stringify(data, null, 2);
+          }
           const result: Record<string, unknown> = {};
           if (name) result.name = name;
           if (endpointUrl) result.endpoint_url = endpointUrl;

@@ -83,6 +83,10 @@ export function invokeServerTool(serverId: number, request: ToolInvokeRequest): 
   });
 }
 
+export function exportMcpServer(serverId: number): Promise<Record<string, unknown>> {
+  return apiFetch<Record<string, unknown>>(`/api/mcp/servers/${serverId}/export`);
+}
+
 export function getServerAccess(serverId: number): Promise<McpServerAccess[]> {
   return apiFetch<McpServerAccess[]>(`/api/mcp/servers/${serverId}/access`);
 }

@@ -124,3 +124,7 @@ export function fetchDefaults(): Promise<LoomDefaults> {
 export function getAgentIntegration(id: number): Promise<IntegrationInfoResponse> {
   return apiFetch<IntegrationInfoResponse>(`/api/agents/${id}/integration`);
 }
+
+export function exportAgent(id: number): Promise<Record<string, unknown>> {
+  return apiFetch<Record<string, unknown>>(`/api/agents/${id}/export`);
+}

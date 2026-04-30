@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, Trash2, RefreshCw } from "lucide-react";
+import { Loader2, Trash2, Pencil } from "lucide-react";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { statusVariant } from "@/lib/status";
@@ -11,10 +11,9 @@ import type { MemoryResponse } from "@/api/types";
 interface MemoryCardProps {
   memory: MemoryResponse;
   now: number;
-  refreshingId: number | null;
   submitting: boolean;
-  onRefresh: (id: number) => void;
   onDelete: (id: number, deleteInAws: boolean) => void;
+  onEdit?: (id: number) => void;
   readOnly?: boolean;
   showOnCardKeys?: string[];
   deleteStartTime?: number;
@@ -28,10 +27,9 @@ function isTransitional(status: string): boolean {
 export function MemoryCard({
   memory,
   now,
-  refreshingId,
   submitting,
-  onRefresh,
   onDelete,
+  onEdit,
   readOnly,
   showOnCardKeys,
   deleteStartTime,
@@ -89,19 +87,16 @@ export function MemoryCard({
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            <button
-              type="button"
-              onClick={() => onRefresh(memory.id)}
-              disabled={refreshingId === memory.id}
-              className="text-muted-foreground/50 hover:text-foreground transition-colors"
-              title="Refresh"
-            >
-              {refreshingId === memory.id ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5" />
-              )}
-            </button>
+            {onEdit && (
+              <button
+                type="button"
+                onClick={() => onEdit(memory.id)}
+                className="text-muted-foreground/50 hover:text-foreground transition-colors"
+                title="Edit"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            )}
             {canDelete && (
               <button
                 type="button"

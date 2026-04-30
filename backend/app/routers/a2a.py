@@ -436,3 +436,25 @@ def update_access_rules(
         db.refresh(r)
 
     return [A2aAccessRuleResponse(**r.to_dict()) for r in new_rules]
+
+
+@router.get("/{agent_id}/export")
+def export_a2a_agent(
+    agent_id: int,
+    user: UserInfo = Depends(require_scopes("admin:write")),
+    db: Session = Depends(get_db),
+):
+    """Export full A2A agent config including secrets. Super admin only."""
+    agent = _get_agent_or_404(agent_id, db)
+    data: dict = {
+        "base_url": agent.base_url,
+        "name": agent.name,
+        "auth_type": agent.auth_type,
+    }
+    if agent.auth_type == "oauth2":
+        data["oauth2_well_known_url"] = agent.oauth2_well_known_url
+        data["oauth2_client_id"] = agent.oauth2_client_id
+        data["oauth2_client_secret"] = agent.oauth2_client_secret or None
+        data["oauth2_scopes"] = agent.oauth2_scopes
+        data["delegation_mode"] = agent.delegation_mode
+    return data

@@ -56,7 +56,7 @@ export function AgentListPage({
   onDeploy,
   onDeployHarness,
   onSelectAgent,
-  onRefreshAgent,
+  onRefreshAgent: _onRefreshAgent,
   onDelete,
   readOnly,
   groupRestriction,
@@ -65,10 +65,11 @@ export function AgentListPage({
   userGroups = [],
 }: AgentListPageProps) {
   const { timezone } = useTimezone();
-  const { user, browserSessionId } = useAuth();
+  const { user, browserSessionId, hasScope } = useAuth();
   const [submitting, setSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState<BuilderTab>("deploy");
   const [showAddForm, setShowAddForm] = useState(false);
+  const [exportAgentId, setExportAgentId] = useState<number | undefined>(undefined);
   const [tagPolicies, setTagPolicies] = useState<TagPolicy[]>([]);
   const [tagFilters, setTagFilters] = useState<Record<string, string[]>>(() => {
     try { return JSON.parse(localStorage.getItem("loom:tagFilters:agents") || "{}") as Record<string, string[]>; } catch { return {}; }
@@ -246,6 +247,7 @@ export function AgentListPage({
                 isLoading={submitting}
                 groupRestriction={groupRestriction}
                 ownerRestriction={ownerRestriction}
+                exportAgentId={exportAgentId}
               />
             </CardContent>
           </Card>
@@ -377,8 +379,8 @@ export function AgentListPage({
                   <AgentCard
                     agent={agent}
                     onSelect={onSelectAgent}
-                    onRefresh={onRefreshAgent}
                     onDelete={onDelete}
+                    onEdit={hasScope("admin:write") ? (id) => { setExportAgentId(id); setShowAddForm(true); } : undefined}
                     readOnly={readOnly}
                     showOnCardKeys={effectiveShowOnCardKeys}
                     deleteStartTime={deleteStartTimes?.[agent.id]}

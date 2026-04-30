@@ -10,8 +10,9 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
-import { testA2aConnection, testA2aConnectionPreCreate } from "@/api/a2a";
+import { testA2aConnection, testA2aConnectionPreCreate, exportA2aAgent } from "@/api/a2a";
 import { JsonConfigSection } from "./JsonConfigSection";
+import { useAuth } from "@/contexts/AuthContext";
 import type { A2aAgentCreateRequest, TestConnectionResult } from "@/api/types";
 
 interface A2aAgentFormProps {
@@ -21,6 +22,7 @@ interface A2aAgentFormProps {
 }
 
 export function A2aAgentForm({ onSubmit, onCancel, initialData }: A2aAgentFormProps) {
+  const { hasScope } = useAuth();
   const [name, setName] = useState(initialData?.name ?? "");
   const [baseUrl, setBaseUrl] = useState(initialData?.base_url ?? "");
   const [authType, setAuthType] = useState<"none" | "oauth2">(initialData?.auth_type ?? "none");
@@ -105,7 +107,11 @@ export function A2aAgentForm({ onSubmit, onCancel, initialData }: A2aAgentFormPr
             return "Invalid JSON. Please check the format and try again.";
           }
         }}
-        onExport={() => {
+        onExport={async () => {
+          if (initialData?.id && hasScope("admin:write")) {
+            const data = await exportA2aAgent(initialData.id);
+            return JSON.stringify(data, null, 2);
+          }
           const result: Record<string, unknown> = {};
           if (name) result.name = name;
           if (baseUrl) result.base_url = baseUrl;

@@ -46,3 +46,7 @@ export function purgeMemory(id: number): Promise<void> {
 export function getMemoryRecords(id: number): Promise<MemoryRecordsResponse> {
   return apiFetch<MemoryRecordsResponse>(`/api/memories/${id}/records`);
 }
+
+export function exportMemory(id: number): Promise<Record<string, unknown>> {
+  return apiFetch<Record<string, unknown>>(`/api/memories/${id}/export`);
+}

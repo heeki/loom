@@ -81,3 +81,7 @@ export function updateAgentAccess(agentId: number, request: A2aAccessUpdateReque
     body: JSON.stringify(request),
   });
 }
+
+export function exportA2aAgent(agentId: number): Promise<Record<string, unknown>> {
+  return apiFetch<Record<string, unknown>>(`/api/a2a/agents/${agentId}/export`);
+}

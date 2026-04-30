@@ -255,6 +255,35 @@ def get_mcp_server(
     return McpServerResponse(**server.to_dict())
 
 
+@router.get("/{server_id}/export")
+def export_mcp_server(
+    server_id: int,
+    user: UserInfo = Depends(require_scopes("admin:write")),
+    db: Session = Depends(get_db),
+):
+    """Export full MCP server config including secrets. Super admin only."""
+    server = _get_server_or_404(server_id, db)
+    data: dict = {
+        "name": server.name,
+        "description": server.description,
+        "endpoint_url": server.endpoint_url,
+        "transport_type": server.transport_type,
+        "auth_type": server.auth_type,
+    }
+    if server.auth_type == "oauth2":
+        data["oauth2_well_known_url"] = server.oauth2_well_known_url
+        data["oauth2_client_id"] = server.oauth2_client_id
+        data["oauth2_client_secret"] = server.oauth2_client_secret or None
+        data["oauth2_scopes"] = server.oauth2_scopes
+        data["delegation_mode"] = server.delegation_mode
+    if server.auth_type == "api_key":
+        data["api_key_header_name"] = server.api_key_header_name
+        data["api_key"] = resolve_api_key(server)
+    if server.supports_elicitation == "true":
+        data["supports_elicitation"] = True
+    return data
+
+
 @router.put("/{server_id}", response_model=McpServerResponse)
 def update_mcp_server(
     server_id: int,
