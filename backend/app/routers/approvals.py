@@ -223,7 +223,7 @@ def delete_approval_policy(policy_id: int, db: Session = Depends(get_db)):
     "/approvals/{request_id}/decide",
     dependencies=[Depends(require_scopes("invoke"))],
 )
-def decide_approval(
+async def decide_approval(
     request_id: str,
     body: ApprovalDecisionRequest,
     db: Session = Depends(get_db),
@@ -232,6 +232,7 @@ def decide_approval(
     if body.decision not in ("approved", "rejected"):
         raise HTTPException(400, "decision must be 'approved' or 'rejected'")
 
+    # Retry briefly if the approval request hasn't been registered yet (race condition)
     found = resolve_approval(
         request_id,
         decision=body.decision,
@@ -239,6 +240,18 @@ def decide_approval(
         reason=body.reason,
         content=body.content,
     )
+    if not found:
+        for _ in range(10):
+            await asyncio.sleep(0.5)
+            found = resolve_approval(
+                request_id,
+                decision=body.decision,
+                decided_by=user.sub,
+                reason=body.reason,
+                content=body.content,
+            )
+            if found:
+                break
     if not found:
         raise HTTPException(404, "Approval request not found or already resolved")
 

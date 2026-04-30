@@ -17,6 +17,7 @@ export function ApprovalRequestBubble({
   const [decision, setDecision] = useState<string | null>(resolved ? "approved" : null);
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [showReason, setShowReason] = useState(false);
   const [elapsed, setElapsed] = useState(0);
 
@@ -31,12 +32,13 @@ export function ApprovalRequestBubble({
 
   const handleDecision = async (d: "approved" | "rejected") => {
     setSubmitting(true);
+    setError(null);
     try {
       await submitApprovalDecision(data.request_id, d, reason || undefined);
       setDecision(d);
       onDecided?.(data.request_id, d);
-    } catch {
-      // Decision submit failed — let user retry
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to submit decision. Try again.");
     } finally {
       setSubmitting(false);
     }
@@ -89,6 +91,10 @@ export function ApprovalRequestBubble({
           <p className="text-xs text-muted-foreground mt-1 font-mono break-all line-clamp-3">
             {data.tool_input_summary}
           </p>
+        )}
+
+        {error && (
+          <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>
         )}
 
         {decision ? (
