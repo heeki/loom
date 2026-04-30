@@ -31,8 +31,8 @@ class _OAuth2Auth(httpx.Auth):
     """httpx Auth that injects a Bearer token from the AgentCore Identity service.
 
     On each outbound HTTP request the auth handler:
-      1. Reads the workload access token from ``BedrockAgentCoreContext``
-         (set automatically by the AgentCore Runtime per invocation).
+      1. Uses the workload access token (captured at construction time from
+         ``BedrockAgentCoreContext`` or resolved lazily from the env/context).
       2. Exchanges it for a downstream OAuth2 access token via the
          AgentCore ``get_resource_oauth2_token`` API.
       3. Sets the ``Authorization: Bearer <token>`` header.
@@ -53,12 +53,15 @@ class _OAuth2Auth(httpx.Auth):
         self._region = os.environ.get("AWS_REGION", "us-east-1")
         self._delegation_mode = (delegation_mode or "m2m").lower()
         self._oauth2_flow = "USER_FEDERATION" if self._delegation_mode == "obo" else "M2M"
+        # Capture the workload token eagerly — auth_flow runs in the MCP
+        # client's background thread where ContextVar is not propagated.
+        self._workload_token = BedrockAgentCoreContext.get_workload_access_token()
 
     def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
-        workload_token = BedrockAgentCoreContext.get_workload_access_token()
+        workload_token = self._workload_token or BedrockAgentCoreContext.get_workload_access_token()
         if not workload_token:
             logger.warning(
-                "No workload access token in context for '%s'; sending unauthenticated",
+                "No workload access token available for '%s'; sending unauthenticated",
                 self._credential_provider_name,
             )
             yield request
