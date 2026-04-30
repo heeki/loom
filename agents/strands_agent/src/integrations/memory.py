@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -17,6 +18,17 @@ logger = logging.getLogger(__name__)
 _DEFAULT_NAMESPACE = "loom"
 # Default actor ID for events created by the agent
 _DEFAULT_ACTOR_ID = "loom-agent"
+
+# AWS actorId constraint: [a-zA-Z0-9][a-zA-Z0-9-_/]*(?::[a-zA-Z0-9-_/]+)*[a-zA-Z0-9-_/]*
+_ACTOR_ID_INVALID_CHARS = re.compile(r"[^a-zA-Z0-9\-_/:]")
+
+
+def _sanitize_actor_id(raw: str) -> str:
+    """Sanitize actor_id to comply with AWS actorId constraints."""
+    sanitized = _ACTOR_ID_INVALID_CHARS.sub("-", raw)
+    if not sanitized or not sanitized[0].isalnum():
+        sanitized = "u-" + sanitized
+    return sanitized
 
 
 class MemoryHook:
@@ -151,7 +163,7 @@ class MemoryHook:
 
             now = datetime.now(timezone.utc)
             session_id = event.invocation_state.get("session_id", "")
-            actor_id = event.invocation_state.get("actor_id") or _DEFAULT_ACTOR_ID
+            actor_id = _sanitize_actor_id(event.invocation_state.get("actor_id") or _DEFAULT_ACTOR_ID)
             for msg in new_messages:
                 role = msg.get("role", "OTHER").upper()
                 # Map Strands roles to AgentCore Memory roles
