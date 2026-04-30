@@ -192,7 +192,7 @@ export function A2aAgentForm({ onSubmit, onCancel, initialData }: A2aAgentFormPr
                 <Input value={scopes} onChange={(e) => setScopes(e.target.value)} placeholder="openid profile (space-separated)" />
               </div>
             </div>
-            <div className="w-[260px]">
+            <div className="w-[280px]">
               <label className="text-xs text-muted-foreground">Delegation Mode</label>
               <Select value={delegationMode} onValueChange={(v) => setDelegationMode(v as "m2m" | "obo")}>
                 <SelectTrigger className="w-full text-sm">
@@ -203,7 +203,7 @@ export function A2aAgentForm({ onSubmit, onCancel, initialData }: A2aAgentFormPr
                   <SelectItem value="obo">On-Behalf-Of (user identity)</SelectItem>
                 </SelectContent>
               </Select>
-              <p className="text-[10px] text-muted-foreground mt-0.5">
+              <p className="text-[10px] text-muted-foreground mt-0.5 whitespace-nowrap">
                 OBO uses RFC 8693 token exchange to delegate the invoking user&apos;s identity downstream.
               </p>
             </div>

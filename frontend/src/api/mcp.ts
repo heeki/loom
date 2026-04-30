@@ -58,6 +58,7 @@ export function testConnectionPreCreate(config: {
   oauth2_client_id?: string;
   oauth2_client_secret?: string;
   oauth2_scopes?: string;
+  delegation_mode?: string;
 }): Promise<TestConnectionResult> {
   return apiFetch<TestConnectionResult>("/api/mcp/servers/test-connection", {
     method: "POST",

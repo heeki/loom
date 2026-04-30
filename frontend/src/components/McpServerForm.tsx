@@ -89,6 +89,7 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
           if (clientId.trim()) config.oauth2_client_id = clientId.trim();
           if (clientSecret) config.oauth2_client_secret = clientSecret;
           if (scopes.trim()) config.oauth2_scopes = scopes.trim();
+          config.delegation_mode = delegationMode;
         }
         if (authType === "api_key") {
           (config as Record<string, string>).api_key_header_name = apiKeyHeaderName;
@@ -256,7 +257,7 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
               <label className="text-xs text-muted-foreground">Scopes</label>
               <Input value={scopes} onChange={(e) => setScopes(e.target.value)} placeholder="openid profile (space-separated)" />
             </div>
-            <div className="w-[220px]">
+            <div className="w-[280px]">
               <label className="text-xs text-muted-foreground">Delegation Mode</label>
               <Select value={delegationMode} onValueChange={(v) => setDelegationMode(v as "m2m" | "obo")}>
                 <SelectTrigger className="w-full text-sm">
@@ -267,7 +268,7 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
                   <SelectItem value="obo">On-Behalf-Of (user identity)</SelectItem>
                 </SelectContent>
               </Select>
-              <p className="text-[10px] text-muted-foreground mt-0.5">
+              <p className="text-[10px] text-muted-foreground mt-0.5 whitespace-nowrap">
                 OBO uses RFC 8693 token exchange to delegate the invoking user&apos;s identity downstream.
               </p>
             </div>

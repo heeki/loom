@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
@@ -317,28 +317,41 @@ class TestConnectionRequest(BaseModel):
     oauth2_client_id: str | None = None
     oauth2_client_secret: str | None = None
     oauth2_scopes: str | None = None
+    delegation_mode: str | None = None
     api_key_header_name: str | None = None
     api_key: str | None = None
+
+
+def _extract_user_token(request: Request) -> str | None:
+    """Extract the raw Bearer token from the request for OBO exchange."""
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return auth[7:]
+    return None
 
 
 @router.post("/test-connection", response_model=TestConnectionResponse)
 def test_connection_pre_create(
     request: TestConnectionRequest,
+    raw_request: Request,
     user: UserInfo = Depends(require_scopes("mcp:write")),
 ) -> TestConnectionResponse:
-    result = svc_test_connection(request, api_key=request.api_key)
+    user_token = _extract_user_token(raw_request) if getattr(request, "delegation_mode", None) == "obo" else None
+    result = svc_test_connection(request, api_key=request.api_key, user_token=user_token)
     return TestConnectionResponse(**result)
 
 
 @router.post("/{server_id}/test-connection", response_model=TestConnectionResponse)
 def test_connection(
     server_id: int,
+    raw_request: Request,
     user: UserInfo = Depends(require_scopes("mcp:write")),
     db: Session = Depends(get_db),
 ) -> TestConnectionResponse:
     server = _get_server_or_404(server_id, db)
     api_key = resolve_api_key(server)
-    result = svc_test_connection(server, api_key=api_key)
+    user_token = _extract_user_token(raw_request) if getattr(server, "delegation_mode", "m2m") == "obo" else None
+    result = svc_test_connection(server, api_key=api_key, user_token=user_token)
     return TestConnectionResponse(**result)
 
 
@@ -359,13 +372,15 @@ def get_mcp_tools(
 @router.post("/{server_id}/tools/refresh", response_model=list[McpToolResponse])
 def refresh_mcp_tools(
     server_id: int,
+    request: Request,
     user: UserInfo = Depends(require_scopes("mcp:write")),
     db: Session = Depends(get_db),
 ) -> list[McpToolResponse]:
     server = _get_server_or_404(server_id, db)
     api_key = resolve_api_key(server)
+    user_token = _extract_user_token(request) if getattr(server, "delegation_mode", "m2m") == "obo" else None
 
-    fetched_tools = svc_fetch_tools(server, api_key=api_key)
+    fetched_tools = svc_fetch_tools(server, api_key=api_key, user_token=user_token)
 
     # Clear existing tools
     db.query(McpTool).filter(McpTool.server_id == server_id).delete()

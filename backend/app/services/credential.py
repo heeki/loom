@@ -65,8 +65,6 @@ def create_oauth2_credential_provider(
             }
         },
     }
-    if delegation_mode == "obo":
-        kwargs['oauth2Flow'] = 'ON_BEHALF_OF_TOKEN_EXCHANGE'
     if tags:
         kwargs['tags'] = tags
 

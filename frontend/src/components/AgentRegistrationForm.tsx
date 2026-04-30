@@ -936,16 +936,19 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                               }}
                             />
                             <span className="shrink-0">{server.name}</span>
-                            <span className="text-muted-foreground/60 truncate min-w-0" title={server.endpoint_url}>{server.endpoint_url}</span>
                             {server.auth_type === "oauth2" && (
                               <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded shrink-0">OAuth2</span>
                             )}
                             {server.auth_type === "oauth2" && server.delegation_mode === "obo" && (
-                              <span className="text-[10px] text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-950 px-1 rounded shrink-0" title="User identity delegated via RFC 8693 token exchange">OBO</span>
+                              <span className="text-[10px] text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-950 px-1 rounded shrink-0">OBO</span>
                             )}
                             {server.auth_type === "oauth2" && server.delegation_mode !== "obo" && (
-                              <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded shrink-0" title="Shared agent identity">M2M</span>
+                              <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded shrink-0">M2M</span>
                             )}
+                            <span className="relative group text-muted-foreground/60 shrink-0">
+                              {(() => { try { return new URL(server.endpoint_url).host; } catch { return server.endpoint_url; } })()}
+                              <span className="absolute left-0 top-full mt-1 z-50 hidden group-hover:block text-[10px] text-foreground bg-popover border border-border px-2 py-1 rounded shadow-md whitespace-nowrap">{server.endpoint_url}</span>
+                            </span>
                           </label>
                         ))}
                       </div>
@@ -973,16 +976,19 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                               }}
                             />
                             <span className="shrink-0">{agent.name}</span>
-                            <span className="text-muted-foreground/60 truncate min-w-0" title={agent.base_url}>{agent.base_url}</span>
                             {agent.auth_type === "oauth2" && (
                               <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded shrink-0">OAuth2</span>
                             )}
                             {agent.auth_type === "oauth2" && agent.delegation_mode === "obo" && (
-                              <span className="text-[10px] text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-950 px-1 rounded shrink-0" title="User identity delegated via RFC 8693 token exchange">OBO</span>
+                              <span className="text-[10px] text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-950 px-1 rounded shrink-0">OBO</span>
                             )}
                             {agent.auth_type === "oauth2" && agent.delegation_mode !== "obo" && (
-                              <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded shrink-0" title="Shared agent identity">M2M</span>
+                              <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded shrink-0">M2M</span>
                             )}
+                            <span className="relative group text-muted-foreground/60 shrink-0">
+                              {(() => { try { return new URL(agent.base_url).host; } catch { return agent.base_url; } })()}
+                              <span className="absolute left-0 top-full mt-1 z-50 hidden group-hover:block text-[10px] text-foreground bg-popover border border-border px-2 py-1 rounded shadow-md whitespace-nowrap">{agent.base_url}</span>
+                            </span>
                           </label>
                         ))}
                       </div>
