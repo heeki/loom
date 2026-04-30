@@ -99,10 +99,10 @@ def _ensure_mcp_tools(actor_id: str = ""):
     global _mcp_attached
     if _mcp_attached or _config is None:
         return
-    _mcp_attached = True
 
     static_servers = [s for s in _config.integrations.mcp_servers if s.enabled and not s.dynamic_only]
     if not static_servers:
+        _mcp_attached = True
         return
 
     if actor_id:
@@ -113,8 +113,9 @@ def _ensure_mcp_tools(actor_id: str = ""):
     logger.info("Attaching MCP tools (first invocation with context)")
     try:
         attach_mcp_tools(_agent, static_servers)
+        _mcp_attached = True
     except Exception as e:
-        logger.warning("Failed to attach MCP tools: %s. Agent will continue without MCP tools.", e)
+        logger.warning("Failed to attach MCP tools: %s. Will retry on next invocation.", e)
 
 
 def _attach_dynamic_mcp_servers(agent_instance, dynamic_servers: list[dict[str, Any]], actor_id: str, elicitation_callback=None) -> None:
@@ -206,15 +207,6 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
 
     session_id = payload.get("session_id", "")
     actor_id = payload.get("actor_id") or "loom-agent"
-
-    # Forward the user's access token (if provided) to the OAuth2 auth
-    # handlers via USER_ACCESS_TOKEN env var so OBO-configured integrations
-    # can present it as the subject token in RFC 8693 exchange.
-    user_access_token = payload.get("user_access_token")
-    if user_access_token:
-        os.environ["USER_ACCESS_TOKEN"] = user_access_token
-    else:
-        os.environ.pop("USER_ACCESS_TOKEN", None)
 
     _ensure_mcp_tools(actor_id)
 
@@ -490,12 +482,6 @@ async def ws_invoke(websocket, context) -> None:
             prompt = data.get("prompt", "")
             session_id = data.get("session_id", "")
             actor_id = data.get("actor_id") or "loom-agent"
-
-            user_access_token = data.get("user_access_token")
-            if user_access_token:
-                os.environ["USER_ACCESS_TOKEN"] = user_access_token
-            else:
-                os.environ.pop("USER_ACCESS_TOKEN", None)
 
             _ensure_mcp_tools(actor_id)
 

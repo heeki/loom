@@ -115,13 +115,38 @@ def attach_mcp_tools(agent: Agent, servers: list[MCPServerConfig]) -> None:
     """Attach MCP tool clients to an already-initialized agent.
 
     Called during the first invocation when the workload access token
-    is available in the request context.
+    is available in the request context. Servers that fail to connect
+    (e.g. 401 Unauthorized) are skipped gracefully.
 
     Args:
         agent: The running Strands Agent instance.
         servers: MCP server configurations to connect.
     """
     mcp_clients = build_mcp_clients(servers)
+    if not mcp_clients:
+        logger.warning("build_mcp_clients returned 0 clients for %d server(s)", len(servers))
+        return
+
+    strands_mcp_logger = logging.getLogger("strands.tools.mcp.mcp_client")
+    prev_level = strands_mcp_logger.level
+
+    attached = 0
     for client in mcp_clients:
-        agent.tool_registry.process_tools([client])
-    logger.info("Attached %d MCP tool client(s) to agent", len(mcp_clients))
+        strands_mcp_logger.setLevel(logging.CRITICAL)
+        try:
+            agent.tool_registry.process_tools([client])
+            attached += 1
+        except BaseException as e:
+            logger.warning(
+                "Failed to attach MCP client: %s. The agent will continue without this server's tools.",
+                e,
+            )
+            try:
+                client.stop()
+            except BaseException:
+                pass
+        finally:
+            strands_mcp_logger.setLevel(prev_level)
+
+    tool_names = list(agent.tool_registry.registry.keys())
+    logger.info("Attached %d/%d MCP tool client(s) to agent. Registered tools: %s", attached, len(mcp_clients), tool_names)

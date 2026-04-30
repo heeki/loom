@@ -933,8 +933,6 @@ def _deploy_agent_background(
                 "transport": server["transport_type"],
                 "endpoint_url": server["endpoint_url"],
             }
-            if server.get("supports_elicitation"):
-                entry["dynamic_only"] = True
             if server["auth_type"] == "oauth2":
                 cp_name = f"loom-{request.name}-mcp-{server['name']}"
                 mcp_delegation = server.get("delegation_mode") or "m2m"
@@ -1508,8 +1506,6 @@ def _deploy_harness_background(
                 "endpoint_url": server["endpoint_url"],
                 "auth_type": server["auth_type"],
             }
-            if server.get("supports_elicitation"):
-                mcp_entry["dynamic_only"] = True
             if cp_name:
                 mcp_entry["auth"] = {
                     "type": "oauth2",

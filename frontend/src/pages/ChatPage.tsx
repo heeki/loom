@@ -241,17 +241,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
         setEnabledConnectors(new Set(JSON.parse(stored) as number[]));
       } catch { setEnabledConnectors(new Set()); }
     } else {
-      // No user preference saved yet — pre-enable connectors configured on the agent
-      const agent = agents.find((a) => a.id === selectedAgentId);
-      const agentMcpNames = agent?.mcp_names ?? [];
-      if (agentMcpNames.length > 0 && connectors.length > 0) {
-        const preEnabled = connectors
-          .filter((c) => agentMcpNames.includes(c.name))
-          .map((c) => c.id);
-        setEnabledConnectors(new Set(preEnabled));
-      } else {
-        setEnabledConnectors(new Set());
-      }
+      setEnabledConnectors(new Set());
     }
   }, [connectorStorageKey, agents, selectedAgentId, connectors]);
 
@@ -589,10 +579,15 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
       if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "agent", "invoke", agentName);
       const agent = agents.find((a) => a.id === selectedAgentId);
       const rtModel = selectedModelId && agent && selectedModelId !== agent.model_id ? selectedModelId : undefined;
-      const activeConnectorIds = enabledConnectors.size > 0 ? Array.from(enabledConnectors) : undefined;
+      const deployNames = agent?.mcp_names ?? [];
+      const invokeOnlyIds = Array.from(enabledConnectors).filter((id) => {
+        const c = connectors.find((cn) => cn.id === id);
+        return c && !deployNames.includes(c.name);
+      });
+      const activeConnectorIds = invokeOnlyIds.length > 0 ? invokeOnlyIds : undefined;
       invoke(prompt, "DEFAULT", currentSessionId ?? undefined, undefined, undefined, rtModel, activeConnectorIds, linkStatus === "linked" ? true : undefined);
     }
-  }, [isStreaming, queuedPrompt, error, selectedModelId, selectedAgentId, agents, enabledConnectors, linkStatus]);
+  }, [isStreaming, queuedPrompt, error, selectedModelId, selectedAgentId, agents, enabledConnectors, connectors, linkStatus]);
 
   // Scroll to bottom on new messages or streaming updates
   useEffect(() => {
@@ -613,9 +608,14 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     const agentName = agents.find((a) => a.id === selectedAgentId)?.name ?? String(selectedAgentId);
     if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "agent", "invoke", agentName);
     const runtimeModelId = selectedModelId && selectedAgent && selectedModelId !== selectedAgent.model_id ? selectedModelId : undefined;
-    const activeConnectorIds = enabledConnectors.size > 0 ? Array.from(enabledConnectors) : undefined;
+    const deployNames = selectedAgent?.mcp_names ?? [];
+    const invokeOnlyIds = Array.from(enabledConnectors).filter((id) => {
+      const c = connectors.find((cn) => cn.id === id);
+      return c && !deployNames.includes(c.name);
+    });
+    const activeConnectorIds = invokeOnlyIds.length > 0 ? invokeOnlyIds : undefined;
     await invoke(prompt, "DEFAULT", currentSessionId ?? undefined, undefined, undefined, runtimeModelId, activeConnectorIds, linkStatus === "linked" ? true : undefined);
-  }, [input, isStreaming, selectedAgentId, currentSessionId, invoke, agents, user, browserSessionId, selectedModelId, selectedAgent, enabledConnectors, linkStatus]);
+  }, [input, isStreaming, selectedAgentId, currentSessionId, invoke, agents, user, browserSessionId, selectedModelId, selectedAgent, enabledConnectors, connectors, linkStatus]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -1186,63 +1186,95 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                           )}
                         </button>
                       )}
-                      {showConnectors && (
+                      {showConnectors && (() => {
+                        const agentMcpNames = agents.find((a) => a.id === selectedAgentId)?.mcp_names ?? [];
+                        const deployTimeConnectors = connectors.filter((c) => agentMcpNames.includes(c.name));
+                        const invokeTimeConnectors = connectors.filter((c) => !agentMcpNames.includes(c.name));
+                        return (
                         <div className="absolute bottom-8 left-0 z-50 w-72 rounded-lg border bg-background shadow-md py-1">
-                          <div className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                            MCP Connectors
-                          </div>
-                          {connectors.map((c) => {
-                            const isEnabled = enabledConnectors.has(c.id);
-                            const needsKey = c.auth_type === "api_key" && !c.has_user_api_key;
-                            const isConnected = c.auth_type === "none" || (c.auth_type === "api_key" && c.has_user_api_key);
-                            return (
-                              <div
-                                key={c.id}
-                                className="flex items-center justify-between px-3 py-2 text-xs hover:bg-accent transition-colors"
-                              >
-                                <button
-                                  onClick={() => toggleConnector(c)}
-                                  className="flex items-center gap-2 min-w-0 flex-1"
-                                >
-                                  <span className="truncate" title={c.name}>{c.name}</span>
-                                  {needsKey && (
-                                    <span className="flex items-center gap-0.5 text-amber-500 shrink-0">
-                                      <KeyRound className="h-3 w-3" />
-                                    </span>
-                                  )}
-                                  {c.auth_type === "oauth2" && !isEnabled && (
-                                    <span className="text-[10px] text-muted-foreground shrink-0">OAuth2</span>
-                                  )}
-                                </button>
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                  {isConnected && c.auth_type !== "none" && (
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); void disconnectConnector(c); }}
-                                      className="text-muted-foreground/50 hover:text-destructive transition-colors"
-                                      title={`Disconnect ${c.name}`}
-                                    >
-                                      <Unplug className="h-3 w-3" />
-                                    </button>
-                                  )}
-                                  <button onClick={() => toggleConnector(c)}>
-                                    <div
-                                      className={`relative w-7 h-4 rounded-full transition-colors ${
-                                        isEnabled ? "bg-green-500" : "bg-muted-foreground/30"
-                                      }`}
-                                    >
-                                      <div
-                                        className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
-                                          isEnabled ? "translate-x-3.5" : "translate-x-0.5"
-                                        }`}
-                                      />
-                                    </div>
-                                  </button>
-                                </div>
+                          {invokeTimeConnectors.length > 0 && (
+                            <>
+                              <div className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                                Additional Available Tools
                               </div>
-                            );
-                          })}
+                              {invokeTimeConnectors.map((c) => {
+                                const isEnabled = enabledConnectors.has(c.id);
+                                const needsKey = c.auth_type === "api_key" && !c.has_user_api_key;
+                                const isConnected = c.auth_type === "none" || (c.auth_type === "api_key" && c.has_user_api_key);
+                                return (
+                                  <div
+                                    key={c.id}
+                                    className="flex items-center justify-between px-3 py-2 text-xs hover:bg-accent transition-colors"
+                                  >
+                                    <button
+                                      onClick={() => toggleConnector(c)}
+                                      className="flex items-center gap-2 min-w-0 flex-1"
+                                    >
+                                      <span className="truncate" title={c.name}>{c.name}</span>
+                                      {needsKey && (
+                                        <span className="flex items-center gap-0.5 text-amber-500 shrink-0">
+                                          <KeyRound className="h-3 w-3" />
+                                        </span>
+                                      )}
+                                      {c.auth_type === "oauth2" && !isEnabled && (
+                                        <span className="text-[10px] text-muted-foreground shrink-0">OAuth2</span>
+                                      )}
+                                    </button>
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      {isConnected && c.auth_type !== "none" && (
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); void disconnectConnector(c); }}
+                                          className="text-muted-foreground/50 hover:text-destructive transition-colors"
+                                          title={`Disconnect ${c.name}`}
+                                        >
+                                          <Unplug className="h-3 w-3" />
+                                        </button>
+                                      )}
+                                      <button onClick={() => toggleConnector(c)}>
+                                        <div
+                                          className={`relative w-7 h-4 rounded-full transition-colors ${
+                                            isEnabled ? "bg-green-500" : "bg-muted-foreground/30"
+                                          }`}
+                                        >
+                                          <div
+                                            className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
+                                              isEnabled ? "translate-x-3.5" : "translate-x-0.5"
+                                            }`}
+                                          />
+                                        </div>
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </>
+                          )}
+                          {deployTimeConnectors.length > 0 && (
+                            <>
+                              <div className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider border-t mt-1 pt-1.5">
+                                Built-in Tools
+                              </div>
+                              {deployTimeConnectors.map((c) => (
+                                <div
+                                  key={c.id}
+                                  className="flex items-center justify-between px-3 py-2 text-xs opacity-70"
+                                >
+                                  <span className="flex items-center gap-2 min-w-0 flex-1">
+                                    <span className="truncate" title={c.name}>{c.name}</span>
+                                  </span>
+                                  <div
+                                    className="relative w-7 h-4 rounded-full bg-green-500/60 cursor-not-allowed"
+                                    title="Attached at deploy time"
+                                  >
+                                    <div className="absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm translate-x-3.5" />
+                                  </div>
+                                </div>
+                              ))}
+                            </>
+                          )}
                         </div>
-                      )}
+                        );
+                      })()}
                       {apiKeyDialog && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
                           <div className="w-96 rounded-lg border bg-background shadow-lg p-4 space-y-3">

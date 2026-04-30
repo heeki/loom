@@ -161,7 +161,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [tokens, setTokens] = useState<AuthTokens | null>(() => {
     try {
       const stored = sessionStorage.getItem("loom_auth_tokens");
-      return stored ? JSON.parse(stored) as AuthTokens : null;
+      if (stored) {
+        const parsed = JSON.parse(stored) as AuthTokens;
+        // Check if the access token is expired before restoring
+        try {
+          const claims = JSON.parse(atob(parsed.accessToken.split(".")[1] ?? ""));
+          if (claims.exp && claims.exp < Date.now() / 1000) {
+            sessionStorage.removeItem("loom_auth_tokens");
+            sessionStorage.removeItem("loom_auth_user");
+            return null;
+          }
+        } catch { /* if we can't decode, let validation handle it */ }
+        setAuthToken(parsed.accessToken);
+        return parsed;
+      }
+      return null;
     } catch { return null; }
   });
   const [user, setUser] = useState<CognitoUser | null>(() => {
@@ -499,6 +513,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
   }, [tokens, logout]);
+
 
   useEffect(() => {
     return () => {
