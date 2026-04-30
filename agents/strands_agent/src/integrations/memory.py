@@ -24,7 +24,7 @@ _ACTOR_ID_INVALID_CHARS = re.compile(r"[^a-zA-Z0-9\-_/:]")
 
 
 def _sanitize_actor_id(raw: str) -> str:
-    """Sanitize actor_id to comply with AWS actorId constraints."""
+    """Sanitize actor_id to comply with AWS actorId constraints as a fallback."""
     sanitized = _ACTOR_ID_INVALID_CHARS.sub("-", raw)
     if not sanitized or not sanitized[0].isalnum():
         sanitized = "u-" + sanitized

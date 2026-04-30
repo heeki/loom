@@ -110,6 +110,12 @@ class UserInfo:
     username: str
     groups: list[str]
     scopes: set[str]
+    idp_type: str = "cognito"
+
+    @property
+    def actor_id(self) -> str:
+        """Return a provider:sub formatted actor ID safe for AWS APIs."""
+        return f"{self.idp_type}:{self.sub}" if self.sub else "loom-agent"
 
 
 # ---------------------------------------------------------------------------
@@ -207,6 +213,7 @@ def get_current_user(request: Request) -> UserInfo:
             username="local-dev",
             groups=["t-admin", "g-admins-super"],
             scopes=ALL_SCOPES.copy(),
+            idp_type="local",
         )
 
     if not token:
@@ -279,6 +286,7 @@ def _build_user_from_external_claims(claims: dict[str, Any], idp: dict) -> UserI
         username=username,
         groups=loom_groups,
         scopes=derive_scopes(loom_groups),
+        idp_type=idp.get("provider_type", "external"),
     )
 
 

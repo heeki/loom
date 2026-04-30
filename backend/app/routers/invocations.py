@@ -1506,7 +1506,7 @@ async def invoke_agent_endpoint(
     dynamic_mcp_servers: list[dict[str, Any]] | None = None
     has_elicitation_connector = False
     if request_body.connector_ids:
-        actor_id = user.username or user.sub or "loom-agent"
+        actor_id = user.actor_id
         mcp_records = db.query(McpServer).filter(McpServer.id.in_(request_body.connector_ids)).all()
         dynamic_mcp_servers = []
 
@@ -1525,13 +1525,16 @@ async def invoke_agent_endpoint(
                     "api_key_header_name": server.api_key_header_name or "x-api-key",
                 }
             elif server.auth_type == "oauth2":
+                cred_provider = getattr(server, "credential_provider_name", None) or f"loom-{agent.name}-mcp-{server.name}"
                 auth_entry: dict[str, str] = {
                     "type": "oauth2",
                     "well_known_endpoint": server.oauth2_well_known_url or "",
-                    "credential_provider_name": f"loom-{agent.name}-mcp-{server.name}",
+                    "credential_provider_name": cred_provider,
                 }
                 if server.oauth2_scopes:
                     auth_entry["scopes"] = server.oauth2_scopes
+                if getattr(server, "delegation_mode", None):
+                    auth_entry["delegation_mode"] = server.delegation_mode
                 entry["auth"] = auth_entry
             dynamic_mcp_servers.append(entry)
             if server.supports_elicitation == "true":
@@ -1593,7 +1596,7 @@ async def invoke_agent_endpoint(
 
         stream_gen = invoke_harness_agent_stream(
             agent, session, invocation, db, client_invoke_time,
-            request_body.prompt, user.username or user.sub or "loom-agent",
+            request_body.prompt, user.actor_id,
             runtime_model_id, access_token, token_source,
             dynamic_harness_tools,
             user_access_token=user_access_token,
@@ -1603,7 +1606,7 @@ async def invoke_agent_endpoint(
         stream_gen = invoke_agent_stream(
             agent, session, invocation, db, client_invoke_time,
             request_body.prompt, access_token, token_source,
-            user.username or user.sub or "loom-agent",
+            user.actor_id,
             runtime_model_id, dynamic_mcp_servers,
             approval_policies=approval_policies_payload,
             supports_elicitation=has_elicitation_connector,
