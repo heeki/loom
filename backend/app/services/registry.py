@@ -259,10 +259,12 @@ class RegistryClient:
         """Build MCP-type descriptors conforming to the MCP InitializeResult schema."""
         MCP_DESCRIPTION_MAX_LENGTH = 100
         namespaced_name = f"{namespace}/{server.name}"
+        transport_type = server.transport_type or "streamable_http"
+        remote_type = "streamable-http" if transport_type == "streamable_http" else transport_type
         server_info: dict[str, Any] = {
+            "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
             "name": namespaced_name,
             "description": (server.description or "")[:MCP_DESCRIPTION_MAX_LENGTH],
-            "protocolVersion": "2025-12-11",
             "version": "1.0.0",
             "capabilities": {
                 "tools": {},
@@ -271,11 +273,9 @@ class RegistryClient:
                 "name": namespaced_name,
                 "version": "1.0.0",
             },
-            "packages": [{
-                "registryType": "npm",
-                "identifier": namespaced_name,
-                "version": "1.0.0",
-                "transport": {"type": "stdio"},
+            "remotes": [{
+                "type": remote_type,
+                "url": server.endpoint_url,
             }],
         }
         if server.description:
