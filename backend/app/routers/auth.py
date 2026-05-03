@@ -1,7 +1,9 @@
 """Authentication configuration endpoints."""
 import logging
 import os
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from app.dependencies.auth import UserInfo, get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -49,4 +51,14 @@ def get_auth_config() -> dict:
         "provider_type": "cognito",
         "user_pool_id": user_pool_id,
         "region": region,
+    }
+
+
+@router.get("/me")
+def get_current_user_info(user: UserInfo = Depends(get_current_user)) -> dict:
+    """Return the backend-resolved identity for the current token."""
+    return {
+        "username": user.username,
+        "sub": user.sub,
+        "groups": user.groups,
     }

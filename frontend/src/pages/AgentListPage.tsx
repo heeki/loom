@@ -36,7 +36,7 @@ interface AgentListPageProps {
   onViewModeChange: (mode: "cards" | "table") => void;
   onRegister: (arn: string, modelId?: string) => Promise<unknown>;
   onDeploy?: (request: AgentDeployRequest) => Promise<unknown>;
-  onDeployHarness?: (request: AgentHarnessDeployRequest) => Promise<unknown>;
+  onDeployHarness?: (request: AgentHarnessDeployRequest, existingAgentId?: number) => Promise<unknown>;
   onSelectAgent: (id: number) => void;
   onRefreshAgent: (id: number) => void;
   onDelete: (id: number, cleanupAws: boolean) => void;
@@ -152,11 +152,13 @@ export function AgentListPage({
 
   const handleDeployHarness = async (request: AgentHarnessDeployRequest) => {
     if (!onDeployHarness) return;
-    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'agent', 'deploy_harness', request.name);
+    const action = exportAgentId ? "update_harness" : "deploy_harness";
+    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'agent', action, request.name);
     setShowAddForm(false);
     try {
-      await onDeployHarness(request);
-      toast.success("Harness deployment started");
+      await onDeployHarness(request, exportAgentId);
+      setExportAgentId(undefined);
+      toast.success(exportAgentId ? "Agent update started" : "Harness deployment started");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Deployment failed");
     }

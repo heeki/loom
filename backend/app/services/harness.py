@@ -91,6 +91,68 @@ def get_harness(harness_id: str, region: str = "us-east-1") -> dict[str, Any]:
     return response.get("harness", response)
 
 
+def update_harness(
+    harness_id: str,
+    execution_role_arn: str | None = None,
+    model_id: str | None = None,
+    system_prompt: str | None = None,
+    tools: list[dict[str, Any]] | None = None,
+    allowed_tools: list[str] | None = None,
+    max_iterations: int | None = None,
+    max_tokens: int | None = None,
+    authorizer_config: dict[str, Any] | None = None,
+    network_mode: str | None = None,
+    idle_timeout: int | None = None,
+    max_lifetime: int | None = None,
+    region: str = "us-east-1",
+) -> dict[str, Any]:
+    """Update an existing AgentCore Harness."""
+    import boto3
+
+    client = boto3.client("bedrock-agentcore-control", region_name=region)
+
+    params: dict[str, Any] = {"harnessId": harness_id}
+
+    if execution_role_arn:
+        params["executionRoleArn"] = execution_role_arn
+    if model_id:
+        model_config: dict[str, Any] = {"modelId": model_id}
+        if max_tokens is not None:
+            model_config["maxTokens"] = max_tokens
+        params["model"] = {"bedrockModelConfig": model_config}
+    if system_prompt is not None:
+        params["systemPrompt"] = [{"text": system_prompt}]
+    if tools is not None:
+        params["tools"] = tools
+    if allowed_tools:
+        params["allowedTools"] = allowed_tools
+    else:
+        params["allowedTools"] = ["*"]
+    if max_iterations is not None:
+        params["maxIterations"] = max_iterations
+    if authorizer_config is not None:
+        params["authorizerConfiguration"] = {"optionalValue": authorizer_config}
+
+    lifecycle_config: dict[str, int] = {}
+    if idle_timeout is not None:
+        lifecycle_config["idleRuntimeSessionTimeout"] = idle_timeout
+    if max_lifetime is not None:
+        lifecycle_config["maxLifetime"] = max_lifetime
+
+    if lifecycle_config or (network_mode and network_mode != "PUBLIC"):
+        env_config: dict[str, Any] = {}
+        if lifecycle_config:
+            env_config["lifecycleConfiguration"] = lifecycle_config
+        if network_mode and network_mode != "PUBLIC":
+            env_config["networkConfiguration"] = {"networkMode": network_mode}
+        params["environment"] = {"agentCoreRuntimeEnvironment": env_config}
+
+    response = client.update_harness(**params)
+    result = response.get("harness", response)
+    logger.info("Updated harness '%s': status=%s", harness_id, result.get("status"))
+    return result
+
+
 def delete_harness(harness_id: str, region: str = "us-east-1") -> dict[str, Any]:
     """Delete a harness."""
     import boto3
@@ -192,6 +254,7 @@ def invoke_harness_stream(
     stop_reason: str | None = None
 
     for event in stream:
+        logger.debug("Harness raw event: %s", event)
         if "contentBlockStart" in event:
             start = event["contentBlockStart"].get("start", {})
             tool_use = start.get("toolUse")
@@ -199,6 +262,7 @@ def invoke_harness_stream(
                 current_tool_name = tool_use.get("name")
                 current_tool_use_id = tool_use.get("toolUseId")
                 current_tool_input_chunks = []
+                logger.info("Harness tool_use start: name=%s id=%s", current_tool_name, current_tool_use_id)
                 if current_tool_name:
                     yield {"type": "structured", "content": {"tool_use": {"name": current_tool_name}}}
 
@@ -221,6 +285,7 @@ def invoke_harness_stream(
 
         elif "messageStop" in event:
             stop_reason = event["messageStop"].get("stopReason")
+            logger.info("Harness messageStop: stopReason=%s current_tool=%s current_tool_use_id=%s", stop_reason, current_tool_name, current_tool_use_id)
 
         elif "metadata" in event:
             meta = event["metadata"]

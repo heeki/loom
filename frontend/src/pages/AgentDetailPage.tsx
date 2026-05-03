@@ -104,6 +104,18 @@ export function AgentDetailPage({
   const { streamedText, segments, sessionStart, sessionEnd, isStreaming, error, rawError, invoke, cancel } =
     useInvoke(agent.id, agent.authorizer_config?.name ?? undefined);
 
+  // Resolve the backend-authoritative username for session ownership filtering
+  const [backendUserId, setBackendUserId] = useState<string | null>(null);
+  useEffect(() => {
+    import("@/api/auth").then(({ fetchAuthMe }) => {
+      fetchAuthMe().then((me) => setBackendUserId(me.username)).catch(() => {});
+    });
+  }, []);
+  useEffect(() => {
+    if (sessionStart?.user_id) setBackendUserId(sessionStart.user_id);
+  }, [sessionStart]);
+  const currentUserId = backendUserId ?? user?.username ?? user?.sub;
+
   const handleInvoke = async (prompt: string, qualifier: string, sessionId?: string, credentialId?: number, bearerToken?: string, modelId?: string, connectorIds?: number[], useLinkedToken?: boolean) => {
     if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'agent', 'invoke', agent.name ?? agent.runtime_id ?? String(agent.id));
     await invoke(prompt, qualifier, sessionId, credentialId, bearerToken, modelId, connectorIds, useLinkedToken);
@@ -212,7 +224,7 @@ export function AgentDetailPage({
           <InvokePanel
             agentId={agent.id}
             qualifiers={agent.available_qualifiers}
-            sessions={sessions}
+            sessions={sessions.filter((s) => !s.user_id || s.user_id === currentUserId)}
             isStreaming={isStreaming}
             modelId={agent.model_id}
             allowedModelIds={agent.allowed_model_ids}

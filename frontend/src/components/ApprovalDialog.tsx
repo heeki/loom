@@ -47,7 +47,7 @@ export function ApprovalRequestBubble({
   if (isNotifyOnly) {
     return (
       <div className="flex justify-start">
-        <div className="max-w-[84%] rounded-2xl px-4 py-3 text-sm bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
+        <div className="max-w-full rounded-2xl px-4 py-3 text-sm bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
           <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300 mb-1">
             <ShieldCheck className="h-4 w-4 shrink-0" />
             <span className="font-medium text-xs uppercase tracking-wide">Tool Notification</span>
@@ -70,7 +70,7 @@ export function ApprovalRequestBubble({
 
   return (
     <div className="flex justify-start">
-      <div className="max-w-[84%] rounded-2xl px-4 py-3 text-sm bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+      <div className="max-w-full rounded-2xl px-4 py-3 text-sm bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
         <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300 mb-1">
           <ShieldCheck className="h-4 w-4 shrink-0" />
           <span className="font-medium text-xs uppercase tracking-wide">Approval Required</span>

@@ -510,7 +510,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
         const capturedPending = pendingPromptRef.current;
         const capturedToolNames = toolNamesRef.current.length > 0 ? [...toolNamesRef.current] : undefined;
         const capturedHitlSegments = segmentsRef.current.filter(
-          s => s.type === "approval_request" || s.type === "approval_resolved" || s.type === "elicitation_request"
+          s => s.type === "tool_use" || s.type === "approval_request" || s.type === "approval_resolved" || s.type === "elicitation_request"
         );
         getSession(selectedAgentId, sessionId)
           .then((session) => {
@@ -1487,15 +1487,16 @@ function ChatElapsedTimer({ since }: { since: number }) {
 }
 
 function ChatToolUseBlock({ tools, isActive }: { tools: { name: string; index: number; total: number; timestamp: number }[]; isActive: boolean }) {
-  const last = tools[tools.length - 1]!;
+  const tool = tools[0]!;
   return (
-    <div className="py-1.5 my-1 text-xs text-muted-foreground border-l-2 border-muted-foreground/30 pl-2 space-y-0.5">
+    <div className="py-1 my-0.5 text-xs text-muted-foreground border-l-2 border-muted-foreground/30 pl-2">
       <div className="flex items-center gap-1.5">
         <Wrench className="h-3 w-3 shrink-0" />
-        <span>Tool calls ({last.index}/{last.total}):</span>
+        <span className="font-medium text-foreground/70">{formatToolName(tool.name)}</span>
+        <span className="text-muted-foreground/60">({tool.index}/{tool.total})</span>
         {isActive && (
           <>
-            <ChatElapsedTimer since={last.timestamp} />
+            <ChatElapsedTimer since={tool.timestamp} />
             <span className="flex gap-0.5 ml-0.5">
               <span className="h-1 w-1 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:0ms]" />
               <span className="h-1 w-1 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:150ms]" />
@@ -1504,9 +1505,6 @@ function ChatToolUseBlock({ tools, isActive }: { tools: { name: string; index: n
           </>
         )}
       </div>
-      {tools.map((t, i) => (
-        <div key={i} className="pl-[18px] font-medium text-foreground/70">{formatToolName(t.name)}</div>
-      ))}
     </div>
   );
 }
@@ -1525,31 +1523,19 @@ function StreamingBubble({
       <div className="max-w-[84%] rounded-2xl px-4 py-3 text-sm break-words bg-muted">
         {(() => {
           const blocks: React.ReactNode[] = [];
-          let toolGroup: { name: string; index: number; total: number; timestamp: number }[] = [];
-          let toolGroupStart = 0;
-          const flushTools = () => {
-            if (toolGroup.length > 0) {
-              const lastIdx = toolGroupStart + toolGroup.length - 1;
-              const active = isStreaming && lastIdx === segments.length - 1;
-              blocks.push(<ChatToolUseBlock key={`tools-${toolGroupStart}`} tools={toolGroup} isActive={active} />);
-              toolGroup = [];
-            }
-          };
           segments.forEach((seg, i) => {
             if (seg.type === "tool_use") {
-              if (toolGroup.length === 0) toolGroupStart = i;
-              toolGroup.push({ name: seg.name, index: seg.index, total: seg.total, timestamp: seg.timestamp });
+              const active = isStreaming && i === segments.length - 1;
+              blocks.push(
+                <ChatToolUseBlock key={`tools-${i}`} tools={[{ name: seg.name, index: seg.index, total: seg.total, timestamp: seg.timestamp }]} isActive={active} />
+              );
             } else if (seg.type === "approval_request") {
-              flushTools();
               blocks.push(<ApprovalRequestBubble key={`approval-${i}`} data={seg.data} />);
             } else if (seg.type === "approval_resolved") {
-              flushTools();
               // Skip render — approval status is already shown inline in the ApprovalRequestBubble
             } else if (seg.type === "elicitation_request") {
-              flushTools();
               blocks.push(<ElicitationRequestBubble key={`elicit-${i}`} data={seg.data} onRespond={onElicitationRespond} />);
             } else {
-              flushTools();
               blocks.push(
                 <ReactMarkdown
                   key={i}
@@ -1597,7 +1583,6 @@ function StreamingBubble({
               );
             }
           });
-          flushTools();
           return blocks;
         })()}
         {isStreaming && (
@@ -1629,7 +1614,24 @@ function MessageBubble({
           isUser ? "bg-primary text-primary-foreground" : "bg-muted"
         }`}
       >
-          {toolNames && toolNames.length > 0 && (
+          {hitlSegments && hitlSegments.length > 0 ? (
+            <div className="mb-2 space-y-1">
+              {hitlSegments.map((seg, i) => {
+                if (seg.type === "tool_use") return (
+                  <div key={`h-tool-${i}`} className="py-1 text-xs text-muted-foreground border-l-2 border-muted-foreground/30 pl-2">
+                    <div className="flex items-center gap-1.5">
+                      <Wrench className="h-3 w-3 shrink-0" />
+                      <span className="font-medium text-foreground/70">{formatToolName(seg.name)}</span>
+                      <span className="text-muted-foreground/60">({seg.index}/{seg.total})</span>
+                    </div>
+                  </div>
+                );
+                if (seg.type === "approval_request") return <ApprovalRequestBubble key={`h-approval-${i}`} data={seg.data} resolved />;
+                if (seg.type === "elicitation_request") return <ElicitationRequestBubble key={`h-elicit-${i}`} data={seg.data} resolved resolvedSummary={seg.resolvedSummary} />;
+                return null;
+              })}
+            </div>
+          ) : toolNames && toolNames.length > 0 ? (
             <div className="py-1 mb-2 text-xs text-muted-foreground border-l-2 border-muted-foreground/30 pl-2 space-y-0.5">
               <div className="flex items-center gap-1.5">
                 <Wrench className="h-3 w-3 shrink-0" />
@@ -1639,16 +1641,7 @@ function MessageBubble({
                 <div key={i} className="pl-[18px] font-medium text-foreground/70">{formatToolName(name)}</div>
               ))}
             </div>
-          )}
-          {hitlSegments && hitlSegments.length > 0 && (
-            <div className="mb-2 space-y-2">
-              {hitlSegments.map((seg, i) => {
-                if (seg.type === "approval_request") return <ApprovalRequestBubble key={`h-approval-${i}`} data={seg.data} resolved />;
-                if (seg.type === "elicitation_request") return <ElicitationRequestBubble key={`h-elicit-${i}`} data={seg.data} resolved resolvedSummary={seg.resolvedSummary} />;
-                return null;
-              })}
-            </div>
-          )}
+          ) : null}
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{

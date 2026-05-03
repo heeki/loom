@@ -45,6 +45,10 @@ export function fetchAuthConfig(): Promise<AuthConfig> {
   return apiFetch<AuthConfig>("/api/auth/config");
 }
 
+export function fetchAuthMe(): Promise<{ username: string; sub: string; groups: string[] }> {
+  return apiFetch<{ username: string; sub: string; groups: string[] }>("/api/auth/me");
+}
+
 export async function initiateAuth(
   username: string,
   password: string,

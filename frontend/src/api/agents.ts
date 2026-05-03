@@ -47,6 +47,16 @@ export function deployHarnessAgent(
   });
 }
 
+export function updateHarnessAgent(
+  id: number,
+  request: AgentHarnessDeployRequest,
+): Promise<AgentResponse> {
+  return apiFetch<AgentResponse>(`/api/agents/${id}/redeploy-harness`, {
+    method: "PUT",
+    body: JSON.stringify(request),
+  });
+}
+
 export function redeployAgent(id: number): Promise<AgentResponse> {
   return apiFetch<AgentResponse>(`/api/agents/${id}/redeploy`, {
     method: "POST",

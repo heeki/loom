@@ -275,6 +275,22 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
     if dynamic_servers:
         _attach_dynamic_mcp_servers(agent, dynamic_servers, actor_id, elicitation_callback=elicitation_callback)
 
+    # Re-attach static MCP servers with elicitation callback if needed
+    if supports_elicitation and elicitation_callback and _config and _mcp_attached:
+        elicit_servers = [s for s in _config.integrations.mcp_servers if s.enabled and not s.dynamic_only]
+        if elicit_servers:
+            static_as_dynamic = [
+                {"name": s.name, "transport": s.transport, "endpoint_url": s.endpoint_url,
+                 "auth": {"type": s.auth.type, "credentials_secret_arn": s.auth.credentials_secret_arn,
+                          "api_key_header_name": s.auth.api_key_header_name,
+                          "well_known_endpoint": s.auth.well_known_endpoint,
+                          "credential_provider_name": s.auth.credential_provider_name,
+                          "scopes": s.auth.scopes} if s.auth else None}
+                for s in elicit_servers
+            ]
+            _attach_dynamic_mcp_servers(agent, static_as_dynamic, actor_id, elicitation_callback=elicitation_callback)
+            logger.info("Re-attached %d static MCP server(s) with elicitation callback", len(elicit_servers))
+
     # Inject approval policies from the invocation payload (sent by Loom)
     invocation_policies = payload.get("approval_policies")
     if invocation_policies and isinstance(invocation_policies, list) and _approval_hook:

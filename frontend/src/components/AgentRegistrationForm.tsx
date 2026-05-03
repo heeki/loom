@@ -242,6 +242,8 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
       }
       if (parsed.max_iterations != null) setHarnessMaxIterations(String(parsed.max_iterations));
       if (parsed.max_tokens != null) setHarnessMaxTokens(String(parsed.max_tokens));
+      if (parsed.human_confirmation != null) setEnableHumanConfirmation(!!parsed.human_confirmation);
+      if (parsed.confirmation_policy != null) setConfirmationPolicy(parsed.confirmation_policy as string);
     }).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exportAgentId, models.length, dataLoaded]);
@@ -1095,7 +1097,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                   className="min-w-[120px]"
                   disabled={isLoading || !name.trim() || !modelId || !selectedRoleId || (deploymentType === "custom" ? !onDeploy : !onDeployHarness) || hasValidationErrors}
                 >
-                  {isLoading ? "Deploying..." : (deploymentType === "managed" ? "Deploy Harness" : "Deploy")}
+                  {isLoading ? "Deploying..." : (exportAgentId ? "Update Agent" : (deploymentType === "managed" ? "Deploy Harness" : "Deploy"))}
                 </Button>
                 <Button
                   type="button"

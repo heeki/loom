@@ -1086,12 +1086,18 @@ async def invoke_harness_agent_stream(
                 from app.services.harness import resume_harness_stream
 
                 pending_tool_stop = chunk["content"]
+                logger.info("HITL tool_use_stop event: %s", json.dumps(pending_tool_stop))
 
                 while pending_tool_stop is not None:
                     tool_use_id = pending_tool_stop["tool_use_id"]
                     tool_name = pending_tool_stop.get("tool_name") or "user_confirmation"
                     tool_input = pending_tool_stop.get("tool_input", {})
                     pending_tool_stop = None
+
+                    logger.info(
+                        "HITL inline function called: tool=%s id=%s input=%s",
+                        tool_name, tool_use_id, json.dumps(tool_input),
+                    )
 
                     request_id = create_approval_request()
                     approval_event = {
@@ -1104,10 +1110,15 @@ async def invoke_harness_agent_stream(
                         "timeout_seconds": 300,
                         "session_id": session_id,
                     }
+                    logger.info("HITL approval_request: %s", json.dumps(approval_event))
                     yield format_sse_event("approval_request", approval_event)
 
                     decision = await wait_for_approval(request_id, timeout=300.0)
                     decision_str = decision.get("decision", "timeout")
+                    logger.info(
+                        "HITL approval decision: request_id=%s decision=%s decided_by=%s reason=%s",
+                        request_id, decision_str, decision.get("decided_by"), decision.get("reason"),
+                    )
                     yield format_sse_event("approval_resolved", {
                         "request_id": request_id,
                         "status": decision_str,
@@ -1123,6 +1134,10 @@ async def invoke_harness_agent_stream(
                         tool_result_content = json.dumps({"approved": False, "message": reason})
                         tool_result_status = "error"
 
+                    logger.info(
+                        "HITL resuming harness: tool=%s status=%s content=%s",
+                        tool_name, tool_result_status, tool_result_content,
+                    )
                     resume_generator = resume_harness_stream(
                         harness_arn=agent.arn,
                         session_id=session_id,
@@ -1541,7 +1556,7 @@ async def invoke_agent_endpoint(
                 has_elicitation_connector = True
         logger.info("Resolved %d dynamic MCP connectors for invocation (elicitation=%s)", len(dynamic_mcp_servers), has_elicitation_connector)
 
-    # ---- Detect OBO delegation mode from stored AGENT_CONFIG_JSON ----
+    # ---- Detect OBO delegation mode and static elicitation from AGENT_CONFIG_JSON ----
     # If any integration has delegation_mode="obo", we must forward the user's
     # access token so the runtime can perform RFC 8693 token exchange.
     delegation_mode = "m2m"
@@ -1555,6 +1570,12 @@ async def invoke_agent_endpoint(
             a2a_list = integrations.get("a2a_agents", []) or []
             if any((i.get("delegation_mode") or "m2m") == "obo" for i in (mcp_list + a2a_list)):
                 delegation_mode = "obo"
+            # Check if any static MCP server supports elicitation
+            if not has_elicitation_connector:
+                for mcp_cfg in mcp_list:
+                    if mcp_cfg.get("supports_elicitation") == "true" or mcp_cfg.get("supports_elicitation") is True:
+                        has_elicitation_connector = True
+                        break
     except (ValueError, TypeError) as e:
         logger.warning("Failed to parse AGENT_CONFIG_JSON for delegation_mode detection: %s", e)
 
@@ -1573,6 +1594,8 @@ async def invoke_agent_endpoint(
             "OBO delegation active for agent %s: user_access_token_present=%s",
             agent_id, bool(user_access_token),
         )
+
+    logger.info("Elicitation support resolved: has_elicitation_connector=%s", has_elicitation_connector)
 
     # Resolve active approval policies for the agent
     approval_policies_payload: list[dict[str, Any]] | None = None
