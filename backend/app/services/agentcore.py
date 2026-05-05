@@ -178,7 +178,10 @@ def invoke_agent(
             continue
         line_count += 1
         if line_count <= 10 or "elicitation" in decoded.lower() or "interrupt" in decoded.lower():
-            logger.info("Stream line %d: %s", line_count, decoded[:500])
+            if "token_info" in decoded:
+                logger.info("Stream line %d: [token_info event redacted]", line_count)
+            else:
+                logger.info("Stream line %d: %s", line_count, decoded[:500])
         if not decoded.startswith('data:'):
             logger.info("Non-data stream line: %s", decoded[:500])
             continue

@@ -12,6 +12,8 @@ from typing import Any, Generator, Optional
 import boto3
 import httpx
 from mcp.client.streamable_http import streamablehttp_client
+from strands.hooks import HookProvider, HookRegistry
+from strands.hooks.events import AfterToolCallEvent
 from strands.tools.mcp import MCPClient
 
 from bedrock_agentcore.runtime.context import BedrockAgentCoreContext
@@ -31,6 +33,7 @@ _TOKEN_EXPIRY_SKEW_SECS = 30
 # Token info events emitted when OBO tokens are acquired.
 # The handler drains this list and yields events to the stream.
 _token_info_events: list[dict[str, Any]] = []
+_token_info_emitted: set[str] = set()
 _token_info_lock = threading.Lock()
 
 
@@ -40,6 +43,54 @@ def drain_token_info_events() -> list[dict[str, Any]]:
         events = _token_info_events.copy()
         _token_info_events.clear()
     return events
+
+
+def reset_token_info_state() -> None:
+    """Reset emission tracking for a new invocation."""
+    with _token_info_lock:
+        _token_info_emitted.clear()
+
+
+_TOKEN_INFO_PREFIX = "__TOKEN_INFO__:"
+
+
+class TokenInfoHook(HookProvider):
+    """Strands hook that extracts __TOKEN_INFO__ markers from MCP tool results.
+
+    When an MCP server embeds token info in tool result content blocks
+    (because server-initiated notifications can't traverse the AgentCore proxy),
+    this hook strips those blocks from the result before the model sees them
+    and pushes the data into the token_info event queue.
+    """
+
+    def register_hooks(self, registry: HookRegistry, **kwargs: Any) -> None:
+        registry.add_callback(AfterToolCallEvent, self._extract_token_info)
+
+    def _extract_token_info(self, event: AfterToolCallEvent) -> None:
+        result = event.result
+        if not result or "content" not in result:
+            return
+
+        clean_content = []
+        for block in result["content"]:
+            text = block.get("text", "")
+            if text.startswith(_TOKEN_INFO_PREFIX):
+                try:
+                    payload = _json.loads(text[len(_TOKEN_INFO_PREFIX):])
+                    with _token_info_lock:
+                        _token_info_events.append(payload)
+                    logger.info(
+                        "Extracted token_info from tool result: type=%s provider=%s",
+                        payload.get("token_type"),
+                        payload.get("credential_provider"),
+                    )
+                except Exception as e:
+                    logger.warning("Failed to parse __TOKEN_INFO__ block: %s", e)
+            else:
+                clean_content.append(block)
+
+        if len(clean_content) != len(result["content"]):
+            event.result = {**result, "content": clean_content}
 
 
 def _decode_jwt_claims(token: str) -> dict[str, Any] | None:
@@ -111,12 +162,43 @@ class _OAuth2Auth(httpx.Auth):
 
         yield request
 
+    def _emit_token_info(self, token: str) -> None:
+        """Decode token claims and emit a token_info event (once per drain cycle)."""
+        emit_key = self._credential_provider_name
+        with _token_info_lock:
+            if emit_key in _token_info_emitted:
+                return
+            _token_info_emitted.add(emit_key)
+
+        claims = _decode_jwt_claims(token)
+        if claims:
+            event = {
+                "token_type": "obo",
+                "credential_provider": self._credential_provider_name,
+                "flow": self._oauth2_flow,
+                "claims": {
+                    "iss": claims.get("iss"),
+                    "sub": claims.get("sub"),
+                    "aud": claims.get("aud"),
+                    "azp": claims.get("azp"),
+                    "appid": claims.get("appid"),
+                    "scp": claims.get("scp"),
+                    "roles": claims.get("roles"),
+                    "act": claims.get("act"),
+                    "exp": claims.get("exp"),
+                    "iat": claims.get("iat"),
+                },
+            }
+            with _token_info_lock:
+                _token_info_events.append(event)
+
     def _fetch_resource_token(self, workload_token: str) -> Optional[str]:
         cache_key = (self._credential_provider_name, self._oauth2_flow, workload_token[:32])
         now = time.time()
         with _TOKEN_CACHE_LOCK:
             cached = _TOKEN_CACHE.get(cache_key)
             if cached and cached[1] > now + _TOKEN_EXPIRY_SKEW_SECS:
+                self._emit_token_info(cached[0])
                 return cached[0]
 
         try:
@@ -147,29 +229,7 @@ class _OAuth2Auth(httpx.Auth):
                 self._credential_provider_name, self._oauth2_flow, expires_in,
             )
 
-            # Emit token_info event for admin inspection
-            claims = _decode_jwt_claims(token)
-            if claims:
-                event = {
-                    "token_type": "obo",
-                    "credential_provider": self._credential_provider_name,
-                    "flow": self._oauth2_flow,
-                    "claims": {
-                        "iss": claims.get("iss"),
-                        "sub": claims.get("sub"),
-                        "aud": claims.get("aud"),
-                        "azp": claims.get("azp"),
-                        "appid": claims.get("appid"),
-                        "scp": claims.get("scp"),
-                        "roles": claims.get("roles"),
-                        "act": claims.get("act"),
-                        "exp": claims.get("exp"),
-                        "iat": claims.get("iat"),
-                    },
-                }
-                with _token_info_lock:
-                    _token_info_events.append(event)
-
+            self._emit_token_info(token)
             return token
         except Exception as e:
             logger.warning(
@@ -264,6 +324,40 @@ def _build_transport_callable(config: MCPServerConfig) -> Any:
     return partial(streamablehttp_client, url=config.endpoint_url)
 
 
+def _make_logging_callback():
+    """Create an async logging callback that captures token_info notifications."""
+    async def _logging_callback(params) -> None:
+        logger.info(
+            "MCP logging notification received: logger=%s level=%s data_type=%s",
+            getattr(params, "logger", None),
+            getattr(params, "level", None),
+            type(getattr(params, "data", None)).__name__,
+        )
+        if getattr(params, "logger", None) == "token_info" and params.data:
+            data = params.data
+            if isinstance(data, dict) and "token_info" in data:
+                with _token_info_lock:
+                    _token_info_events.append(data["token_info"])
+                logger.info(
+                    "Captured token_info from MCP server: type=%s provider=%s",
+                    data["token_info"].get("token_type"),
+                    data["token_info"].get("credential_provider"),
+                )
+            else:
+                logger.warning("token_info logger but unexpected data structure: %s", data)
+    return _logging_callback
+
+
+def _install_logging_callback(client: MCPClient) -> None:
+    """Monkey-patch the MCP client session to capture logging notifications."""
+    session = getattr(client, "_background_thread_session", None)
+    if session is not None:
+        session._logging_callback = _make_logging_callback()
+        logger.info("Installed token_info logging callback on MCP session")
+    else:
+        logger.warning("Cannot install logging callback: no _background_thread_session found")
+
+
 def _try_create_client(server: MCPServerConfig) -> MCPClient | None:
     """Attempt to create and validate an MCP client for a server.
 
@@ -281,6 +375,7 @@ def _try_create_client(server: MCPServerConfig) -> MCPClient | None:
     strands_mcp_logger.setLevel(logging.CRITICAL)
     try:
         client.start()
+        _install_logging_callback(client)
         logger.info("MCP client for server '%s' started successfully", server.name)
         return client
     except BaseException as e:

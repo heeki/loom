@@ -261,7 +261,7 @@ export function AgentDetailPage({
         {sessionEnd && <LatencySummary sessionEnd={sessionEnd} />}
 
         {(sessionStart?.user_token || tokenInfos.length > 0) && (
-          <TokenInfoCard userToken={sessionStart?.user_token} oboTokens={tokenInfos} groupMappings={authConfig?.group_mappings} />
+          <TokenInfoCard userToken={sessionStart?.user_token} oboTokens={tokenInfos} groupMappings={authConfig?.group_mappings} authorizerName={agent.authorizer_config?.name} />
         )}
 
         {error && (
@@ -623,7 +623,7 @@ function subAnnotation(sub?: string, aud?: string | string[]): string | undefine
   return `per-user id for client_id: ${cleanClientId}`;
 }
 
-function TokenInfoCard({ userToken, oboTokens, groupMappings }: { userToken?: SSETokenInfo; oboTokens: SSETokenInfo[]; groupMappings?: Record<string, string[]> }) {
+function TokenInfoCard({ userToken, oboTokens, groupMappings, authorizerName }: { userToken?: SSETokenInfo; oboTokens: SSETokenInfo[]; groupMappings?: Record<string, string[]>; authorizerName?: string }) {
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -637,7 +637,7 @@ function TokenInfoCard({ userToken, oboTokens, groupMappings }: { userToken?: SS
           <details open>
             <summary className="cursor-pointer text-xs font-medium flex items-center gap-1.5">
               <Badge variant="outline" className="text-[10px] px-1.5 py-0">user</Badge>
-              <span className="text-muted-foreground">{userToken.source ?? "login"}</span>
+              <span className="text-muted-foreground">{userToken.source ?? "login"}{authorizerName ? ` (${authorizerName})` : ""}</span>
             </summary>
             <div className="mt-1.5 pl-2 border-l-2 border-muted-foreground/20">
               <TokenClaimsRow label="iss" value={userToken.claims.iss} annotation={userToken.claims.iss ? "issuer" : undefined} />

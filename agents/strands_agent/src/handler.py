@@ -40,7 +40,7 @@ from mcp.types import ElicitResult
 from src.config import AgentConfig, MCPServerConfig, AuthConfig, load_config
 from src.agent import attach_mcp_tools, build_agent
 from src.integrations.approval import ApprovalHook
-from src.integrations.mcp_client import has_deferred_auth_servers, _build_transport_callable, drain_token_info_events
+from src.integrations.mcp_client import has_deferred_auth_servers, _build_transport_callable, drain_token_info_events, reset_token_info_state
 from src.telemetry import trace_invocation
 
 # Configure the root Python logger so all modules (agent, mcp_client, etc.)
@@ -209,6 +209,7 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
     session_id = payload.get("session_id", "")
     actor_id = payload.get("actor_id") or "loom-agent"
 
+    reset_token_info_state()
     _ensure_mcp_tools(actor_id)
 
     # --- Handle elicitation response (resume a blocked tool) ---

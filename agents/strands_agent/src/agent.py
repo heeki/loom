@@ -8,7 +8,7 @@ from strands.models.bedrock import BedrockModel
 
 from src.config import AgentConfig, MCPServerConfig
 from src.integrations.approval import ApprovalHook
-from src.integrations.mcp_client import build_mcp_clients, create_mcp_clients, has_oauth2_servers
+from src.integrations.mcp_client import build_mcp_clients, create_mcp_clients, has_oauth2_servers, _install_logging_callback, TokenInfoHook
 from src.integrations.a2a_client import create_a2a_clients
 from src.integrations.memory import MemoryHook
 from src.telemetry import TelemetryHook
@@ -65,6 +65,9 @@ def build_agent(config: AgentConfig, defer_mcp: bool = False) -> tuple[Agent, Ap
     hooks.append(approval_hook)
     if approval_hook.policies:
         logger.info("Enabled approval hook with %d static policy(ies)", len(approval_hook.policies))
+
+    # Token info extraction hook — captures __TOKEN_INFO__ from MCP tool results
+    hooks.append(TokenInfoHook())
 
     # Telemetry hook (R7)
     telemetry_hook = TelemetryHook()
@@ -135,6 +138,7 @@ def attach_mcp_tools(agent: Agent, servers: list[MCPServerConfig]) -> None:
         strands_mcp_logger.setLevel(logging.CRITICAL)
         try:
             agent.tool_registry.process_tools([client])
+            _install_logging_callback(client)
             attached += 1
         except BaseException as e:
             logger.warning(

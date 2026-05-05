@@ -2208,11 +2208,14 @@ def _delete_agent_background(
             db.query(Invocation).filter(Invocation.session_id.in_(session_ids)).delete(synchronize_session="fetch")
         db.query(InvocationSession).filter(InvocationSession.agent_id == agent_id).delete()
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
-        if agent:
+        if agent and agent.runtime_id == runtime_id:
             db.delete(agent)
             db.flush()
             db.commit()
             logger.info("Purged agent %d and its sessions from database", agent_id)
+        elif agent:
+            db.commit()
+            logger.info("Agent %d has a different runtime_id (%s vs %s); skipping purge (likely recreated)", agent_id, agent.runtime_id, runtime_id)
         else:
             db.commit()
             logger.info("Agent %d already removed from database; cleaned up orphan sessions", agent_id)
