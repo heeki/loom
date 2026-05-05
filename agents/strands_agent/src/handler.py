@@ -40,7 +40,7 @@ from mcp.types import ElicitResult
 from src.config import AgentConfig, MCPServerConfig, AuthConfig, load_config
 from src.agent import attach_mcp_tools, build_agent
 from src.integrations.approval import ApprovalHook
-from src.integrations.mcp_client import has_deferred_auth_servers, _build_transport_callable
+from src.integrations.mcp_client import has_deferred_auth_servers, _build_transport_callable, drain_token_info_events
 from src.telemetry import trace_invocation
 
 # Configure the root Python logger so all modules (agent, mcp_client, etc.)
@@ -362,6 +362,10 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
                                         logger.info("Tool call detected: %s", tool_use["name"])
                                         await queue.put({"tool_use": {"name": tool_use["name"], "id": tool_use.get("toolUseId", "")}})
 
+                        # Drain any OBO token info events acquired during tool execution
+                        for ti in drain_token_info_events():
+                            await queue.put({"token_info": ti})
+
                     if result and getattr(result, "stop_reason", None) == "interrupt":
                         interrupts = getattr(result, "interrupts", [])
                         logger.info("Agent interrupted with %d pending approval(s)", len(interrupts))
@@ -413,6 +417,10 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
                                 if isinstance(tool_use, dict) and tool_use.get("name"):
                                     logger.info("Tool call detected: %s", tool_use["name"])
                                     yield {"tool_use": {"name": tool_use["name"], "id": tool_use.get("toolUseId", "")}}
+
+                    # Drain any OBO token info events acquired during tool execution
+                    for ti in drain_token_info_events():
+                        yield {"token_info": ti}
 
                 if result and getattr(result, "stop_reason", None) == "interrupt":
                     interrupts = getattr(result, "interrupts", [])

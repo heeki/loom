@@ -1,5 +1,7 @@
 """Dynamic MCP tool client creation from agent configuration."""
 
+import base64
+import json as _json
 import logging
 import os
 import threading
@@ -25,6 +27,31 @@ logger = logging.getLogger(__name__)
 _TOKEN_CACHE: dict[tuple[str, str, str], tuple[str, float]] = {}
 _TOKEN_CACHE_LOCK = threading.Lock()
 _TOKEN_EXPIRY_SKEW_SECS = 30
+
+# Token info events emitted when OBO tokens are acquired.
+# The handler drains this list and yields events to the stream.
+_token_info_events: list[dict[str, Any]] = []
+_token_info_lock = threading.Lock()
+
+
+def drain_token_info_events() -> list[dict[str, Any]]:
+    """Drain and return all pending token info events."""
+    with _token_info_lock:
+        events = _token_info_events.copy()
+        _token_info_events.clear()
+    return events
+
+
+def _decode_jwt_claims(token: str) -> dict[str, Any] | None:
+    """Decode JWT payload without verification (for inspection only)."""
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return None
+        padded = parts[1] + "=" * (-len(parts[1]) % 4)
+        return _json.loads(base64.urlsafe_b64decode(padded))
+    except Exception:
+        return None
 
 
 class _OAuth2Auth(httpx.Auth):
@@ -119,6 +146,28 @@ class _OAuth2Auth(httpx.Auth):
                 "OAuth2 token acquired: credential_provider=%s flow=%s expires_in=%ds",
                 self._credential_provider_name, self._oauth2_flow, expires_in,
             )
+
+            # Emit token_info event for admin inspection
+            claims = _decode_jwt_claims(token)
+            if claims:
+                event = {
+                    "token_type": "obo",
+                    "credential_provider": self._credential_provider_name,
+                    "flow": self._oauth2_flow,
+                    "claims": {
+                        "iss": claims.get("iss"),
+                        "sub": claims.get("sub"),
+                        "aud": claims.get("aud"),
+                        "scp": claims.get("scp"),
+                        "roles": claims.get("roles"),
+                        "act": claims.get("act"),
+                        "exp": claims.get("exp"),
+                        "iat": claims.get("iat"),
+                    },
+                }
+                with _token_info_lock:
+                    _token_info_events.append(event)
+
             return token
         except Exception as e:
             logger.warning(

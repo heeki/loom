@@ -4,7 +4,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Key, Pencil, Check, X, Wrench } from "lucide-react";
+import { Key, Pencil, Check, X, Wrench, Shield } from "lucide-react";
+import type { SSETokenInfo } from "@/api/types";
 import { ApprovalRequestBubble } from "@/components/ApprovalDialog";
 import { ElicitationRequestBubble } from "@/components/ElicitationDialog";
 import { fetchModels } from "@/api/agents";
@@ -101,7 +102,7 @@ export function AgentDetailPage({
   const canInvokeThisAgent = isSuperAdmin || !agentGroup || allowedGroups.includes(agentGroup);
   const effectiveCanInvoke = canInvoke && canInvokeThisAgent;
   const { user, browserSessionId, authConfig } = useAuth();
-  const { streamedText, segments, sessionStart, sessionEnd, isStreaming, error, rawError, invoke, cancel } =
+  const { streamedText, segments, sessionStart, sessionEnd, isStreaming, error, rawError, tokenInfos, invoke, cancel } =
     useInvoke(agent.id, agent.authorizer_config?.name ?? undefined);
 
   // Resolve the backend-authoritative username for session ownership filtering
@@ -258,6 +259,10 @@ export function AgentDetailPage({
         )}
 
         {sessionEnd && <LatencySummary sessionEnd={sessionEnd} />}
+
+        {(sessionStart?.user_token || tokenInfos.length > 0) && (
+          <TokenInfoCard userToken={sessionStart?.user_token} oboTokens={tokenInfos} groupMappings={authConfig?.group_mappings} />
+        )}
 
         {error && (
           <Card className="border-destructive">
@@ -567,6 +572,103 @@ function RegisteredAgentModelConfig({ agent, onPatchAgent }: {
             ))}
           </div>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+
+function TokenClaimsRow({ label, value, annotation, children }: { label: string; value?: unknown; annotation?: string; children?: React.ReactNode }) {
+  if (value === undefined && !children) return null;
+  if (value === null && !children) return null;
+  return (
+    <div className="flex items-baseline gap-2 py-0.5">
+      <span className="text-xs text-muted-foreground w-12 shrink-0">{label}</span>
+      {children ? (
+        <div className="font-mono text-xs break-all">{children}</div>
+      ) : (
+        <span className="font-mono text-xs break-all">
+          {typeof value === "object" ? JSON.stringify(value) : String(value)}
+          {annotation && <span className="text-muted-foreground ml-1 font-sans">({annotation})</span>}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function resolveRoles(roles: string[] | undefined, groupMappings?: Record<string, string[]>): React.ReactNode | undefined {
+  if (!roles || roles.length === 0) return undefined;
+  if (!groupMappings || Object.keys(groupMappings).length === 0) {
+    return roles.map((r, i) => (
+      <div key={i} className="py-0.5">{r} <span className="text-muted-foreground">→ unmapped (configure IdP group mappings)</span></div>
+    ));
+  }
+  return roles.map((r, i) => {
+    const mapped = groupMappings[r];
+    return (
+      <div key={i} className="py-0.5">
+        {r}
+        {mapped
+          ? <span className="text-green-600 dark:text-green-400 ml-1">→ {mapped.join(", ")}</span>
+          : <span className="text-muted-foreground ml-1">→ unmapped (group or directory role)</span>}
+      </div>
+    );
+  });
+}
+
+function subAnnotation(sub?: string, aud?: string | string[]): string | undefined {
+  if (!sub) return undefined;
+  const clientId = Array.isArray(aud) ? aud[0] : aud;
+  const cleanClientId = clientId?.replace("api://", "") ?? "unknown";
+  return `per-user id for client_id: ${cleanClientId}`;
+}
+
+function TokenInfoCard({ userToken, oboTokens, groupMappings }: { userToken?: SSETokenInfo; oboTokens: SSETokenInfo[]; groupMappings?: Record<string, string[]> }) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center gap-2">
+          <Shield className="h-4 w-4 text-muted-foreground" />
+          <CardTitle className="text-sm font-medium">Token Info</CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {userToken && (
+          <details open>
+            <summary className="cursor-pointer text-xs font-medium flex items-center gap-1.5">
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0">user</Badge>
+              <span className="text-muted-foreground">{userToken.source ?? "login"}</span>
+            </summary>
+            <div className="mt-1.5 pl-2 border-l-2 border-muted-foreground/20">
+              <TokenClaimsRow label="iss" value={userToken.claims.iss} />
+              <TokenClaimsRow label="sub" value={userToken.claims.sub} annotation={subAnnotation(userToken.claims.sub, userToken.claims.aud)} />
+              <TokenClaimsRow label="aud" value={userToken.claims.aud} />
+              <TokenClaimsRow label="scp" value={userToken.claims.scp} />
+              {userToken.claims.roles && userToken.claims.roles.length > 0 && (
+                <TokenClaimsRow label="roles">{resolveRoles(userToken.claims.roles, groupMappings)}</TokenClaimsRow>
+              )}
+              <TokenClaimsRow label="act" value={userToken.claims.act} />
+              <TokenClaimsRow label="exp" value={userToken.claims.exp ? new Date(userToken.claims.exp * 1000).toISOString() : undefined} />
+            </div>
+          </details>
+        )}
+        {oboTokens.map((t, i) => (
+          <details key={i} open>
+            <summary className="cursor-pointer text-xs font-medium flex items-center gap-1.5">
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-amber-500/50 text-amber-700 dark:text-amber-400">obo</Badge>
+              <span className="text-muted-foreground">{t.credential_provider ?? t.flow ?? "exchange"}</span>
+            </summary>
+            <div className="mt-1.5 pl-2 border-l-2 border-amber-500/30">
+              <TokenClaimsRow label="iss" value={t.claims.iss} />
+              <TokenClaimsRow label="sub" value={t.claims.sub} annotation={subAnnotation(t.claims.sub, t.claims.aud)} />
+              <TokenClaimsRow label="aud" value={t.claims.aud} />
+              <TokenClaimsRow label="scp" value={t.claims.scp} />
+              <TokenClaimsRow label="roles" value={t.claims.roles} />
+              <TokenClaimsRow label="act" value={t.claims.act} />
+              <TokenClaimsRow label="exp" value={t.claims.exp ? new Date(t.claims.exp * 1000).toISOString() : undefined} />
+            </div>
+          </details>
+        ))}
       </CardContent>
     </Card>
   );

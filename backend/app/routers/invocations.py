@@ -1,5 +1,6 @@
 """Agent invocation endpoints with SSE streaming support."""
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -42,6 +43,39 @@ from app.routers.agents import derive_log_group
 
 
 router = APIRouter(prefix="/api/agents", tags=["invocations"])
+
+
+def _decode_jwt_claims(token: str) -> dict[str, Any] | None:
+    """Decode JWT payload without verification (for admin inspection)."""
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return None
+        padded = parts[1] + "=" * (-len(parts[1]) % 4)
+        return json.loads(base64.urlsafe_b64decode(padded))
+    except Exception:
+        return None
+
+
+def _extract_token_summary(token: str, token_type: str = "user", source: str | None = None) -> dict[str, Any] | None:
+    """Extract key claims from a JWT for admin display."""
+    claims = _decode_jwt_claims(token)
+    if not claims:
+        return None
+    summary: dict[str, Any] = {"token_type": token_type}
+    if source:
+        summary["source"] = source
+    summary["claims"] = {
+        "iss": claims.get("iss"),
+        "sub": claims.get("sub"),
+        "aud": claims.get("aud"),
+        "scp": claims.get("scp"),
+        "roles": claims.get("roles"),
+        "act": claims.get("act"),
+        "exp": claims.get("exp"),
+        "iat": claims.get("iat"),
+    }
+    return summary
 
 
 # Pydantic models
@@ -511,6 +545,9 @@ async def invoke_agent_stream(
         session_start_data["token_source"] = token_source
     if access_token:
         session_start_data["has_token"] = True
+        token_summary = _extract_token_summary(access_token, "user", token_source)
+        if token_summary:
+            session_start_data["user_token"] = token_summary
     session_start_data["delegation_mode"] = delegation_mode
     if delegation_mode == "obo":
         session_start_data["has_user_access_token"] = bool(user_access_token)
@@ -585,6 +622,12 @@ async def invoke_agent_stream(
                     if isinstance(tool_use, dict) and tool_use.get("name"):
                         logger.info("Tool use event: %s", tool_use["name"])
                         yield format_sse_event("tool_use", {"name": tool_use["name"]})
+                        continue
+                    # OBO token info event from agent
+                    token_info = structured.get("token_info")
+                    if isinstance(token_info, dict):
+                        logger.info("Token info event: type=%s provider=%s", token_info.get("token_type"), token_info.get("credential_provider"))
+                        yield format_sse_event("token_info", token_info)
                         continue
                     # MCP elicitation: tool paused waiting for user input
                     elicitation_data = structured.get("elicitation")
@@ -1021,7 +1064,7 @@ async def invoke_harness_agent_stream(
     session.status = "streaming"
     db.commit()
 
-    yield format_sse_event("session_start", {
+    harness_start_data: dict[str, Any] = {
         "session_id": session_id,
         "invocation_id": invocation_id,
         "client_invoke_time": client_invoke_time,
@@ -1030,7 +1073,12 @@ async def invoke_harness_agent_stream(
         "token_source": token_source,
         "delegation_mode": delegation_mode,
         "has_user_access_token": bool(user_access_token) if delegation_mode == "obo" else None,
-    })
+    }
+    if access_token:
+        harness_token_summary = _extract_token_summary(access_token, "user", token_source)
+        if harness_token_summary:
+            harness_start_data["user_token"] = harness_token_summary
+    yield format_sse_event("session_start", harness_start_data)
 
     if delegation_mode == "obo" and not user_access_token:
         error_msg = (
@@ -1502,18 +1550,6 @@ async def invoke_agent_endpoint(
                 except Exception as e:
                     logger.warning("Failed to get Cognito token for agent %s: %s", agent_id, e)
 
-    if access_token and token_source == "user":
-        try:
-            import base64, json as _json2
-            parts = access_token.split(".")
-            if len(parts) >= 2:
-                padded = parts[1] + "=" * (-len(parts[1]) % 4)
-                claims = _json2.loads(base64.urlsafe_b64decode(padded))
-                logger.info("User token claims: iss=%s, aud=%s, sub=%s, appid=%s, azp=%s, ver=%s, scp=%s, roles=%s, exp=%s",
-                            claims.get("iss"), claims.get("aud"), claims.get("sub"), claims.get("appid"),
-                            claims.get("azp"), claims.get("ver"), claims.get("scp"), claims.get("roles"), claims.get("exp"))
-        except Exception as e:
-            logger.warning("Could not decode user token for debugging: %s", e)
     logger.info("Invoking agent %s with token_source=%s, has_token=%s",
                 agent_id, token_source, bool(access_token))
 

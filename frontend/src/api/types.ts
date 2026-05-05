@@ -515,6 +515,23 @@ export interface MemoryRecordsResponse {
 }
 
 // SSE event types
+export interface SSETokenInfo {
+  token_type: string;
+  source?: string;
+  credential_provider?: string;
+  flow?: string;
+  claims: {
+    iss?: string;
+    sub?: string;
+    aud?: string | string[];
+    scp?: string;
+    roles?: string[];
+    act?: Record<string, unknown>;
+    exp?: number;
+    iat?: number;
+  };
+}
+
 export interface SSESessionStart {
   session_id: string;
   invocation_id: string;
@@ -522,6 +539,7 @@ export interface SSESessionStart {
   user_id?: string;
   token_source?: string;
   has_token?: boolean;
+  user_token?: SSETokenInfo;
 }
 
 export interface SSEChunk {
