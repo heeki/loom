@@ -640,15 +640,15 @@ function TokenInfoCard({ userToken, oboTokens, groupMappings }: { userToken?: SS
               <span className="text-muted-foreground">{userToken.source ?? "login"}</span>
             </summary>
             <div className="mt-1.5 pl-2 border-l-2 border-muted-foreground/20">
-              <TokenClaimsRow label="iss" value={userToken.claims.iss} />
+              <TokenClaimsRow label="iss" value={userToken.claims.iss} annotation={userToken.claims.iss ? "issuer" : undefined} />
               <TokenClaimsRow label="sub" value={userToken.claims.sub} annotation={subAnnotation(userToken.claims.sub, userToken.claims.aud)} />
-              <TokenClaimsRow label="aud" value={userToken.claims.aud} />
-              <TokenClaimsRow label="scp" value={userToken.claims.scp} />
+              <TokenClaimsRow label="aud" value={userToken.claims.aud} annotation={userToken.claims.aud ? "audience" : undefined} />
+              <TokenClaimsRow label="scp" value={userToken.claims.scp} annotation={userToken.claims.scp ? "scopes" : undefined} />
               {userToken.claims.roles && userToken.claims.roles.length > 0 && (
                 <TokenClaimsRow label="roles">{resolveRoles(userToken.claims.roles, groupMappings)}</TokenClaimsRow>
               )}
               <TokenClaimsRow label="act" value={userToken.claims.act} />
-              <TokenClaimsRow label="exp" value={userToken.claims.exp ? new Date(userToken.claims.exp * 1000).toISOString() : undefined} />
+              <TokenClaimsRow label="exp" value={userToken.claims.exp ? new Date(userToken.claims.exp * 1000).toISOString() : undefined} annotation={userToken.claims.exp ? "token expiry" : undefined} />
             </div>
           </details>
         )}
@@ -659,13 +659,14 @@ function TokenInfoCard({ userToken, oboTokens, groupMappings }: { userToken?: SS
               <span className="text-muted-foreground">{t.credential_provider ?? t.flow ?? "exchange"}</span>
             </summary>
             <div className="mt-1.5 pl-2 border-l-2 border-amber-500/30">
-              <TokenClaimsRow label="iss" value={t.claims.iss} />
+              <TokenClaimsRow label="iss" value={t.claims.iss} annotation={t.claims.iss ? "issuer" : undefined} />
               <TokenClaimsRow label="sub" value={t.claims.sub} annotation={subAnnotation(t.claims.sub, t.claims.aud)} />
-              <TokenClaimsRow label="aud" value={t.claims.aud} />
-              <TokenClaimsRow label="scp" value={t.claims.scp} />
+              <TokenClaimsRow label="aud" value={t.claims.aud} annotation={t.claims.aud ? "audience" : undefined} />
+              <TokenClaimsRow label="azp" value={t.claims.azp ?? t.claims.appid} annotation={t.claims.azp || t.claims.appid ? "authorized party: actor that performed the OBO exchange" : undefined} />
+              <TokenClaimsRow label="scp" value={t.claims.scp} annotation={t.claims.scp ? "scopes" : undefined} />
               <TokenClaimsRow label="roles" value={t.claims.roles} />
               <TokenClaimsRow label="act" value={t.claims.act} />
-              <TokenClaimsRow label="exp" value={t.claims.exp ? new Date(t.claims.exp * 1000).toISOString() : undefined} />
+              <TokenClaimsRow label="exp" value={t.claims.exp ? new Date(t.claims.exp * 1000).toISOString() : undefined} annotation={t.claims.exp ? "token expiry" : undefined} />
             </div>
           </details>
         ))}

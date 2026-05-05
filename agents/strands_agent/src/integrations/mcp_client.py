@@ -158,6 +158,8 @@ class _OAuth2Auth(httpx.Auth):
                         "iss": claims.get("iss"),
                         "sub": claims.get("sub"),
                         "aud": claims.get("aud"),
+                        "azp": claims.get("azp"),
+                        "appid": claims.get("appid"),
                         "scp": claims.get("scp"),
                         "roles": claims.get("roles"),
                         "act": claims.get("act"),

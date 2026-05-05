@@ -524,6 +524,8 @@ export interface SSETokenInfo {
     iss?: string;
     sub?: string;
     aud?: string | string[];
+    azp?: string;
+    appid?: string;
     scp?: string;
     roles?: string[];
     act?: Record<string, unknown>;
