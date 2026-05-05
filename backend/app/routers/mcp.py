@@ -39,6 +39,7 @@ class McpServerCreateRequest(BaseModel):
     oauth2_client_secret: str | None = Field(None, description="OAuth2 client secret")
     oauth2_scopes: str | None = Field(None, description="OAuth2 scopes (space-separated)")
     delegation_mode: str = Field(default="m2m", description="OAuth2 delegation mode: 'm2m' or 'obo'")
+    obo_grant_type: str | None = Field(None, description="OBO grant type: 'JWT_AUTHORIZATION_GRANT' (Entra ID) or 'TOKEN_EXCHANGE' (Okta)")
     api_key_header_name: str | None = Field(None, description="Header name for API key auth")
     api_key: str | None = Field(None, description="Admin API key (stored in Secrets Manager)")
     supports_elicitation: bool = Field(default=False, description="Whether this server supports MCP elicitation")
@@ -69,6 +70,7 @@ class McpServerUpdateRequest(BaseModel):
     oauth2_client_secret: str | None = None
     oauth2_scopes: str | None = None
     delegation_mode: str | None = None
+    obo_grant_type: str | None = None
     api_key_header_name: str | None = None
     api_key: str | None = None
     supports_elicitation: bool | None = None
@@ -87,6 +89,7 @@ class McpServerResponse(BaseModel):
     oauth2_client_id: str | None = None
     oauth2_scopes: str | None = None
     delegation_mode: str = "m2m"
+    obo_grant_type: str | None = None
     has_oauth2_secret: bool = False
     api_key_header_name: str | None = None
     has_admin_api_key: bool = False
@@ -186,6 +189,7 @@ def create_mcp_server(
         oauth2_client_secret=request.oauth2_client_secret,
         oauth2_scopes=request.oauth2_scopes,
         delegation_mode=request.delegation_mode or "m2m",
+        obo_grant_type=request.obo_grant_type,
     )
     server.api_key_header_name = request.api_key_header_name
     server.supports_elicitation = "true" if request.supports_elicitation else "false"

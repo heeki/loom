@@ -29,6 +29,7 @@ class A2aAgent(Base):
     oauth2_client_secret = Column(String, nullable=True)
     oauth2_scopes = Column(String, nullable=True)  # space-separated
     delegation_mode = Column(String, nullable=False, default="m2m")  # 'm2m' or 'obo'
+    obo_grant_type = Column(String, nullable=True)  # 'JWT_AUTHORIZATION_GRANT' or 'TOKEN_EXCHANGE'
     agentcore_session_id = Column(String, nullable=True)  # persisted AgentCore Runtime session ID
     registry_record_id = Column(String, nullable=True)
     registry_status = Column(String, nullable=True)  # DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, DEPRECATED
@@ -70,6 +71,7 @@ class A2aAgent(Base):
             "oauth2_scopes": self.oauth2_scopes,
             "has_oauth2_secret": self.oauth2_client_secret is not None and self.oauth2_client_secret != "",
             "delegation_mode": self.delegation_mode or "m2m",
+            "obo_grant_type": self.obo_grant_type,
             "agentcore_session_id": self.agentcore_session_id,
             "registry_record_id": self.registry_record_id,
             "registry_status": self.registry_status,

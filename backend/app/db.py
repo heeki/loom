@@ -138,6 +138,8 @@ def _migrate_add_columns(eng) -> None:
         ("mcp_servers", "runtime_endpoint_url", "VARCHAR"),
         ("mcp_servers", "delegation_mode", "VARCHAR DEFAULT 'm2m'"),
         ("a2a_agents", "delegation_mode", "VARCHAR DEFAULT 'm2m'"),
+        ("mcp_servers", "obo_grant_type", "VARCHAR"),
+        ("a2a_agents", "obo_grant_type", "VARCHAR"),
     ]
 
     is_postgres = eng.dialect.name == "postgresql"

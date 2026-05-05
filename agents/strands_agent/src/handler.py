@@ -31,7 +31,7 @@ import threading
 from typing import Any, AsyncGenerator
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
-from strands.types.exceptions import MaxTokensReachedException
+from strands.types.exceptions import MaxTokensReachedException, ToolProviderException
 
 from strands.models.bedrock import BedrockModel
 
@@ -147,6 +147,7 @@ def _attach_dynamic_mcp_servers(agent_instance, dynamic_servers: list[dict[str, 
                 credential_provider_name=auth_data.get("credential_provider_name", ""),
                 scopes=auth_data.get("scopes", ""),
                 delegation_mode=(auth_data.get("delegation_mode") or "m2m").lower(),
+                obo_grant_type=auth_data.get("obo_grant_type", ""),
             )
 
         # Skip OAuth2 servers with no usable credentials — they would connect
@@ -285,7 +286,9 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
                           "api_key_header_name": s.auth.api_key_header_name,
                           "well_known_endpoint": s.auth.well_known_endpoint,
                           "credential_provider_name": s.auth.credential_provider_name,
-                          "scopes": s.auth.scopes} if s.auth else None}
+                          "scopes": s.auth.scopes,
+                          "delegation_mode": s.auth.delegation_mode,
+                          "obo_grant_type": s.auth.obo_grant_type} if s.auth else None}
                 for s in elicit_servers
             ]
             _attach_dynamic_mcp_servers(agent, static_as_dynamic, actor_id, elicitation_callback=elicitation_callback)
@@ -365,6 +368,9 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
                         await queue.put({"interrupt": {"stopReason": "interrupt", "interrupts": [{"id": i.id, "name": i.name, "reason": i.reason} for i in interrupts]}})
             except MaxTokensReachedException:
                 await queue.put("\n\n[Response truncated: the model reached its maximum output token limit.]")
+            except ToolProviderException as e:
+                logger.warning("Tool provider error session_id=%s: %s", session_id, e)
+                await queue.put({"_error": f"A tool provider encountered an error: {e}"})
             except Exception as e:
                 logger.error("Agent task error session_id=%s: %s", session_id, e)
                 await queue.put({"_error": str(e)})
@@ -415,6 +421,9 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
             except MaxTokensReachedException:
                 logger.warning("Max tokens reached for session_id=%s", session_id)
                 yield "\n\n[Response truncated: the model reached its maximum output token limit. Try a shorter prompt or a model with a higher token limit.]"
+            except ToolProviderException as e:
+                logger.warning("Tool provider error session_id=%s: %s", session_id, e)
+                yield f"\n\nA tool provider encountered an error: {e}"
 
 
 async def _drain_queue(queue: asyncio.Queue) -> AsyncGenerator[Any, None]:
@@ -586,6 +595,7 @@ def _attach_dynamic_mcp_servers_ws(
                 credential_provider_name=auth_data.get("credential_provider_name", ""),
                 scopes=auth_data.get("scopes", ""),
                 delegation_mode=(auth_data.get("delegation_mode") or "m2m").lower(),
+                obo_grant_type=auth_data.get("obo_grant_type", ""),
             )
 
         config = MCPServerConfig(

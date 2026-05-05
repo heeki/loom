@@ -148,6 +148,7 @@ export function McpServersPage({ viewMode, onViewModeChange, readOnly, initialSe
                   oauth2_scopes: editingServer.oauth2_scopes ?? undefined,
                   api_key_header_name: editingServer.api_key_header_name ?? undefined,
                   delegation_mode: editingServer.delegation_mode ?? undefined,
+                  obo_grant_type: editingServer.obo_grant_type ?? undefined,
                   supports_elicitation: editingServer.supports_elicitation,
                 }}
               />

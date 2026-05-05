@@ -23,6 +23,7 @@ def create_oauth2_credential_provider(
     region: str,
     tags: dict[str, str] | None = None,
     delegation_mode: str = "m2m",
+    obo_grant_type: str | None = None,
 ) -> dict[str, Any]:
     """
     Create an OAuth2 credential provider via the AgentCore control plane.
@@ -38,8 +39,11 @@ def create_oauth2_credential_provider(
         region: AWS region name
         tags: Optional dict of tags to apply to the credential provider
         delegation_mode: "m2m" (default, client_credentials) or "obo" for
-            RFC 8693 on-behalf-of token exchange. When "obo", adds
-            oauth2Flow="ON_BEHALF_OF_TOKEN_EXCHANGE" to the request.
+            on-behalf-of token exchange.
+        obo_grant_type: When delegation_mode is "obo", specifies the grant type:
+            "JWT_AUTHORIZATION_GRANT" (RFC 7523, for Microsoft Entra ID) or
+            "TOKEN_EXCHANGE" (RFC 8693, for Okta and others).
+            Defaults to "TOKEN_EXCHANGE" if not specified.
 
     Returns:
         Dictionary with provider details from the API response,
@@ -52,21 +56,39 @@ def create_oauth2_credential_provider(
 
     client = boto3.client('bedrock-agentcore-control', region_name=region)
 
+    custom_config: dict[str, Any] = {
+        'clientId': client_id,
+        'clientSecret': client_secret,
+        'oauthDiscovery': {
+            'discoveryUrl': auth_server_url,
+        },
+    }
+    if delegation_mode == "obo":
+        grant_type = obo_grant_type or "TOKEN_EXCHANGE"
+        obo_config: dict[str, Any] = {'grantType': grant_type}
+        if grant_type == "TOKEN_EXCHANGE":
+            obo_config['tokenExchangeGrantTypeConfig'] = {
+                'actorTokenContent': 'NONE',
+            }
+        if grant_type == "JWT_AUTHORIZATION_GRANT":
+            custom_config['clientAuthenticationMethod'] = 'CLIENT_SECRET_POST'
+        custom_config['onBehalfOfTokenExchangeConfig'] = obo_config
+
     kwargs: dict[str, Any] = {
         'name': name,
         'credentialProviderVendor': 'CustomOauth2',
         'oauth2ProviderConfigInput': {
-            'customOauth2ProviderConfig': {
-                'clientId': client_id,
-                'clientSecret': client_secret,
-                'oauthDiscovery': {
-                    'discoveryUrl': auth_server_url,
-                },
-            }
+            'customOauth2ProviderConfig': custom_config,
         },
     }
     if tags:
         kwargs['tags'] = tags
+
+    logger.info(
+        "Creating credential provider '%s': vendor=%s, delegation_mode=%s, obo_grant_type=%s, config_keys=%s",
+        name, 'CustomOauth2', delegation_mode, obo_grant_type,
+        list(custom_config.keys()),
+    )
 
     last_exc: Exception | None = None
     for attempt in range(_MAX_RETRIES + 1):

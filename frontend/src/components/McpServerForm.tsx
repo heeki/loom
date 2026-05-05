@@ -36,6 +36,7 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
   const [clientSecret, setClientSecret] = useState("");
   const [scopes, setScopes] = useState(initialData?.oauth2_scopes ?? "");
   const [delegationMode, setDelegationMode] = useState<"m2m" | "obo">(initialData?.delegation_mode ?? "m2m");
+  const [oboGrantType, setOboGrantType] = useState<"JWT_AUTHORIZATION_GRANT" | "TOKEN_EXCHANGE">(initialData?.obo_grant_type ?? "TOKEN_EXCHANGE");
   const [apiKeyHeaderName, setApiKeyHeaderName] = useState(initialData?.api_key_header_name ?? "x-api-key");
   const [apiKey, setApiKey] = useState("");
   const [supportsElicitation, setSupportsElicitation] = useState(initialData?.supports_elicitation ?? false);
@@ -60,6 +61,9 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
         if (clientSecret) request.oauth2_client_secret = clientSecret;
         if (scopes.trim()) request.oauth2_scopes = scopes.trim();
         request.delegation_mode = delegationMode;
+        if (delegationMode === "obo") {
+          request.obo_grant_type = oboGrantType;
+        }
       }
       if (authType === "api_key") {
         request.api_key_header_name = apiKeyHeaderName;
@@ -127,6 +131,7 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
             if (parsed.oauth2_client_secret !== undefined) setClientSecret(parsed.oauth2_client_secret);
             if (parsed.oauth2_scopes !== undefined) setScopes(parsed.oauth2_scopes);
             if (parsed.delegation_mode === "m2m" || parsed.delegation_mode === "obo") setDelegationMode(parsed.delegation_mode);
+            if (parsed.obo_grant_type === "JWT_AUTHORIZATION_GRANT" || parsed.obo_grant_type === "TOKEN_EXCHANGE") setOboGrantType(parsed.obo_grant_type);
             if (parsed.api_key_header_name !== undefined) setApiKeyHeaderName(parsed.api_key_header_name);
             if (parsed.api_key !== undefined) setApiKey(parsed.api_key);
             if (parsed.supports_elicitation !== undefined) setSupportsElicitation(!!parsed.supports_elicitation);
@@ -152,6 +157,7 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
             result.oauth2_client_secret = "(redacted)";
             if (scopes) result.oauth2_scopes = scopes;
             result.delegation_mode = delegationMode;
+            if (delegationMode === "obo") result.obo_grant_type = oboGrantType;
           }
           if (authType === "api_key") {
             result.api_key_header_name = apiKeyHeaderName;
@@ -263,20 +269,33 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
               <label className="text-xs text-muted-foreground">Scopes</label>
               <Input value={scopes} onChange={(e) => setScopes(e.target.value)} placeholder="openid profile (space-separated)" />
             </div>
-            <div className="w-[280px]">
-              <label className="text-xs text-muted-foreground">Delegation Mode</label>
-              <Select value={delegationMode} onValueChange={(v) => setDelegationMode(v as "m2m" | "obo")}>
-                <SelectTrigger className="w-full text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="m2m">M2M (shared agent identity)</SelectItem>
-                  <SelectItem value="obo">On-Behalf-Of (user identity)</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-[10px] text-muted-foreground mt-0.5 whitespace-nowrap">
-                OBO uses RFC 8693 token exchange to delegate the invoking user&apos;s identity downstream.
-              </p>
+            <div className="flex gap-3">
+              <div className="w-[280px]">
+                <label className="text-xs text-muted-foreground">Delegation Mode</label>
+                <Select value={delegationMode} onValueChange={(v) => setDelegationMode(v as "m2m" | "obo")}>
+                  <SelectTrigger className="w-full text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="m2m">M2M (shared agent identity)</SelectItem>
+                    <SelectItem value="obo">On-Behalf-Of (user identity)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {delegationMode === "obo" && (
+                <div className="w-[280px]">
+                  <label className="text-xs text-muted-foreground">OBO Grant Type</label>
+                  <Select value={oboGrantType} onValueChange={(v) => setOboGrantType(v as "JWT_AUTHORIZATION_GRANT" | "TOKEN_EXCHANGE")}>
+                    <SelectTrigger className="w-full text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="JWT_AUTHORIZATION_GRANT">JWT Authorization Grant (Entra ID)</SelectItem>
+                      <SelectItem value="TOKEN_EXCHANGE">Token Exchange (Okta)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
           </div>
         )}

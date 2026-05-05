@@ -47,12 +47,14 @@ class _OAuth2Auth(httpx.Auth):
         credential_provider_name: str,
         scopes: list[str],
         delegation_mode: str = "m2m",
+        obo_grant_type: str | None = None,
     ) -> None:
         self._credential_provider_name = credential_provider_name
         self._scopes = scopes
         self._region = os.environ.get("AWS_REGION", "us-east-1")
         self._delegation_mode = (delegation_mode or "m2m").lower()
         self._oauth2_flow = "ON_BEHALF_OF_TOKEN_EXCHANGE" if self._delegation_mode == "obo" else "M2M"
+        self._obo_grant_type = obo_grant_type
         # Capture the workload token eagerly — auth_flow runs in the MCP
         # client's background thread where ContextVar is not propagated.
         self._workload_token = BedrockAgentCoreContext.get_workload_access_token()
@@ -92,12 +94,15 @@ class _OAuth2Auth(httpx.Auth):
 
         try:
             identity_client = IdentityClient(self._region)
-            resp = identity_client.dp_client.get_resource_oauth2_token(
-                workloadIdentityToken=workload_token,
-                resourceCredentialProviderName=self._credential_provider_name,
-                scopes=self._scopes,
-                oauth2Flow=self._oauth2_flow,
-            )
+            token_kwargs: dict[str, Any] = {
+                'workloadIdentityToken': workload_token,
+                'resourceCredentialProviderName': self._credential_provider_name,
+                'scopes': self._scopes,
+                'oauth2Flow': self._oauth2_flow,
+            }
+            if self._obo_grant_type == "JWT_AUTHORIZATION_GRANT":
+                token_kwargs['customParameters'] = {'requested_token_use': 'on_behalf_of'}
+            resp = identity_client.dp_client.get_resource_oauth2_token(**token_kwargs)
             token = resp.get("accessToken")
             if not token:
                 logger.warning(
@@ -173,13 +178,15 @@ def _build_transport_callable(config: MCPServerConfig) -> Any:
             credential_provider_name=config.auth.credential_provider_name,
             scopes=scope_list,
             delegation_mode=delegation_mode,
+            obo_grant_type=config.auth.obo_grant_type or None,
         )
         logger.info(
-            "MCP server '%s' configured with OAuth2 auth (credential_provider=%s, scopes=%s, delegation_mode=%s)",
+            "MCP server '%s' configured with OAuth2 auth (credential_provider=%s, scopes=%s, delegation_mode=%s, obo_grant_type=%s)",
             config.name,
             config.auth.credential_provider_name,
             scope_list,
             delegation_mode,
+            config.auth.obo_grant_type,
         )
         return partial(streamablehttp_client, url=config.endpoint_url, auth=auth)
 

@@ -40,6 +40,7 @@ class A2aAgentCreateRequest(BaseModel):
     oauth2_client_secret: str | None = Field(None, description="OAuth2 client secret")
     oauth2_scopes: str | None = Field(None, description="OAuth2 scopes (space-separated)")
     delegation_mode: str = Field(default="m2m", description="OAuth2 delegation mode: 'm2m' or 'obo'")
+    obo_grant_type: str | None = Field(None, description="OBO grant type: 'JWT_AUTHORIZATION_GRANT' (Entra ID) or 'TOKEN_EXCHANGE' (Okta)")
 
     @model_validator(mode="after")
     def validate_oauth2_fields(self):
@@ -61,6 +62,7 @@ class A2aAgentUpdateRequest(BaseModel):
     oauth2_client_secret: str | None = None
     oauth2_scopes: str | None = None
     delegation_mode: str | None = None
+    obo_grant_type: str | None = None
 
 
 class A2aAgentResponse(BaseModel):
@@ -84,6 +86,7 @@ class A2aAgentResponse(BaseModel):
     oauth2_scopes: str | None = None
     has_oauth2_secret: bool = False
     delegation_mode: str = "m2m"
+    obo_grant_type: str | None = None
     agentcore_session_id: str | None = None
     registry_record_id: str | None = None
     registry_status: str | None = None
@@ -220,6 +223,7 @@ def create_a2a_agent(
         oauth2_client_secret=request.oauth2_client_secret,
         oauth2_scopes=request.oauth2_scopes,
         delegation_mode=request.delegation_mode or "m2m",
+        obo_grant_type=request.obo_grant_type,
         agentcore_session_id=str(uuid.uuid4()) if _is_agentcore_url(request.base_url) else None,
         last_fetched_at=datetime.utcnow(),
     )
