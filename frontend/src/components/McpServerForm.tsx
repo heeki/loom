@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
-import { testConnection, testConnectionPreCreate, exportMcpServer } from "@/api/mcp";
+import { testConnectionPreCreate, exportMcpServer } from "@/api/mcp";
 import { JsonConfigSection } from "./JsonConfigSection";
 import { useAuth } from "@/contexts/AuthContext";
 import type { McpServerCreateRequest, TestConnectionResult } from "@/api/types";
@@ -81,28 +81,23 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
     setTesting(true);
     setTestResult(null);
     try {
-      let result: TestConnectionResult;
-      if (initialData?.id) {
-        result = await testConnection(initialData.id);
-      } else {
-        const config: Parameters<typeof testConnectionPreCreate>[0] = {
-          endpoint_url: endpointUrl.trim(),
-          transport_type: transportType,
-          auth_type: authType,
-        };
-        if (authType === "oauth2") {
-          if (wellKnownUrl.trim()) config.oauth2_well_known_url = wellKnownUrl.trim();
-          if (clientId.trim()) config.oauth2_client_id = clientId.trim();
-          if (clientSecret) config.oauth2_client_secret = clientSecret;
-          if (scopes.trim()) config.oauth2_scopes = scopes.trim();
-          config.delegation_mode = delegationMode;
-        }
-        if (authType === "api_key") {
-          (config as Record<string, string>).api_key_header_name = apiKeyHeaderName;
-          if (apiKey) (config as Record<string, string>).api_key = apiKey;
-        }
-        result = await testConnectionPreCreate(config);
+      const config: Parameters<typeof testConnectionPreCreate>[0] = {
+        endpoint_url: endpointUrl.trim(),
+        transport_type: transportType,
+        auth_type: authType,
+      };
+      if (authType === "oauth2") {
+        if (wellKnownUrl.trim()) config.oauth2_well_known_url = wellKnownUrl.trim();
+        if (clientId.trim()) config.oauth2_client_id = clientId.trim();
+        if (clientSecret) config.oauth2_client_secret = clientSecret;
+        if (scopes.trim()) config.oauth2_scopes = scopes.trim();
+        config.delegation_mode = delegationMode;
       }
+      if (authType === "api_key") {
+        (config as Record<string, string>).api_key_header_name = apiKeyHeaderName;
+        if (apiKey) (config as Record<string, string>).api_key = apiKey;
+      }
+      const result = await testConnectionPreCreate(config);
       setTestResult(result);
     } catch (e) {
       setTestResult({ success: false, message: e instanceof Error ? e.message : "Test failed" });
