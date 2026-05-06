@@ -28,14 +28,15 @@ Wait for the user to confirm before proceeding.
 
 ## Step 3: Update Version Files
 
-Update the version in both files:
+Update the version in all three files:
 - `backend/pyproject.toml`: update the `version = "..."` line
 - `frontend/package.json`: update the `"version": "..."` line
+- `backend/app/main.py`: update both `version="..."` occurrences (FastAPI app and health endpoint)
 
 ## Step 4: Commit Version Changes
 
 Commit the version bumps:
-1. Run `git add backend/pyproject.toml frontend/package.json`
+1. Run `git add backend/pyproject.toml frontend/package.json backend/app/main.py`
 2. Commit with message `chore: bump version to <new-version>`
 
 ## Step 5: Draft Release Notes
