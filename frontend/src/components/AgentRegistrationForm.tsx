@@ -18,6 +18,7 @@ import * as securityApi from "@/api/security";
 import * as settingsApi from "@/api/settings";
 import { listMcpServers } from "@/api/mcp";
 import { listA2aAgents } from "@/api/a2a";
+import { useAuth } from "@/contexts/AuthContext";
 import { listMemories } from "@/api/memories";
 import { ResourceTagFields } from "@/components/ResourceTagFields";
 import type { AgentDeployRequest, AgentHarnessDeployRequest, ModelOption, ManagedRole, AuthorizerConfigResponse, TagProfile, McpServer, A2aAgent, MemoryResponse } from "@/api/types";
@@ -93,9 +94,11 @@ interface AgentRegistrationFormProps {
   isLoading: boolean;
   groupRestriction?: string;
   ownerRestriction?: string;
+  exportAgentId?: number;
 }
 
-export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarness, isLoading, groupRestriction, ownerRestriction }: AgentRegistrationFormProps) {
+export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarness, isLoading, groupRestriction, ownerRestriction, exportAgentId }: AgentRegistrationFormProps) {
+  const { hasScope } = useAuth();
 
   // Deployment type (Custom Agent vs Managed Agent)
   const [deploymentType, setDeploymentType] = useState<DeploymentType>("custom");
@@ -107,9 +110,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
   const [name, setName] = useState("");
   const [nameError, setNameError] = useState("");
   const [description, setDescription] = useState("");
-  const [agentDescription, setAgentDescription] = useState("");
-  const [behavioralGuidelines, setBehavioralGuidelines] = useState("");
-  const [outputExpectations, setOutputExpectations] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("");
   const [modelId, setModelId] = useState("");
   const [selectedAllowedModelIds, setSelectedAllowedModelIds] = useState<string[]>([]);
   const [selectedRoleId, setSelectedRoleId] = useState<string>("");
@@ -157,18 +158,95 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
   const [authConfigs, setAuthConfigs] = useState<AuthorizerConfigResponse[]>([]);
   const [defaults, setDefaults] = useState<agentsApi.LoomDefaults>({ idle_timeout_seconds: 300, max_lifetime_seconds: 3600 });
 
+  const [dataLoaded, setDataLoaded] = useState(false);
   useEffect(() => {
     void agentsApi.fetchModels().then(setModels).catch(() => {});
     void agentsApi.fetchDefaults().then(setDefaults).catch(() => {});
     if (mode === "deploy") {
-      void securityApi.listManagedRoles().then(setManagedRoles).catch(() => {});
-      void securityApi.listAuthorizerConfigs().then(setAuthConfigs).catch(() => {});
-      void settingsApi.listTagProfiles().then(setTagProfiles).catch(() => {});
-      void listMcpServers().then(setMcpServers).catch(() => {});
-      void listA2aAgents().then(setA2aAgents).catch(() => {});
-      void listMemories().then(setMemories).catch(() => {});
+      Promise.all([
+        securityApi.listManagedRoles().then(setManagedRoles).catch(() => {}),
+        securityApi.listAuthorizerConfigs().then(setAuthConfigs).catch(() => {}),
+        settingsApi.listTagProfiles().then(setTagProfiles).catch(() => {}),
+        listMcpServers().then(setMcpServers).catch(() => {}),
+        listA2aAgents().then(setA2aAgents).catch(() => {}),
+        listMemories().then(setMemories).catch(() => {}),
+      ]).then(() => setDataLoaded(true));
     }
   }, [mode]);
+
+  // Auto-populate form when editing an existing agent
+  const [loadedAgentId, setLoadedAgentId] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    if (!exportAgentId || !hasScope("admin:write")) return;
+    if (exportAgentId === loadedAgentId) return;
+    if (models.length === 0 || !dataLoaded) return;
+    setLoadedAgentId(exportAgentId);
+    void agentsApi.exportAgent(exportAgentId).then((parsed) => {
+      if (parsed.deployment_type === "custom" || parsed.deployment_type === "managed") {
+        setDeploymentType(parsed.deployment_type as DeploymentType);
+      }
+      if (parsed.name) setName(parsed.name as string);
+      if (parsed.description) setDescription(parsed.description as string);
+      if (parsed.system_prompt) setSystemPrompt(parsed.system_prompt as string);
+      else if (parsed.persona) setSystemPrompt(parsed.persona as string);
+      if (parsed.model) {
+        const match = models.find((m) => m.model_id === parsed.model || m.display_name === parsed.model);
+        if (match) setModelId(match.model_id);
+      }
+      if (Array.isArray(parsed.allowed_models)) {
+        const validIds = models.map((m) => m.model_id);
+        setSelectedAllowedModelIds((parsed.allowed_models as string[]).filter((id) => validIds.includes(id)));
+      }
+      if (parsed.role) {
+        const match = managedRoles.find((r) => r.role_name === parsed.role || r.role_arn === parsed.role);
+        if (match) setSelectedRoleId(match.id.toString());
+      }
+      if (parsed.network_mode) setNetworkMode(parsed.network_mode as string);
+      if (parsed.authorizer) {
+        const match = authConfigs.find((c) => c.name === parsed.authorizer || c.id.toString() === parsed.authorizer);
+        if (match) setSelectedAuthConfigId(match.id.toString());
+      }
+      if (parsed.tags) {
+        const match = tagProfiles.find((p) => p.name === parsed.tags);
+        if (match) setSelectedTagProfileId(match.id.toString());
+      }
+      if (Array.isArray(parsed.mcp_servers)) {
+        const ids = (parsed.mcp_servers as (string | number)[])
+          .map((s) => {
+            if (typeof s === "number") return s;
+            const match = mcpServers.find((m) => m.name === s);
+            return match?.id;
+          })
+          .filter((id): id is number => id !== undefined);
+        setSelectedMcpServerIds(ids);
+      }
+      if (Array.isArray(parsed.a2a_agents)) {
+        const ids = (parsed.a2a_agents as (string | number)[])
+          .map((s) => {
+            if (typeof s === "number") return s;
+            const match = a2aAgents.find((a) => a.name === s);
+            return match?.id;
+          })
+          .filter((id): id is number => id !== undefined);
+        setSelectedA2aAgentIds(ids);
+      }
+      if (Array.isArray(parsed.memories)) {
+        const ids = (parsed.memories as (string | number)[])
+          .map((s) => {
+            if (typeof s === "number") return s;
+            const match = memories.find((m) => m.name === s);
+            return match?.id;
+          })
+          .filter((id): id is number => id !== undefined);
+        setSelectedMemoryIds(ids);
+      }
+      if (parsed.max_iterations != null) setHarnessMaxIterations(String(parsed.max_iterations));
+      if (parsed.max_tokens != null) setHarnessMaxTokens(String(parsed.max_tokens));
+      if (parsed.human_confirmation != null) setEnableHumanConfirmation(!!parsed.human_confirmation);
+      if (parsed.confirmation_policy != null) setConfirmationPolicy(parsed.confirmation_policy as string);
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exportAgentId, models.length, dataLoaded]);
 
   const selectedRole = managedRoles.find((r) => r.id.toString() === selectedRoleId);
   const selectedAuthConfig = authConfigs.find((c) => c.id.toString() === selectedAuthConfigId);
@@ -235,9 +313,9 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
         source: "harness",
         name: name.trim(),
         description: description.trim(),
-        agent_description: agentDescription.trim(),
-        behavioral_guidelines: behavioralGuidelines.trim(),
-        output_expectations: outputExpectations.trim(),
+        agent_description: systemPrompt.trim(),
+        behavioral_guidelines: "",
+        output_expectations: "",
         model_id: modelId,
         allowed_model_ids: selectedAllowedModelIds.length > 0
           ? (selectedAllowedModelIds.includes(modelId) ? selectedAllowedModelIds : [modelId, ...selectedAllowedModelIds])
@@ -292,9 +370,9 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
         source: "deploy",
         name: name.trim(),
         description: description.trim(),
-        agent_description: agentDescription.trim(),
-        behavioral_guidelines: behavioralGuidelines.trim(),
-        output_expectations: outputExpectations.trim(),
+        agent_description: systemPrompt.trim(),
+        behavioral_guidelines: "",
+        output_expectations: "",
         model_id: modelId,
         allowed_model_ids: selectedAllowedModelIds.length > 0
           ? (selectedAllowedModelIds.includes(modelId) ? selectedAllowedModelIds : [modelId, ...selectedAllowedModelIds])
@@ -323,9 +401,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
       await onDeploy(request);
       setName("");
       setDescription("");
-      setAgentDescription("");
-      setBehavioralGuidelines("");
-      setOutputExpectations("");
+      setSystemPrompt("");
       setModelId("");
       setSelectedAllowedModelIds([]);
       setSelectedRoleId("");
@@ -394,9 +470,8 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                     }
                     if (parsed.name) setName(parsed.name);
                     if (parsed.description) setDescription(parsed.description);
-                    if (parsed.persona) setAgentDescription(parsed.persona);
-                    if (parsed.instructions) setBehavioralGuidelines(parsed.instructions);
-                    if (parsed.behavior) setOutputExpectations(parsed.behavior);
+                    if (parsed.system_prompt) setSystemPrompt(parsed.system_prompt);
+                    else if (parsed.persona) setSystemPrompt(parsed.persona);
                     if (parsed.model) {
                       const match = models.find((m) => m.model_id === parsed.model || m.display_name === parsed.model);
                       if (match) setModelId(match.model_id);
@@ -457,32 +532,40 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                     return "Invalid JSON. Please check the format and try again.";
                   }
                 }}
-                onExport={() => {
+                onExport={async () => {
+                  if (exportAgentId && hasScope("admin:write")) {
+                    const data = await agentsApi.exportAgent(exportAgentId);
+                    return JSON.stringify(data, null, 2);
+                  }
                   const result: Record<string, unknown> = {};
                   result.deployment_type = deploymentType;
                   if (name) result.name = name;
                   if (description) result.description = description;
-                  if (agentDescription) result.persona = agentDescription;
-                  if (behavioralGuidelines) result.instructions = behavioralGuidelines;
-                  if (outputExpectations) result.behavior = outputExpectations;
-                  if (modelId) {
-                    result.model = modelId;
-                  }
+                  if (systemPrompt) result.system_prompt = systemPrompt;
+                  if (modelId) result.model = modelId;
                   if (selectedAllowedModelIds.length > 0) {
                     result.allowed_models = selectedAllowedModelIds;
                   }
+                  if (networkMode && networkMode !== "PUBLIC") result.network_mode = networkMode;
                   if (selectedRoleId) {
                     const role = managedRoles.find((r) => r.id.toString() === selectedRoleId);
                     if (role) result.role = role.role_name;
                   }
-                  if (networkMode && networkMode !== "PUBLIC") result.network_mode = networkMode;
+                  if (selectedTagProfileId) {
+                    const profile = tagProfiles.find((p) => p.id.toString() === selectedTagProfileId);
+                    if (profile) result.tags = profile.name;
+                  }
                   if (selectedAuthConfigId) {
                     const auth = authConfigs.find((c) => c.id.toString() === selectedAuthConfigId);
                     if (auth) result.authorizer = auth.name;
                   }
-                  if (selectedTagProfileId) {
-                    const profile = tagProfiles.find((p) => p.id.toString() === selectedTagProfileId);
-                    if (profile) result.tags = profile.name;
+                  if (deploymentType === "managed") {
+                    if (harnessMaxIterations) result.max_iterations = parseInt(harnessMaxIterations, 10);
+                    if (harnessMaxTokens) result.max_tokens = parseInt(harnessMaxTokens, 10);
+                    if (enableHumanConfirmation) {
+                      result.human_confirmation = true;
+                      result.confirmation_policy = confirmationPolicy;
+                    }
                   }
                   if (selectedMcpServerIds.length > 0) {
                     result.mcp_servers = selectedMcpServerIds.map((id) => {
@@ -502,17 +585,9 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                       return mem?.name ?? id;
                     });
                   }
-                  if (deploymentType === "managed") {
-                    if (harnessMaxIterations) result.max_iterations = parseInt(harnessMaxIterations, 10);
-                    if (harnessMaxTokens) result.max_tokens = parseInt(harnessMaxTokens, 10);
-                    if (enableHumanConfirmation) {
-                      result.human_confirmation = true;
-                      result.confirmation_policy = confirmationPolicy;
-                    }
-                  }
                   return JSON.stringify(result, null, 2);
                 }}
-                placeholder='{"deployment_type": "custom|managed", "name": "...", "description": "...", "persona": "...", "instructions": "...", "behavior": "...", "model": "... (default)", "allowed_models": ["..."], "role": "...", "authorizer": "...", "tags": "...", "mcp_servers": ["..."], "a2a_agents": ["..."], "memories": ["..."], "max_iterations": 75, "max_tokens": 4096, "human_confirmation": true, "confirmation_policy": "..."}'
+                placeholder='{"deployment_type": "custom|managed", "name": "...", "description": "...", "system_prompt": "...", "model": "... (default)", "allowed_models": ["..."], "network_mode": "PUBLIC", "role": "...", "tags": "...", "authorizer": "...", "max_iterations": 75, "max_tokens": 4096, "human_confirmation": true, "confirmation_policy": "...", "mcp_servers": ["..."], "a2a_agents": ["..."], "memories": ["..."]}'
               />
 
               {/* Deployment Type Selector */}
@@ -577,29 +652,13 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
               {/* Agent Behavior (System Prompt) */}
               <section className="space-y-3">
                 <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Agent Behavior (System Prompt)</h4>
-                <div className="space-y-2">
-                  <Textarea
-                    placeholder="Persona or role definition (e.g., You are a helpful customer support agent that resolves billing inquiries for an e-commerce platform)"
-                    value={agentDescription}
-                    onChange={(e) => setAgentDescription(e.target.value)}
-                    rows={2}
-                    className="text-sm"
-                  />
-                  <Textarea
-                    placeholder="Specific instructions or tasks (e.g., Look up the customer's order history, identify the issue, and provide a resolution within company policy)"
-                    value={behavioralGuidelines}
-                    onChange={(e) => setBehavioralGuidelines(e.target.value)}
-                    rows={2}
-                    className="text-sm"
-                  />
-                  <Textarea
-                    placeholder="Behavioral guidelines and constraints (e.g., Use a friendly and professional tone, never share internal system details, and escalate to a human agent if the customer requests it)"
-                    value={outputExpectations}
-                    onChange={(e) => setOutputExpectations(e.target.value)}
-                    rows={2}
-                    className="text-sm"
-                  />
-                </div>
+                <Textarea
+                  placeholder={"Persona: You are a helpful customer support agent that resolves billing inquiries for an e-commerce platform.\n\nInstructions: Look up the customer's order history, identify the issue, and provide a resolution within company policy.\n\nGuidelines: Use a friendly and professional tone, never share internal system details, and escalate to a human agent if the customer requests it."}
+                  value={systemPrompt}
+                  onChange={(e) => setSystemPrompt(e.target.value)}
+                  rows={5}
+                  className="text-sm"
+                />
               </section>
 
               {/* Model, Protocol, Network, IAM Role */}
@@ -936,10 +995,19 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                               }}
                             />
                             <span className="shrink-0">{server.name}</span>
-                            <span className="text-muted-foreground/60 truncate min-w-0" title={server.endpoint_url}>{server.endpoint_url}</span>
                             {server.auth_type === "oauth2" && (
                               <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded shrink-0">OAuth2</span>
                             )}
+                            {server.auth_type === "oauth2" && server.delegation_mode === "obo" && (
+                              <span className="text-[10px] text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-950 px-1 rounded shrink-0">OBO</span>
+                            )}
+                            {server.auth_type === "oauth2" && server.delegation_mode !== "obo" && (
+                              <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded shrink-0">M2M</span>
+                            )}
+                            <span className="relative group text-muted-foreground/60 shrink-0">
+                              {(() => { try { return new URL(server.endpoint_url).host; } catch { return server.endpoint_url; } })()}
+                              <span className="absolute left-0 top-full mt-1 z-50 hidden group-hover:block text-[10px] text-foreground bg-popover border border-border px-2 py-1 rounded shadow-md whitespace-nowrap">{server.endpoint_url}</span>
+                            </span>
                           </label>
                         ))}
                       </div>
@@ -967,10 +1035,19 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                               }}
                             />
                             <span className="shrink-0">{agent.name}</span>
-                            <span className="text-muted-foreground/60 truncate min-w-0" title={agent.base_url}>{agent.base_url}</span>
                             {agent.auth_type === "oauth2" && (
                               <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded shrink-0">OAuth2</span>
                             )}
+                            {agent.auth_type === "oauth2" && agent.delegation_mode === "obo" && (
+                              <span className="text-[10px] text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-950 px-1 rounded shrink-0">OBO</span>
+                            )}
+                            {agent.auth_type === "oauth2" && agent.delegation_mode !== "obo" && (
+                              <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded shrink-0">M2M</span>
+                            )}
+                            <span className="relative group text-muted-foreground/60 shrink-0">
+                              {(() => { try { return new URL(agent.base_url).host; } catch { return agent.base_url; } })()}
+                              <span className="absolute left-0 top-full mt-1 z-50 hidden group-hover:block text-[10px] text-foreground bg-popover border border-border px-2 py-1 rounded shadow-md whitespace-nowrap">{agent.base_url}</span>
+                            </span>
                           </label>
                         ))}
                       </div>
@@ -1020,7 +1097,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                   className="min-w-[120px]"
                   disabled={isLoading || !name.trim() || !modelId || !selectedRoleId || (deploymentType === "custom" ? !onDeploy : !onDeployHarness) || hasValidationErrors}
                 >
-                  {isLoading ? "Deploying..." : (deploymentType === "managed" ? "Deploy Harness" : "Deploy")}
+                  {isLoading ? "Deploying..." : (exportAgentId ? "Update Agent" : (deploymentType === "managed" ? "Deploy Harness" : "Deploy"))}
                 </Button>
                 <Button
                   type="button"
@@ -1029,9 +1106,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                   onClick={() => {
                     setName("");
                     setDescription("");
-                    setAgentDescription("");
-                    setBehavioralGuidelines("");
-                    setOutputExpectations("");
+                    setSystemPrompt("");
                     setModelId("");
                     setSelectedRoleId("");
                     setNetworkMode("PUBLIC");

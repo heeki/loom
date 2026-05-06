@@ -6,8 +6,6 @@ export function useSessions(agentId: number | null) {
   const [sessions, setSessions] = useState<SessionResponse[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Clear and re-fetch when agentId changes. The cancelled flag prevents a
-  // stale in-flight request from a previous agentId from overwriting state.
   useEffect(() => {
     if (agentId === null) {
       setSessions([]);

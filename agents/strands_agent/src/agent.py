@@ -8,7 +8,7 @@ from strands.models.bedrock import BedrockModel
 
 from src.config import AgentConfig, MCPServerConfig
 from src.integrations.approval import ApprovalHook
-from src.integrations.mcp_client import build_mcp_clients, create_mcp_clients, has_oauth2_servers
+from src.integrations.mcp_client import build_mcp_clients, create_mcp_clients, has_oauth2_servers, _install_logging_callback, TokenInfoHook
 from src.integrations.a2a_client import create_a2a_clients
 from src.integrations.memory import MemoryHook
 from src.telemetry import TelemetryHook
@@ -66,6 +66,9 @@ def build_agent(config: AgentConfig, defer_mcp: bool = False) -> tuple[Agent, Ap
     if approval_hook.policies:
         logger.info("Enabled approval hook with %d static policy(ies)", len(approval_hook.policies))
 
+    # Token info extraction hook — captures __TOKEN_INFO__ from MCP tool results
+    hooks.append(TokenInfoHook())
+
     # Telemetry hook (R7)
     telemetry_hook = TelemetryHook()
     hooks.append(telemetry_hook)
@@ -115,13 +118,43 @@ def attach_mcp_tools(agent: Agent, servers: list[MCPServerConfig]) -> None:
     """Attach MCP tool clients to an already-initialized agent.
 
     Called during the first invocation when the workload access token
-    is available in the request context.
+    is available in the request context. Servers that fail to connect
+    (e.g. 401 Unauthorized) are skipped gracefully.
 
     Args:
         agent: The running Strands Agent instance.
         servers: MCP server configurations to connect.
     """
     mcp_clients = build_mcp_clients(servers)
+    if not mcp_clients:
+        logger.warning("build_mcp_clients returned 0 clients for %d server(s)", len(servers))
+        return
+
+    strands_mcp_logger = logging.getLogger("strands.tools.mcp.mcp_client")
+    strands_registry_logger = logging.getLogger("strands.tools.registry")
+    prev_mcp_level = strands_mcp_logger.level
+    prev_registry_level = strands_registry_logger.level
+
+    attached = 0
     for client in mcp_clients:
-        agent.tool_registry.process_tools([client])
-    logger.info("Attached %d MCP tool client(s) to agent", len(mcp_clients))
+        strands_mcp_logger.setLevel(logging.CRITICAL)
+        strands_registry_logger.setLevel(logging.CRITICAL)
+        try:
+            agent.tool_registry.process_tools([client])
+            _install_logging_callback(client)
+            attached += 1
+        except BaseException as e:
+            logger.warning(
+                "Failed to attach MCP client: %s. The agent will continue without this server's tools.",
+                e,
+            )
+            try:
+                client.stop()
+            except BaseException:
+                pass
+        finally:
+            strands_mcp_logger.setLevel(prev_mcp_level)
+            strands_registry_logger.setLevel(prev_registry_level)
+
+    tool_names = list(agent.tool_registry.registry.keys())
+    logger.info("Attached %d/%d MCP tool client(s) to agent. Registered tools: %s", attached, len(mcp_clients), tool_names)

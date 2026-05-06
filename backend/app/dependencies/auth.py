@@ -110,6 +110,12 @@ class UserInfo:
     username: str
     groups: list[str]
     scopes: set[str]
+    idp_type: str = "cognito"
+
+    @property
+    def actor_id(self) -> str:
+        """Return a provider:sub formatted actor ID safe for AWS APIs."""
+        return f"{self.idp_type}:{self.sub}" if self.sub else "loom-agent"
 
 
 # ---------------------------------------------------------------------------
@@ -207,6 +213,7 @@ def get_current_user(request: Request) -> UserInfo:
             username="local-dev",
             groups=["t-admin", "g-admins-super"],
             scopes=ALL_SCOPES.copy(),
+            idp_type="local",
         )
 
     if not token:
@@ -228,7 +235,9 @@ def get_current_user(request: Request) -> UserInfo:
             )
             return _build_user_from_external_claims(claims, active_idp)
         except Exception as e:
-            logger.debug("External IdP validation failed, trying Cognito: %s", e)
+            logger.warning("External IdP validation failed (jwks_uri=%s, issuer=%s, audience=%s): %s",
+                           active_idp["jwks_uri"], issuer,
+                           active_idp.get("audience") or active_idp.get("client_id"), e)
             # Fall through to Cognito if external validation fails
             if not user_pool_id:
                 raise HTTPException(status_code=401, detail="Invalid or expired token") from e
@@ -279,6 +288,7 @@ def _build_user_from_external_claims(claims: dict[str, Any], idp: dict) -> UserI
         username=username,
         groups=loom_groups,
         scopes=derive_scopes(loom_groups),
+        idp_type=idp.get("provider_type", "external"),
     )
 
 

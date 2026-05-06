@@ -47,6 +47,16 @@ export function deployHarnessAgent(
   });
 }
 
+export function updateHarnessAgent(
+  id: number,
+  request: AgentHarnessDeployRequest,
+): Promise<AgentResponse> {
+  return apiFetch<AgentResponse>(`/api/agents/${id}/redeploy-harness`, {
+    method: "PUT",
+    body: JSON.stringify(request),
+  });
+}
+
 export function redeployAgent(id: number): Promise<AgentResponse> {
   return apiFetch<AgentResponse>(`/api/agents/${id}/redeploy`, {
     method: "POST",
@@ -123,4 +133,8 @@ export function fetchDefaults(): Promise<LoomDefaults> {
 
 export function getAgentIntegration(id: number): Promise<IntegrationInfoResponse> {
   return apiFetch<IntegrationInfoResponse>(`/api/agents/${id}/integration`);
+}
+
+export function exportAgent(id: number): Promise<Record<string, unknown>> {
+  return apiFetch<Record<string, unknown>>(`/api/agents/${id}/export`);
 }

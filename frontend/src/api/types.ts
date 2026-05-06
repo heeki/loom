@@ -515,6 +515,25 @@ export interface MemoryRecordsResponse {
 }
 
 // SSE event types
+export interface SSETokenInfo {
+  token_type: string;
+  source?: string;
+  credential_provider?: string;
+  flow?: string;
+  claims: {
+    iss?: string;
+    sub?: string;
+    aud?: string | string[];
+    azp?: string;
+    appid?: string;
+    scp?: string;
+    roles?: string[];
+    act?: Record<string, unknown>;
+    exp?: number;
+    iat?: number;
+  };
+}
+
 export interface SSESessionStart {
   session_id: string;
   invocation_id: string;
@@ -522,6 +541,7 @@ export interface SSESessionStart {
   user_id?: string;
   token_source?: string;
   has_token?: boolean;
+  user_token?: SSETokenInfo;
 }
 
 export interface SSEChunk {
@@ -666,6 +686,7 @@ export interface ConnectorInfo {
   auth_type: "none" | "oauth2" | "api_key";
   has_user_api_key: boolean;
   supports_elicitation: boolean;
+  delegation_mode?: "m2m" | "obo";
 }
 
 // MCP Server types
@@ -681,6 +702,9 @@ export interface McpServer {
   oauth2_client_id: string | null;
   oauth2_scopes: string | null;
   has_oauth2_secret: boolean;
+  delegation_mode?: "m2m" | "obo";
+  obo_grant_type?: "JWT_AUTHORIZATION_GRANT" | "TOKEN_EXCHANGE" | null;
+  oauth2_audience?: string | null;
   api_key_header_name: string | null;
   has_admin_api_key: boolean;
   supports_elicitation: boolean;
@@ -701,6 +725,9 @@ export interface McpServerCreateRequest {
   oauth2_client_id?: string;
   oauth2_client_secret?: string;
   oauth2_scopes?: string;
+  delegation_mode?: "m2m" | "obo";
+  obo_grant_type?: "JWT_AUTHORIZATION_GRANT" | "TOKEN_EXCHANGE";
+  oauth2_audience?: string;
   api_key_header_name?: string;
   api_key?: string;
   supports_elicitation?: boolean;
@@ -718,6 +745,9 @@ export interface McpServerUpdateRequest {
   oauth2_client_id?: string;
   oauth2_client_secret?: string;
   oauth2_scopes?: string;
+  delegation_mode?: "m2m" | "obo";
+  obo_grant_type?: "JWT_AUTHORIZATION_GRANT" | "TOKEN_EXCHANGE" | null;
+  oauth2_audience?: string;
   api_key_header_name?: string;
   api_key?: string;
   supports_elicitation?: boolean;
@@ -793,6 +823,8 @@ export interface A2aAgent {
   oauth2_client_id: string | null;
   oauth2_scopes: string | null;
   has_oauth2_secret: boolean;
+  delegation_mode?: "m2m" | "obo";
+  obo_grant_type?: "JWT_AUTHORIZATION_GRANT" | "TOKEN_EXCHANGE" | null;
   agentcore_session_id: string | null;
   last_fetched_at: string | null;
   created_at: string | null;
@@ -809,6 +841,8 @@ export interface A2aAgentCreateRequest {
   oauth2_client_id?: string;
   oauth2_client_secret?: string;
   oauth2_scopes?: string;
+  delegation_mode?: "m2m" | "obo";
+  obo_grant_type?: "JWT_AUTHORIZATION_GRANT" | "TOKEN_EXCHANGE";
 }
 
 export interface A2aAgentUpdateRequest {
@@ -820,6 +854,8 @@ export interface A2aAgentUpdateRequest {
   oauth2_client_id?: string;
   oauth2_client_secret?: string;
   oauth2_scopes?: string;
+  delegation_mode?: "m2m" | "obo";
+  obo_grant_type?: "JWT_AUTHORIZATION_GRANT" | "TOKEN_EXCHANGE" | null;
 }
 
 export interface A2aAgentSkill {

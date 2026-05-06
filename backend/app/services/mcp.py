@@ -73,11 +73,112 @@ def resolve_api_key(server: Any, user_sub: str | None = None) -> str | None:
     return None
 
 
-def _build_headers(server: Any, api_key: str | None = None) -> dict[str, str]:
+def _get_obo_token(server: Any, user_token: str) -> str | None:
+    """Exchange a user token for a downstream token via OBO.
+
+    Entra ID uses grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer with
+    requested_token_use=on_behalf_of. Okta/others use the standard RFC 8693
+    token-exchange grant.
+    """
+    if not server.oauth2_well_known_url or not server.oauth2_client_id or not server.oauth2_client_secret:
+        return None
+
+    token_url = None
+    discovery: dict = {}
+    try:
+        resp = httpx.get(server.oauth2_well_known_url, timeout=10)
+        resp.raise_for_status()
+        discovery = resp.json()
+        token_url = discovery.get("token_endpoint")
+    except Exception as e:
+        logger.warning("Failed to discover token endpoint from %s: %s", server.oauth2_well_known_url, e)
+
+    if not token_url:
+        return None
+
+    is_entra = "login.microsoftonline.com" in server.oauth2_well_known_url
+
+    # Decode subject token claims for debugging and audience extraction
+    import base64
+    _claims: dict = {}
+    try:
+        _payload = user_token.split(".")[1]
+        _payload += "=" * (4 - len(_payload) % 4)
+        _claims = json.loads(base64.urlsafe_b64decode(_payload))
+        logger.info("Subject token claims: iss=%s, aud=%s, cid/azp=%s", _claims.get("iss"), _claims.get("aud"), _claims.get("cid") or _claims.get("azp"))
+    except Exception:
+        pass
+
+    try:
+        if is_entra:
+            data: dict[str, str] = {
+                "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                "assertion": user_token,
+                "client_id": server.oauth2_client_id,
+                "client_secret": server.oauth2_client_secret,
+                "requested_token_use": "on_behalf_of",
+            }
+            if server.oauth2_scopes:
+                data["scope"] = server.oauth2_scopes
+            resp = httpx.post(token_url, data=data, timeout=10)
+        else:
+            # Okta RFC 8693 token exchange — use Basic Auth per Okta docs
+            import base64 as _b64
+            audience = server.oauth2_audience or _claims.get("aud", "")
+            logger.info("Okta token exchange audience: %s", audience)
+            oidc_scopes = {"openid", "profile", "email", "address", "phone", "offline_access"}
+            exchange_scopes = " ".join(
+                s for s in (server.oauth2_scopes or "").split()
+                if s not in oidc_scopes
+            )
+
+            # Okta: actor identified by Basic Auth credentials
+            basic_creds = _b64.b64encode(
+                f"{server.oauth2_client_id}:{server.oauth2_client_secret}".encode()
+            ).decode()
+            basic_headers = {
+                "Authorization": f"Basic {basic_creds}",
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/json",
+            }
+
+            data = {
+                "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+                "subject_token": user_token,
+                "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+                "audience": audience,
+            }
+            if exchange_scopes:
+                data["scope"] = exchange_scopes
+
+            resp = httpx.post(token_url, data=data, headers=basic_headers, timeout=10)
+        if resp.status_code != 200:
+            logger.warning("OBO token exchange failed (HTTP %d): %s", resp.status_code, resp.text)
+            return None
+        access_token = resp.json().get("access_token")
+        if access_token:
+            import base64
+            try:
+                payload = access_token.split(".")[1]
+                payload += "=" * (4 - len(payload) % 4)
+                claims = json.loads(base64.urlsafe_b64decode(payload))
+                logger.info("OBO token claims: %s", json.dumps({k: v for k, v in claims.items() if k not in ("nonce", "x5t", "xms_cc")}, indent=2))
+            except Exception:
+                pass
+        return access_token
+    except Exception as e:
+        logger.warning("OBO token exchange error: %s", e)
+        return None
+
+
+def _build_headers(server: Any, api_key: str | None = None, user_token: str | None = None) -> dict[str, str]:
     """Build request headers, including auth if configured."""
     headers: dict[str, str] = {"Content-Type": "application/json"}
     if server.auth_type == "oauth2":
-        token = _get_oauth2_token(server)
+        if getattr(server, "delegation_mode", "m2m") == "obo" and user_token:
+            token = _get_obo_token(server, user_token)
+        else:
+            token = _get_oauth2_token(server)
         if token:
             headers["Authorization"] = f"Bearer {token}"
     elif server.auth_type == "api_key" and api_key:
@@ -101,14 +202,14 @@ def _jsonrpc_request(method: str, params: dict | None = None, req_id: int = 1) -
     return msg
 
 
-def _call_streamable_http(server: Any, method: str, params: dict | None = None, api_key: str | None = None) -> dict | None:
+def _call_streamable_http(server: Any, method: str, params: dict | None = None, api_key: str | None = None, user_token: str | None = None) -> dict | None:
     """Call an MCP server using Streamable HTTP (POST JSON-RPC).
 
     Always initializes a session first (works for both stateless and stateful
     servers). Stateless servers accept initialize but don't return a session ID.
     Stateful servers require it and return a Mcp-Session-Id header.
     """
-    headers = _build_headers(server, api_key)
+    headers = _build_headers(server, api_key, user_token=user_token)
     headers["Accept"] = "application/json, text/event-stream"
 
     try:
@@ -125,6 +226,9 @@ def _call_streamable_http(server: Any, method: str, params: dict | None = None, 
             headers=headers,
             timeout=MCP_REQUEST_TIMEOUT,
         )
+        if resp.status_code != 200:
+            logger.error("Streamable HTTP call to %s failed (HTTP %d): %s", server.endpoint_url, resp.status_code, resp.text[:500])
+            return None
         resp.raise_for_status()
 
         content_type = resp.headers.get("content-type", "")
@@ -161,14 +265,14 @@ def _initialize_session(server: Any, headers: dict[str, str]) -> str | None:
         return None
 
 
-def _call_sse(server: Any, method: str, params: dict | None = None, api_key: str | None = None) -> dict | None:
+def _call_sse(server: Any, method: str, params: dict | None = None, api_key: str | None = None, user_token: str | None = None) -> dict | None:
     """Call an MCP server using SSE transport.
 
     SSE transport: POST JSON-RPC to the endpoint, receive SSE stream back.
     Some SSE servers accept POST directly; others require establishing an SSE
     connection first. We try the POST approach which is the MCP standard.
     """
-    headers = _build_headers(server, api_key)
+    headers = _build_headers(server, api_key, user_token=user_token)
     headers["Accept"] = "text/event-stream"
     body = _jsonrpc_request(method, params)
 
@@ -211,15 +315,15 @@ def _parse_sse_response(text: str) -> dict | None:
     return None
 
 
-def _call_mcp(server: Any, method: str, params: dict | None = None, api_key: str | None = None) -> dict | None:
+def _call_mcp(server: Any, method: str, params: dict | None = None, api_key: str | None = None, user_token: str | None = None) -> dict | None:
     """Call an MCP server using the configured transport."""
     if server.transport_type == "streamable_http":
-        return _call_streamable_http(server, method, params, api_key)
+        return _call_streamable_http(server, method, params, api_key, user_token=user_token)
     else:
-        return _call_sse(server, method, params, api_key)
+        return _call_sse(server, method, params, api_key, user_token=user_token)
 
 
-def test_mcp_connection(server: Any, api_key: str | None = None) -> dict:
+def test_mcp_connection(server: Any, api_key: str | None = None, user_token: str | None = None) -> dict:
     """Test connectivity to an MCP server.
 
     Sends an `initialize` JSON-RPC request to verify the server is reachable
@@ -231,7 +335,7 @@ def test_mcp_connection(server: Any, api_key: str | None = None) -> dict:
         "clientInfo": {"name": "loom", "version": "1.0.0"},
     }
 
-    result = _call_mcp(server, "initialize", init_params, api_key)
+    result = _call_mcp(server, "initialize", init_params, api_key, user_token=user_token)
 
     if result is None:
         return {"success": False, "message": f"Failed to connect to {server.endpoint_url}"}
@@ -248,9 +352,9 @@ def test_mcp_connection(server: Any, api_key: str | None = None) -> dict:
     return {"success": True, "message": f"Connected to {server_name}{version_str}"}
 
 
-def fetch_mcp_tools(server: Any, api_key: str | None = None) -> list[dict]:
+def fetch_mcp_tools(server: Any, api_key: str | None = None, user_token: str | None = None) -> list[dict]:
     """Fetch available tools from an MCP server via the tools/list method."""
-    result = _call_mcp(server, "tools/list", api_key=api_key)
+    result = _call_mcp(server, "tools/list", api_key=api_key, user_token=user_token)
 
     if result is None:
         logger.warning("No response from %s for tools/list", server.endpoint_url)

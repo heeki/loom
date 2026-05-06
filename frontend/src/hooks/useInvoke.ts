@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { SSESessionStart, SSESessionEnd, SSEApprovalRequest, SSEApprovalResolved, SSEElicitationRequest } from "@/api/types";
+import type { SSESessionStart, SSESessionEnd, SSEApprovalRequest, SSEApprovalResolved, SSEElicitationRequest, SSETokenInfo } from "@/api/types";
 import { invokeAgentStream, invokeAgentWs, type WsInvokeController } from "@/api/invocations";
 import { friendlyInvokeError } from "@/lib/errors";
 
@@ -26,6 +26,7 @@ interface InvokeSnapshot {
   toolNames: string[];
   error: string | null;
   rawError: string | null;
+  tokenInfos: SSETokenInfo[];
 }
 
 const EMPTY: InvokeSnapshot = {
@@ -38,6 +39,7 @@ const EMPTY: InvokeSnapshot = {
   toolNames: [],
   error: null,
   rawError: null,
+  tokenInfos: [],
 };
 
 type Listener = () => void;
@@ -94,6 +96,7 @@ async function _startInvoke(
     toolNames: [],
     error: null,
     rawError: null,
+    tokenInfos: [],
   });
 
   if (useWebSocket) {
@@ -151,6 +154,10 @@ async function _startInvoke(
           const cur = _get(agentId);
           const segs = [...cur.segments, { type: "elicitation_request" as const, data }];
           _update(agentId, { segments: segs });
+        },
+        onTokenInfo: (data) => {
+          const cur = _get(agentId);
+          _update(agentId, { tokenInfos: [...cur.tokenInfos, data] });
         },
         onSessionEnd: (data) => {
           _update(agentId, { sessionEnd: data, isStreaming: false, currentToolName: null });
@@ -359,6 +366,7 @@ export function useInvoke(agentId: number, authorizerName?: string) {
     toolNames: snapshot.toolNames,
     error: snapshot.error,
     rawError: snapshot.rawError,
+    tokenInfos: snapshot.tokenInfos,
     invoke,
     cancel,
   };

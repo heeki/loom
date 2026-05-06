@@ -23,8 +23,9 @@ Loom seamlessly weaves together agents, memory stores, MCP servers, and agent-to
 
 ### MCP Servers
 - Register and manage MCP servers with tool discovery
-- OAuth2 authentication and credential provider support
+- OAuth2 authentication and credential provider support with delegation mode (m2m or obo)
 - Per-persona access control (all_tools or selected_tools)
+- Resource export/edit system with pencil-to-edit and JSON export
 
 ### A2A Agents
 - Register Agent-to-Agent protocol agents by base URL with automatic Agent Card fetching
@@ -47,12 +48,15 @@ Loom seamlessly weaves together agents, memory stores, MCP servers, and agent-to
 
 ### Security and Access Control
 - Cognito user authentication with automatic token refresh
-- 3rd-party identity provider support: federate with Microsoft Entra ID, Okta, Auth0, or any Generic OIDC provider via Authorization Code + PKCE flow, with configurable group claim mapping to Loom groups
+- 3rd-party identity provider support: federate with Microsoft Entra ID, Okta, Auth0, or any Generic OIDC provider via Authorization Code + PKCE flow, with configurable group claim mapping to Loom groups and client_type (public/confidential) toggle
 - Two-dimensional group-based authorization: Type groups (t-admin, t-user) for UI view and Resource groups (g-admins-*, g-users-*) for access control (21 scopes total)
 - IAM role, authorizer, and credential management
 - Admin user view switching to preview scoped experiences
 - Human-in-the-loop (HITL) approval policies: configurable policies for tool-level human oversight with four methods — agentic loop hooks, tool context interrupts, MCP elicitation, and harness inline functions
 - Approval audit trail with per-agent queryable log
+- On-behalf-of (OBO) token exchange: RFC 8693 delegation enabling agents to access downstream resources with user-scoped permissions, configurable per MCP server and A2A agent via delegation_mode (m2m/obo) with support for TOKEN_EXCHANGE and JWT_AUTHORIZATION_GRANT flows
+- Token info inspection card showing decoded OBO token claims with group mapping resolution
+- Per-user session ownership filtering in admin invoke panel
 
 ### Platform Catalog and Tagging
 - Unified catalog view across agents, memory, MCP servers, and platform resources

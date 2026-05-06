@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Trash2, Plus, FlaskConical, ChevronDown, ChevronRight, Pencil, ArrowRightLeft } from "lucide-react";
 import { JsonConfigSection } from "@/components/JsonConfigSection";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   listIdentityProviders,
   createIdentityProvider,
@@ -58,6 +59,7 @@ interface IdentityProviderPanelProps {
 }
 
 export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) {
+  const { logout } = useAuth();
   const [providers, setProviders] = useState<IdentityProviderResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -73,6 +75,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
   const [formIssuerUrl, setFormIssuerUrl] = useState("");
   const [formClientId, setFormClientId] = useState("");
   const [formClientSecret, setFormClientSecret] = useState("");
+  const [formClientType, setFormClientType] = useState("public");
   const [formScopes, setFormScopes] = useState("");
   const [formAudience, setFormAudience] = useState("");
   const [formGroupClaimPath, setFormGroupClaimPath] = useState("");
@@ -99,6 +102,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
     setFormIssuerUrl("");
     setFormClientId("");
     setFormClientSecret("");
+    setFormClientType("public");
     setFormScopes("");
     setFormAudience("");
     setFormGroupClaimPath("");
@@ -118,6 +122,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
       if (obj.issuer_url) setFormIssuerUrl(obj.issuer_url);
       if (obj.client_id) setFormClientId(obj.client_id);
       if (obj.client_secret) setFormClientSecret(obj.client_secret);
+      if (obj.client_type) setFormClientType(obj.client_type);
       if (obj.scopes) setFormScopes(obj.scopes);
       if (obj.audience) setFormAudience(obj.audience);
       if (obj.group_claim_path) setFormGroupClaimPath(obj.group_claim_path);
@@ -128,7 +133,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
           if (Array.isArray(val)) {
             for (const g of val as string[]) reversed[g] = key;
           } else if (typeof val === "string") {
-            reversed[key] = val;
+            reversed[val] = key;
           }
         }
         setFormMappings(reversed);
@@ -141,18 +146,19 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
   };
 
   const handleJsonExport = (): string => {
-    const groupMappings: Record<string, string[]> = {};
+    const groupMappings: Record<string, string> = {};
     for (const [loomGroup, uuid] of Object.entries(formMappings)) {
       const trimmed = uuid.trim();
       if (!trimmed) continue;
-      if (!groupMappings[trimmed]) groupMappings[trimmed] = [];
-      groupMappings[trimmed].push(loomGroup);
+      groupMappings[trimmed] = loomGroup;
     }
     return JSON.stringify({
       name: formName,
       provider_type: formProviderType,
       issuer_url: formIssuerUrl,
       client_id: formClientId,
+      client_secret: formClientSecret || undefined,
+      client_type: formClientType,
       scopes: formScopes || undefined,
       audience: formAudience || undefined,
       group_claim_path: formGroupClaimPath || undefined,
@@ -168,6 +174,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
     setFormIssuerUrl(idp.issuer_url);
     setFormClientId(idp.client_id);
     setFormClientSecret("");
+    setFormClientType(idp.client_type || "public");
     setFormScopes(idp.scopes || "");
     setFormAudience(idp.audience || "");
     setFormGroupClaimPath(idp.group_claim_path || "");
@@ -201,6 +208,12 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
   const handleSave = async () => {
     setSaving(true);
     setError(null);
+
+    // Determine upfront if this save will switch the active IdP.
+    const savingAsActive = formStatus === "active";
+    const currentActive = providers.find((p) => p.status === "active");
+    const isIdPSwitch = savingAsActive && (!currentActive || currentActive.client_id !== formClientId);
+
     try {
       const groupMappings: Record<string, string[]> = {};
       for (const [loomGroup, uuid] of Object.entries(formMappings)) {
@@ -217,6 +230,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
           issuer_url: formIssuerUrl,
           client_id: formClientId,
           client_secret: formClientSecret || undefined,
+          client_type: formClientType,
           scopes: formScopes || undefined,
           audience: formAudience || undefined,
           group_claim_path: formGroupClaimPath || undefined,
@@ -230,6 +244,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
           issuer_url: formIssuerUrl,
           client_id: formClientId,
           client_secret: formClientSecret || undefined,
+          client_type: formClientType,
           scopes: formScopes || undefined,
           audience: formAudience || undefined,
           group_claim_path: formGroupClaimPath || undefined,
@@ -238,11 +253,22 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
         };
         await createIdentityProvider(data);
       }
+
+      if (isIdPSwitch) {
+        logout();
+        return;
+      }
+
       resetForm();
       setShowForm(false);
       setEditingId(null);
       await fetchProviders();
     } catch (e) {
+      // Any failure after saving an active IdP means the switch likely took effect
+      if (isIdPSwitch || savingAsActive) {
+        logout();
+        return;
+      }
       setError(e instanceof Error ? e.message : "Failed to save identity provider");
     } finally {
       setSaving(false);
@@ -262,9 +288,22 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
   const handleToggleStatus = async (idp: IdentityProviderResponse) => {
     try {
       const newStatus = idp.status === "active" ? "inactive" : "active";
+      const currentActive = providers.find((p) => p.status === "active");
+      const isSwitching = newStatus === "active" && currentActive && currentActive.id !== idp.id;
+
       await updateIdentityProvider(idp.id, { status: newStatus });
+
+      if (isSwitching) {
+        logout();
+        return;
+      }
       await fetchProviders();
     } catch (e) {
+      // If activating a different IdP caused a 401, the switch took effect
+      if (idp.status !== "active") {
+        logout();
+        return;
+      }
       setError(e instanceof Error ? e.message : "Failed to update status");
     }
   };
@@ -318,7 +357,17 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-[auto_2fr_3fr] gap-4">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Client Type</Label>
+          <Select value={formClientType} onValueChange={setFormClientType}>
+            <SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="public">Public (PKCE)</SelectItem>
+              <SelectItem value="confidential">Confidential</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <div className="space-y-1.5">
           <Label className="text-xs">Client ID</Label>
           <Input value={formClientId} onChange={(e) => setFormClientId(e.target.value)} placeholder="App registration client ID" />
@@ -333,6 +382,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
           />
         </div>
       </div>
+      <p className="text-[10px] text-muted-foreground -mt-2">Public: browser exchanges code directly via PKCE. Confidential: backend proxies code exchange with client secret.</p>
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
@@ -363,6 +413,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
         </div>
       </div>
 
+      {formProviderType === "entra_id" && (
       <div className="space-y-2">
         <Label className="text-xs">Group Mappings</Label>
         <p className="text-[10px] text-muted-foreground">Map each Loom group to its external IdP group identifier (e.g. Entra security group Object ID).</p>
@@ -379,6 +430,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
           </div>
         ))}
       </div>
+      )}
 
       <div className="flex gap-2">
         <Button size="sm" className="min-w-[120px]" onClick={() => void handleSave()} disabled={saving || !formName.trim() || !formIssuerUrl.trim() || !formClientId.trim()}>
@@ -405,7 +457,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
           </p>
         </div>
         <div className="shrink-0 ml-4">
-          <Button size="sm" variant="outline" onClick={() => { resetForm(); setEditingId(null); setShowForm(true); }} disabled={readOnly || showForm}>
+          <Button size="sm" variant="outline" onClick={() => { resetForm(); setEditingId(null); setConfirmDeleteId(null); setShowForm(true); }} disabled={readOnly || showForm}>
             <Plus className="h-3.5 w-3.5 mr-1" />
             Add Identity Provider
           </Button>
@@ -510,6 +562,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
               <div className="pl-6 space-y-3">
                 <div className="rounded border bg-input-bg p-3 space-y-1 text-xs">
                   <div><span className="text-muted-foreground">Client ID: </span><span className="font-mono">{idp.client_id}</span></div>
+                  <div><span className="text-muted-foreground">Client Type: </span><span>{idp.client_type === "confidential" ? "Confidential" : "Public (PKCE)"}</span></div>
                   {idp.has_client_secret && <div><span className="text-muted-foreground">Client Secret: </span><span className="text-muted-foreground italic">(redacted)</span></div>}
                   {idp.scopes && <div><span className="text-muted-foreground">Scopes: </span><span className="break-all">{idp.scopes}</span></div>}
                   {idp.audience && <div><span className="text-muted-foreground">Audience: </span><span className="font-mono break-all">{idp.audience}</span></div>}
@@ -519,7 +572,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
                   {idp.token_endpoint && <div><span className="text-muted-foreground">Token: </span><span className="break-all">{idp.token_endpoint}</span></div>}
                 </div>
 
-                {Object.keys(idp.group_mappings).length > 0 && (
+                {idp.provider_type === "entra_id" && Object.keys(idp.group_mappings).length > 0 && (
                   <div>
                     <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-2">
                       <ArrowRightLeft className="h-3.5 w-3.5" />

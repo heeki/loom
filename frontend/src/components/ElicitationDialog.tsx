@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { MessageSquare, CheckCircle, XCircle } from "lucide-react";
+import { MessageSquare, CheckCircle, XCircle, Clock } from "lucide-react";
 import { submitApprovalDecision } from "@/api/approvals";
 import type { SSEElicitationRequest } from "@/api/types";
 
@@ -23,6 +23,14 @@ export function ElicitationRequestBubble({
   const [submitted, setSubmitted] = useState(resolved ?? false);
   const [submittedSummary, setSubmittedSummary] = useState<string | null>(resolvedSummary ?? null);
   const [selectedChoice, setSelectedChoice] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (submitted) return;
+    const start = Date.now();
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [submitted]);
 
   const properties = (data.schema?.properties ?? {}) as Record<
     string,
@@ -78,12 +86,18 @@ export function ElicitationRequestBubble({
 
   return (
     <div className="flex justify-start">
-      <div className="max-w-[84%] rounded-2xl px-4 py-3 text-sm bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800">
+      <div className="max-w-full rounded-2xl px-4 py-3 text-sm bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800">
         <div className="flex items-center gap-2 text-purple-700 dark:text-purple-300 mb-1">
           <MessageSquare className="h-4 w-4 shrink-0" />
           <span className="font-medium text-xs uppercase tracking-wide">Input Required</span>
           {data.server_name && (
             <span className="text-xs text-muted-foreground">{data.server_name}</span>
+          )}
+          {!submitted && (
+            <span className="text-xs text-muted-foreground ml-auto flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              {elapsed}s / 300s
+            </span>
           )}
         </div>
         {data.message && <p className="text-xs mb-2 whitespace-pre-wrap">{data.message}</p>}

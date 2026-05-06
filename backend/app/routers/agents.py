@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -25,6 +25,8 @@ from app.models.mcp import McpServer, McpServerAccess
 from app.models.session import InvocationSession
 from app.models.invocation import Invocation
 from app.models.tag_policy import TagPolicy
+from app.models.tag_profile import TagProfile
+from app.models.managed_role import ManagedRole
 from app.routers.utils import get_agent_or_404
 
 from app.services.agentcore import describe_runtime, list_runtime_endpoints
@@ -48,6 +50,7 @@ from app.services.iam import (
 from app.services.credential import create_oauth2_credential_provider, delete_credential_provider
 from app.services.harness import (
     create_harness as create_harness_api,
+    update_harness as update_harness_api,
     get_harness as get_harness_api,
     delete_harness as delete_harness_api,
 )
@@ -755,6 +758,9 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
             "oauth2_client_id": s.oauth2_client_id,
             "oauth2_client_secret": s.oauth2_client_secret,
             "oauth2_scopes": s.oauth2_scopes,
+            "delegation_mode": (s.delegation_mode or "m2m"),
+            "obo_grant_type": s.obo_grant_type,
+            "oauth2_audience": s.oauth2_audience,
             "api_key_header_name": s.api_key_header_name,
             "supports_elicitation": s.supports_elicitation == "true",
         }
@@ -771,6 +777,8 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
             "oauth2_client_id": a.oauth2_client_id,
             "oauth2_client_secret": a.oauth2_client_secret,
             "oauth2_scopes": a.oauth2_scopes,
+            "delegation_mode": (a.delegation_mode or "m2m"),
+            "obo_grant_type": a.obo_grant_type,
         }
         for a in a2a_records
     ]
@@ -929,10 +937,10 @@ def _deploy_agent_background(
                 "transport": server["transport_type"],
                 "endpoint_url": server["endpoint_url"],
             }
-            if server.get("supports_elicitation"):
-                entry["dynamic_only"] = True
             if server["auth_type"] == "oauth2":
                 cp_name = f"loom-{request.name}-mcp-{server['name']}"
+                mcp_delegation = server.get("delegation_mode") or "m2m"
+                mcp_obo_grant = server.get("obo_grant_type")
                 try:
                     cp_response = create_oauth2_credential_provider(
                         name=cp_name,
@@ -941,10 +949,12 @@ def _deploy_agent_background(
                         auth_server_url=server["oauth2_well_known_url"] or "",
                         region=region,
                         tags=resolved_tags,
+                        delegation_mode=mcp_delegation,
+                        obo_grant_type=mcp_obo_grant,
                     )
                     logger.info(
-                        "Created credential provider '%s' for MCP server '%s' (callback: %s)",
-                        cp_name, server["name"], cp_response.get("callbackUrl"),
+                        "Created credential provider '%s' for MCP server '%s' (delegation=%s callback=%s)",
+                        cp_name, server["name"], mcp_delegation, cp_response.get("callbackUrl"),
                     )
                 except Exception as e:
                     logger.error(
@@ -958,11 +968,16 @@ def _deploy_agent_background(
                 auth_entry: dict[str, str] = {
                     "type": "oauth2",
                     "credential_provider_name": cp_name,
+                    "delegation_mode": mcp_delegation,
                 }
+                if mcp_obo_grant:
+                    auth_entry["obo_grant_type"] = mcp_obo_grant
                 if server["oauth2_well_known_url"]:
                     auth_entry["well_known_endpoint"] = server["oauth2_well_known_url"]
                 if server["oauth2_scopes"]:
                     auth_entry["scopes"] = server["oauth2_scopes"]
+                if server.get("oauth2_audience"):
+                    auth_entry["audience"] = server["oauth2_audience"]
                 entry["auth"] = auth_entry
             elif server["auth_type"] == "api_key":
                 secret_name = f"loom/mcp/{server['name']}/api-key/{{actor_id}}"
@@ -971,6 +986,9 @@ def _deploy_agent_background(
                     "credentials_secret_arn": secret_name,
                     "api_key_header_name": server["api_key_header_name"] or "x-api-key",
                 }
+            entry["delegation_mode"] = server.get("delegation_mode") or "m2m"
+            if server.get("supports_elicitation"):
+                entry["supports_elicitation"] = "true"
             mcp_server_configs.append(entry)
 
         # Build A2A agent configs from snapshots
@@ -983,6 +1001,8 @@ def _deploy_agent_background(
             }
             if a2a["auth_type"] == "oauth2":
                 cp_name = f"loom-{request.name}-a2a-{a2a['name']}"
+                a2a_delegation = a2a.get("delegation_mode") or "m2m"
+                a2a_obo_grant = a2a.get("obo_grant_type")
                 try:
                     cp_response = create_oauth2_credential_provider(
                         name=cp_name,
@@ -991,10 +1011,12 @@ def _deploy_agent_background(
                         auth_server_url=a2a["oauth2_well_known_url"] or "",
                         region=region,
                         tags=resolved_tags,
+                        delegation_mode=a2a_delegation,
+                        obo_grant_type=a2a_obo_grant,
                     )
                     logger.info(
-                        "Created credential provider '%s' for A2A agent '%s' (callback: %s)",
-                        cp_name, a2a["name"], cp_response.get("callbackUrl"),
+                        "Created credential provider '%s' for A2A agent '%s' (delegation=%s callback=%s)",
+                        cp_name, a2a["name"], a2a_delegation, cp_response.get("callbackUrl"),
                     )
                 except Exception as e:
                     logger.error(
@@ -1008,12 +1030,16 @@ def _deploy_agent_background(
                 a2a_auth: dict[str, str] = {
                     "type": "oauth2",
                     "credential_provider_name": cp_name,
+                    "delegation_mode": a2a_delegation,
                 }
+                if a2a_obo_grant:
+                    a2a_auth["obo_grant_type"] = a2a_obo_grant
                 if a2a["oauth2_well_known_url"]:
                     a2a_auth["well_known_endpoint"] = a2a["oauth2_well_known_url"]
                 if a2a["oauth2_scopes"]:
                     a2a_auth["scopes"] = a2a["oauth2_scopes"]
                 entry["auth"] = a2a_auth
+            entry["delegation_mode"] = a2a.get("delegation_mode") or "m2m"
             a2a_agent_configs.append(entry)
 
         # Build memory configs from snapshots
@@ -1038,6 +1064,7 @@ def _deploy_agent_background(
         env_vars = {
             "AGENT_CONFIG_JSON": config_json,
             "OTEL_SERVICE_NAME": request.name,
+            "WORKLOAD_IDENTITY_NAME": f"loom-{request.name}",
             "AGENT_OBSERVABILITY_ENABLED": "true",
             "AWS_REGION": region,
         }
@@ -1283,6 +1310,13 @@ def _deploy_harness(request: AgentCreateRequest, db: Session, background_tasks: 
             )
         )
 
+    existing = db.query(Agent).filter(Agent.name == request.name, Agent.source == "harness").first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"A harness agent named '{request.name}' already exists (id={existing.id}). Use the update endpoint or delete it first.",
+        )
+
     region = os.getenv("AWS_REGION", DEFAULT_REGION)
     account_id = os.getenv("AWS_ACCOUNT_ID", "")
 
@@ -1311,6 +1345,8 @@ def _deploy_harness(request: AgentCreateRequest, db: Session, background_tasks: 
                 "oauth2_client_secret": server.oauth2_client_secret,
                 "oauth2_well_known_url": server.oauth2_well_known_url,
                 "oauth2_scopes": server.oauth2_scopes,
+                "delegation_mode": (server.delegation_mode or "m2m"),
+                "obo_grant_type": server.obo_grant_type,
                 "api_key_header_name": server.api_key_header_name,
                 "supports_elicitation": server.supports_elicitation == "true",
             })
@@ -1459,6 +1495,8 @@ def _deploy_harness_background(
             cp_arn: str | None = None
             if server["auth_type"] == "oauth2":
                 cp_name = f"loom-{name}-mcp-{server['name']}"
+                mcp_delegation = server.get("delegation_mode") or "m2m"
+                mcp_obo_grant = server.get("obo_grant_type")
                 try:
                     cp_response = create_oauth2_credential_provider(
                         name=cp_name,
@@ -1467,6 +1505,8 @@ def _deploy_harness_background(
                         auth_server_url=server["oauth2_well_known_url"] or "",
                         region=region,
                         tags=resolved_tags if resolved_tags else None,
+                        delegation_mode=mcp_delegation,
+                        obo_grant_type=mcp_obo_grant,
                     )
                     cp_arn = cp_response.get("arn") or cp_response.get("credentialProviderArn")
                     logger.info(
@@ -1493,10 +1533,18 @@ def _deploy_harness_background(
                 "endpoint_url": server["endpoint_url"],
                 "auth_type": server["auth_type"],
             }
-            if server.get("supports_elicitation"):
-                mcp_entry["dynamic_only"] = True
             if cp_name:
-                mcp_entry["auth"] = {"type": "oauth2", "credential_provider_name": cp_name}
+                harness_auth: dict[str, str] = {
+                    "type": "oauth2",
+                    "credential_provider_name": cp_name,
+                    "delegation_mode": server.get("delegation_mode") or "m2m",
+                }
+                if server.get("obo_grant_type"):
+                    harness_auth["obo_grant_type"] = server["obo_grant_type"]
+                mcp_entry["auth"] = harness_auth
+            mcp_entry["delegation_mode"] = server.get("delegation_mode") or "m2m"
+            if server.get("supports_elicitation"):
+                mcp_entry["supports_elicitation"] = "true"
             mcp_server_configs.append(mcp_entry)
 
         harness_tools.extend(extra_harness_tools)
@@ -1614,6 +1662,171 @@ def _deploy_harness_background(
         db.close()
 
 
+def _update_harness_background(
+    agent_id: int,
+    harness_id: str,
+    name: str,
+    execution_role_arn: str,
+    model_id: str,
+    system_prompt: str,
+    mcp_snapshots: list[dict[str, Any]],
+    extra_harness_tools: list[dict[str, Any]],
+    max_iterations: int | None,
+    max_tokens: int | None,
+    authorizer_config: dict[str, Any] | None,
+    network_mode: str,
+    idle_timeout: int | None,
+    max_lifetime: int | None,
+    resolved_tags: dict[str, str],
+    old_cp_names: set[str],
+    region: str,
+    account_id: str,
+) -> None:
+    """Background task that updates an existing harness via UpdateHarness API."""
+    db = SessionLocal()
+    try:
+        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        if not agent:
+            logger.error("Background harness update: agent %s not found", agent_id)
+            return
+
+        # --- Step 1: Handle credential providers for OAuth2 MCP servers ---
+        new_cp_names: set[str] = set()
+        harness_tools: list[dict[str, Any]] = []
+        mcp_server_configs: list[dict[str, Any]] = []
+
+        for server in mcp_snapshots:
+            cp_name: str | None = None
+            if server["auth_type"] == "oauth2":
+                cp_name = f"loom-{name}-mcp-{server['name']}"
+                new_cp_names.add(cp_name)
+                mcp_delegation = server.get("delegation_mode") or "m2m"
+                mcp_obo_grant = server.get("obo_grant_type")
+                if cp_name not in old_cp_names:
+                    try:
+                        from app.services.deployment import create_oauth2_credential_provider
+                        create_oauth2_credential_provider(
+                            name=cp_name,
+                            client_id=server["oauth2_client_id"] or "",
+                            client_secret=server["oauth2_client_secret"] or "",
+                            auth_server_url=server["oauth2_well_known_url"] or "",
+                            region=region,
+                            tags=resolved_tags if resolved_tags else None,
+                            delegation_mode=mcp_delegation,
+                            obo_grant_type=mcp_obo_grant,
+                        )
+                        logger.info("Created credential provider '%s' for MCP server '%s'", cp_name, server["name"])
+                    except Exception as e:
+                        logger.error("Failed to create credential provider for MCP '%s': %s", server["name"], e)
+                        agent.status = "FAILED"
+                        agent.deployment_status = "credential_creation_failed"
+                        db.commit()
+                        return
+
+            if server["auth_type"] != "oauth2":
+                harness_tools.append(_build_harness_tool_for_mcp(server))
+
+            mcp_entry: dict[str, Any] = {
+                "name": server["name"],
+                "endpoint_url": server["endpoint_url"],
+                "auth_type": server["auth_type"],
+            }
+            if cp_name:
+                harness_auth: dict[str, str] = {
+                    "type": "oauth2",
+                    "credential_provider_name": cp_name,
+                    "delegation_mode": server.get("delegation_mode") or "m2m",
+                }
+                if server.get("obo_grant_type"):
+                    harness_auth["obo_grant_type"] = server["obo_grant_type"]
+                mcp_entry["auth"] = harness_auth
+            mcp_entry["delegation_mode"] = server.get("delegation_mode") or "m2m"
+            if server.get("supports_elicitation"):
+                mcp_entry["supports_elicitation"] = "true"
+            mcp_server_configs.append(mcp_entry)
+
+        harness_tools.extend(extra_harness_tools)
+
+        # Delete old credential providers no longer needed
+        removed_cps = old_cp_names - new_cp_names
+        for cp_name in removed_cps:
+            try:
+                from app.services.deployment import delete_oauth2_credential_provider
+                delete_oauth2_credential_provider(cp_name, region)
+                logger.info("Deleted old credential provider '%s'", cp_name)
+            except Exception as e:
+                logger.warning("Failed to delete old credential provider '%s': %s", cp_name, e)
+
+        # --- Step 2: Update harness via API ---
+        agent.deployment_status = "updating"
+        db.commit()
+
+        all_mcp_tools = [_build_harness_tool_for_mcp(s) for s in mcp_snapshots]
+        all_mcp_tools.extend(extra_harness_tools)
+
+        config_json = json.dumps({
+            "system_prompt": system_prompt,
+            "model_id": model_id,
+            "max_tokens": max_tokens,
+            "harness_config": {
+                "tools": all_mcp_tools,
+                "deploy_tools": harness_tools,
+                "max_iterations": max_iterations,
+            },
+            "integrations": {
+                "mcp_servers": mcp_server_configs,
+                "a2a_agents": [],
+                "memory": {"enabled": False, "resources": []},
+            },
+        })
+
+        db.add(ConfigEntry(
+            agent_id=agent.id,
+            key="AGENT_CONFIG_JSON",
+            value=config_json,
+            is_secret=False,
+            source="env_var",
+        ))
+        db.commit()
+
+        response = update_harness_api(
+            harness_id=harness_id,
+            execution_role_arn=execution_role_arn,
+            model_id=model_id,
+            system_prompt=system_prompt,
+            tools=harness_tools if harness_tools else None,
+            max_iterations=max_iterations,
+            max_tokens=max_tokens,
+            authorizer_config=authorizer_config,
+            network_mode=network_mode,
+            idle_timeout=idle_timeout,
+            max_lifetime=max_lifetime,
+            region=region,
+        )
+
+        harness_status = response.get("status", "UPDATING")
+        agent.status = "READY" if harness_status == "READY" else harness_status
+        agent.deployment_status = "READY" if harness_status == "READY" else "deployed"
+        agent.deployed_at = datetime.utcnow()
+        agent.last_refreshed_at = datetime.utcnow()
+        db.commit()
+
+        logger.info("Harness update complete: agent=%s harness_id=%s", agent_id, harness_id)
+
+    except Exception as e:
+        logger.error("Failed to update harness for agent %s: %s", agent_id, e)
+        try:
+            agent = db.query(Agent).filter(Agent.id == agent_id).first()
+            if agent:
+                agent.deployment_status = "failed"
+                agent.status = "FAILED"
+                db.commit()
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
 def _is_resource_not_found(e: Exception) -> bool:
     """Return True if an AWS error indicates the resource no longer exists."""
     from botocore.exceptions import ClientError
@@ -1658,9 +1871,14 @@ def list_agents(
         allowed_tags = [g.replace("g-users-", "", 1) for g in user_groups]
         agents = [a for a in agents if a.get_tags().get("loom:group") in allowed_tags]
 
-    # Registry visibility: t-user only sees APPROVED or unregistered agents
+    # Registry visibility: when registry is enabled, t-user only sees APPROVED agents
     if "t-admin" not in user.groups:
-        agents = [a for a in agents if not a.registry_status or a.registry_status == "APPROVED"]
+        from app.services.registry import get_registry_client
+        reg_client = get_registry_client()
+        if reg_client.registry_id:
+            agents = [a for a in agents if a.registry_status == "APPROVED"]
+        else:
+            agents = [a for a in agents if not a.registry_status or a.registry_status == "APPROVED"]
 
     return [_agent_response(agent, db) for agent in agents]
 
@@ -1994,11 +2212,14 @@ def _delete_agent_background(
             db.query(Invocation).filter(Invocation.session_id.in_(session_ids)).delete(synchronize_session="fetch")
         db.query(InvocationSession).filter(InvocationSession.agent_id == agent_id).delete()
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
-        if agent:
+        if agent and agent.runtime_id == runtime_id:
             db.delete(agent)
             db.flush()
             db.commit()
             logger.info("Purged agent %d and its sessions from database", agent_id)
+        elif agent:
+            db.commit()
+            logger.info("Agent %d has a different runtime_id (%s vs %s); skipping purge (likely recreated)", agent_id, agent.runtime_id, runtime_id)
         else:
             db.commit()
             logger.info("Agent %d already removed from database; cleaned up orphan sessions", agent_id)
@@ -2171,6 +2392,160 @@ def redeploy_agent_endpoint(agent_id: int, user: UserInfo = Depends(require_scop
     return _agent_response(agent, db)
 
 
+@router.put("/{agent_id}/redeploy-harness", response_model=AgentResponse)
+def redeploy_harness_agent(
+    agent_id: int,
+    request: AgentCreateRequest,
+    background_tasks: BackgroundTasks,
+    user: UserInfo = Depends(require_scopes("agent:write")),
+    db: Session = Depends(get_db),
+) -> AgentResponse:
+    """Update and redeploy a harness agent with new configuration.
+
+    Uses the UpdateHarness API to modify the existing harness in-place,
+    then updates the local agent record and config.
+    """
+    agent = get_agent_or_404(agent_id, db)
+
+    if agent.source != "harness":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only harness agents can be updated via this endpoint",
+        )
+
+    if not agent.harness_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Agent has no harness_id — cannot update. Delete and redeploy instead.",
+        )
+
+    region = os.getenv("AWS_REGION", DEFAULT_REGION)
+    account_id = os.getenv("AWS_ACCOUNT_ID", "")
+
+    # Clean up old credential providers that are no longer needed
+    old_config_entry = db.query(ConfigEntry).filter(
+        ConfigEntry.agent_id == agent_id, ConfigEntry.key == "AGENT_CONFIG_JSON"
+    ).first()
+    old_cp_names: set[str] = set()
+    if old_config_entry:
+        try:
+            old_config = json.loads(old_config_entry.value)
+            old_mcp = old_config.get("integrations", {}).get("mcp_servers", [])
+            for srv in old_mcp:
+                cp_name = (srv.get("auth", {}) or {}).get("credential_provider_name")
+                if cp_name:
+                    old_cp_names.add(cp_name)
+        except (json.JSONDecodeError, TypeError):
+            pass
+        db.delete(old_config_entry)
+        db.commit()
+
+    # Update agent fields
+    resolved_tags, _ = _resolve_tags(db, request.tags)
+    system_prompt = _build_system_prompt(request)
+
+    agent.description = request.description or agent.description
+    agent.execution_role_arn = request.role_arn or agent.execution_role_arn
+    agent.network_mode = request.network_mode or agent.network_mode
+    agent.status = "UPDATING"
+    agent.deployment_status = "updating"
+
+    effective_allowed = request.allowed_model_ids if request.allowed_model_ids else [request.model_id]
+    if request.model_id and request.model_id not in effective_allowed:
+        effective_allowed = [request.model_id] + effective_allowed
+    agent.set_allowed_model_ids(effective_allowed)
+
+    if resolved_tags:
+        agent.set_tags(resolved_tags)
+
+    # Rebuild authorizer config
+    authorizer_config = None
+    user_client_id = os.getenv("LOOM_COGNITO_USER_CLIENT_ID", "")
+    if request.authorizer_type == "cognito" and request.authorizer_pool_id:
+        jwt_config: dict[str, Any] = {
+            "discoveryUrl": f"https://cognito-idp.{region}.amazonaws.com/{request.authorizer_pool_id}/.well-known/openid-configuration"
+        }
+        allowed_clients = list(request.authorizer_allowed_clients) if request.authorizer_allowed_clients else []
+        if user_client_id and user_client_id not in allowed_clients:
+            allowed_clients.append(user_client_id)
+        if allowed_clients:
+            jwt_config["allowedClients"] = allowed_clients
+        if request.authorizer_allowed_audience:
+            jwt_config["allowedAudience"] = request.authorizer_allowed_audience
+        if request.authorizer_allowed_scopes:
+            jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
+        authorizer_config = {"customJWTAuthorizer": jwt_config}
+    elif request.authorizer_type in ("other", "entra_id", "okta") and request.authorizer_discovery_url:
+        jwt_config = {"discoveryUrl": request.authorizer_discovery_url}
+        if request.authorizer_allowed_audience:
+            jwt_config["allowedAudience"] = request.authorizer_allowed_audience
+        if request.authorizer_allowed_clients and request.authorizer_type not in ("entra_id", "okta"):
+            jwt_config["allowedClients"] = request.authorizer_allowed_clients
+        if request.authorizer_allowed_scopes:
+            jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
+        authorizer_config = {"customJWTAuthorizer": jwt_config}
+
+    if authorizer_config:
+        jwt = authorizer_config.get("customJWTAuthorizer", {})
+        agent.set_authorizer_config({
+            "type": request.authorizer_type,
+            "pool_id": request.authorizer_pool_id,
+            "discovery_url": jwt.get("discoveryUrl"),
+            "allowed_audience": jwt.get("allowedAudience", []),
+            "allowed_clients": jwt.get("allowedClients", []),
+            "allowed_scopes": jwt.get("allowedScopes", []),
+        })
+
+    db.commit()
+    db.refresh(agent)
+
+    # Snapshot MCP servers
+    mcp_snapshots: list[dict[str, Any]] = []
+    if request.mcp_servers:
+        mcp_records = db.query(McpServer).filter(McpServer.id.in_(request.mcp_servers)).all()
+        for server in mcp_records:
+            mcp_snapshots.append({
+                "name": server.name,
+                "endpoint_url": server.endpoint_url,
+                "transport_type": server.transport_type,
+                "auth_type": server.auth_type,
+                "oauth2_client_id": server.oauth2_client_id,
+                "oauth2_client_secret": server.oauth2_client_secret,
+                "oauth2_well_known_url": server.oauth2_well_known_url,
+                "oauth2_scopes": server.oauth2_scopes,
+                "delegation_mode": (server.delegation_mode or "m2m"),
+                "obo_grant_type": server.obo_grant_type,
+                "api_key_header_name": server.api_key_header_name,
+                "supports_elicitation": server.supports_elicitation == "true",
+            })
+
+    extra_harness_tools = request.harness_tools or []
+
+    background_tasks.add_task(
+        _update_harness_background,
+        agent_id=agent_id,
+        harness_id=agent.harness_id,
+        name=agent.name,
+        execution_role_arn=agent.execution_role_arn,
+        model_id=request.model_id,
+        system_prompt=system_prompt,
+        mcp_snapshots=mcp_snapshots,
+        extra_harness_tools=extra_harness_tools,
+        max_iterations=request.harness_max_iterations,
+        max_tokens=request.harness_max_tokens,
+        authorizer_config=authorizer_config,
+        network_mode=request.network_mode,
+        idle_timeout=request.idle_timeout,
+        max_lifetime=request.max_lifetime,
+        resolved_tags=resolved_tags,
+        old_cp_names=old_cp_names,
+        region=region,
+        account_id=account_id,
+    )
+
+    return _agent_response(agent, db)
+
+
 @router.get("/{agent_id}/config", response_model=list[ConfigEntryResponse])
 def get_agent_config(agent_id: int, user: UserInfo = Depends(require_scopes("agent:read")), db: Session = Depends(get_db)) -> list[ConfigEntryResponse]:
     """Get all configuration entries for an agent. Secret values are masked."""
@@ -2183,6 +2558,116 @@ def get_agent_config(agent_id: int, user: UserInfo = Depends(require_scopes("age
             d["value"] = "********"
         result.append(ConfigEntryResponse(**d))
     return result
+
+
+@router.get("/{agent_id}/export")
+def export_agent(agent_id: int, user: UserInfo = Depends(require_scopes("admin:write")), db: Session = Depends(get_db)):
+    """Export agent config in form-compatible format. Super admin only."""
+    agent = get_agent_or_404(agent_id, db)
+    data: dict[str, Any] = {}
+
+    # Extract from AGENT_CONFIG_JSON
+    entries = db.query(ConfigEntry).filter(ConfigEntry.agent_id == agent_id).all()
+    agent_config: dict = {}
+    for entry in entries:
+        if entry.key == "AGENT_CONFIG_JSON":
+            try:
+                agent_config = json.loads(entry.value)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    # Order matches form layout
+    data["deployment_type"] = "managed" if agent.source == "harness" else "custom"
+    data["name"] = agent.name
+    if agent.description:
+        data["description"] = agent.description
+
+    system_prompt = agent_config.get("system_prompt", "")
+    if system_prompt:
+        data["system_prompt"] = system_prompt
+
+    if agent_config.get("model_id"):
+        data["model"] = agent_config["model_id"]
+    allowed = agent.get_allowed_model_ids()
+    if allowed:
+        data["allowed_models"] = allowed
+
+    if agent.network_mode and agent.network_mode != "PUBLIC":
+        data["network_mode"] = agent.network_mode
+
+    if agent.execution_role_arn:
+        managed_role = db.query(ManagedRole).filter(ManagedRole.role_arn == agent.execution_role_arn).first()
+        if managed_role:
+            data["role"] = managed_role.role_name
+        else:
+            data["role_arn"] = agent.execution_role_arn
+
+    tags = agent.get_tags()
+    if tags:
+        profiles = db.query(TagProfile).all()
+        matched_profile = None
+        best_match_size = 0
+        for profile in profiles:
+            profile_tags = profile.get_tags()
+            if not profile_tags:
+                continue
+            if all(tags.get(k) == v for k, v in profile_tags.items()) and len(profile_tags) > best_match_size:
+                matched_profile = profile
+                best_match_size = len(profile_tags)
+        if matched_profile:
+            data["tags"] = matched_profile.name
+        else:
+            data["tags"] = tags
+
+    auth_config = agent.get_authorizer_config()
+    if auth_config:
+        ac = None
+        if auth_config.get("pool_id"):
+            ac = db.query(AuthorizerConfig).filter(AuthorizerConfig.pool_id == auth_config["pool_id"]).first()
+        if not ac and auth_config.get("discovery_url"):
+            ac = db.query(AuthorizerConfig).filter(AuthorizerConfig.discovery_url == auth_config["discovery_url"]).first()
+        if ac:
+            data["authorizer"] = ac.name
+
+    if agent.source == "harness":
+        max_iterations = agent_config.get("max_iterations") or agent_config.get("harness", {}).get("max_iterations")
+        if max_iterations:
+            data["max_iterations"] = max_iterations
+        max_tokens = agent_config.get("max_tokens") or agent_config.get("harness", {}).get("max_tokens")
+        if max_tokens:
+            data["max_tokens"] = max_tokens
+        harness_cfg = agent_config.get("harness_config", {})
+        deploy_tools = harness_cfg.get("deploy_tools", [])
+        for tool in deploy_tools:
+            if tool.get("type") == "inline_function" and tool.get("name") == "user_confirmation":
+                data["human_confirmation"] = True
+                inline_fn = tool.get("config", {}).get("inlineFunction", {})
+                if inline_fn.get("description"):
+                    data["confirmation_policy"] = inline_fn["description"]
+                break
+
+    integrations = agent_config.get("integrations", {})
+    mcp_servers = integrations.get("mcp_servers", [])
+    if mcp_servers:
+        names = [s.get("name", "") for s in mcp_servers if s.get("name")]
+        verified = [n for n in names if db.query(McpServer).filter(McpServer.name == n).first()]
+        if verified:
+            data["mcp_servers"] = verified
+    a2a_agents = integrations.get("a2a_agents", [])
+    if a2a_agents:
+        names = [a.get("name", "") for a in a2a_agents if a.get("name")]
+        verified = [n for n in names if db.query(A2aAgentModel).filter(A2aAgentModel.name == n).first()]
+        if verified:
+            data["a2a_agents"] = verified
+    memory_cfg = integrations.get("memory", {})
+    memory_resources = memory_cfg.get("resources", [])
+    if memory_resources:
+        names = [m.get("name", "") for m in memory_resources if m.get("name")]
+        verified = [n for n in names if db.query(Memory).filter(Memory.name == n).first()]
+        if verified:
+            data["memories"] = verified
+
+    return data
 
 
 @router.patch("/{agent_id}", response_model=AgentResponse)
@@ -2515,3 +3000,121 @@ async def get_agent_integration(
     if agent.status != "READY":
         raise HTTPException(status_code=400, detail="Integration info is only available for agents with status READY")
     return _build_integration_info(agent, db)
+
+
+# ---------------------------------------------------------------------------
+# OBO validation / dry-run test endpoint (R7)
+# ---------------------------------------------------------------------------
+class TestOboRequest(BaseModel):
+    credential_provider_name: str = Field(..., description="Name of the OBO credential provider to exercise")
+    scopes: list[str] = Field(default_factory=list, description="Scopes requested on the downstream token")
+    workload_name: str | None = Field(default=None, description="Optional ACPS workload identity name (defaults to agent-derived)")
+
+
+class TestOboResponse(BaseModel):
+    success: bool
+    message: str
+    access_token_present: bool = False
+    claims: dict | None = None
+    scopes: str | None = None
+    error: str | None = None
+
+
+def _decode_jwt_claims(token: str) -> dict | None:
+    """Best-effort decode of a JWT's payload (no signature verification)."""
+    import base64
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return None
+        padded = parts[1] + "=" * (-len(parts[1]) % 4)
+        return json.loads(base64.urlsafe_b64decode(padded))
+    except Exception:
+        return None
+
+
+@router.post("/{agent_id}/test-obo", response_model=TestOboResponse)
+def test_obo_exchange(
+    agent_id: int,
+    body: TestOboRequest,
+    request: Request,
+    user: UserInfo = Depends(require_scopes("agent:write")),
+    db: Session = Depends(get_db),
+) -> TestOboResponse:
+    """Dry-run an OBO token exchange for a given credential provider.
+
+    Uses the caller's Authorization bearer token as the user subject token,
+    calls ACPS ``get-resource-oauth2-token`` with
+    ``oauth2Flow=ON_BEHALF_OF_TOKEN_EXCHANGE``, and returns the decoded claims.
+    """
+    agent = get_agent_or_404(agent_id, db)
+
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User access token required in Authorization header",
+        )
+    user_token = auth_header[7:]
+
+    region = agent.region or os.getenv("AWS_REGION", "us-east-1")
+    workload_name = body.workload_name or f"loom-{agent.name}"
+
+    import boto3
+    try:
+        acps = boto3.client("acps", region_name=region)
+    except Exception as e:
+        logger.warning("ACPS client not available: %s", e)
+        return TestOboResponse(
+            success=False,
+            message="ACPS client is not configured in this environment",
+            error=str(e),
+        )
+
+    try:
+        wl = acps.get_workload_access_token_for_jwt(
+            workloadName=workload_name,
+            userToken=user_token,
+        )
+        workload_token = wl.get("workloadAccessToken")
+        if not workload_token:
+            return TestOboResponse(
+                success=False,
+                message="ACPS returned no workload access token",
+                error="missing workloadAccessToken",
+            )
+
+        kwargs: dict[str, Any] = {
+            "workloadIdentityToken": workload_token,
+            "resourceCredentialProviderName": body.credential_provider_name,
+            "oauth2Flow": "ON_BEHALF_OF_TOKEN_EXCHANGE",
+        }
+        if body.scopes:
+            kwargs["scopes"] = body.scopes
+
+        token_resp = acps.get_resource_oauth2_token(**kwargs)
+        access_token = token_resp.get("accessToken")
+        if not access_token:
+            return TestOboResponse(
+                success=False,
+                message="OBO exchange did not return an access token",
+                error="missing accessToken",
+            )
+
+        claims = _decode_jwt_claims(access_token)
+        scp = claims.get("scp") if isinstance(claims, dict) else None
+        return TestOboResponse(
+            success=True,
+            message="OBO token exchange succeeded",
+            access_token_present=True,
+            claims=claims,
+            scopes=scp,
+        )
+    except Exception as e:
+        logger.exception("OBO dry-run failed for agent=%s provider=%s: %s",
+                         agent_id, body.credential_provider_name, e)
+        return TestOboResponse(
+            success=False,
+            message="OBO token exchange failed",
+            error=str(e),
+        )

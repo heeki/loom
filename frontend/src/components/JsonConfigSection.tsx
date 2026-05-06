@@ -7,7 +7,7 @@ interface JsonConfigSectionProps {
   /** Called when the user clicks Apply. Return an error string on failure, or null on success. */
   onApply: (json: string) => string | null | Promise<string | null>;
   /** Called when the user clicks Export. Return the JSON string to display. */
-  onExport: () => string;
+  onExport: () => string | Promise<string>;
   /** Optional label text (defaults to "Paste JSON"). */
   label?: string;
   /** Placeholder text for the textarea. */
@@ -38,11 +38,16 @@ export function JsonConfigSection({
     }
   };
 
-  const handleExport = () => {
-    const exported = onExport();
-    setJsonInput(exported);
-    setJsonError("");
-    if (!showSection) setShowSection(true);
+  const handleExport = async () => {
+    try {
+      const exported = await Promise.resolve(onExport());
+      setJsonInput(exported);
+      setJsonError("");
+      if (!showSection) setShowSection(true);
+    } catch (e) {
+      setJsonError(e instanceof Error ? e.message : "Export failed");
+      if (!showSection) setShowSection(true);
+    }
   };
 
   const handleCancel = () => {
@@ -89,7 +94,7 @@ export function JsonConfigSection({
               type="button"
               size="sm"
               variant="outline"
-              onClick={handleExport}
+              onClick={() => void handleExport()}
             >
               Export
             </Button>

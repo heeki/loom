@@ -58,6 +58,8 @@ export function testConnectionPreCreate(config: {
   oauth2_client_id?: string;
   oauth2_client_secret?: string;
   oauth2_scopes?: string;
+  delegation_mode?: string;
+  oauth2_audience?: string;
 }): Promise<TestConnectionResult> {
   return apiFetch<TestConnectionResult>("/api/mcp/servers/test-connection", {
     method: "POST",
@@ -80,6 +82,10 @@ export function invokeServerTool(serverId: number, request: ToolInvokeRequest): 
     method: "POST",
     body: JSON.stringify(request),
   });
+}
+
+export function exportMcpServer(serverId: number): Promise<Record<string, unknown>> {
+  return apiFetch<Record<string, unknown>>(`/api/mcp/servers/${serverId}/export`);
 }
 
 export function getServerAccess(serverId: number): Promise<McpServerAccess[]> {

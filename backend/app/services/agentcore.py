@@ -90,6 +90,7 @@ def invoke_agent(
     approval_policies: list[dict[str, Any]] | None = None,
     supports_elicitation: bool = False,
     elicitation_response: dict[str, Any] | None = None,
+    user_access_token: str | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """
     Invoke an AgentCore Runtime agent and stream the response.
@@ -131,6 +132,8 @@ def invoke_agent(
         payload["supports_elicitation"] = True
     if elicitation_response:
         payload["elicitationResponse"] = elicitation_response
+    if user_access_token:
+        payload["user_access_token"] = user_access_token
     payload_bytes = json.dumps(payload).encode('utf-8')
 
     params: dict[str, Any] = {
@@ -175,7 +178,10 @@ def invoke_agent(
             continue
         line_count += 1
         if line_count <= 10 or "elicitation" in decoded.lower() or "interrupt" in decoded.lower():
-            logger.info("Stream line %d: %s", line_count, decoded[:500])
+            if "token_info" in decoded:
+                logger.info("Stream line %d: [token_info event redacted]", line_count)
+            else:
+                logger.info("Stream line %d: %s", line_count, decoded[:500])
         if not decoded.startswith('data:'):
             logger.info("Non-data stream line: %s", decoded[:500])
             continue

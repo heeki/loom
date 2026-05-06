@@ -1,5 +1,6 @@
 """Agent invocation endpoints with SSE streaming support."""
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -42,6 +43,39 @@ from app.routers.agents import derive_log_group
 
 
 router = APIRouter(prefix="/api/agents", tags=["invocations"])
+
+
+def _decode_jwt_claims(token: str) -> dict[str, Any] | None:
+    """Decode JWT payload without verification (for admin inspection)."""
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return None
+        padded = parts[1] + "=" * (-len(parts[1]) % 4)
+        return json.loads(base64.urlsafe_b64decode(padded))
+    except Exception:
+        return None
+
+
+def _extract_token_summary(token: str, token_type: str = "user", source: str | None = None) -> dict[str, Any] | None:
+    """Extract key claims from a JWT for admin display."""
+    claims = _decode_jwt_claims(token)
+    if not claims:
+        return None
+    summary: dict[str, Any] = {"token_type": token_type}
+    if source:
+        summary["source"] = source
+    summary["claims"] = {
+        "iss": claims.get("iss"),
+        "sub": claims.get("sub"),
+        "aud": claims.get("aud"),
+        "scp": claims.get("scp"),
+        "roles": claims.get("roles"),
+        "act": claims.get("act"),
+        "exp": claims.get("exp"),
+        "iat": claims.get("iat"),
+    }
+    return summary
 
 
 # Pydantic models
@@ -457,6 +491,8 @@ async def invoke_agent_stream(
     dynamic_mcp_servers: list[dict[str, Any]] | None = None,
     approval_policies: list[dict[str, Any]] | None = None,
     supports_elicitation: bool = False,
+    user_access_token: str | None = None,
+    delegation_mode: str = "m2m",
 ) -> AsyncGenerator[str, None]:
     """
     Invoke the agent and yield SSE events as the response streams.
@@ -509,7 +545,31 @@ async def invoke_agent_stream(
         session_start_data["token_source"] = token_source
     if access_token:
         session_start_data["has_token"] = True
+        token_summary = _extract_token_summary(access_token, "user", token_source)
+        if token_summary:
+            session_start_data["user_token"] = token_summary
+    session_start_data["delegation_mode"] = delegation_mode
+    if delegation_mode == "obo":
+        session_start_data["has_user_access_token"] = bool(user_access_token)
     yield format_sse_event("session_start", session_start_data)
+
+    # Validate OBO precondition: user access token must be present
+    if delegation_mode == "obo" and not user_access_token:
+        error_msg = (
+            "OBO delegation is configured for this agent but no user access token "
+            "is available. Sign in via the same identity provider as the agent "
+            "authorizer, or select a credential that forwards the user token."
+        )
+        logger.error(
+            "OBO precondition failed for agent %s session %s: missing user_access_token",
+            agent.id, session_id,
+        )
+        invocation.status = "error"
+        invocation.error_message = error_msg
+        session.status = "error"
+        db.commit()
+        yield format_sse_event("error", {"message": error_msg, "code": "obo_missing_user_token"})
+        return
 
     # Shared state between streaming and finalization
     response_chunks: list[str] = []
@@ -532,6 +592,7 @@ async def invoke_agent_stream(
             runtime_model_id=runtime_model_id,
             approval_policies=approval_policies,
             supports_elicitation=supports_elicitation,
+            user_access_token=user_access_token,
         )
 
         # Stream chunks to frontend. Each next() call on the synchronous
@@ -561,6 +622,12 @@ async def invoke_agent_stream(
                     if isinstance(tool_use, dict) and tool_use.get("name"):
                         logger.info("Tool use event: %s", tool_use["name"])
                         yield format_sse_event("tool_use", {"name": tool_use["name"]})
+                        continue
+                    # OBO token info event from agent
+                    token_info = structured.get("token_info")
+                    if isinstance(token_info, dict):
+                        logger.info("Token info event: type=%s provider=%s", token_info.get("token_type"), token_info.get("credential_provider"))
+                        yield format_sse_event("token_info", token_info)
                         continue
                     # MCP elicitation: tool paused waiting for user input
                     elicitation_data = structured.get("elicitation")
@@ -601,6 +668,7 @@ async def invoke_agent_stream(
                             runtime_model_id=runtime_model_id,
                             supports_elicitation=True,
                             elicitation_response={"action": elicit_action, "content": elicit_content},
+                            user_access_token=user_access_token,
                         )
 
                         def _next_elicit_resume():
@@ -680,6 +748,7 @@ async def invoke_agent_stream(
                                 dynamic_mcp_servers=None,
                                 runtime_model_id=runtime_model_id,
                                 interrupt_response=interrupt_response_payload,
+                                user_access_token=user_access_token,
                             )
 
                             def _next_resume():
@@ -915,6 +984,8 @@ async def invoke_harness_agent_stream(
     access_token: str | None = None,
     token_source: str | None = None,
     dynamic_tools: list[dict[str, Any]] | None = None,
+    user_access_token: str | None = None,
+    delegation_mode: str = "m2m",
 ) -> AsyncGenerator[str, None]:
     """Invoke a harness-deployed agent and yield SSE events.
 
@@ -993,14 +1064,37 @@ async def invoke_harness_agent_stream(
     session.status = "streaming"
     db.commit()
 
-    yield format_sse_event("session_start", {
+    harness_start_data: dict[str, Any] = {
         "session_id": session_id,
         "invocation_id": invocation_id,
         "client_invoke_time": client_invoke_time,
         "user_id": session.user_id,
         "has_token": bool(access_token),
         "token_source": token_source,
-    })
+        "delegation_mode": delegation_mode,
+        "has_user_access_token": bool(user_access_token) if delegation_mode == "obo" else None,
+    }
+    if access_token:
+        harness_token_summary = _extract_token_summary(access_token, "user", token_source)
+        if harness_token_summary:
+            harness_start_data["user_token"] = harness_token_summary
+    yield format_sse_event("session_start", harness_start_data)
+
+    if delegation_mode == "obo" and not user_access_token:
+        error_msg = (
+            "OBO delegation is configured for this harness agent but no user "
+            "access token is available. Sign in via the agent's identity provider."
+        )
+        logger.error(
+            "OBO precondition failed for harness agent %s session %s: missing user_access_token",
+            agent.id, session_id,
+        )
+        invocation.status = "error"
+        invocation.error_message = error_msg
+        session.status = "error"
+        db.commit()
+        yield format_sse_event("error", {"message": error_msg, "code": "obo_missing_user_token"})
+        return
 
     response_chunks: list[str] = []
     harness_input_tokens = 0
@@ -1016,6 +1110,7 @@ async def invoke_harness_agent_stream(
             actor_id=actor_id,
             access_token=access_token,
             tools=invoke_tools,
+            user_access_token=user_access_token,
         )
 
         _sentinel = object()
@@ -1039,12 +1134,18 @@ async def invoke_harness_agent_stream(
                 from app.services.harness import resume_harness_stream
 
                 pending_tool_stop = chunk["content"]
+                logger.info("HITL tool_use_stop event: %s", json.dumps(pending_tool_stop))
 
                 while pending_tool_stop is not None:
                     tool_use_id = pending_tool_stop["tool_use_id"]
                     tool_name = pending_tool_stop.get("tool_name") or "user_confirmation"
                     tool_input = pending_tool_stop.get("tool_input", {})
                     pending_tool_stop = None
+
+                    logger.info(
+                        "HITL inline function called: tool=%s id=%s input=%s",
+                        tool_name, tool_use_id, json.dumps(tool_input),
+                    )
 
                     request_id = create_approval_request()
                     approval_event = {
@@ -1057,10 +1158,15 @@ async def invoke_harness_agent_stream(
                         "timeout_seconds": 300,
                         "session_id": session_id,
                     }
+                    logger.info("HITL approval_request: %s", json.dumps(approval_event))
                     yield format_sse_event("approval_request", approval_event)
 
                     decision = await wait_for_approval(request_id, timeout=300.0)
                     decision_str = decision.get("decision", "timeout")
+                    logger.info(
+                        "HITL approval decision: request_id=%s decision=%s decided_by=%s reason=%s",
+                        request_id, decision_str, decision.get("decided_by"), decision.get("reason"),
+                    )
                     yield format_sse_event("approval_resolved", {
                         "request_id": request_id,
                         "status": decision_str,
@@ -1076,6 +1182,10 @@ async def invoke_harness_agent_stream(
                         tool_result_content = json.dumps({"approved": False, "message": reason})
                         tool_result_status = "error"
 
+                    logger.info(
+                        "HITL resuming harness: tool=%s status=%s content=%s",
+                        tool_name, tool_result_status, tool_result_content,
+                    )
                     resume_generator = resume_harness_stream(
                         harness_arn=agent.arn,
                         session_id=session_id,
@@ -1088,6 +1198,7 @@ async def invoke_harness_agent_stream(
                         tools=invoke_tools,
                         access_token=access_token,
                         actor_id=actor_id,
+                        user_access_token=user_access_token,
                     )
 
                     def _next_resume():
@@ -1439,18 +1550,6 @@ async def invoke_agent_endpoint(
                 except Exception as e:
                     logger.warning("Failed to get Cognito token for agent %s: %s", agent_id, e)
 
-    if access_token and token_source == "user":
-        try:
-            import base64, json as _json2
-            parts = access_token.split(".")
-            if len(parts) >= 2:
-                padded = parts[1] + "=" * (-len(parts[1]) % 4)
-                claims = _json2.loads(base64.urlsafe_b64decode(padded))
-                logger.info("User token claims: iss=%s, aud=%s, sub=%s, appid=%s, azp=%s, ver=%s, scp=%s, roles=%s, exp=%s",
-                            claims.get("iss"), claims.get("aud"), claims.get("sub"), claims.get("appid"),
-                            claims.get("azp"), claims.get("ver"), claims.get("scp"), claims.get("roles"), claims.get("exp"))
-        except Exception as e:
-            logger.warning("Could not decode user token for debugging: %s", e)
     logger.info("Invoking agent %s with token_source=%s, has_token=%s",
                 agent_id, token_source, bool(access_token))
 
@@ -1458,7 +1557,7 @@ async def invoke_agent_endpoint(
     dynamic_mcp_servers: list[dict[str, Any]] | None = None
     has_elicitation_connector = False
     if request_body.connector_ids:
-        actor_id = user.username or user.sub or "loom-agent"
+        actor_id = user.actor_id
         mcp_records = db.query(McpServer).filter(McpServer.id.in_(request_body.connector_ids)).all()
         dynamic_mcp_servers = []
 
@@ -1477,18 +1576,66 @@ async def invoke_agent_endpoint(
                     "api_key_header_name": server.api_key_header_name or "x-api-key",
                 }
             elif server.auth_type == "oauth2":
+                cred_provider = getattr(server, "credential_provider_name", None) or f"loom-{agent.name}-mcp-{server.name}"
                 auth_entry: dict[str, str] = {
                     "type": "oauth2",
                     "well_known_endpoint": server.oauth2_well_known_url or "",
-                    "credential_provider_name": f"loom-{agent.name}-mcp-{server.name}",
+                    "credential_provider_name": cred_provider,
                 }
                 if server.oauth2_scopes:
                     auth_entry["scopes"] = server.oauth2_scopes
+                if getattr(server, "delegation_mode", None):
+                    auth_entry["delegation_mode"] = server.delegation_mode
+                if getattr(server, "obo_grant_type", None):
+                    auth_entry["obo_grant_type"] = server.obo_grant_type
+                if getattr(server, "oauth2_audience", None):
+                    auth_entry["audience"] = server.oauth2_audience
                 entry["auth"] = auth_entry
             dynamic_mcp_servers.append(entry)
             if server.supports_elicitation == "true":
                 has_elicitation_connector = True
         logger.info("Resolved %d dynamic MCP connectors for invocation (elicitation=%s)", len(dynamic_mcp_servers), has_elicitation_connector)
+
+    # ---- Detect OBO delegation mode and static elicitation from AGENT_CONFIG_JSON ----
+    # If any integration has delegation_mode="obo", we must forward the user's
+    # access token so the runtime can perform RFC 8693 token exchange.
+    delegation_mode = "m2m"
+    try:
+        config_map_agent = {e.key: e.value for e in agent.config_entries}
+        raw_cfg = config_map_agent.get("AGENT_CONFIG_JSON", "")
+        if raw_cfg:
+            cfg = json.loads(raw_cfg)
+            integrations = cfg.get("integrations", {}) or {}
+            mcp_list = integrations.get("mcp_servers", []) or []
+            a2a_list = integrations.get("a2a_agents", []) or []
+            if any((i.get("delegation_mode") or "m2m") == "obo" for i in (mcp_list + a2a_list)):
+                delegation_mode = "obo"
+            # Check if any static MCP server supports elicitation
+            if not has_elicitation_connector:
+                for mcp_cfg in mcp_list:
+                    if mcp_cfg.get("supports_elicitation") == "true" or mcp_cfg.get("supports_elicitation") is True:
+                        has_elicitation_connector = True
+                        break
+    except (ValueError, TypeError) as e:
+        logger.warning("Failed to parse AGENT_CONFIG_JSON for delegation_mode detection: %s", e)
+
+    # Resolve user access token for OBO: prefer Authorization header from the
+    # incoming request (the frontend user's login token). This is the
+    # subject_token for RFC 8693 exchange.
+    user_access_token: str | None = None
+    if delegation_mode == "obo":
+        incoming_auth = request.headers.get("Authorization", "")
+        if incoming_auth.startswith("Bearer "):
+            user_access_token = incoming_auth[7:]
+        # If the resolved agent bearer came from the user's login token, reuse it.
+        elif token_source == "user" and access_token:
+            user_access_token = access_token
+        logger.info(
+            "OBO delegation active for agent %s: user_access_token_present=%s",
+            agent_id, bool(user_access_token),
+        )
+
+    logger.info("Elicitation support resolved: has_elicitation_connector=%s", has_elicitation_connector)
 
     # Resolve active approval policies for the agent
     approval_policies_payload: list[dict[str, Any]] | None = None
@@ -1512,18 +1659,22 @@ async def invoke_agent_endpoint(
 
         stream_gen = invoke_harness_agent_stream(
             agent, session, invocation, db, client_invoke_time,
-            request_body.prompt, user.username or user.sub or "loom-agent",
+            request_body.prompt, user.actor_id,
             runtime_model_id, access_token, token_source,
             dynamic_harness_tools,
+            user_access_token=user_access_token,
+            delegation_mode=delegation_mode,
         )
     else:
         stream_gen = invoke_agent_stream(
             agent, session, invocation, db, client_invoke_time,
             request_body.prompt, access_token, token_source,
-            user.username or user.sub or "loom-agent",
+            user.actor_id,
             runtime_model_id, dynamic_mcp_servers,
             approval_policies=approval_policies_payload,
             supports_elicitation=has_elicitation_connector,
+            user_access_token=user_access_token,
+            delegation_mode=delegation_mode,
         )
 
     return StreamingResponse(

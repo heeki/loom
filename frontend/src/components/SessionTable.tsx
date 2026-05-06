@@ -23,6 +23,8 @@ interface SessionTableProps {
 
 type SortDir = "asc" | "desc";
 
+const PAGE_SIZE = 5;
+
 function statusVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
   switch (status) {
     case "active":
@@ -42,6 +44,7 @@ function statusVariant(status: string): "default" | "secondary" | "destructive" 
 export function SessionTable({ sessions, onSelectSession, loading, currentUserId }: SessionTableProps) {
   const { timezone } = useTimezone();
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [page, setPage] = useState(0);
 
   const sorted = useMemo(() => {
     return [...sessions].sort((a, b) => {
@@ -51,7 +54,13 @@ export function SessionTable({ sessions, onSelectSession, loading, currentUserId
     });
   }, [sessions, sortDir]);
 
-  const toggleSort = () => setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+  const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
+  const paged = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  const toggleSort = () => {
+    setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    setPage(0);
+  };
 
   if (loading) {
     return (
@@ -68,58 +77,75 @@ export function SessionTable({ sessions, onSelectSession, loading, currentUserId
   }
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-[36ch]">Session ID</TableHead>
-          <TableHead>Invoked By</TableHead>
-          <TableHead>Qualifier</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Invocations</TableHead>
-          <TableHead>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-auto p-0 font-medium hover:bg-transparent"
-              onClick={toggleSort}
-            >
-              Created {sortDir === "desc" ? "\u2193" : "\u2191"}
-            </Button>
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {sorted.map((session) => (
-          <TableRow
-            key={session.session_id}
-            className="cursor-pointer hover:bg-accent/50"
-            onClick={() => onSelectSession(session.session_id)}
-          >
-            <TableCell className="font-mono text-xs">
-              {session.session_id}
-            </TableCell>
-            <TableCell className="text-xs">
-              {session.user_id ? (
-                <span className={currentUserId && session.user_id !== currentUserId ? "text-muted-foreground" : ""}>
-                  {session.user_id}
-                </span>
-              ) : (
-                <span className="text-muted-foreground">—</span>
-              )}
-            </TableCell>
-            <TableCell>
-              <Badge variant="outline">{session.qualifier}</Badge>
-            </TableCell>
-            <TableCell>
-              <Badge variant={statusVariant(session.live_status)}>{session.live_status}</Badge>
-            </TableCell>
-            <TableCell>{session.invocations.length}</TableCell>
-            <TableCell className="text-xs text-muted-foreground">
-              {formatTimestamp(session.created_at, timezone)}
-            </TableCell>
+    <div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-[36ch]">Session ID</TableHead>
+            <TableHead>Invoked By</TableHead>
+            <TableHead>Qualifier</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Invocations</TableHead>
+            <TableHead>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-auto p-0 font-medium hover:bg-transparent"
+                onClick={toggleSort}
+              >
+                Created {sortDir === "desc" ? "↓" : "↑"}
+              </Button>
+            </TableHead>
           </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+        </TableHeader>
+        <TableBody>
+          {paged.map((session) => (
+            <TableRow
+              key={session.session_id}
+              className="cursor-pointer hover:bg-accent/50"
+              onClick={() => onSelectSession(session.session_id)}
+            >
+              <TableCell className="font-mono text-xs">
+                {session.session_id}
+              </TableCell>
+              <TableCell className="text-xs">
+                {session.user_id ? (
+                  <span className={currentUserId && session.user_id !== currentUserId ? "text-muted-foreground" : ""}>
+                    {session.user_id}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">&mdash;</span>
+                )}
+              </TableCell>
+              <TableCell>
+                <Badge variant="outline">{session.qualifier}</Badge>
+              </TableCell>
+              <TableCell>
+                <Badge variant={statusVariant(session.live_status)}>{session.live_status}</Badge>
+              </TableCell>
+              <TableCell>{session.invocations.length}</TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {formatTimestamp(session.created_at, timezone)}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between pt-2 px-1">
+          <span className="text-xs text-muted-foreground">
+            {sorted.length} sessions &mdash; page {page + 1} of {totalPages}
+          </span>
+          <div className="flex gap-1">
+            <Button variant="ghost" size="sm" className="h-6 text-xs" disabled={page === 0} onClick={() => setPage(page - 1)}>
+              Prev
+            </Button>
+            <Button variant="ghost" size="sm" className="h-6 text-xs" disabled={page >= totalPages - 1} onClick={() => setPage(page + 1)}>
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

@@ -11,8 +11,9 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
-import { testConnection, testConnectionPreCreate } from "@/api/mcp";
+import { testConnectionPreCreate, exportMcpServer } from "@/api/mcp";
 import { JsonConfigSection } from "./JsonConfigSection";
+import { useAuth } from "@/contexts/AuthContext";
 import type { McpServerCreateRequest, TestConnectionResult } from "@/api/types";
 
 interface McpServerFormProps {
@@ -22,6 +23,7 @@ interface McpServerFormProps {
 }
 
 export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerFormProps) {
+  const { hasScope } = useAuth();
   const [name, setName] = useState(initialData?.name ?? "");
   const [description, setDescription] = useState(initialData?.description ?? "");
   const [endpointUrl, setEndpointUrl] = useState(initialData?.endpoint_url ?? "");
@@ -33,6 +35,9 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
   const [clientId, setClientId] = useState(initialData?.oauth2_client_id ?? "");
   const [clientSecret, setClientSecret] = useState("");
   const [scopes, setScopes] = useState(initialData?.oauth2_scopes ?? "");
+  const [delegationMode, setDelegationMode] = useState<"m2m" | "obo">(initialData?.delegation_mode ?? "m2m");
+  const [oboGrantType, setOboGrantType] = useState<"JWT_AUTHORIZATION_GRANT" | "TOKEN_EXCHANGE">(initialData?.obo_grant_type ?? "TOKEN_EXCHANGE");
+  const [audience, setAudience] = useState(initialData?.oauth2_audience ?? "");
   const [apiKeyHeaderName, setApiKeyHeaderName] = useState(initialData?.api_key_header_name ?? "x-api-key");
   const [apiKey, setApiKey] = useState("");
   const [supportsElicitation, setSupportsElicitation] = useState(initialData?.supports_elicitation ?? false);
@@ -56,6 +61,11 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
         if (clientId.trim()) request.oauth2_client_id = clientId.trim();
         if (clientSecret) request.oauth2_client_secret = clientSecret;
         if (scopes.trim()) request.oauth2_scopes = scopes.trim();
+        request.delegation_mode = delegationMode;
+        if (delegationMode === "obo") {
+          request.obo_grant_type = oboGrantType;
+          if (audience.trim()) request.oauth2_audience = audience.trim();
+        }
       }
       if (authType === "api_key") {
         request.api_key_header_name = apiKeyHeaderName;
@@ -73,27 +83,24 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
     setTesting(true);
     setTestResult(null);
     try {
-      let result: TestConnectionResult;
-      if (initialData?.id) {
-        result = await testConnection(initialData.id);
-      } else {
-        const config: Parameters<typeof testConnectionPreCreate>[0] = {
-          endpoint_url: endpointUrl.trim(),
-          transport_type: transportType,
-          auth_type: authType,
-        };
-        if (authType === "oauth2") {
-          if (wellKnownUrl.trim()) config.oauth2_well_known_url = wellKnownUrl.trim();
-          if (clientId.trim()) config.oauth2_client_id = clientId.trim();
-          if (clientSecret) config.oauth2_client_secret = clientSecret;
-          if (scopes.trim()) config.oauth2_scopes = scopes.trim();
-        }
-        if (authType === "api_key") {
-          (config as Record<string, string>).api_key_header_name = apiKeyHeaderName;
-          if (apiKey) (config as Record<string, string>).api_key = apiKey;
-        }
-        result = await testConnectionPreCreate(config);
+      const config: Parameters<typeof testConnectionPreCreate>[0] = {
+        endpoint_url: endpointUrl.trim(),
+        transport_type: transportType,
+        auth_type: authType,
+      };
+      if (authType === "oauth2") {
+        if (wellKnownUrl.trim()) config.oauth2_well_known_url = wellKnownUrl.trim();
+        if (clientId.trim()) config.oauth2_client_id = clientId.trim();
+        if (clientSecret) config.oauth2_client_secret = clientSecret;
+        if (scopes.trim()) config.oauth2_scopes = scopes.trim();
+        config.delegation_mode = delegationMode;
+        if (delegationMode === "obo" && audience.trim()) config.oauth2_audience = audience.trim();
       }
+      if (authType === "api_key") {
+        (config as Record<string, string>).api_key_header_name = apiKeyHeaderName;
+        if (apiKey) (config as Record<string, string>).api_key = apiKey;
+      }
+      const result = await testConnectionPreCreate(config);
       setTestResult(result);
     } catch (e) {
       setTestResult({ success: false, message: e instanceof Error ? e.message : "Test failed" });
@@ -121,6 +128,9 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
             if (parsed.oauth2_client_id !== undefined) setClientId(parsed.oauth2_client_id);
             if (parsed.oauth2_client_secret !== undefined) setClientSecret(parsed.oauth2_client_secret);
             if (parsed.oauth2_scopes !== undefined) setScopes(parsed.oauth2_scopes);
+            if (parsed.delegation_mode === "m2m" || parsed.delegation_mode === "obo") setDelegationMode(parsed.delegation_mode);
+            if (parsed.obo_grant_type === "JWT_AUTHORIZATION_GRANT" || parsed.obo_grant_type === "TOKEN_EXCHANGE") setOboGrantType(parsed.obo_grant_type);
+            if (parsed.oauth2_audience !== undefined) setAudience(parsed.oauth2_audience);
             if (parsed.api_key_header_name !== undefined) setApiKeyHeaderName(parsed.api_key_header_name);
             if (parsed.api_key !== undefined) setApiKey(parsed.api_key);
             if (parsed.supports_elicitation !== undefined) setSupportsElicitation(!!parsed.supports_elicitation);
@@ -129,7 +139,11 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
             return "Invalid JSON. Please check the format and try again.";
           }
         }}
-        onExport={() => {
+        onExport={async () => {
+          if (initialData?.id && hasScope("admin:write")) {
+            const data = await exportMcpServer(initialData.id);
+            return JSON.stringify(data, null, 2);
+          }
           const result: Record<string, unknown> = {};
           if (name) result.name = name;
           if (endpointUrl) result.endpoint_url = endpointUrl;
@@ -141,6 +155,9 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
             if (clientId) result.oauth2_client_id = clientId;
             result.oauth2_client_secret = "(redacted)";
             if (scopes) result.oauth2_scopes = scopes;
+            result.delegation_mode = delegationMode;
+            if (delegationMode === "obo") result.obo_grant_type = oboGrantType;
+            if (delegationMode === "obo" && audience) result.oauth2_audience = audience;
           }
           if (authType === "api_key") {
             result.api_key_header_name = apiKeyHeaderName;
@@ -251,6 +268,45 @@ export function McpServerForm({ onSubmit, onCancel, initialData }: McpServerForm
             <div>
               <label className="text-xs text-muted-foreground">Scopes</label>
               <Input value={scopes} onChange={(e) => setScopes(e.target.value)} placeholder="openid profile (space-separated)" />
+            </div>
+            <div className="flex gap-3">
+              <div className="w-[280px]">
+                <label className="text-xs text-muted-foreground">Delegation Mode</label>
+                <Select value={delegationMode} onValueChange={(v) => setDelegationMode(v as "m2m" | "obo")}>
+                  <SelectTrigger className="w-full text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="m2m">M2M (shared agent identity)</SelectItem>
+                    <SelectItem value="obo">On-Behalf-Of (user identity)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {delegationMode === "obo" && (
+                <div className="w-[280px]">
+                  <label className="text-xs text-muted-foreground">OBO Grant Type</label>
+                  <Select value={oboGrantType} onValueChange={(v) => setOboGrantType(v as "JWT_AUTHORIZATION_GRANT" | "TOKEN_EXCHANGE")}>
+                    <SelectTrigger className="w-full text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="JWT_AUTHORIZATION_GRANT">JWT Authorization Grant (Entra ID)</SelectItem>
+                      <SelectItem value="TOKEN_EXCHANGE">Token Exchange (Okta)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {delegationMode === "obo" && oboGrantType === "TOKEN_EXCHANGE" && (
+                <div className="w-[280px]">
+                  <label className="text-xs text-muted-foreground">Audience</label>
+                  <Input
+                    value={audience}
+                    onChange={(e) => setAudience(e.target.value)}
+                    placeholder="e.g. loom"
+                    className="text-sm"
+                  />
+                </div>
+              )}
             </div>
           </div>
         )}

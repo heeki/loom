@@ -158,6 +158,7 @@ export function A2aAgentsPage({ viewMode, onViewModeChange, readOnly, initialSel
                   oauth2_well_known_url: editingAgent.oauth2_well_known_url ?? undefined,
                   oauth2_client_id: editingAgent.oauth2_client_id ?? undefined,
                   oauth2_scopes: editingAgent.oauth2_scopes ?? undefined,
+                  delegation_mode: editingAgent.delegation_mode ?? undefined,
                 }}
               />
             </CardContent>

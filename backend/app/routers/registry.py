@@ -229,6 +229,65 @@ def create_record(
     return _record_to_detail_response(result)
 
 
+class RegistryRecordUpdateRequest(BaseModel):
+    namespace: str | None = Field(None, description="Namespace prefix for MCP servers")
+
+
+@router.put("/records/{record_id}", response_model=RegistryRecordDetailResponse)
+def update_record(
+    record_id: str,
+    request: RegistryRecordUpdateRequest = RegistryRecordUpdateRequest(),
+    user: UserInfo = Depends(require_scopes("registry:write")),
+    db: Session = Depends(get_db),
+) -> RegistryRecordDetailResponse:
+    """Update a registry record by re-building descriptors from the linked Loom resource."""
+    client = get_registry_client()
+
+    server = db.query(McpServer).filter(McpServer.registry_record_id == record_id).first()
+    if server:
+        ns = request.namespace or "aws.agentcore"
+        if ns not in MCP_NAMESPACES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"namespace must be one of: {', '.join(MCP_NAMESPACES)}",
+            )
+        tools = db.query(McpTool).filter(McpTool.server_id == server.id).all()
+        descriptors = client.build_mcp_descriptors(server, tools, namespace=ns)
+        name = server.name
+        description = server.description
+        descriptor_type = "MCP"
+    else:
+        agent_a2a = db.query(A2aAgent).filter(A2aAgent.registry_record_id == record_id).first()
+        if agent_a2a:
+            descriptors = client.build_a2a_descriptors(agent_a2a)
+            name = agent_a2a.name
+            description = agent_a2a.description
+            descriptor_type = "A2A"
+        else:
+            agent = db.query(Agent).filter(Agent.registry_record_id == record_id).first()
+            if agent:
+                descriptors = client.build_agent_descriptors(agent)
+                name = agent.name or agent.runtime_id
+                description = agent.description
+                descriptor_type = "A2A"
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"No Loom resource found linked to registry record {record_id}",
+                )
+
+    result = client.update_record(
+        record_id=record_id,
+        name=name,
+        descriptor_type=descriptor_type,
+        descriptors=descriptors,
+        record_version="1.0",
+        description=description,
+    )
+    rec = client.get_record(record_id)
+    return _record_to_detail_response(rec) if rec else _record_to_detail_response(result)
+
+
 @router.post("/records/{record_id}/submit", response_model=RegistryRecordResponse)
 def submit_for_approval(
     record_id: str,

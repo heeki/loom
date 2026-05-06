@@ -60,8 +60,12 @@ The agent reads configuration from one of two sources (checked in order):
         "endpoint_url": "https://mcp.example.com/jira",
         "auth": {
           "type": "oauth2",
+          "credential_provider_name": "loom-myagent-mcp-jira",
           "well_known_endpoint": "https://auth.example.com/.well-known/openid-configuration",
-          "credentials_secret_arn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:loom/jira-creds"
+          "scopes": "api://default/.default",
+          "delegation_mode": "obo",
+          "obo_grant_type": "TOKEN_EXCHANGE",
+          "audience": "api://my-resource"
         }
       }
     ],
@@ -102,6 +106,7 @@ This allows the frontend to pass the user-configured prompt as a deploy-time par
 | `AGENT_SYSTEM_PROMPT` | System prompt (overrides config file) | — |
 | `AGENT_OBSERVABILITY_ENABLED` | Enables ADOT export pipeline | — |
 | `OTEL_SERVICE_NAME` | Service name for ADOT telemetry | `loom-agent` |
+| `WORKLOAD_IDENTITY_NAME` | Workload identity name for credential providers | `loom-{agent_name}` |
 | `MEMORY_STORE_ID` | AgentCore Memory store identifier | — |
 | `AWS_REGION` | AWS region | `us-east-1` |
 | `LOG_LEVEL` | Logging level | `INFO` |
@@ -142,11 +147,26 @@ Produces `build/agent.zip` — a self-contained zip deployable to AgentCore Runt
 MCP (Model Context Protocol) tool servers are dynamically loaded from configuration. The agent creates MCP clients at startup for each enabled server. Currently supports `streamable_http` transport.
 
 **Authentication types:**
-- `oauth2` — Uses `_OAuth2Auth` httpx handler to exchange workload tokens for downstream access tokens via AgentCore Identity credential providers.
+- `oauth2` — Uses `_OAuth2Auth` httpx handler to exchange workload tokens for downstream access tokens via AgentCore Identity credential providers. Supports two delegation modes:
+  - **M2M** (machine-to-machine, default): Uses `oauth2Flow: M2M` for client credentials exchange.
+  - **OBO** (on-behalf-of): Uses `oauth2Flow: ON_BEHALF_OF_TOKEN_EXCHANGE` with the user's access token for RFC 8693 token exchange. Supports `TOKEN_EXCHANGE` (Okta and others) and `JWT_AUTHORIZATION_GRANT` (Microsoft Entra ID) grant types.
 - `api_key` — Uses `_ApiKeyAuth` httpx handler. Resolves the API key once from AWS Secrets Manager at initialization (not per-request) to avoid throttling. Header injection follows `api_key_header_name` — `Authorization` headers use `Bearer` prefix; all others set the raw key.
 - Unauthenticated — no auth handler.
 
+**OBO token exchange flow:**
+1. The user's access token is forwarded from the Loom backend to the agent runtime via the invocation payload (`user_access_token` field).
+2. The `_OAuth2Auth` handler captures the workload token eagerly at construction time (before the MCP client's background thread starts) to avoid ContextVar propagation issues.
+3. On each MCP request, the handler calls `get_resource_oauth2_token` with `oauth2Flow: ON_BEHALF_OF_TOKEN_EXCHANGE` and the user's token as subject.
+4. The resulting downstream token is scoped to the invoking user's permissions.
+5. Token caching is keyed by `(credential_provider_name, oauth2_flow, workload_token_prefix)` with TTL-based expiry.
+
+**Token info extraction:**
+- `TokenInfoHook` (Strands `HookProvider`) monitors MCP tool results for `__TOKEN_INFO__` markers embedded by the MCP server (since server-initiated notifications cannot traverse the AgentCore proxy).
+- Decoded JWT claims from OBO tokens are emitted as `token_info` SSE events for the frontend to display.
+
 **Dynamic MCP connectors:** The handler accepts `dynamic_mcp_servers` in the invocation payload for per-invocation MCP server attachment. A connection pool keyed by `(server_name, actor_id)` reuses previously-connected servers across invocations. For API key connectors, the `{actor_id}` placeholder in `credentials_secret_arn` is resolved to the invoking user's identity.
+
+**Graceful MCP failures:** Servers that fail to connect (e.g., 401 Unauthorized due to expired tokens) are skipped rather than failing the entire agent initialization. The agent retries MCP attachment on the next invocation. Strands internal loggers are temporarily suppressed to CRITICAL during attachment to avoid noisy stack traces.
 
 ### A2A Agent Clients
 

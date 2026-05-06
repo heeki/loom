@@ -22,7 +22,7 @@
 frontend/
 ├── src/
 │   ├── api/
-│   │   ├── types.ts            # TypeScript interfaces mirroring backend models (A2aAgent, A2aAgentSkill, A2aAgentAccess, A2aAgentCard, CostDashboardResponse, CostActualsResponse, CostActualAgent, CostActualSession, AgentCostSummary, ModelPricing, SSEToolUse, StreamSegment)
+│   │   ├── types.ts            # TypeScript interfaces mirroring backend models (A2aAgent, A2aAgentSkill, A2aAgentAccess, A2aAgentCard, CostDashboardResponse, CostActualsResponse, CostActualAgent, CostActualSession, AgentCostSummary, ModelPricing, SSEToolUse, SSETokenInfo, StreamSegment)
 │   │   ├── client.ts           # apiFetch<T>() wrapper + ApiError class, dynamic BASE_URL via VITE_API_BASE_URL, automatic auth token injection, 401 auto-refresh via `setOnUnauthorized` callback, and `tryRefreshToken()` export for SSE retry
 │   │   ├── auth.ts             # Cognito auth API (initiateAuth, respondToChallenge, refreshTokens)
 │   │   ├── agents.ts           # Agent CRUD + deployHarnessAgent(), fetchRoles(), fetchCognitoPools(), fetchModels(), fetchDefaults()
@@ -50,7 +50,7 @@ frontend/
 │   │   ├── useA2aAgents.ts  # A2A agent list with auto-fetch, CRUD callbacks
 │   │   └── useTraces.ts    # Trace list + detail state management
 │   ├── components/
-│   │   ├── ui/                 # shadcn primitives + searchable-select.tsx + multi-select.tsx + add-filter-dropdown.tsx
+│   │   ├── ui/                 # shadcn primitives + searchable-select.tsx + multi-select.tsx + add-filter-dropdown.tsx + tooltip.tsx
 │   │   ├── SortableCardGrid.tsx — Drag-to-reorder card grid using @dnd-kit, default alphabetical sort, SortButton, localStorage persistence
 │   │   ├── SortableTableHead.tsx — Clickable sortable table column headers with arrow indicators
 │   │   ├── AgentCard.tsx       # Agent summary card with refresh + Trash2 icon deletion
@@ -256,9 +256,10 @@ Full deployment form with sections:
 **Layout:** Single-column, full-width stacked layout:
 
 ### Sessions (top)
-- Full-width table of all sessions for this agent
+- Full-width table of all sessions for this agent, filtered to sessions owned by the current user
 - Columns: Session ID (truncated), Qualifier, Live Status, Invocation count, Created timestamp
 - Live status badges: active (green), expired (muted), streaming/pending (yellow), error (red)
+- Pagination with configurable page size and page navigation controls
 - Clicking a row navigates to Session Detail
 
 ### Invoke Form
@@ -276,6 +277,12 @@ Full deployment form with sections:
 
 ### Latency Summary
 - 4-metric placeholder (shows "—" before invocation), fills in after `session_end` SSE event
+
+### Token Info Card
+- Shown below the latency summary when the invocation includes user token claims or OBO token claims
+- Displays decoded JWT claims for the user token (issuer, subject with annotation, audience, scopes, roles with group mapping resolution, expiry)
+- Displays OBO tokens acquired from downstream MCP servers during tool execution (credential provider attribution, flow type, claims)
+- Role claims are resolved against the active IdP's group mappings to show the Loom group assignment
 
 ### Error Display
 - Invocation errors show user-friendly messages mapped from raw error patterns via `friendlyInvokeError()` in `lib/errors.ts`
@@ -433,7 +440,7 @@ Create/edit form with:
 - Name (required, 1/3 width) and Endpoint URL (required, flex-1) and Transport Type (select: SSE/Streamable HTTP, 180px)
 - Description (textarea)
 - Authentication section: radio toggle for None / OAuth2 / API Key
-- When OAuth2: well-known URL, client ID, client secret (password input with "(unchanged)" placeholder in edit mode), scopes (space-separated)
+- When OAuth2: well-known URL, client ID, client secret (password input with "(unchanged)" placeholder in edit mode), scopes (space-separated), delegation mode radio toggle (M2M / OBO), OBO grant type selector (TOKEN_EXCHANGE / JWT_AUTHORIZATION_GRANT, shown when OBO selected), audience field (shown when OBO selected, required for Okta custom authorization servers)
 - When API Key: Header Name dropdown (`x-api-key` or `Authorization`), API Key password input (with "(unchanged)" placeholder in edit mode when admin key exists)
 - "Test Connection" button (only shown in edit mode) with success/failure badge result
 - Create/Update and Cancel buttons
@@ -478,7 +485,7 @@ Accessed by clicking an agent card/row. Shows:
 Create/edit form with:
 - Base URL (required) with helper text about Agent Card endpoint
 - Authentication section: radio toggle for None / OAuth2
-- When OAuth2: well-known URL, client ID, client secret (password input with "(unchanged)" placeholder in edit mode), scopes (space-separated)
+- When OAuth2: well-known URL, client ID, client secret (password input with "(unchanged)" placeholder in edit mode), scopes (space-separated), delegation mode radio toggle (M2M / OBO), OBO grant type selector (shown when OBO selected)
 - "Test Connection" button (only shown in edit mode) with success/failure badge result
 - Register/Update and Cancel buttons
 
@@ -692,6 +699,12 @@ The input textarea remains enabled during streaming. Sending a message while a r
 ### Deploy Card
 When a deploy starts, `AgentListPage` records the deploying agent name and triggers an immediate `fetchAgents()` to pick up the DB record (created before the AWS API call). The `useAgents` hook handles ongoing polling for transitional agents. This replaced the earlier ephemeral card approach which caused position glitches when the real agent appeared.
 
+### Resource Export/Edit System
+`AgentCard` and `MemoryCard` replace the refresh button with a pencil-to-edit button (Pencil icon). Clicking edit on an agent navigates to the agent deploy form pre-filled with the agent's exported configuration. Memory cards open the create form pre-filled with the memory's configuration fetched via `GET /api/memories/{id}/export`. JSON export from the form serializes the current state including `memory_strategies` with strategy types and namespaces. This enables round-trip editing of existing resources.
+
+### Tooltip Component
+`frontend/src/components/ui/tooltip.tsx` — Radix Tooltip primitives with zero-delay appearance (`delayDuration=0`), animated content (fade-in/zoom-in), directional slide animations, and an arrow indicator. Used for instant username display on sidebar hover.
+
 ### Friendly Error Messages
 `lib/errors.ts` provides `friendlyInvokeError(raw: string, authorizerName?: string): string` that maps raw error strings to user-friendly messages using pattern matching. When an `authorizerName` is provided (from the agent's `authorizer_config`), 401/403 errors include a hint about which authorizer to use. The `useInvoke` hook stores both the friendly error (for display) and the raw error (for the 'Show details' toggle). This keeps error UX readable while preserving debugging information.
 
@@ -899,7 +912,7 @@ When no external IdP is active, the login page behaves identically to the existi
 ### Identity Provider Management UI
 
 `IdentityProviderPanel.tsx` on the Security Admin page provides:
-- **Identity Providers tab**: CRUD for provider configurations with fields for name, provider type (dropdown: Microsoft Entra ID, Okta, Auth0, Generic OIDC), discovery URL, client ID, group claim, and scopes.
+- **Identity Providers tab**: CRUD for provider configurations with fields for name, provider type (dropdown: Microsoft Entra ID, Okta, Auth0, Generic OIDC), discovery URL, client ID, client type toggle (public/confidential), group claim, and scopes.
 - **OIDC Discovery button**: fetches `.well-known/openid-configuration` and auto-populates authorization, token, JWKS, and userinfo endpoints.
 - **Test Discovery button**: validates that the provider's discovery endpoint is reachable and returns valid metadata.
 - **Group Mapping table**: editable table for mapping external IdP group names/IDs to Loom groups. Each row has external group (text input) and Loom group (dropdown of known groups).
@@ -971,7 +984,31 @@ The Agent Registration Form includes a "Enable human confirmation (inline functi
 
 ---
 
-## 16. Future Work
+## 16. On-Behalf-Of (OBO) Delegation UI
+
+### 16.1 Delegation Mode Selector
+
+MCP server and A2A agent forms include a "Delegation Mode" select within the OAuth2 authentication section:
+- Options: **M2M** (client credentials, default) or **On-Behalf-Of** (RFC 8693 token exchange).
+- Only visible when `auth_type` is "oauth2".
+- Stored as `delegation_mode` field on the server/agent model.
+
+### 16.2 Deploy Form Integration Badges
+
+The agent registration form shows M2M/OBO badges next to each OAuth2 MCP server and A2A agent in the integration selection lists, so admins can see which delegation mode each integration uses at deploy time.
+
+### 16.3 Invoke/Chat OBO Indicators
+
+- **InvokePanel**: When the agent has OBO-configured integrations and a user token is available, displays a blue "User identity delegated" indicator. If the user is not authenticated, shows an amber "OBO requires authentication" warning.
+- **ChatPage**: Same indicators rendered near the model/connector row above the message input.
+
+### 16.4 Types
+
+`delegation_mode?: "m2m" | "obo"` added to: `McpServer`, `McpServerCreateRequest`, `McpServerUpdateRequest`, `A2aAgent`, `A2aAgentCreateRequest`, `A2aAgentUpdateRequest`, and `ConnectorInfo`.
+
+---
+
+## 17. Future Work
 
 - **VPC network mode** support
 - **Operate Tab** — aggregate dashboard with summary cards, per-agent latency charts

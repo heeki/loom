@@ -167,13 +167,15 @@ export function LoginPage() {
                   You may be signed in automatically if you have an active {providerLabel} session.
                 </p>
               )}
-              <button
-                type="button"
-                className="text-xs text-muted-foreground hover:text-foreground underline w-full text-center"
-                onClick={() => { try { localStorage.removeItem("loom_last_oidc_user"); localStorage.removeItem("loom_last_oidc_provider"); } catch { /* ignore */ } logoutIdP(); }}
-              >
-                Sign in as a different user
-              </button>
+              {lastOidcUser && (
+                <button
+                  type="button"
+                  className="text-xs text-muted-foreground hover:text-foreground underline w-full text-center"
+                  onClick={() => { try { localStorage.removeItem("loom_last_oidc_user"); localStorage.removeItem("loom_last_oidc_provider"); } catch { /* ignore */ } logoutIdP(); }}
+                >
+                  Sign in as a different user
+                </button>
+              )}
               {error && (
                 <p className="text-sm text-destructive">{error}</p>
               )}

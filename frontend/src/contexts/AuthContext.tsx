@@ -161,7 +161,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [tokens, setTokens] = useState<AuthTokens | null>(() => {
     try {
       const stored = sessionStorage.getItem("loom_auth_tokens");
-      return stored ? JSON.parse(stored) as AuthTokens : null;
+      if (stored) {
+        const parsed = JSON.parse(stored) as AuthTokens;
+        // Check if the access token is expired before restoring
+        try {
+          const claims = JSON.parse(atob(parsed.accessToken.split(".")[1] ?? ""));
+          if (claims.exp && claims.exp < Date.now() / 1000) {
+            sessionStorage.removeItem("loom_auth_tokens");
+            sessionStorage.removeItem("loom_auth_user");
+            return null;
+          }
+        } catch { /* if we can't decode, let validation handle it */ }
+        setAuthToken(parsed.accessToken);
+        return parsed;
+      }
+      return null;
     } catch { return null; }
   });
   const [user, setUser] = useState<CognitoUser | null>(() => {
@@ -268,10 +282,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((cfg) => {
         setConfig(cfg);
 
-        // Check for OIDC callback code in URL
+        // Invalidate cached tokens if the IdP changed (e.g., switched from Okta to Entra).
+        // Use the id_token's aud claim which always matches the client_id, unlike access
+        // tokens which may have a different audience (e.g., Entra ID API resource URIs).
+        if (isExternalOIDC(cfg) && tokensRef.current?.idToken) {
+          try {
+            const claims = decodeJwtPayload(tokensRef.current.idToken);
+            const tokenAud = (claims.aud as string) || "";
+            const configClientId = cfg.client_id || "";
+            if (configClientId && tokenAud && tokenAud !== configClientId) {
+              setTokens(null);
+              setUser(null);
+              setAuthToken(null);
+            }
+          } catch { /* ignore decode errors */ }
+        }
+
+        // Check for OIDC callback code in URL (skip link-callback — that's handled separately)
         const params = new URLSearchParams(window.location.search);
         const code = params.get("code");
-        if (code && isExternalOIDC(cfg)) {
+        if (code && isExternalOIDC(cfg) && window.location.pathname !== "/oauth/link-callback") {
           void handleOIDCCallback(code, cfg).finally(() => setIsLoading(false));
           return;
         }
@@ -292,7 +322,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (isExternalOIDC(config)) {
         // For external IdP, loading is done after callback handling or immediately if no code
         const params = new URLSearchParams(window.location.search);
-        if (!params.get("code")) {
+        if (!params.get("code") || window.location.pathname === "/oauth/link-callback") {
           setIsLoading(false);
         }
       } else if (config.user_pool_id && import.meta.env.VITE_COGNITO_USER_CLIENT_ID) {
@@ -357,7 +387,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const currentTokens = tokensRef.current;
       const currentConfig = configRef.current;
       if (!currentTokens?.refreshToken || !currentConfig) return null;
-      if (isExternalOIDC(currentConfig)) return null;
+      if (isExternalOIDC(currentConfig)) {
+        // Only clear session if the token is actually expired — a 401 on a
+        // scope-restricted endpoint shouldn't nuke the entire session.
+        try {
+          const payload = currentTokens.accessToken.split(".")[1] ?? "";
+          const claims = JSON.parse(atob(payload));
+          if (claims.exp && claims.exp > Date.now() / 1000) {
+            return null;
+          }
+        } catch { /* can't verify — clear to be safe */ }
+        setTokens(null);
+        setUser(null);
+        setAuthToken(null);
+        return null;
+      }
       try {
         const result = await refreshTokens(
           currentTokens.refreshToken,
@@ -479,19 +523,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     Object.keys(sessionStorage)
       .filter((k) => k.startsWith("loom:invokePrompt:"))
       .forEach((k) => sessionStorage.removeItem(k));
-    fetchAuthConfig().then((cfg) => setConfig(cfg)).catch(() => {});
+    setIsLoading(true);
+    fetchAuthConfig().then((cfg) => {
+      setConfig(cfg);
+      setIsLoading(false);
+    }).catch(() => { setIsLoading(false); });
   }, []);
 
   const logoutIdP = useCallback(() => {
     const currentConfig = configRef.current;
     const idToken = tokens?.idToken;
     logout();
-    if (currentConfig && isExternalOIDC(currentConfig) && currentConfig.issuer_url) {
+    // Mark that next login should force a fresh prompt
+    sessionStorage.setItem("oidc_force_prompt", "login");
+    if (currentConfig && isExternalOIDC(currentConfig) && currentConfig.issuer_url && idToken) {
+      // Only redirect to IdP logout if we have a valid id_token_hint — otherwise the
+      // IdP may reject the request (e.g. after authorization server change).
       const issuer = currentConfig.issuer_url.replace(/\/+$/, "");
       const returnUrl = window.location.origin;
       if (currentConfig.provider_type === "okta") {
-        const params = new URLSearchParams({ post_logout_redirect_uri: returnUrl });
-        if (idToken) params.set("id_token_hint", idToken);
+        const params = new URLSearchParams({ post_logout_redirect_uri: returnUrl, id_token_hint: idToken });
         window.location.href = `${issuer}/v1/logout?${params.toString()}`;
       } else if (currentConfig.provider_type === "entra_id") {
         const params = new URLSearchParams({ post_logout_redirect_uri: returnUrl });
@@ -499,6 +550,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
   }, [tokens, logout]);
+
 
   useEffect(() => {
     return () => {
@@ -528,7 +580,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider
       value={{
-        isAuthenticated: isConfigured ? tokens !== null : true,
+        isAuthenticated: isLoading ? false : isConfigured ? tokens !== null : true,
         isLoading,
         user,
         accessToken: tokens?.accessToken ?? null,

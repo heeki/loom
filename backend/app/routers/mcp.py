@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
@@ -38,6 +38,9 @@ class McpServerCreateRequest(BaseModel):
     oauth2_client_id: str | None = Field(None, description="OAuth2 client ID")
     oauth2_client_secret: str | None = Field(None, description="OAuth2 client secret")
     oauth2_scopes: str | None = Field(None, description="OAuth2 scopes (space-separated)")
+    delegation_mode: str = Field(default="m2m", description="OAuth2 delegation mode: 'm2m' or 'obo'")
+    obo_grant_type: str | None = Field(None, description="OBO grant type: 'JWT_AUTHORIZATION_GRANT' (Entra ID) or 'TOKEN_EXCHANGE' (Okta)")
+    oauth2_audience: str | None = Field(None, description="Token exchange audience (required for Okta custom auth servers)")
     api_key_header_name: str | None = Field(None, description="Header name for API key auth")
     api_key: str | None = Field(None, description="Admin API key (stored in Secrets Manager)")
     supports_elicitation: bool = Field(default=False, description="Whether this server supports MCP elicitation")
@@ -67,6 +70,9 @@ class McpServerUpdateRequest(BaseModel):
     oauth2_client_id: str | None = None
     oauth2_client_secret: str | None = None
     oauth2_scopes: str | None = None
+    delegation_mode: str | None = None
+    obo_grant_type: str | None = None
+    oauth2_audience: str | None = None
     api_key_header_name: str | None = None
     api_key: str | None = None
     supports_elicitation: bool | None = None
@@ -84,6 +90,9 @@ class McpServerResponse(BaseModel):
     oauth2_well_known_url: str | None = None
     oauth2_client_id: str | None = None
     oauth2_scopes: str | None = None
+    delegation_mode: str = "m2m"
+    obo_grant_type: str | None = None
+    oauth2_audience: str | None = None
     has_oauth2_secret: bool = False
     api_key_header_name: str | None = None
     has_admin_api_key: bool = False
@@ -182,6 +191,9 @@ def create_mcp_server(
         oauth2_client_id=request.oauth2_client_id,
         oauth2_client_secret=request.oauth2_client_secret,
         oauth2_scopes=request.oauth2_scopes,
+        delegation_mode=request.delegation_mode or "m2m",
+        obo_grant_type=request.obo_grant_type,
+        oauth2_audience=request.oauth2_audience,
     )
     server.api_key_header_name = request.api_key_header_name
     server.supports_elicitation = "true" if request.supports_elicitation else "false"
@@ -251,6 +263,39 @@ def get_mcp_server(
     return McpServerResponse(**server.to_dict())
 
 
+@router.get("/{server_id}/export")
+def export_mcp_server(
+    server_id: int,
+    user: UserInfo = Depends(require_scopes("admin:write")),
+    db: Session = Depends(get_db),
+):
+    """Export full MCP server config including secrets. Super admin only."""
+    server = _get_server_or_404(server_id, db)
+    data: dict = {
+        "name": server.name,
+        "description": server.description,
+        "endpoint_url": server.endpoint_url,
+        "transport_type": server.transport_type,
+        "auth_type": server.auth_type,
+    }
+    if server.auth_type == "oauth2":
+        data["oauth2_well_known_url"] = server.oauth2_well_known_url
+        data["oauth2_client_id"] = server.oauth2_client_id
+        data["oauth2_client_secret"] = server.oauth2_client_secret or None
+        data["oauth2_scopes"] = server.oauth2_scopes
+        data["delegation_mode"] = server.delegation_mode
+        if server.obo_grant_type:
+            data["obo_grant_type"] = server.obo_grant_type
+        if server.oauth2_audience:
+            data["oauth2_audience"] = server.oauth2_audience
+    if server.auth_type == "api_key":
+        data["api_key_header_name"] = server.api_key_header_name
+        data["api_key"] = resolve_api_key(server)
+    if server.supports_elicitation == "true":
+        data["supports_elicitation"] = True
+    return data
+
+
 @router.put("/{server_id}", response_model=McpServerResponse)
 def update_mcp_server(
     server_id: int,
@@ -313,28 +358,42 @@ class TestConnectionRequest(BaseModel):
     oauth2_client_id: str | None = None
     oauth2_client_secret: str | None = None
     oauth2_scopes: str | None = None
+    delegation_mode: str | None = None
+    oauth2_audience: str | None = None
     api_key_header_name: str | None = None
     api_key: str | None = None
+
+
+def _extract_user_token(request: Request) -> str | None:
+    """Extract the raw Bearer token from the request for OBO exchange."""
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return auth[7:]
+    return None
 
 
 @router.post("/test-connection", response_model=TestConnectionResponse)
 def test_connection_pre_create(
     request: TestConnectionRequest,
+    raw_request: Request,
     user: UserInfo = Depends(require_scopes("mcp:write")),
 ) -> TestConnectionResponse:
-    result = svc_test_connection(request, api_key=request.api_key)
+    user_token = _extract_user_token(raw_request) if getattr(request, "delegation_mode", None) == "obo" else None
+    result = svc_test_connection(request, api_key=request.api_key, user_token=user_token)
     return TestConnectionResponse(**result)
 
 
 @router.post("/{server_id}/test-connection", response_model=TestConnectionResponse)
 def test_connection(
     server_id: int,
+    raw_request: Request,
     user: UserInfo = Depends(require_scopes("mcp:write")),
     db: Session = Depends(get_db),
 ) -> TestConnectionResponse:
     server = _get_server_or_404(server_id, db)
     api_key = resolve_api_key(server)
-    result = svc_test_connection(server, api_key=api_key)
+    user_token = _extract_user_token(raw_request) if getattr(server, "delegation_mode", "m2m") == "obo" else None
+    result = svc_test_connection(server, api_key=api_key, user_token=user_token)
     return TestConnectionResponse(**result)
 
 
@@ -355,13 +414,15 @@ def get_mcp_tools(
 @router.post("/{server_id}/tools/refresh", response_model=list[McpToolResponse])
 def refresh_mcp_tools(
     server_id: int,
+    request: Request,
     user: UserInfo = Depends(require_scopes("mcp:write")),
     db: Session = Depends(get_db),
 ) -> list[McpToolResponse]:
     server = _get_server_or_404(server_id, db)
     api_key = resolve_api_key(server)
+    user_token = _extract_user_token(request) if getattr(server, "delegation_mode", "m2m") == "obo" else None
 
-    fetched_tools = svc_fetch_tools(server, api_key=api_key)
+    fetched_tools = svc_fetch_tools(server, api_key=api_key, user_token=user_token)
 
     # Clear existing tools
     db.query(McpTool).filter(McpTool.server_id == server_id).delete()

@@ -34,10 +34,11 @@ def _get_jwks(jwks_url: str) -> dict[str, Any]:
 
 def _get_signing_key(jwks: dict[str, Any], kid: str) -> jwt_algorithms.RSAAlgorithm:
     """Find the signing key matching the given kid."""
+    available_kids = [k.get("kid") for k in jwks.get("keys", [])]
     for key_data in jwks.get("keys", []):
         if key_data.get("kid") == kid:
             return jwt_algorithms.RSAAlgorithm.from_jwk(key_data)
-    raise ValueError(f"Key with kid={kid} not found in JWKS")
+    raise ValueError(f"Key with kid={kid} not found in JWKS (available: {available_kids})")
 
 
 def validate_token(

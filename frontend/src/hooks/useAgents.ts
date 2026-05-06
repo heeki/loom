@@ -12,6 +12,7 @@ const DEPLOY_IN_PROGRESS = new Set([
   "creating_role",
   "building_artifact",
   "deploying",
+  "updating",
   "ENDPOINT_CREATING",
 ]);
 
@@ -23,7 +24,7 @@ function needsPolling(agent: AgentResponse): boolean {
         DEPLOY_IN_PROGRESS.has(agent.deployment_status ?? "") ||
         agent.endpoint_status === "CREATING")) ||
     (agent.source === "harness" &&
-      (agent.status === "CREATING" ||
+      (agent.status === "CREATING" || agent.status === "UPDATING" ||
         DEPLOY_IN_PROGRESS.has(agent.deployment_status ?? "")))
   );
 }
@@ -52,10 +53,6 @@ export function useAgents() {
       initialLoadDone.current = true;
     }
   }, []);
-
-  useEffect(() => {
-    void fetchAgents();
-  }, [fetchAgents]);
 
   // Status polling for agents that are creating or deleting
   const agentsRef = useRef(agents);
@@ -143,8 +140,10 @@ export function useAgents() {
   );
 
   const deployHarnessAgent = useCallback(
-    async (request: AgentHarnessDeployRequest) => {
-      const agent = await agentsApi.deployHarnessAgent(request);
+    async (request: AgentHarnessDeployRequest, existingAgentId?: number) => {
+      const agent = existingAgentId
+        ? await agentsApi.updateHarnessAgent(existingAgentId, request)
+        : await agentsApi.deployHarnessAgent(request);
       await fetchAgents();
       return agent;
     },

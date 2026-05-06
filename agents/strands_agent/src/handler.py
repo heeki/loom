@@ -31,7 +31,7 @@ import threading
 from typing import Any, AsyncGenerator
 
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
-from strands.types.exceptions import MaxTokensReachedException
+from strands.types.exceptions import MaxTokensReachedException, ToolProviderException
 
 from strands.models.bedrock import BedrockModel
 
@@ -40,7 +40,7 @@ from mcp.types import ElicitResult
 from src.config import AgentConfig, MCPServerConfig, AuthConfig, load_config
 from src.agent import attach_mcp_tools, build_agent
 from src.integrations.approval import ApprovalHook
-from src.integrations.mcp_client import has_deferred_auth_servers, _build_transport_callable
+from src.integrations.mcp_client import has_deferred_auth_servers, _build_transport_callable, drain_token_info_events, reset_token_info_state, set_user_access_token
 from src.telemetry import trace_invocation
 
 # Configure the root Python logger so all modules (agent, mcp_client, etc.)
@@ -99,10 +99,10 @@ def _ensure_mcp_tools(actor_id: str = ""):
     global _mcp_attached
     if _mcp_attached or _config is None:
         return
-    _mcp_attached = True
 
     static_servers = [s for s in _config.integrations.mcp_servers if s.enabled and not s.dynamic_only]
     if not static_servers:
+        _mcp_attached = True
         return
 
     if actor_id:
@@ -113,8 +113,9 @@ def _ensure_mcp_tools(actor_id: str = ""):
     logger.info("Attaching MCP tools (first invocation with context)")
     try:
         attach_mcp_tools(_agent, static_servers)
+        _mcp_attached = True
     except Exception as e:
-        logger.warning("Failed to attach MCP tools: %s. Agent will continue without MCP tools.", e)
+        logger.warning("Failed to attach MCP tools: %s. Will retry on next invocation.", e)
 
 
 def _attach_dynamic_mcp_servers(agent_instance, dynamic_servers: list[dict[str, Any]], actor_id: str, elicitation_callback=None) -> None:
@@ -145,6 +146,8 @@ def _attach_dynamic_mcp_servers(agent_instance, dynamic_servers: list[dict[str, 
                 well_known_endpoint=auth_data.get("well_known_endpoint", ""),
                 credential_provider_name=auth_data.get("credential_provider_name", ""),
                 scopes=auth_data.get("scopes", ""),
+                delegation_mode=(auth_data.get("delegation_mode") or "m2m").lower(),
+                obo_grant_type=auth_data.get("obo_grant_type", ""),
             )
 
         # Skip OAuth2 servers with no usable credentials — they would connect
@@ -175,6 +178,13 @@ def _attach_dynamic_mcp_servers(agent_instance, dynamic_servers: list[dict[str, 
 
         transport_callable = _build_transport_callable(config)
         client = MCPClient(transport_callable, elicitation_callback=elicitation_callback)
+
+        strands_mcp_logger = logging.getLogger("strands.tools.mcp.mcp_client")
+        strands_registry_logger = logging.getLogger("strands.tools.registry")
+        prev_mcp_level = strands_mcp_logger.level
+        prev_registry_level = strands_registry_logger.level
+        strands_mcp_logger.setLevel(logging.CRITICAL)
+        strands_registry_logger.setLevel(logging.CRITICAL)
         try:
             agent_instance.tool_registry.process_tools([client])
             _dynamic_mcp_clients[pool_key] = client
@@ -185,6 +195,9 @@ def _attach_dynamic_mcp_servers(agent_instance, dynamic_servers: list[dict[str, 
                 client.stop()
             except BaseException:
                 pass
+        finally:
+            strands_mcp_logger.setLevel(prev_mcp_level)
+            strands_registry_logger.setLevel(prev_registry_level)
 
 
 @app.entrypoint
@@ -206,6 +219,10 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
     session_id = payload.get("session_id", "")
     actor_id = payload.get("actor_id") or "loom-agent"
 
+    # Make user access token available for OBO token exchange flows
+    set_user_access_token(payload.get("user_access_token"))
+
+    reset_token_info_state()
     _ensure_mcp_tools(actor_id)
 
     # --- Handle elicitation response (resume a blocked tool) ---
@@ -272,6 +289,25 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
     dynamic_servers = payload.get("dynamic_mcp_servers")
     if dynamic_servers:
         _attach_dynamic_mcp_servers(agent, dynamic_servers, actor_id, elicitation_callback=elicitation_callback)
+
+    # Re-attach static MCP servers with elicitation callback if needed
+    if supports_elicitation and elicitation_callback and _config and _mcp_attached:
+        elicit_servers = [s for s in _config.integrations.mcp_servers if s.enabled and not s.dynamic_only]
+        if elicit_servers:
+            static_as_dynamic = [
+                {"name": s.name, "transport": s.transport, "endpoint_url": s.endpoint_url,
+                 "auth": {"type": s.auth.type, "credentials_secret_arn": s.auth.credentials_secret_arn,
+                          "api_key_header_name": s.auth.api_key_header_name,
+                          "well_known_endpoint": s.auth.well_known_endpoint,
+                          "credential_provider_name": s.auth.credential_provider_name,
+                          "scopes": s.auth.scopes,
+                          "delegation_mode": s.auth.delegation_mode,
+                          "obo_grant_type": s.auth.obo_grant_type,
+                          "audience": s.auth.audience} if s.auth else None}
+                for s in elicit_servers
+            ]
+            _attach_dynamic_mcp_servers(agent, static_as_dynamic, actor_id, elicitation_callback=elicitation_callback)
+            logger.info("Re-attached %d static MCP server(s) with elicitation callback", len(elicit_servers))
 
     # Inject approval policies from the invocation payload (sent by Loom)
     invocation_policies = payload.get("approval_policies")
@@ -341,12 +377,19 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
                                         logger.info("Tool call detected: %s", tool_use["name"])
                                         await queue.put({"tool_use": {"name": tool_use["name"], "id": tool_use.get("toolUseId", "")}})
 
+                        # Drain any OBO token info events acquired during tool execution
+                        for ti in drain_token_info_events():
+                            await queue.put({"token_info": ti})
+
                     if result and getattr(result, "stop_reason", None) == "interrupt":
                         interrupts = getattr(result, "interrupts", [])
                         logger.info("Agent interrupted with %d pending approval(s)", len(interrupts))
                         await queue.put({"interrupt": {"stopReason": "interrupt", "interrupts": [{"id": i.id, "name": i.name, "reason": i.reason} for i in interrupts]}})
             except MaxTokensReachedException:
                 await queue.put("\n\n[Response truncated: the model reached its maximum output token limit.]")
+            except ToolProviderException as e:
+                logger.warning("Tool provider error session_id=%s: %s", session_id, e)
+                await queue.put({"_error": f"A tool provider encountered an error: {e}"})
             except Exception as e:
                 logger.error("Agent task error session_id=%s: %s", session_id, e)
                 await queue.put({"_error": str(e)})
@@ -390,6 +433,10 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
                                     logger.info("Tool call detected: %s", tool_use["name"])
                                     yield {"tool_use": {"name": tool_use["name"], "id": tool_use.get("toolUseId", "")}}
 
+                    # Drain any OBO token info events acquired during tool execution
+                    for ti in drain_token_info_events():
+                        yield {"token_info": ti}
+
                 if result and getattr(result, "stop_reason", None) == "interrupt":
                     interrupts = getattr(result, "interrupts", [])
                     logger.info("Agent interrupted with %d pending approval(s)", len(interrupts))
@@ -397,6 +444,9 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
             except MaxTokensReachedException:
                 logger.warning("Max tokens reached for session_id=%s", session_id)
                 yield "\n\n[Response truncated: the model reached its maximum output token limit. Try a shorter prompt or a model with a higher token limit.]"
+            except ToolProviderException as e:
+                logger.warning("Tool provider error session_id=%s: %s", session_id, e)
+                yield f"\n\nA tool provider encountered an error: {e}"
 
 
 async def _drain_queue(queue: asyncio.Queue) -> AsyncGenerator[Any, None]:
@@ -481,6 +531,7 @@ async def ws_invoke(websocket, context) -> None:
             session_id = data.get("session_id", "")
             actor_id = data.get("actor_id") or "loom-agent"
 
+            set_user_access_token(data.get("user_access_token"))
             _ensure_mcp_tools(actor_id)
 
             dynamic_servers = data.get("dynamic_mcp_servers")
@@ -567,6 +618,8 @@ def _attach_dynamic_mcp_servers_ws(
                 well_known_endpoint=auth_data.get("well_known_endpoint", ""),
                 credential_provider_name=auth_data.get("credential_provider_name", ""),
                 scopes=auth_data.get("scopes", ""),
+                delegation_mode=(auth_data.get("delegation_mode") or "m2m").lower(),
+                obo_grant_type=auth_data.get("obo_grant_type", ""),
             )
 
         config = MCPServerConfig(
@@ -579,6 +632,13 @@ def _attach_dynamic_mcp_servers_ws(
 
         transport_callable = _build_transport_callable(config)
         client = MCPClient(transport_callable, elicitation_callback=elicitation_callback)
+
+        strands_mcp_logger = logging.getLogger("strands.tools.mcp.mcp_client")
+        strands_registry_logger = logging.getLogger("strands.tools.registry")
+        prev_mcp_level = strands_mcp_logger.level
+        prev_registry_level = strands_registry_logger.level
+        strands_mcp_logger.setLevel(logging.CRITICAL)
+        strands_registry_logger.setLevel(logging.CRITICAL)
         try:
             agent_instance.tool_registry.process_tools([client])
             _dynamic_mcp_clients[pool_key] = client
@@ -589,6 +649,9 @@ def _attach_dynamic_mcp_servers_ws(
                 client.stop()
             except BaseException:
                 pass
+        finally:
+            strands_mcp_logger.setLevel(prev_mcp_level)
+            strands_registry_logger.setLevel(prev_registry_level)
 
 
 def main() -> None:

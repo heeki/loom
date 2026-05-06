@@ -20,6 +20,9 @@ class McpServer(Base):
     oauth2_client_id = Column(String, nullable=True)
     oauth2_client_secret = Column(String, nullable=True)
     oauth2_scopes = Column(String, nullable=True)  # space-separated
+    delegation_mode = Column(String, nullable=False, default="m2m")  # 'm2m' or 'obo'
+    obo_grant_type = Column(String, nullable=True)  # 'JWT_AUTHORIZATION_GRANT' or 'TOKEN_EXCHANGE'
+    oauth2_audience = Column(String, nullable=True)  # Token exchange audience (required for Okta custom auth servers)
     api_key_header_name = Column(String, nullable=True)  # e.g. 'x-api-key', 'Authorization'
     has_admin_api_key = Column(String, nullable=True)  # 'true' or 'false'
     supports_elicitation = Column(String, nullable=True, default="false")  # 'true' or 'false'
@@ -44,6 +47,9 @@ class McpServer(Base):
             "oauth2_well_known_url": self.oauth2_well_known_url,
             "oauth2_client_id": self.oauth2_client_id,
             "oauth2_scopes": self.oauth2_scopes,
+            "delegation_mode": self.delegation_mode or "m2m",
+            "obo_grant_type": self.obo_grant_type,
+            "oauth2_audience": self.oauth2_audience,
             "has_oauth2_secret": self.oauth2_client_secret is not None and self.oauth2_client_secret != "",
             "api_key_header_name": self.api_key_header_name,
             "has_admin_api_key": self.has_admin_api_key == "true",

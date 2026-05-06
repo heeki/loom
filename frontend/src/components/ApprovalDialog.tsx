@@ -17,6 +17,7 @@ export function ApprovalRequestBubble({
   const [decision, setDecision] = useState<string | null>(resolved ? "approved" : null);
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [showReason, setShowReason] = useState(false);
   const [elapsed, setElapsed] = useState(0);
 
@@ -31,12 +32,13 @@ export function ApprovalRequestBubble({
 
   const handleDecision = async (d: "approved" | "rejected") => {
     setSubmitting(true);
+    setError(null);
     try {
       await submitApprovalDecision(data.request_id, d, reason || undefined);
       setDecision(d);
       onDecided?.(data.request_id, d);
-    } catch {
-      // Decision submit failed — let user retry
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to submit decision. Try again.");
     } finally {
       setSubmitting(false);
     }
@@ -45,7 +47,7 @@ export function ApprovalRequestBubble({
   if (isNotifyOnly) {
     return (
       <div className="flex justify-start">
-        <div className="max-w-[84%] rounded-2xl px-4 py-3 text-sm bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
+        <div className="max-w-full rounded-2xl px-4 py-3 text-sm bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
           <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300 mb-1">
             <ShieldCheck className="h-4 w-4 shrink-0" />
             <span className="font-medium text-xs uppercase tracking-wide">Tool Notification</span>
@@ -68,7 +70,7 @@ export function ApprovalRequestBubble({
 
   return (
     <div className="flex justify-start">
-      <div className="max-w-[84%] rounded-2xl px-4 py-3 text-sm bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+      <div className="max-w-full rounded-2xl px-4 py-3 text-sm bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
         <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300 mb-1">
           <ShieldCheck className="h-4 w-4 shrink-0" />
           <span className="font-medium text-xs uppercase tracking-wide">Approval Required</span>
@@ -89,6 +91,10 @@ export function ApprovalRequestBubble({
           <p className="text-xs text-muted-foreground mt-1 font-mono break-all line-clamp-3">
             {data.tool_input_summary}
           </p>
+        )}
+
+        {error && (
+          <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>
         )}
 
         {decision ? (

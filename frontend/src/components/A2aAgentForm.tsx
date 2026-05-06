@@ -1,10 +1,18 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
-import { testA2aConnection, testA2aConnectionPreCreate } from "@/api/a2a";
+import { testA2aConnection, testA2aConnectionPreCreate, exportA2aAgent } from "@/api/a2a";
 import { JsonConfigSection } from "./JsonConfigSection";
+import { useAuth } from "@/contexts/AuthContext";
 import type { A2aAgentCreateRequest, TestConnectionResult } from "@/api/types";
 
 interface A2aAgentFormProps {
@@ -14,6 +22,7 @@ interface A2aAgentFormProps {
 }
 
 export function A2aAgentForm({ onSubmit, onCancel, initialData }: A2aAgentFormProps) {
+  const { hasScope } = useAuth();
   const [name, setName] = useState(initialData?.name ?? "");
   const [baseUrl, setBaseUrl] = useState(initialData?.base_url ?? "");
   const [authType, setAuthType] = useState<"none" | "oauth2">(initialData?.auth_type ?? "none");
@@ -21,6 +30,7 @@ export function A2aAgentForm({ onSubmit, onCancel, initialData }: A2aAgentFormPr
   const [clientId, setClientId] = useState(initialData?.oauth2_client_id ?? "");
   const [clientSecret, setClientSecret] = useState("");
   const [scopes, setScopes] = useState(initialData?.oauth2_scopes ?? "");
+  const [delegationMode, setDelegationMode] = useState<"m2m" | "obo">(initialData?.delegation_mode ?? "m2m");
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
@@ -39,6 +49,7 @@ export function A2aAgentForm({ onSubmit, onCancel, initialData }: A2aAgentFormPr
         if (clientId.trim()) request.oauth2_client_id = clientId.trim();
         if (clientSecret) request.oauth2_client_secret = clientSecret;
         if (scopes.trim()) request.oauth2_scopes = scopes.trim();
+        request.delegation_mode = delegationMode;
       }
       await onSubmit(request);
     } finally {
@@ -90,12 +101,17 @@ export function A2aAgentForm({ onSubmit, onCancel, initialData }: A2aAgentFormPr
             if (parsed.oauth2_client_id !== undefined) setClientId(parsed.oauth2_client_id);
             if (parsed.oauth2_client_secret !== undefined) setClientSecret(parsed.oauth2_client_secret);
             if (parsed.oauth2_scopes !== undefined) setScopes(parsed.oauth2_scopes);
+            if (parsed.delegation_mode === "m2m" || parsed.delegation_mode === "obo") setDelegationMode(parsed.delegation_mode);
             return null;
           } catch {
             return "Invalid JSON. Please check the format and try again.";
           }
         }}
-        onExport={() => {
+        onExport={async () => {
+          if (initialData?.id && hasScope("admin:write")) {
+            const data = await exportA2aAgent(initialData.id);
+            return JSON.stringify(data, null, 2);
+          }
           const result: Record<string, unknown> = {};
           if (name) result.name = name;
           if (baseUrl) result.base_url = baseUrl;
@@ -105,6 +121,7 @@ export function A2aAgentForm({ onSubmit, onCancel, initialData }: A2aAgentFormPr
             if (clientId) result.oauth2_client_id = clientId;
             result.oauth2_client_secret = "(redacted)";
             if (scopes) result.oauth2_scopes = scopes;
+            result.delegation_mode = delegationMode;
           }
           return JSON.stringify(result, null, 2);
         }}
@@ -180,6 +197,21 @@ export function A2aAgentForm({ onSubmit, onCancel, initialData }: A2aAgentFormPr
                 <label className="text-xs text-muted-foreground">Scopes</label>
                 <Input value={scopes} onChange={(e) => setScopes(e.target.value)} placeholder="openid profile (space-separated)" />
               </div>
+            </div>
+            <div className="w-[280px]">
+              <label className="text-xs text-muted-foreground">Delegation Mode</label>
+              <Select value={delegationMode} onValueChange={(v) => setDelegationMode(v as "m2m" | "obo")}>
+                <SelectTrigger className="w-full text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="m2m">M2M (shared agent identity)</SelectItem>
+                  <SelectItem value="obo">On-Behalf-Of (user identity)</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-muted-foreground mt-0.5 whitespace-nowrap">
+                OBO uses RFC 8693 token exchange to delegate the invoking user&apos;s identity downstream.
+              </p>
             </div>
           </div>
         )}

@@ -25,7 +25,7 @@ import { toast } from "sonner";
 import { useTimezone } from "@/contexts/TimezoneContext";
 import { formatTimestamp } from "@/lib/format";
 import { statusVariant } from "@/lib/status";
-import { listMemories, createMemory, importMemory, refreshMemory, deleteMemory, purgeMemory } from "@/api/memories";
+import { listMemories, createMemory, importMemory, refreshMemory, deleteMemory, purgeMemory, exportMemory } from "@/api/memories";
 import { listTagPolicies, listTagProfiles } from "@/api/settings";
 import { ApiError } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -97,13 +97,12 @@ interface MemoryManagementPanelProps {
 
 export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, ownerRestriction, userGroups = [] }: MemoryManagementPanelProps) {
   const { timezone } = useTimezone();
-  const { user, browserSessionId } = useAuth();
+  const { user, browserSessionId, hasScope } = useAuth();
   const [memories, setMemories] = useState<MemoryResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [addMode, setAddMode] = useState<"create" | "import">("create");
   const [submitting, setSubmitting] = useState(false);
-  const [refreshingId, setRefreshingId] = useState<number | null>(null);
   // Elapsed timer: tick a `now` timestamp every second so elapsed = now - created_at
   const [now, setNow] = useState(Date.now());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -113,6 +112,7 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, ow
   const [creationStartTimes, setCreationStartTimes] = useState<Record<number, number>>({});
 
   // Create form state
+  const [exportMemoryId, setExportMemoryId] = useState<number | null>(null);
   const [formName, setFormName] = useState("");
   const [formDescription, setFormDescription] = useState("");
   const [formExpiryDays, setFormExpiryDays] = useState(7);
@@ -147,6 +147,31 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, ow
     void listTagPolicies().then(setTagPolicies).catch(() => {});
     void listTagProfiles().then(setTagProfiles).catch(() => {});
   }, [fetchMemories]);
+
+  useEffect(() => {
+    if (!exportMemoryId || !hasScope("admin:write")) return;
+    void exportMemory(exportMemoryId).then((data) => {
+      if (data.name) setFormName(data.name as string);
+      if (data.description) setFormDescription(data.description as string);
+      if (typeof data.event_expiry_duration === "number") setFormExpiryDays(data.event_expiry_duration);
+      if (data.tags) {
+        const match = tagProfiles.find((p) => p.name === data.tags);
+        if (match) setSelectedTagProfileId(match.id.toString());
+      }
+      const rawStrategies = data.memory_strategies as Array<Record<string, unknown>> | undefined;
+      if (Array.isArray(rawStrategies)) {
+        const validTypes = ["semantic", "summary", "user_preference", "episodic", "custom"] as const;
+        const strategies: StrategyFormState[] = rawStrategies.map((s) => {
+          const st = validTypes.includes(s.strategy_type as typeof validTypes[number])
+            ? (s.strategy_type as StrategyFormState["strategy_type"])
+            : "semantic";
+          const ns = Array.isArray(s.namespaces) ? (s.namespaces[0] as string) || "" : (s.namespace as string) || "";
+          return { strategy_type: st, name: (s.name as string) || "", description: (s.description as string) || "", namespace: ns };
+        });
+        setFormStrategies(strategies);
+      }
+    }).catch(() => {});
+  }, [exportMemoryId]);
 
   // 1-second tick for elapsed display, 3-second poll for AWS status
   const memoriesRef = useRef(memories);
@@ -297,19 +322,6 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, ow
       toast.error(parseApiError(e));
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleRefresh = async (id: number) => {
-    setRefreshingId(id);
-    try {
-      const updated = await refreshMemory(id);
-      setMemories((prev) => prev.map((m) => (m.id === id ? updated : m)));
-      toast.success("Memory status refreshed");
-    } catch (e) {
-      toast.error(parseApiError(e));
-    } finally {
-      setRefreshingId(null);
     }
   };
 
@@ -479,16 +491,18 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, ow
                           setSelectedTagProfileId(match.id.toString());
                         }
                       }
-                      if (Array.isArray(parsed.strategies)) {
+                      const rawStrategies = parsed.memory_strategies || parsed.strategies;
+                      if (Array.isArray(rawStrategies)) {
                         const validTypes = ["semantic", "summary", "user_preference", "episodic", "custom"];
                         const strategies: StrategyFormState[] = [];
-                        for (const s of parsed.strategies) {
+                        for (const s of rawStrategies) {
                           if (s.strategy_type && !validTypes.includes(s.strategy_type)) continue;
+                          const ns = Array.isArray(s.namespaces) ? s.namespaces[0] || "" : s.namespace || "";
                           strategies.push({
                             strategy_type: s.strategy_type || "semantic",
                             name: s.name || "",
                             description: s.description || "",
-                            namespace: s.namespace || "",
+                            namespace: ns,
                           });
                         }
                         setFormStrategies(strategies);
@@ -498,7 +512,11 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, ow
                       return "Invalid JSON. Please check the format and try again.";
                     }
                   }}
-                  onExport={() => {
+                  onExport={async () => {
+                    if (exportMemoryId && hasScope("admin:write")) {
+                      const data = await exportMemory(exportMemoryId);
+                      return JSON.stringify(data, null, 2);
+                    }
                     const result: Record<string, unknown> = {};
                     if (formName) result.name = formName;
                     if (formDescription) result.description = formDescription;
@@ -826,10 +844,9 @@ export function MemoryManagementPanel({ viewMode, readOnly, groupRestriction, ow
                 <MemoryCard
                   memory={mem}
                   now={now}
-                  refreshingId={refreshingId}
                   submitting={submitting}
-                  onRefresh={handleRefresh}
                   onDelete={handleDelete}
+                  onEdit={hasScope("admin:write") ? (id) => { setExportMemoryId(id); setShowAddForm(true); setAddMode("create"); } : undefined}
                   readOnly={readOnly}
                   showOnCardKeys={effectiveShowOnCardKeys}
                   deleteStartTime={deleteStartTimes[mem.id]}

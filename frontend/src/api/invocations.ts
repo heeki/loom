@@ -11,6 +11,7 @@ import type {
   SSEApprovalRequest,
   SSEApprovalResolved,
   SSEElicitationRequest,
+  SSETokenInfo,
 } from "./types";
 
 export function listSessions(agentId: number, userId?: string): Promise<SessionResponse[]> {
@@ -52,6 +53,7 @@ export interface StreamCallbacks {
   onApprovalRequest?: (data: SSEApprovalRequest) => void;
   onApprovalResolved?: (data: SSEApprovalResolved) => void;
   onElicitationRequest?: (data: SSEElicitationRequest) => void;
+  onTokenInfo?: (data: SSETokenInfo) => void;
 }
 
 export async function invokeAgentStream(
@@ -162,6 +164,9 @@ export async function invokeAgentStream(
               break;
             case "elicitation_request":
               callbacks.onElicitationRequest?.(parsed as SSEElicitationRequest);
+              break;
+            case "token_info":
+              callbacks.onTokenInfo?.(parsed as SSETokenInfo);
               break;
           }
         } catch {

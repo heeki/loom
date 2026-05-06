@@ -112,6 +112,7 @@ Detailed specifications for each component are maintained in their respective di
 - Secrets are cleaned up from Secrets Manager when authorizer credentials or agents are deleted.
 - Security administration (roles, authorizers, credentials, permissions) is managed through a dedicated persona workflow.
 - Human-in-the-loop (HITL) approval policies enforce human oversight for sensitive tool calls. Four HITL methods are supported: agentic loop hooks (custom agents), tool context interrupts (custom agents), MCP elicitation (custom agents with MCP), and harness inline functions (managed agents).
+- On-behalf-of (OBO) token exchange (RFC 8693) enables agents to access downstream OAuth2 resources with the invoking user's scoped permissions. Configurable per MCP server and A2A agent via `delegation_mode` (m2m or obo).
 
 ### User Authentication
 
@@ -616,7 +617,25 @@ Agents support runtime model selection, allowing users to choose from a set of a
 - **Credential filtering per authorizer**: Frontend invoke panel filters M2M credentials to only show those from the agent's matching authorizer, preventing cross-authorizer credential selection.
 - **Harness IAM prefix fix**: IAM role policy and CloudFormation role template updated to include `harness_` prefix for workload identity resources and CloudWatch Logs permissions, supporting harness-deployed agents.
 
-### Phase 28 — Advanced Operations
+### Phase 28 — On-Behalf-Of Token Exchange *(Complete)*
+- **OBO delegation mode:** `delegation_mode` field added to `McpServer` and `A2aAgent` models (`m2m` or `obo`). When set to `obo`, AgentCore credential providers are configured for on-behalf-of token exchange (RFC 8693) instead of machine-to-machine client credentials. Configurable `obo_grant_type` field supports `TOKEN_EXCHANGE` (RFC 8693, for Okta and others) and `JWT_AUTHORIZATION_GRANT` (RFC 7523, for Microsoft Entra ID).
+- **Credential provider OBO configuration:** `create_oauth2_credential_provider` accepts `delegation_mode` and `obo_grant_type` parameters. When `obo`, the provider is configured with `onBehalfOfTokenExchangeConfig` containing the appropriate grant type. `TOKEN_EXCHANGE` uses `actorTokenContent: NONE` with `CLIENT_SECRET_BASIC` auth method; `JWT_AUTHORIZATION_GRANT` uses `CLIENT_SECRET_POST`.
+- **User token forwarding:** The invoke endpoint extracts the user's access token from the `Authorization` header and passes it as `user_access_token` in the invocation payload. The harness service injects it as an `X-Loom-User-Access-Token` HTTP header via a boto3 `before-send` event hook. Custom agents receive it in the invoke payload.
+- **Agent runtime OBO exchange:** The `_OAuth2Auth` httpx handler in `mcp_client.py` supports both M2M and OBO flows. OBO uses `oauth2Flow: ON_BEHALF_OF_TOKEN_EXCHANGE` with the user's access token. Workload tokens are captured eagerly at construction time to avoid ContextVar propagation issues in background threads. Token caching is keyed by `(credential_provider_name, oauth2_flow, workload_token_prefix)` with expiry-skew handling.
+- **Token info inspection:** `TokenInfoHook` (Strands `HookProvider`) extracts `__TOKEN_INFO__` markers from MCP tool results (server-initiated notifications cannot traverse the AgentCore proxy). Decoded JWT claims are emitted as `token_info` SSE events. The frontend renders a `TokenInfoCard` on the invoke page showing user token claims, OBO token claims with group mapping resolution, credential provider attribution, and claim annotations (issuer, audience, scopes, roles, expiry).
+- **`client_type` field on identity providers:** `IdentityProvider` model gains a `client_type` column (`public` or `confidential`). The frontend `IdentityProviderPanel` shows a toggle for selecting client type, which controls whether the client secret is required.
+- **Harness update endpoint:** `PUT /api/agents/{id}/redeploy-harness` uses the `UpdateHarness` API to modify existing harness agents in-place without recreation. Background task handles credential provider lifecycle (create new, delete removed) and config JSON updates.
+- **Session table pagination:** `SessionTable` component adds pagination with page size controls and page navigation, improving usability for agents with many sessions.
+- **Session ownership filtering:** Admin invoke panel filters sessions to those owned by the current user via `user_id` match, resolved authoritatively from a backend `/api/auth/me` endpoint.
+- **Resource export/edit system:** `AgentCard` and `MemoryCard` replace the refresh button with a pencil-to-edit button. Clicking edit on an agent navigates to the deploy form pre-filled with the agent's exported configuration. Memory cards open the create form pre-filled with the memory's exported configuration (via `GET /api/memories/{id}/export`). JSON export from the form serializes the current state including `memory_strategies`.
+- **Sidebar tooltip component:** New `Tooltip` shadcn component (`frontend/src/components/ui/tooltip.tsx`) using Radix Tooltip primitives with zero-delay appearance and animated content. Used for instant username display on sidebar hover.
+- **HITL improvements:** Approval dialog race condition fix — prevents duplicate decision submissions. Elicitation dialog improvements. `ToolProviderException` handling in agent runtime yields user-friendly error messages instead of crashing the stream.
+- **Graceful MCP failures:** `attach_mcp_tools` skips servers that fail to connect (e.g., 401 Unauthorized) rather than failing the entire agent initialization. Retry on next invocation when attachment fails. Strands internal loggers suppressed to CRITICAL during MCP attachment to avoid noisy stack traces.
+- **`oauth2_audience` field on MCP servers:** Supports token exchange audience parameter required by Okta custom authorization servers.
+- **`WORKLOAD_IDENTITY_NAME` env var:** Automatically set to `loom-{agent_name}` at deploy time for credential provider discovery.
+- **Agent list registry filtering:** When registry is enabled, `t-user` users see only `APPROVED` agents (previously saw both approved and unregistered). When registry is disabled, the original behavior (show all non-draft) is preserved.
+
+### Phase 29 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

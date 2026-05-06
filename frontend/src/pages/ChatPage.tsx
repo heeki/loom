@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Send, Plus, Brain, LogOut, Bot, User, X, Loader2, Palette, RefreshCw, ChevronDown, Wrench, Plug, KeyRound, Unplug, Link2 } from "lucide-react";
+import { Send, Plus, Brain, LogOut, Bot, User, X, Loader2, Palette, RefreshCw, ChevronDown, Wrench, Plug, KeyRound, Unplug, Link2, UserCheck, AlertTriangle } from "lucide-react";
 import { ApprovalRequestBubble } from "@/components/ApprovalDialog";
 import { ElicitationRequestBubble } from "@/components/ElicitationDialog";
 import { Button } from "@/components/ui/button";
@@ -241,17 +241,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
         setEnabledConnectors(new Set(JSON.parse(stored) as number[]));
       } catch { setEnabledConnectors(new Set()); }
     } else {
-      // No user preference saved yet — pre-enable connectors configured on the agent
-      const agent = agents.find((a) => a.id === selectedAgentId);
-      const agentMcpNames = agent?.mcp_names ?? [];
-      if (agentMcpNames.length > 0 && connectors.length > 0) {
-        const preEnabled = connectors
-          .filter((c) => agentMcpNames.includes(c.name))
-          .map((c) => c.id);
-        setEnabledConnectors(new Set(preEnabled));
-      } else {
-        setEnabledConnectors(new Set());
-      }
+      setEnabledConnectors(new Set());
     }
   }, [connectorStorageKey, agents, selectedAgentId, connectors]);
 
@@ -520,7 +510,7 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
         const capturedPending = pendingPromptRef.current;
         const capturedToolNames = toolNamesRef.current.length > 0 ? [...toolNamesRef.current] : undefined;
         const capturedHitlSegments = segmentsRef.current.filter(
-          s => s.type === "approval_request" || s.type === "approval_resolved" || s.type === "elicitation_request"
+          s => s.type === "tool_use" || s.type === "approval_request" || s.type === "approval_resolved" || s.type === "elicitation_request"
         );
         getSession(selectedAgentId, sessionId)
           .then((session) => {
@@ -589,10 +579,15 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
       if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "agent", "invoke", agentName);
       const agent = agents.find((a) => a.id === selectedAgentId);
       const rtModel = selectedModelId && agent && selectedModelId !== agent.model_id ? selectedModelId : undefined;
-      const activeConnectorIds = enabledConnectors.size > 0 ? Array.from(enabledConnectors) : undefined;
+      const deployNames = agent?.mcp_names ?? [];
+      const invokeOnlyIds = Array.from(enabledConnectors).filter((id) => {
+        const c = connectors.find((cn) => cn.id === id);
+        return c && !deployNames.includes(c.name);
+      });
+      const activeConnectorIds = invokeOnlyIds.length > 0 ? invokeOnlyIds : undefined;
       invoke(prompt, "DEFAULT", currentSessionId ?? undefined, undefined, undefined, rtModel, activeConnectorIds, linkStatus === "linked" ? true : undefined);
     }
-  }, [isStreaming, queuedPrompt, error, selectedModelId, selectedAgentId, agents, enabledConnectors, linkStatus]);
+  }, [isStreaming, queuedPrompt, error, selectedModelId, selectedAgentId, agents, enabledConnectors, connectors, linkStatus]);
 
   // Scroll to bottom on new messages or streaming updates
   useEffect(() => {
@@ -613,9 +608,14 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     const agentName = agents.find((a) => a.id === selectedAgentId)?.name ?? String(selectedAgentId);
     if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "agent", "invoke", agentName);
     const runtimeModelId = selectedModelId && selectedAgent && selectedModelId !== selectedAgent.model_id ? selectedModelId : undefined;
-    const activeConnectorIds = enabledConnectors.size > 0 ? Array.from(enabledConnectors) : undefined;
+    const deployNames = selectedAgent?.mcp_names ?? [];
+    const invokeOnlyIds = Array.from(enabledConnectors).filter((id) => {
+      const c = connectors.find((cn) => cn.id === id);
+      return c && !deployNames.includes(c.name);
+    });
+    const activeConnectorIds = invokeOnlyIds.length > 0 ? invokeOnlyIds : undefined;
     await invoke(prompt, "DEFAULT", currentSessionId ?? undefined, undefined, undefined, runtimeModelId, activeConnectorIds, linkStatus === "linked" ? true : undefined);
-  }, [input, isStreaming, selectedAgentId, currentSessionId, invoke, agents, user, browserSessionId, selectedModelId, selectedAgent, enabledConnectors, linkStatus]);
+  }, [input, isStreaming, selectedAgentId, currentSessionId, invoke, agents, user, browserSessionId, selectedModelId, selectedAgent, enabledConnectors, connectors, linkStatus]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -721,6 +721,15 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
     isStreaming && (!sessionStart || sessionStart.session_id === currentSessionId);
 
   const hasMemory = selectedAgent && selectedAgent.memory_names.length > 0;
+
+  // OBO delegation detection: any MCP connector tied to this agent uses OBO mode
+  const agentMcpNames = selectedAgent?.mcp_names ?? [];
+  const oboConnectorNames = connectors
+    .filter((c) => c.delegation_mode === "obo" && agentMcpNames.includes(c.name))
+    .map((c) => c.name);
+  const hasObo = oboConnectorNames.length > 0;
+  const userTokenAvailable = linkStatus === "linked" || linkStatus === "same-idp";
+  const oboWarning = hasObo && !userTokenAvailable;
 
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
@@ -1177,63 +1186,95 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                           )}
                         </button>
                       )}
-                      {showConnectors && (
+                      {showConnectors && (() => {
+                        const agentMcpNames = agents.find((a) => a.id === selectedAgentId)?.mcp_names ?? [];
+                        const deployTimeConnectors = connectors.filter((c) => agentMcpNames.includes(c.name));
+                        const invokeTimeConnectors = connectors.filter((c) => !agentMcpNames.includes(c.name));
+                        return (
                         <div className="absolute bottom-8 left-0 z-50 w-72 rounded-lg border bg-background shadow-md py-1">
-                          <div className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                            MCP Connectors
-                          </div>
-                          {connectors.map((c) => {
-                            const isEnabled = enabledConnectors.has(c.id);
-                            const needsKey = c.auth_type === "api_key" && !c.has_user_api_key;
-                            const isConnected = c.auth_type === "none" || (c.auth_type === "api_key" && c.has_user_api_key);
-                            return (
-                              <div
-                                key={c.id}
-                                className="flex items-center justify-between px-3 py-2 text-xs hover:bg-accent transition-colors"
-                              >
-                                <button
-                                  onClick={() => toggleConnector(c)}
-                                  className="flex items-center gap-2 min-w-0 flex-1"
-                                >
-                                  <span className="truncate" title={c.name}>{c.name}</span>
-                                  {needsKey && (
-                                    <span className="flex items-center gap-0.5 text-amber-500 shrink-0">
-                                      <KeyRound className="h-3 w-3" />
-                                    </span>
-                                  )}
-                                  {c.auth_type === "oauth2" && !isEnabled && (
-                                    <span className="text-[10px] text-muted-foreground shrink-0">OAuth2</span>
-                                  )}
-                                </button>
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                  {isConnected && c.auth_type !== "none" && (
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); void disconnectConnector(c); }}
-                                      className="text-muted-foreground/50 hover:text-destructive transition-colors"
-                                      title={`Disconnect ${c.name}`}
-                                    >
-                                      <Unplug className="h-3 w-3" />
-                                    </button>
-                                  )}
-                                  <button onClick={() => toggleConnector(c)}>
-                                    <div
-                                      className={`relative w-7 h-4 rounded-full transition-colors ${
-                                        isEnabled ? "bg-green-500" : "bg-muted-foreground/30"
-                                      }`}
-                                    >
-                                      <div
-                                        className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
-                                          isEnabled ? "translate-x-3.5" : "translate-x-0.5"
-                                        }`}
-                                      />
-                                    </div>
-                                  </button>
-                                </div>
+                          {invokeTimeConnectors.length > 0 && (
+                            <>
+                              <div className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                                Additional Available Tools
                               </div>
-                            );
-                          })}
+                              {invokeTimeConnectors.map((c) => {
+                                const isEnabled = enabledConnectors.has(c.id);
+                                const needsKey = c.auth_type === "api_key" && !c.has_user_api_key;
+                                const isConnected = c.auth_type === "none" || (c.auth_type === "api_key" && c.has_user_api_key);
+                                return (
+                                  <div
+                                    key={c.id}
+                                    className="flex items-center justify-between px-3 py-2 text-xs hover:bg-accent transition-colors"
+                                  >
+                                    <button
+                                      onClick={() => toggleConnector(c)}
+                                      className="flex items-center gap-2 min-w-0 flex-1"
+                                    >
+                                      <span className="truncate" title={c.name}>{c.name}</span>
+                                      {needsKey && (
+                                        <span className="flex items-center gap-0.5 text-amber-500 shrink-0">
+                                          <KeyRound className="h-3 w-3" />
+                                        </span>
+                                      )}
+                                      {c.auth_type === "oauth2" && !isEnabled && (
+                                        <span className="text-[10px] text-muted-foreground shrink-0">OAuth2</span>
+                                      )}
+                                    </button>
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      {isConnected && c.auth_type !== "none" && (
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); void disconnectConnector(c); }}
+                                          className="text-muted-foreground/50 hover:text-destructive transition-colors"
+                                          title={`Disconnect ${c.name}`}
+                                        >
+                                          <Unplug className="h-3 w-3" />
+                                        </button>
+                                      )}
+                                      <button onClick={() => toggleConnector(c)}>
+                                        <div
+                                          className={`relative w-7 h-4 rounded-full transition-colors ${
+                                            isEnabled ? "bg-green-500" : "bg-muted-foreground/30"
+                                          }`}
+                                        >
+                                          <div
+                                            className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
+                                              isEnabled ? "translate-x-3.5" : "translate-x-0.5"
+                                            }`}
+                                          />
+                                        </div>
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </>
+                          )}
+                          {deployTimeConnectors.length > 0 && (
+                            <>
+                              <div className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider border-t mt-1 pt-1.5">
+                                Built-in Tools
+                              </div>
+                              {deployTimeConnectors.map((c) => (
+                                <div
+                                  key={c.id}
+                                  className="flex items-center justify-between px-3 py-2 text-xs opacity-70"
+                                >
+                                  <span className="flex items-center gap-2 min-w-0 flex-1">
+                                    <span className="truncate" title={c.name}>{c.name}</span>
+                                  </span>
+                                  <div
+                                    className="relative w-7 h-4 rounded-full bg-green-500/60 cursor-not-allowed"
+                                    title="Attached at deploy time"
+                                  >
+                                    <div className="absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm translate-x-3.5" />
+                                  </div>
+                                </div>
+                              ))}
+                            </>
+                          )}
                         </div>
-                      )}
+                        );
+                      })()}
                       {apiKeyDialog && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
                           <div className="w-96 rounded-lg border bg-background shadow-lg p-4 space-y-3">
@@ -1271,6 +1312,24 @@ export function ChatPage({ userGroups, onLogout, viewAsUser, onExitViewAs }: Cha
                       )}
                     </div>
                     <div className="flex items-center gap-2">
+                      {hasObo && !oboWarning && (
+                        <span
+                          className="flex items-center gap-1 text-[10px] text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-900 rounded-md px-1.5 py-1"
+                          title={`User identity will be delegated to: ${oboConnectorNames.join(", ")}`}
+                        >
+                          <UserCheck className="h-3 w-3" />
+                          User identity delegated
+                        </span>
+                      )}
+                      {oboWarning && (
+                        <span
+                          className="flex items-center gap-1 text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-900 rounded-md px-1.5 py-1"
+                          title="OBO delegation requires authentication — link your account to use this agent."
+                        >
+                          <AlertTriangle className="h-3 w-3" />
+                          OBO requires authentication
+                        </span>
+                      )}
                       {resolvedAuthorizerId && linkStatus === "linked" && (
                         <div className="flex items-center gap-1.5">
                           <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500" title="Account linked" />
@@ -1428,15 +1487,16 @@ function ChatElapsedTimer({ since }: { since: number }) {
 }
 
 function ChatToolUseBlock({ tools, isActive }: { tools: { name: string; index: number; total: number; timestamp: number }[]; isActive: boolean }) {
-  const last = tools[tools.length - 1]!;
+  const tool = tools[0]!;
   return (
-    <div className="py-1.5 my-1 text-xs text-muted-foreground border-l-2 border-muted-foreground/30 pl-2 space-y-0.5">
+    <div className="py-1 my-0.5 text-xs text-muted-foreground border-l-2 border-muted-foreground/30 pl-2">
       <div className="flex items-center gap-1.5">
         <Wrench className="h-3 w-3 shrink-0" />
-        <span>Tool calls ({last.index}/{last.total}):</span>
+        <span className="font-medium text-foreground/70">{formatToolName(tool.name)}</span>
+        <span className="text-muted-foreground/60">({tool.index}/{tool.total})</span>
         {isActive && (
           <>
-            <ChatElapsedTimer since={last.timestamp} />
+            <ChatElapsedTimer since={tool.timestamp} />
             <span className="flex gap-0.5 ml-0.5">
               <span className="h-1 w-1 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:0ms]" />
               <span className="h-1 w-1 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:150ms]" />
@@ -1445,9 +1505,6 @@ function ChatToolUseBlock({ tools, isActive }: { tools: { name: string; index: n
           </>
         )}
       </div>
-      {tools.map((t, i) => (
-        <div key={i} className="pl-[18px] font-medium text-foreground/70">{formatToolName(t.name)}</div>
-      ))}
     </div>
   );
 }
@@ -1466,31 +1523,19 @@ function StreamingBubble({
       <div className="max-w-[84%] rounded-2xl px-4 py-3 text-sm break-words bg-muted">
         {(() => {
           const blocks: React.ReactNode[] = [];
-          let toolGroup: { name: string; index: number; total: number; timestamp: number }[] = [];
-          let toolGroupStart = 0;
-          const flushTools = () => {
-            if (toolGroup.length > 0) {
-              const lastIdx = toolGroupStart + toolGroup.length - 1;
-              const active = isStreaming && lastIdx === segments.length - 1;
-              blocks.push(<ChatToolUseBlock key={`tools-${toolGroupStart}`} tools={toolGroup} isActive={active} />);
-              toolGroup = [];
-            }
-          };
           segments.forEach((seg, i) => {
             if (seg.type === "tool_use") {
-              if (toolGroup.length === 0) toolGroupStart = i;
-              toolGroup.push({ name: seg.name, index: seg.index, total: seg.total, timestamp: seg.timestamp });
+              const active = isStreaming && i === segments.length - 1;
+              blocks.push(
+                <ChatToolUseBlock key={`tools-${i}`} tools={[{ name: seg.name, index: seg.index, total: seg.total, timestamp: seg.timestamp }]} isActive={active} />
+              );
             } else if (seg.type === "approval_request") {
-              flushTools();
               blocks.push(<ApprovalRequestBubble key={`approval-${i}`} data={seg.data} />);
             } else if (seg.type === "approval_resolved") {
-              flushTools();
               // Skip render — approval status is already shown inline in the ApprovalRequestBubble
             } else if (seg.type === "elicitation_request") {
-              flushTools();
               blocks.push(<ElicitationRequestBubble key={`elicit-${i}`} data={seg.data} onRespond={onElicitationRespond} />);
             } else {
-              flushTools();
               blocks.push(
                 <ReactMarkdown
                   key={i}
@@ -1538,7 +1583,6 @@ function StreamingBubble({
               );
             }
           });
-          flushTools();
           return blocks;
         })()}
         {isStreaming && (
@@ -1570,7 +1614,24 @@ function MessageBubble({
           isUser ? "bg-primary text-primary-foreground" : "bg-muted"
         }`}
       >
-          {toolNames && toolNames.length > 0 && (
+          {hitlSegments && hitlSegments.length > 0 ? (
+            <div className="mb-2 space-y-1">
+              {hitlSegments.map((seg, i) => {
+                if (seg.type === "tool_use") return (
+                  <div key={`h-tool-${i}`} className="py-1 text-xs text-muted-foreground border-l-2 border-muted-foreground/30 pl-2">
+                    <div className="flex items-center gap-1.5">
+                      <Wrench className="h-3 w-3 shrink-0" />
+                      <span className="font-medium text-foreground/70">{formatToolName(seg.name)}</span>
+                      <span className="text-muted-foreground/60">({seg.index}/{seg.total})</span>
+                    </div>
+                  </div>
+                );
+                if (seg.type === "approval_request") return <ApprovalRequestBubble key={`h-approval-${i}`} data={seg.data} resolved />;
+                if (seg.type === "elicitation_request") return <ElicitationRequestBubble key={`h-elicit-${i}`} data={seg.data} resolved resolvedSummary={seg.resolvedSummary} />;
+                return null;
+              })}
+            </div>
+          ) : toolNames && toolNames.length > 0 ? (
             <div className="py-1 mb-2 text-xs text-muted-foreground border-l-2 border-muted-foreground/30 pl-2 space-y-0.5">
               <div className="flex items-center gap-1.5">
                 <Wrench className="h-3 w-3 shrink-0" />
@@ -1580,16 +1641,7 @@ function MessageBubble({
                 <div key={i} className="pl-[18px] font-medium text-foreground/70">{formatToolName(name)}</div>
               ))}
             </div>
-          )}
-          {hitlSegments && hitlSegments.length > 0 && (
-            <div className="mb-2 space-y-2">
-              {hitlSegments.map((seg, i) => {
-                if (seg.type === "approval_request") return <ApprovalRequestBubble key={`h-approval-${i}`} data={seg.data} resolved />;
-                if (seg.type === "elicitation_request") return <ElicitationRequestBubble key={`h-elicit-${i}`} data={seg.data} resolved resolvedSummary={seg.resolvedSummary} />;
-                return null;
-              })}
-            </div>
-          )}
+          ) : null}
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{

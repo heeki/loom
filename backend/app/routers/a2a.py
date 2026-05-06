@@ -39,6 +39,8 @@ class A2aAgentCreateRequest(BaseModel):
     oauth2_client_id: str | None = Field(None, description="OAuth2 client ID")
     oauth2_client_secret: str | None = Field(None, description="OAuth2 client secret")
     oauth2_scopes: str | None = Field(None, description="OAuth2 scopes (space-separated)")
+    delegation_mode: str = Field(default="m2m", description="OAuth2 delegation mode: 'm2m' or 'obo'")
+    obo_grant_type: str | None = Field(None, description="OBO grant type: 'JWT_AUTHORIZATION_GRANT' (Entra ID) or 'TOKEN_EXCHANGE' (Okta)")
 
     @model_validator(mode="after")
     def validate_oauth2_fields(self):
@@ -59,6 +61,8 @@ class A2aAgentUpdateRequest(BaseModel):
     oauth2_client_id: str | None = None
     oauth2_client_secret: str | None = None
     oauth2_scopes: str | None = None
+    delegation_mode: str | None = None
+    obo_grant_type: str | None = None
 
 
 class A2aAgentResponse(BaseModel):
@@ -81,6 +85,8 @@ class A2aAgentResponse(BaseModel):
     oauth2_client_id: str | None = None
     oauth2_scopes: str | None = None
     has_oauth2_secret: bool = False
+    delegation_mode: str = "m2m"
+    obo_grant_type: str | None = None
     agentcore_session_id: str | None = None
     registry_record_id: str | None = None
     registry_status: str | None = None
@@ -216,6 +222,8 @@ def create_a2a_agent(
         oauth2_client_id=request.oauth2_client_id,
         oauth2_client_secret=request.oauth2_client_secret,
         oauth2_scopes=request.oauth2_scopes,
+        delegation_mode=request.delegation_mode or "m2m",
+        obo_grant_type=request.obo_grant_type,
         agentcore_session_id=str(uuid.uuid4()) if _is_agentcore_url(request.base_url) else None,
         last_fetched_at=datetime.utcnow(),
     )
@@ -432,3 +440,25 @@ def update_access_rules(
         db.refresh(r)
 
     return [A2aAccessRuleResponse(**r.to_dict()) for r in new_rules]
+
+
+@router.get("/{agent_id}/export")
+def export_a2a_agent(
+    agent_id: int,
+    user: UserInfo = Depends(require_scopes("admin:write")),
+    db: Session = Depends(get_db),
+):
+    """Export full A2A agent config including secrets. Super admin only."""
+    agent = _get_agent_or_404(agent_id, db)
+    data: dict = {
+        "base_url": agent.base_url,
+        "name": agent.name,
+        "auth_type": agent.auth_type,
+    }
+    if agent.auth_type == "oauth2":
+        data["oauth2_well_known_url"] = agent.oauth2_well_known_url
+        data["oauth2_client_id"] = agent.oauth2_client_id
+        data["oauth2_client_secret"] = agent.oauth2_client_secret or None
+        data["oauth2_scopes"] = agent.oauth2_scopes
+        data["delegation_mode"] = agent.delegation_mode
+    return data

@@ -19,6 +19,7 @@ from app.models.invocation import Invocation
 from app.models.memory import Memory
 from app.models.session import InvocationSession
 from app.models.tag_policy import TagPolicy
+from app.models.tag_profile import TagProfile
 from app.services.memory import (
     create_memory as svc_create_memory,
     get_memory as svc_get_memory,
@@ -474,6 +475,58 @@ def get_memory(memory_id: int, user: UserInfo = Depends(require_scopes("memory:r
             detail=f"Memory with id {memory_id} not found"
         )
     return _build_memory_response(memory, db)
+
+
+@router.get("/{memory_id}/export")
+def export_memory(memory_id: int, user: UserInfo = Depends(require_scopes("admin:write")), db: Session = Depends(get_db)):
+    """Export memory config in create-compatible format. Super admin only."""
+    memory = db.query(Memory).filter(Memory.id == memory_id).first()
+    if not memory:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Memory with id {memory_id} not found")
+    data: dict = {
+        "name": memory.name,
+        "description": memory.description,
+        "event_expiry_duration": memory.event_expiry_duration,
+    }
+    if memory.memory_execution_role_arn:
+        data["memory_execution_role_arn"] = memory.memory_execution_role_arn
+    if memory.encryption_key_arn:
+        data["encryption_key_arn"] = memory.encryption_key_arn
+    # Reverse AWS tagged-union format back to create-request format
+    aws_key_to_type = {v: k for k, v in STRATEGY_TYPE_MAP.items()}
+    strategies_config = memory.get_strategies_config()
+    if strategies_config:
+        strategies = []
+        for entry in strategies_config:
+            for aws_key, config in entry.items():
+                strategy_type = aws_key_to_type.get(aws_key, "custom")
+                strat: dict = {
+                    "strategy_type": strategy_type,
+                    "name": config.get("name", ""),
+                }
+                if config.get("description"):
+                    strat["description"] = config["description"]
+                if config.get("namespaces"):
+                    strat["namespaces"] = config["namespaces"]
+                strategies.append(strat)
+        data["memory_strategies"] = strategies
+    tags = memory.get_tags()
+    if tags:
+        profiles = db.query(TagProfile).all()
+        matched_profile = None
+        best_match_size = 0
+        for profile in profiles:
+            profile_tags = profile.get_tags()
+            if not profile_tags:
+                continue
+            if all(tags.get(k) == v for k, v in profile_tags.items()) and len(profile_tags) > best_match_size:
+                matched_profile = profile
+                best_match_size = len(profile_tags)
+        if matched_profile:
+            data["tags"] = matched_profile.name
+        else:
+            data["tags"] = tags
+    return data
 
 
 @router.post("/{memory_id}/refresh", response_model=MemoryResponse)

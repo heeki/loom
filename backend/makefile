@@ -10,6 +10,8 @@ test:
 
 run:
 	source .venv/bin/activate && uvicorn app.main:app --reload --port $${LOOM_BACKEND_PORT:-8000}
+run.debug:
+	source .venv/bin/activate && LOG_LEVEL=DEBUG uvicorn app.main:app --reload --port $${LOOM_BACKEND_PORT:-8000} --log-level debug
 
 # Setup and migration
 migrate: migrate-db fix-sequences

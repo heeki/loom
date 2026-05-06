@@ -55,7 +55,7 @@ export function CatalogPage({
   viewMode,
   onViewModeChange,
   onSelectAgent,
-  onRefreshAgent,
+  onRefreshAgent: _onRefreshAgent,
   onDelete,
   readOnly,
   agentDeleteStartTimes,
@@ -228,7 +228,6 @@ export function CatalogPage({
   const [memories, setMemories] = useState<MemoryResponse[]>([]);
   const [memoriesLoading, setMemoriesLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [refreshingId, setRefreshingId] = useState<number | null>(null);
   const [deleteStartTimes, setDeleteStartTimes] = useState<Record<number, number>>({});
   const filteredMemories = memories
     .filter(mem => matchesFilters(mem.tags))
@@ -309,18 +308,7 @@ export function CatalogPage({
     };
   }, [memories.map((m) => `${m.id}:${m.status}`).join(",")]);
 
-  const handleMemoryRefresh = async (id: number) => {
-    setRefreshingId(id);
-    try {
-      const updated = await refreshMemory(id);
-      setMemories((prev) => prev.map((m) => (m.id === id ? updated : m)));
-      toast.success("Memory status refreshed");
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.detail : "Failed to refresh memory");
-    } finally {
-      setRefreshingId(null);
-    }
-  };
+
 
   const handleMemoryDelete = async (id: number, deleteInAws: boolean) => {
     setSubmitting(true);
@@ -514,7 +502,6 @@ export function CatalogPage({
                   <AgentCard
                     agent={agent}
                     onSelect={onSelectAgent}
-                    onRefresh={onRefreshAgent}
                     onDelete={onDelete}
                     readOnly={readOnly}
                     showOnCardKeys={effectiveShowOnCardKeys}
@@ -632,9 +619,7 @@ export function CatalogPage({
               <MemoryCard
                 memory={mem}
                 now={now}
-                refreshingId={refreshingId}
                 submitting={submitting}
-                onRefresh={handleMemoryRefresh}
                 onDelete={handleMemoryDelete}
                 readOnly={readOnly}
                 showOnCardKeys={effectiveShowOnCardKeys}
