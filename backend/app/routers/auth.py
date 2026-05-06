@@ -40,6 +40,8 @@ def get_auth_config() -> dict:
                     "redirect_uri": os.getenv("LOOM_OIDC_REDIRECT_URI", ""),
                     "group_claim_path": idp.group_claim_path or "groups",
                     "group_mappings": idp.get_group_mappings(),
+                    "has_client_secret": bool(idp.client_secret_arn),
+                    "client_type": idp.client_type or ("confidential" if idp.client_secret_arn else "public"),
                     # Backward compat
                     "user_pool_id": user_pool_id,
                     "region": region,

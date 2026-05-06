@@ -73,6 +73,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
   const [formIssuerUrl, setFormIssuerUrl] = useState("");
   const [formClientId, setFormClientId] = useState("");
   const [formClientSecret, setFormClientSecret] = useState("");
+  const [formClientType, setFormClientType] = useState("public");
   const [formScopes, setFormScopes] = useState("");
   const [formAudience, setFormAudience] = useState("");
   const [formGroupClaimPath, setFormGroupClaimPath] = useState("");
@@ -99,6 +100,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
     setFormIssuerUrl("");
     setFormClientId("");
     setFormClientSecret("");
+    setFormClientType("public");
     setFormScopes("");
     setFormAudience("");
     setFormGroupClaimPath("");
@@ -118,6 +120,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
       if (obj.issuer_url) setFormIssuerUrl(obj.issuer_url);
       if (obj.client_id) setFormClientId(obj.client_id);
       if (obj.client_secret) setFormClientSecret(obj.client_secret);
+      if (obj.client_type) setFormClientType(obj.client_type);
       if (obj.scopes) setFormScopes(obj.scopes);
       if (obj.audience) setFormAudience(obj.audience);
       if (obj.group_claim_path) setFormGroupClaimPath(obj.group_claim_path);
@@ -153,6 +156,8 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
       provider_type: formProviderType,
       issuer_url: formIssuerUrl,
       client_id: formClientId,
+      client_secret: formClientSecret || undefined,
+      client_type: formClientType,
       scopes: formScopes || undefined,
       audience: formAudience || undefined,
       group_claim_path: formGroupClaimPath || undefined,
@@ -168,6 +173,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
     setFormIssuerUrl(idp.issuer_url);
     setFormClientId(idp.client_id);
     setFormClientSecret("");
+    setFormClientType(idp.client_type || "public");
     setFormScopes(idp.scopes || "");
     setFormAudience(idp.audience || "");
     setFormGroupClaimPath(idp.group_claim_path || "");
@@ -217,6 +223,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
           issuer_url: formIssuerUrl,
           client_id: formClientId,
           client_secret: formClientSecret || undefined,
+          client_type: formClientType,
           scopes: formScopes || undefined,
           audience: formAudience || undefined,
           group_claim_path: formGroupClaimPath || undefined,
@@ -230,6 +237,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
           issuer_url: formIssuerUrl,
           client_id: formClientId,
           client_secret: formClientSecret || undefined,
+          client_type: formClientType,
           scopes: formScopes || undefined,
           audience: formAudience || undefined,
           group_claim_path: formGroupClaimPath || undefined,
@@ -318,7 +326,17 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-[auto_2fr_3fr] gap-4">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Client Type</Label>
+          <Select value={formClientType} onValueChange={setFormClientType}>
+            <SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="public">Public (PKCE)</SelectItem>
+              <SelectItem value="confidential">Confidential</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <div className="space-y-1.5">
           <Label className="text-xs">Client ID</Label>
           <Input value={formClientId} onChange={(e) => setFormClientId(e.target.value)} placeholder="App registration client ID" />
@@ -333,6 +351,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
           />
         </div>
       </div>
+      <p className="text-[10px] text-muted-foreground -mt-2">Public: browser exchanges code directly via PKCE. Confidential: backend proxies code exchange with client secret.</p>
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
@@ -512,6 +531,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
               <div className="pl-6 space-y-3">
                 <div className="rounded border bg-input-bg p-3 space-y-1 text-xs">
                   <div><span className="text-muted-foreground">Client ID: </span><span className="font-mono">{idp.client_id}</span></div>
+                  <div><span className="text-muted-foreground">Client Type: </span><span>{idp.client_type === "confidential" ? "Confidential" : "Public (PKCE)"}</span></div>
                   {idp.has_client_secret && <div><span className="text-muted-foreground">Client Secret: </span><span className="text-muted-foreground italic">(redacted)</span></div>}
                   {idp.scopes && <div><span className="text-muted-foreground">Scopes: </span><span className="break-all">{idp.scopes}</span></div>}
                   {idp.audience && <div><span className="text-muted-foreground">Audience: </span><span className="font-mono break-all">{idp.audience}</span></div>}

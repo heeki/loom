@@ -13,6 +13,8 @@ export interface AuthConfig {
   redirect_uri?: string;
   group_claim_path?: string;
   group_mappings?: Record<string, string[]>;
+  has_client_secret?: boolean;
+  client_type?: string; // "public" or "confidential"
 }
 
 export interface AuthTokens {
@@ -219,21 +221,38 @@ export async function startOIDCLogin(config: AuthConfig): Promise<void> {
 
 export async function exchangeOIDCCode(
   code: string,
-  _config: AuthConfig,
+  config: AuthConfig,
 ): Promise<OIDCTokenResponse> {
   const codeVerifier = sessionStorage.getItem("oidc_code_verifier") || "";
   const redirectUri = sessionStorage.getItem("oidc_redirect_uri") || `${window.location.origin}/oauth/callback`;
 
-  // Exchange via backend proxy — the backend attaches the client_secret
-  const response = await fetch(`${getBaseUrl()}/api/auth/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      code,
-      code_verifier: codeVerifier,
-      redirect_uri: redirectUri,
-    }),
-  });
+  let response: Response;
+
+  if (config.client_type === "confidential") {
+    // Confidential client — exchange via backend proxy which attaches the client_secret
+    response = await fetch(`${getBaseUrl()}/api/auth/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code,
+        code_verifier: codeVerifier,
+        redirect_uri: redirectUri,
+      }),
+    });
+  } else {
+    // Public client (PKCE only) — exchange directly with the IdP
+    response = await fetch(config.token_endpoint!, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id: config.client_id || "",
+        code,
+        code_verifier: codeVerifier,
+        redirect_uri: redirectUri,
+      }),
+    });
+  }
 
   if (!response.ok) {
     const text = await response.text();

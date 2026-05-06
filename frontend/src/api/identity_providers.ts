@@ -7,6 +7,7 @@ export interface IdentityProviderResponse {
   issuer_url: string;
   client_id: string;
   has_client_secret: boolean;
+  client_type: string;
   scopes: string | null;
   audience: string | null;
   group_claim_path: string | null;
@@ -26,6 +27,7 @@ export interface CreateIdentityProviderRequest {
   issuer_url: string;
   client_id: string;
   client_secret?: string;
+  client_type?: string;
   scopes?: string;
   audience?: string;
   group_claim_path?: string;
@@ -39,6 +41,7 @@ export interface UpdateIdentityProviderRequest {
   issuer_url?: string;
   client_id?: string;
   client_secret?: string;
+  client_type?: string;
   scopes?: string;
   audience?: string;
   group_claim_path?: string;

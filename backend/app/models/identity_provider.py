@@ -12,6 +12,7 @@ class IdentityProvider(Base):
     issuer_url = Column(String, nullable=False)  # OIDC issuer base URL
     client_id = Column(String, nullable=False)
     client_secret_arn = Column(String, nullable=True)  # Secrets Manager ARN (write-only)
+    client_type = Column(String, nullable=True, default="public")  # "public" or "confidential"
     scopes = Column(String, nullable=True)  # space-separated scopes to request
     audience = Column(String, nullable=True)  # expected aud claim (if different from client_id)
     group_claim_path = Column(String, nullable=True)  # claim path for groups: "cognito:groups", "groups", "roles"
@@ -41,6 +42,7 @@ class IdentityProvider(Base):
             "issuer_url": self.issuer_url,
             "client_id": self.client_id,
             "has_client_secret": bool(self.client_secret_arn),
+            "client_type": self.client_type or ("confidential" if self.client_secret_arn else "public"),
             "scopes": self.scopes,
             "audience": self.audience,
             "group_claim_path": self.group_claim_path,

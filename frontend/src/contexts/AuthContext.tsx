@@ -282,13 +282,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((cfg) => {
         setConfig(cfg);
 
-        // Invalidate cached tokens if the IdP issuer changed
-        if (isExternalOIDC(cfg) && tokensRef.current?.accessToken) {
+        // Invalidate cached tokens if the IdP changed (e.g., switched from Okta to Entra).
+        // Use the id_token's aud claim which always matches the client_id, unlike access
+        // tokens which may have a different audience (e.g., Entra ID API resource URIs).
+        if (isExternalOIDC(cfg) && tokensRef.current?.idToken) {
           try {
-            const claims = decodeJwtPayload(tokensRef.current.accessToken);
-            const tokenIssuer = (claims.iss as string) || "";
-            const configIssuer = cfg.issuer_url || "";
-            if (configIssuer && tokenIssuer && tokenIssuer !== configIssuer) {
+            const claims = decodeJwtPayload(tokensRef.current.idToken);
+            const tokenAud = (claims.aud as string) || "";
+            const configClientId = cfg.client_id || "";
+            if (configClientId && tokenAud && tokenAud !== configClientId) {
               setTokens(null);
               setUser(null);
               setAuthToken(null);
@@ -386,7 +388,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const currentConfig = configRef.current;
       if (!currentTokens?.refreshToken || !currentConfig) return null;
       if (isExternalOIDC(currentConfig)) {
-        // External OIDC has no refresh mechanism — clear session to force re-login
+        // Only clear session if the token is actually expired — a 401 on a
+        // scope-restricted endpoint shouldn't nuke the entire session.
+        try {
+          const payload = currentTokens.accessToken.split(".")[1] ?? "";
+          const claims = JSON.parse(atob(payload));
+          if (claims.exp && claims.exp > Date.now() / 1000) {
+            return null;
+          }
+        } catch { /* can't verify — clear to be safe */ }
         setTokens(null);
         setUser(null);
         setAuthToken(null);

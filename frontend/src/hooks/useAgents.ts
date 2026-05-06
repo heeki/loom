@@ -54,10 +54,6 @@ export function useAgents() {
     }
   }, []);
 
-  useEffect(() => {
-    void fetchAgents();
-  }, [fetchAgents]);
-
   // Status polling for agents that are creating or deleting
   const agentsRef = useRef(agents);
   agentsRef.current = agents;

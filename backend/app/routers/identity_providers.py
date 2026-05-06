@@ -32,6 +32,7 @@ class CreateIdPRequest(BaseModel):
     issuer_url: str
     client_id: str
     client_secret: str | None = None
+    client_type: str = Field("public", description="'public' (PKCE only) or 'confidential' (backend proxies code exchange with secret)")
     scopes: str | None = None
     audience: str | None = None
     group_claim_path: str | None = Field(None, description="JWT claim for groups, e.g. 'groups', 'cognito:groups', 'roles'")
@@ -45,6 +46,7 @@ class UpdateIdPRequest(BaseModel):
     issuer_url: str | None = None
     client_id: str | None = None
     client_secret: str | None = None
+    client_type: str | None = None
     scopes: str | None = None
     audience: str | None = None
     group_claim_path: str | None = None
@@ -115,6 +117,7 @@ def create_identity_provider(
         issuer_url=request.issuer_url,
         client_id=request.client_id,
         client_secret_arn=client_secret_arn,
+        client_type=request.client_type,
         scopes=request.scopes,
         audience=request.audience,
         group_claim_path=request.group_claim_path,
@@ -171,7 +174,7 @@ def update_identity_provider(
         raise HTTPException(status_code=404, detail="Identity provider not found")
 
     rerun_discovery = False
-    for field in ("name", "provider_type", "issuer_url", "client_id", "scopes", "audience", "group_claim_path", "status"):
+    for field in ("name", "provider_type", "issuer_url", "client_id", "client_type", "scopes", "audience", "group_claim_path", "status"):
         value = getattr(request, field)
         if value is not None:
             if field == "issuer_url" and value != idp.issuer_url:
