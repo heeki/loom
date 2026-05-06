@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Trash2, Plus, FlaskConical, ChevronDown, ChevronRight, Pencil, ArrowRightLeft } from "lucide-react";
 import { JsonConfigSection } from "@/components/JsonConfigSection";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   listIdentityProviders,
   createIdentityProvider,
@@ -58,6 +59,7 @@ interface IdentityProviderPanelProps {
 }
 
 export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) {
+  const { logout } = useAuth();
   const [providers, setProviders] = useState<IdentityProviderResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -131,7 +133,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
           if (Array.isArray(val)) {
             for (const g of val as string[]) reversed[g] = key;
           } else if (typeof val === "string") {
-            reversed[key] = val;
+            reversed[val] = key;
           }
         }
         setFormMappings(reversed);
@@ -144,12 +146,11 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
   };
 
   const handleJsonExport = (): string => {
-    const groupMappings: Record<string, string[]> = {};
+    const groupMappings: Record<string, string> = {};
     for (const [loomGroup, uuid] of Object.entries(formMappings)) {
       const trimmed = uuid.trim();
       if (!trimmed) continue;
-      if (!groupMappings[trimmed]) groupMappings[trimmed] = [];
-      groupMappings[trimmed].push(loomGroup);
+      groupMappings[trimmed] = loomGroup;
     }
     return JSON.stringify({
       name: formName,
@@ -207,6 +208,12 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
   const handleSave = async () => {
     setSaving(true);
     setError(null);
+
+    // Determine upfront if this save will switch the active IdP.
+    const savingAsActive = formStatus === "active";
+    const currentActive = providers.find((p) => p.status === "active");
+    const isIdPSwitch = savingAsActive && (!currentActive || currentActive.client_id !== formClientId);
+
     try {
       const groupMappings: Record<string, string[]> = {};
       for (const [loomGroup, uuid] of Object.entries(formMappings)) {
@@ -246,11 +253,22 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
         };
         await createIdentityProvider(data);
       }
+
+      if (isIdPSwitch) {
+        logout();
+        return;
+      }
+
       resetForm();
       setShowForm(false);
       setEditingId(null);
       await fetchProviders();
     } catch (e) {
+      // Any failure after saving an active IdP means the switch likely took effect
+      if (isIdPSwitch || savingAsActive) {
+        logout();
+        return;
+      }
       setError(e instanceof Error ? e.message : "Failed to save identity provider");
     } finally {
       setSaving(false);
@@ -270,9 +288,22 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
   const handleToggleStatus = async (idp: IdentityProviderResponse) => {
     try {
       const newStatus = idp.status === "active" ? "inactive" : "active";
+      const currentActive = providers.find((p) => p.status === "active");
+      const isSwitching = newStatus === "active" && currentActive && currentActive.id !== idp.id;
+
       await updateIdentityProvider(idp.id, { status: newStatus });
+
+      if (isSwitching) {
+        logout();
+        return;
+      }
       await fetchProviders();
     } catch (e) {
+      // If activating a different IdP caused a 401, the switch took effect
+      if (idp.status !== "active") {
+        logout();
+        return;
+      }
       setError(e instanceof Error ? e.message : "Failed to update status");
     }
   };

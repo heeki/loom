@@ -298,10 +298,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } catch { /* ignore decode errors */ }
         }
 
-        // Check for OIDC callback code in URL
+        // Check for OIDC callback code in URL (skip link-callback — that's handled separately)
         const params = new URLSearchParams(window.location.search);
         const code = params.get("code");
-        if (code && isExternalOIDC(cfg)) {
+        if (code && isExternalOIDC(cfg) && window.location.pathname !== "/oauth/link-callback") {
           void handleOIDCCallback(code, cfg).finally(() => setIsLoading(false));
           return;
         }
@@ -322,7 +322,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (isExternalOIDC(config)) {
         // For external IdP, loading is done after callback handling or immediately if no code
         const params = new URLSearchParams(window.location.search);
-        if (!params.get("code")) {
+        if (!params.get("code") || window.location.pathname === "/oauth/link-callback") {
           setIsLoading(false);
         }
       } else if (config.user_pool_id && import.meta.env.VITE_COGNITO_USER_CLIENT_ID) {
@@ -523,7 +523,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     Object.keys(sessionStorage)
       .filter((k) => k.startsWith("loom:invokePrompt:"))
       .forEach((k) => sessionStorage.removeItem(k));
-    fetchAuthConfig().then((cfg) => setConfig(cfg)).catch(() => {});
+    setIsLoading(true);
+    fetchAuthConfig().then((cfg) => {
+      setConfig(cfg);
+      setIsLoading(false);
+    }).catch(() => { setIsLoading(false); });
   }, []);
 
   const logoutIdP = useCallback(() => {

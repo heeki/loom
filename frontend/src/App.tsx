@@ -202,13 +202,28 @@ function AppContent() {
   }, [hasScope]);
 
   const [activePersona, setActivePersona] = useState<Persona>(getDefaultPersona());
+  const [agentInitialTab, setAgentInitialTab] = useState<"details" | "invoke">("details");
   const [viewAsUser, setViewAsUser] = useState<string | null>(null);
   const [pendingMcpId, setPendingMcpId] = useState<number | null>(null);
   const [pendingA2aId, setPendingA2aId] = useState<number | null>(null);
 
-  // Reset all navigation state when user logs in
+  // Reset all navigation state when user logs in (skip if returning from link callback)
+  const hasResetForSession = useRef(false);
   useEffect(() => {
     if (isAuthenticated) {
+      if (hasResetForSession.current) return;
+      hasResetForSession.current = true;
+      const linkReturnId = localStorage.getItem("loom_link_return_agent_id");
+      if (linkReturnId && window.location.pathname !== "/oauth/link-callback") {
+        localStorage.removeItem("loom_link_return_agent_id");
+        const agentId = parseInt(linkReturnId, 10) || null;
+        if (agentId) {
+          setSelectedAgentId(agentId);
+          setActivePersona("builder");
+          setAgentInitialTab("invoke");
+        }
+        return;
+      }
       setActivePersona(getDefaultPersona());
       setSelectedAgentId(null);
       setSelectedSessionId(null);
@@ -216,6 +231,8 @@ function AppContent() {
       setSelectedInvocationId(null);
       setInvocationDetail(null);
       setViewAsUser(null);
+    } else {
+      hasResetForSession.current = false;
     }
   }, [isAuthenticated, getDefaultPersona]);
 
@@ -377,6 +394,7 @@ function AppContent() {
     const agentName = agents.find((a) => a.id === id)?.name ?? String(id);
     if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "navigation", "agent_detail", agentName);
     setSelectedAgentId(id);
+    setAgentInitialTab("details");
     setSelectedSessionId(null);
     setSessionDetail(null);
     setSelectedInvocationId(null);
@@ -770,6 +788,7 @@ function AppContent() {
                   registryReadOnly={!effectiveHasScope("registry:write")}
                   registryEnabled={registryEnabled}
                   userGroups={viewAsUser ? (USER_GROUPS[viewAsUser] ?? []) : (user?.groups ?? [])}
+                  initialTab={agentInitialTab}
                 />
               )}
 

@@ -30,7 +30,7 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
       <div className="absolute right-1 top-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <CopyButton text={code} />
       </div>
-      <pre className="overflow-x-auto rounded bg-black/10 dark:bg-white/10 p-3 text-xs font-mono whitespace-pre-wrap">
+      <pre className="overflow-x-auto rounded bg-white dark:bg-white/10 border border-border p-3 text-xs font-mono whitespace-pre-wrap">
         {language && <span className="text-[10px] text-muted-foreground/60 block mb-1">{language}</span>}
         {code}
       </pre>
@@ -42,7 +42,7 @@ function CopyableField({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center gap-1.5 text-xs">
       <span className="font-medium text-muted-foreground shrink-0">{label}:</span>
-      <code className="rounded bg-black/10 dark:bg-white/10 px-1.5 py-0.5 font-mono text-xs break-all">{value}</code>
+      <code className="rounded bg-white dark:bg-white/10 border border-border px-1.5 py-0.5 font-mono text-xs break-all">{value}</code>
       <CopyButton text={value} />
     </div>
   );

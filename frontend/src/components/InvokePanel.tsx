@@ -145,6 +145,7 @@ export function InvokePanel({ agentId, qualifiers, sessions, isStreaming, modelI
       sessionStorage.setItem("loom_link_redirect_uri", redirect_uri);
       sessionStorage.setItem("loom_link_auth_id", String(resolvedAuthorizerId));
       sessionStorage.setItem("loom_link_return_url", window.location.pathname);
+      localStorage.setItem("loom_link_return_agent_id", String(agentId));
       window.location.href = authorize_url;
     } catch {
       setLinkStatus("unlinked");

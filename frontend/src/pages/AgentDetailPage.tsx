@@ -39,6 +39,7 @@ interface AgentDetailPageProps {
   registryReadOnly?: boolean;
   registryEnabled?: boolean;
   userGroups?: string[];
+  initialTab?: "details" | "invoke";
 }
 
 export function AgentDetailPage({
@@ -54,6 +55,7 @@ export function AgentDetailPage({
   registryReadOnly,
   registryEnabled = false,
   userGroups = [],
+  initialTab = "details",
 }: AgentDetailPageProps) {
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState("");
@@ -126,7 +128,7 @@ export function AgentDetailPage({
   const isDeployed = agent.source === "deploy" || agent.source === "harness";
 
   return (
-    <Tabs defaultValue="details" className="space-y-4">
+    <Tabs defaultValue={initialTab} className="space-y-4">
       <TabsList>
         <TabsTrigger value="details">Details</TabsTrigger>
         <TabsTrigger value="invoke">Invoke</TabsTrigger>
@@ -588,7 +590,7 @@ function TokenClaimsRow({ label, value, annotation, children }: { label: string;
         <div className="font-mono text-xs break-all">{children}</div>
       ) : (
         <span className="font-mono text-xs break-all">
-          {typeof value === "object" ? JSON.stringify(value) : String(value)}
+          {Array.isArray(value) ? value.join(" ") : typeof value === "object" ? JSON.stringify(value) : String(value)}
           {annotation && <span className="text-muted-foreground ml-1 font-sans">({annotation})</span>}
         </span>
       )}
@@ -616,8 +618,11 @@ function resolveRoles(roles: string[] | undefined, groupMappings?: Record<string
   });
 }
 
-function subAnnotation(sub?: string, aud?: string | string[]): string | undefined {
+function subAnnotation(sub?: string, aud?: string | string[], iss?: string): string | undefined {
   if (!sub) return undefined;
+  if (iss?.includes("okta.com")) {
+    return "user identifier";
+  }
   const clientId = Array.isArray(aud) ? aud[0] : aud;
   const cleanClientId = clientId?.replace("api://", "") ?? "unknown";
   return `per-user id for client_id: ${cleanClientId}`;
@@ -641,7 +646,7 @@ function TokenInfoCard({ userToken, oboTokens, groupMappings, authorizerName }: 
             </summary>
             <div className="mt-1.5 pl-2 border-l-2 border-muted-foreground/20">
               <TokenClaimsRow label="iss" value={userToken.claims.iss} annotation={userToken.claims.iss ? "issuer" : undefined} />
-              <TokenClaimsRow label="sub" value={userToken.claims.sub} annotation={subAnnotation(userToken.claims.sub, userToken.claims.aud)} />
+              <TokenClaimsRow label="sub" value={userToken.claims.sub} annotation={subAnnotation(userToken.claims.sub, userToken.claims.aud, userToken.claims.iss)} />
               <TokenClaimsRow label="aud" value={userToken.claims.aud} annotation={userToken.claims.aud ? "audience" : undefined} />
               <TokenClaimsRow label="scp" value={userToken.claims.scp} annotation={userToken.claims.scp ? "scopes" : undefined} />
               {userToken.claims.roles && userToken.claims.roles.length > 0 && (
@@ -660,7 +665,7 @@ function TokenInfoCard({ userToken, oboTokens, groupMappings, authorizerName }: 
             </summary>
             <div className="mt-1.5 pl-2 border-l-2 border-amber-500/30">
               <TokenClaimsRow label="iss" value={t.claims.iss} annotation={t.claims.iss ? "issuer" : undefined} />
-              <TokenClaimsRow label="sub" value={t.claims.sub} annotation={subAnnotation(t.claims.sub, t.claims.aud)} />
+              <TokenClaimsRow label="sub" value={t.claims.sub} annotation={subAnnotation(t.claims.sub, t.claims.aud, t.claims.iss)} />
               <TokenClaimsRow label="aud" value={t.claims.aud} annotation={t.claims.aud ? "audience" : undefined} />
               <TokenClaimsRow label="azp" value={t.claims.azp ?? t.claims.appid} annotation={t.claims.azp || t.claims.appid ? "authorized party: actor that performed the OBO exchange" : undefined} />
               <TokenClaimsRow label="scp" value={t.claims.scp} annotation={t.claims.scp ? "scopes" : undefined} />
