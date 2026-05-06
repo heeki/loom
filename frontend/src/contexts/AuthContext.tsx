@@ -282,6 +282,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((cfg) => {
         setConfig(cfg);
 
+        // Invalidate cached tokens if the IdP issuer changed
+        if (isExternalOIDC(cfg) && tokensRef.current?.accessToken) {
+          try {
+            const claims = decodeJwtPayload(tokensRef.current.accessToken);
+            const tokenIssuer = (claims.iss as string) || "";
+            const configIssuer = cfg.issuer_url || "";
+            if (configIssuer && tokenIssuer && tokenIssuer !== configIssuer) {
+              setTokens(null);
+              setUser(null);
+              setAuthToken(null);
+            }
+          } catch { /* ignore decode errors */ }
+        }
+
         // Check for OIDC callback code in URL
         const params = new URLSearchParams(window.location.search);
         const code = params.get("code");
@@ -371,7 +385,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const currentTokens = tokensRef.current;
       const currentConfig = configRef.current;
       if (!currentTokens?.refreshToken || !currentConfig) return null;
-      if (isExternalOIDC(currentConfig)) return null;
+      if (isExternalOIDC(currentConfig)) {
+        // External OIDC has no refresh mechanism — clear session to force re-login
+        setTokens(null);
+        setUser(null);
+        setAuthToken(null);
+        return null;
+      }
       try {
         const result = await refreshTokens(
           currentTokens.refreshToken,
@@ -500,12 +520,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const currentConfig = configRef.current;
     const idToken = tokens?.idToken;
     logout();
-    if (currentConfig && isExternalOIDC(currentConfig) && currentConfig.issuer_url) {
+    // Mark that next login should force a fresh prompt
+    sessionStorage.setItem("oidc_force_prompt", "login");
+    if (currentConfig && isExternalOIDC(currentConfig) && currentConfig.issuer_url && idToken) {
+      // Only redirect to IdP logout if we have a valid id_token_hint — otherwise the
+      // IdP may reject the request (e.g. after authorization server change).
       const issuer = currentConfig.issuer_url.replace(/\/+$/, "");
       const returnUrl = window.location.origin;
       if (currentConfig.provider_type === "okta") {
-        const params = new URLSearchParams({ post_logout_redirect_uri: returnUrl });
-        if (idToken) params.set("id_token_hint", idToken);
+        const params = new URLSearchParams({ post_logout_redirect_uri: returnUrl, id_token_hint: idToken });
         window.location.href = `${issuer}/v1/logout?${params.toString()}`;
       } else if (currentConfig.provider_type === "entra_id") {
         const params = new URLSearchParams({ post_logout_redirect_uri: returnUrl });
@@ -543,7 +566,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider
       value={{
-        isAuthenticated: isConfigured ? tokens !== null : true,
+        isAuthenticated: isLoading ? false : isConfigured ? tokens !== null : true,
         isLoading,
         user,
         accessToken: tokens?.accessToken ?? null,

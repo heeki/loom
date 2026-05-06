@@ -235,7 +235,9 @@ def get_current_user(request: Request) -> UserInfo:
             )
             return _build_user_from_external_claims(claims, active_idp)
         except Exception as e:
-            logger.debug("External IdP validation failed, trying Cognito: %s", e)
+            logger.warning("External IdP validation failed (jwks_uri=%s, issuer=%s, audience=%s): %s",
+                           active_idp["jwks_uri"], issuer,
+                           active_idp.get("audience") or active_idp.get("client_id"), e)
             # Fall through to Cognito if external validation fails
             if not user_pool_id:
                 raise HTTPException(status_code=401, detail="Invalid or expired token") from e

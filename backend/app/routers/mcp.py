@@ -40,6 +40,7 @@ class McpServerCreateRequest(BaseModel):
     oauth2_scopes: str | None = Field(None, description="OAuth2 scopes (space-separated)")
     delegation_mode: str = Field(default="m2m", description="OAuth2 delegation mode: 'm2m' or 'obo'")
     obo_grant_type: str | None = Field(None, description="OBO grant type: 'JWT_AUTHORIZATION_GRANT' (Entra ID) or 'TOKEN_EXCHANGE' (Okta)")
+    oauth2_audience: str | None = Field(None, description="Token exchange audience (required for Okta custom auth servers)")
     api_key_header_name: str | None = Field(None, description="Header name for API key auth")
     api_key: str | None = Field(None, description="Admin API key (stored in Secrets Manager)")
     supports_elicitation: bool = Field(default=False, description="Whether this server supports MCP elicitation")
@@ -71,6 +72,7 @@ class McpServerUpdateRequest(BaseModel):
     oauth2_scopes: str | None = None
     delegation_mode: str | None = None
     obo_grant_type: str | None = None
+    oauth2_audience: str | None = None
     api_key_header_name: str | None = None
     api_key: str | None = None
     supports_elicitation: bool | None = None
@@ -90,6 +92,7 @@ class McpServerResponse(BaseModel):
     oauth2_scopes: str | None = None
     delegation_mode: str = "m2m"
     obo_grant_type: str | None = None
+    oauth2_audience: str | None = None
     has_oauth2_secret: bool = False
     api_key_header_name: str | None = None
     has_admin_api_key: bool = False
@@ -190,6 +193,7 @@ def create_mcp_server(
         oauth2_scopes=request.oauth2_scopes,
         delegation_mode=request.delegation_mode or "m2m",
         obo_grant_type=request.obo_grant_type,
+        oauth2_audience=request.oauth2_audience,
     )
     server.api_key_header_name = request.api_key_header_name
     server.supports_elicitation = "true" if request.supports_elicitation else "false"
@@ -280,6 +284,10 @@ def export_mcp_server(
         data["oauth2_client_secret"] = server.oauth2_client_secret or None
         data["oauth2_scopes"] = server.oauth2_scopes
         data["delegation_mode"] = server.delegation_mode
+        if server.obo_grant_type:
+            data["obo_grant_type"] = server.obo_grant_type
+        if server.oauth2_audience:
+            data["oauth2_audience"] = server.oauth2_audience
     if server.auth_type == "api_key":
         data["api_key_header_name"] = server.api_key_header_name
         data["api_key"] = resolve_api_key(server)
@@ -351,6 +359,7 @@ class TestConnectionRequest(BaseModel):
     oauth2_client_secret: str | None = None
     oauth2_scopes: str | None = None
     delegation_mode: str | None = None
+    oauth2_audience: str | None = None
     api_key_header_name: str | None = None
     api_key: str | None = None
 

@@ -1,7 +1,10 @@
 """Authentication configuration endpoints."""
 import logging
 import os
-from fastapi import APIRouter, Depends
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from app.dependencies.auth import UserInfo, get_current_user
 
@@ -62,3 +65,55 @@ def get_current_user_info(user: UserInfo = Depends(get_current_user)) -> dict:
         "sub": user.sub,
         "groups": user.groups,
     }
+
+
+class TokenExchangeRequest(BaseModel):
+    code: str
+    code_verifier: str
+    redirect_uri: str
+
+
+@router.post("/token")
+def exchange_token(request: TokenExchangeRequest) -> dict:
+    """Proxy the authorization code exchange to the IdP's token endpoint.
+
+    This allows the backend to include the client_secret (which should not
+    be exposed to the browser) when exchanging the authorization code.
+    """
+    from app.db import SessionLocal
+    from app.models.identity_provider import IdentityProvider
+
+    db = SessionLocal()
+    try:
+        idp = db.query(IdentityProvider).filter(IdentityProvider.status == "active").first()
+        if not idp or not idp.token_endpoint:
+            raise HTTPException(status_code=400, detail="No active IdP with token endpoint configured")
+
+        params = {
+            "grant_type": "authorization_code",
+            "client_id": idp.client_id,
+            "code": request.code,
+            "redirect_uri": request.redirect_uri,
+            "code_verifier": request.code_verifier,
+        }
+
+        if idp.client_secret_arn:
+            from app.services.secrets import get_secret
+            region = os.getenv("AWS_REGION", "us-east-1")
+            client_secret = get_secret(idp.client_secret_arn, region)
+            if client_secret:
+                params["client_secret"] = client_secret
+
+        resp = httpx.post(
+            idp.token_endpoint,
+            data=params,
+            headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            logger.warning("Token exchange failed (HTTP %d): %s", resp.status_code, resp.text)
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+
+        return resp.json()
+    finally:
+        db.close()

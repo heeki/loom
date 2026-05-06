@@ -40,7 +40,7 @@ from mcp.types import ElicitResult
 from src.config import AgentConfig, MCPServerConfig, AuthConfig, load_config
 from src.agent import attach_mcp_tools, build_agent
 from src.integrations.approval import ApprovalHook
-from src.integrations.mcp_client import has_deferred_auth_servers, _build_transport_callable, drain_token_info_events, reset_token_info_state
+from src.integrations.mcp_client import has_deferred_auth_servers, _build_transport_callable, drain_token_info_events, reset_token_info_state, set_user_access_token
 from src.telemetry import trace_invocation
 
 # Configure the root Python logger so all modules (agent, mcp_client, etc.)
@@ -178,6 +178,13 @@ def _attach_dynamic_mcp_servers(agent_instance, dynamic_servers: list[dict[str, 
 
         transport_callable = _build_transport_callable(config)
         client = MCPClient(transport_callable, elicitation_callback=elicitation_callback)
+
+        strands_mcp_logger = logging.getLogger("strands.tools.mcp.mcp_client")
+        strands_registry_logger = logging.getLogger("strands.tools.registry")
+        prev_mcp_level = strands_mcp_logger.level
+        prev_registry_level = strands_registry_logger.level
+        strands_mcp_logger.setLevel(logging.CRITICAL)
+        strands_registry_logger.setLevel(logging.CRITICAL)
         try:
             agent_instance.tool_registry.process_tools([client])
             _dynamic_mcp_clients[pool_key] = client
@@ -188,6 +195,9 @@ def _attach_dynamic_mcp_servers(agent_instance, dynamic_servers: list[dict[str, 
                 client.stop()
             except BaseException:
                 pass
+        finally:
+            strands_mcp_logger.setLevel(prev_mcp_level)
+            strands_registry_logger.setLevel(prev_registry_level)
 
 
 @app.entrypoint
@@ -208,6 +218,9 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
 
     session_id = payload.get("session_id", "")
     actor_id = payload.get("actor_id") or "loom-agent"
+
+    # Make user access token available for OBO token exchange flows
+    set_user_access_token(payload.get("user_access_token"))
 
     reset_token_info_state()
     _ensure_mcp_tools(actor_id)
@@ -289,7 +302,8 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
                           "credential_provider_name": s.auth.credential_provider_name,
                           "scopes": s.auth.scopes,
                           "delegation_mode": s.auth.delegation_mode,
-                          "obo_grant_type": s.auth.obo_grant_type} if s.auth else None}
+                          "obo_grant_type": s.auth.obo_grant_type,
+                          "audience": s.auth.audience} if s.auth else None}
                 for s in elicit_servers
             ]
             _attach_dynamic_mcp_servers(agent, static_as_dynamic, actor_id, elicitation_callback=elicitation_callback)
@@ -517,6 +531,7 @@ async def ws_invoke(websocket, context) -> None:
             session_id = data.get("session_id", "")
             actor_id = data.get("actor_id") or "loom-agent"
 
+            set_user_access_token(data.get("user_access_token"))
             _ensure_mcp_tools(actor_id)
 
             dynamic_servers = data.get("dynamic_mcp_servers")
@@ -617,6 +632,13 @@ def _attach_dynamic_mcp_servers_ws(
 
         transport_callable = _build_transport_callable(config)
         client = MCPClient(transport_callable, elicitation_callback=elicitation_callback)
+
+        strands_mcp_logger = logging.getLogger("strands.tools.mcp.mcp_client")
+        strands_registry_logger = logging.getLogger("strands.tools.registry")
+        prev_mcp_level = strands_mcp_logger.level
+        prev_registry_level = strands_registry_logger.level
+        strands_mcp_logger.setLevel(logging.CRITICAL)
+        strands_registry_logger.setLevel(logging.CRITICAL)
         try:
             agent_instance.tool_registry.process_tools([client])
             _dynamic_mcp_clients[pool_key] = client
@@ -627,6 +649,9 @@ def _attach_dynamic_mcp_servers_ws(
                 client.stop()
             except BaseException:
                 pass
+        finally:
+            strands_mcp_logger.setLevel(prev_mcp_level)
+            strands_registry_logger.setLevel(prev_registry_level)
 
 
 def main() -> None:

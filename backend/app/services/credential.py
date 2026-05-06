@@ -68,8 +68,9 @@ def create_oauth2_credential_provider(
         obo_config: dict[str, Any] = {'grantType': grant_type}
         if grant_type == "TOKEN_EXCHANGE":
             obo_config['tokenExchangeGrantTypeConfig'] = {
-                'actorTokenContent': 'M2M',
+                'actorTokenContent': 'NONE',
             }
+            custom_config['clientAuthenticationMethod'] = 'CLIENT_SECRET_BASIC'
         if grant_type == "JWT_AUTHORIZATION_GRANT":
             custom_config['clientAuthenticationMethod'] = 'CLIENT_SECRET_POST'
         custom_config['onBehalfOfTokenExchangeConfig'] = obo_config

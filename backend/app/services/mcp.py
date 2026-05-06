@@ -98,8 +98,9 @@ def _get_obo_token(server: Any, user_token: str) -> str | None:
 
     is_entra = "login.microsoftonline.com" in server.oauth2_well_known_url
 
-    # Log subject token claims for debugging
+    # Decode subject token claims for debugging and audience extraction
     import base64
+    _claims: dict = {}
     try:
         _payload = user_token.split(".")[1]
         _payload += "=" * (4 - len(_payload) % 4)
@@ -123,8 +124,7 @@ def _get_obo_token(server: Any, user_token: str) -> str | None:
         else:
             # Okta RFC 8693 token exchange — use Basic Auth per Okta docs
             import base64 as _b64
-            issuer = discovery.get("issuer", "")
-            audience = "api://" + issuer.rstrip("/").rsplit("/", 1)[-1] if issuer else ""
+            audience = server.oauth2_audience or _claims.get("aud", "")
             logger.info("Okta token exchange audience: %s", audience)
             oidc_scopes = {"openid", "profile", "email", "address", "phone", "offline_access"}
             exchange_scopes = " ".join(

@@ -363,6 +363,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
         </div>
       </div>
 
+      {formProviderType === "entra_id" && (
       <div className="space-y-2">
         <Label className="text-xs">Group Mappings</Label>
         <p className="text-[10px] text-muted-foreground">Map each Loom group to its external IdP group identifier (e.g. Entra security group Object ID).</p>
@@ -379,6 +380,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
           </div>
         ))}
       </div>
+      )}
 
       <div className="flex gap-2">
         <Button size="sm" className="min-w-[120px]" onClick={() => void handleSave()} disabled={saving || !formName.trim() || !formIssuerUrl.trim() || !formClientId.trim()}>
@@ -405,7 +407,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
           </p>
         </div>
         <div className="shrink-0 ml-4">
-          <Button size="sm" variant="outline" onClick={() => { resetForm(); setEditingId(null); setShowForm(true); }} disabled={readOnly || showForm}>
+          <Button size="sm" variant="outline" onClick={() => { resetForm(); setEditingId(null); setConfirmDeleteId(null); setShowForm(true); }} disabled={readOnly || showForm}>
             <Plus className="h-3.5 w-3.5 mr-1" />
             Add Identity Provider
           </Button>
@@ -519,7 +521,7 @@ export function IdentityProviderPanel({ readOnly }: IdentityProviderPanelProps) 
                   {idp.token_endpoint && <div><span className="text-muted-foreground">Token: </span><span className="break-all">{idp.token_endpoint}</span></div>}
                 </div>
 
-                {Object.keys(idp.group_mappings).length > 0 && (
+                {idp.provider_type === "entra_id" && Object.keys(idp.group_mappings).length > 0 && (
                   <div>
                     <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-2">
                       <ArrowRightLeft className="h-3.5 w-3.5" />

@@ -131,11 +131,14 @@ def attach_mcp_tools(agent: Agent, servers: list[MCPServerConfig]) -> None:
         return
 
     strands_mcp_logger = logging.getLogger("strands.tools.mcp.mcp_client")
-    prev_level = strands_mcp_logger.level
+    strands_registry_logger = logging.getLogger("strands.tools.registry")
+    prev_mcp_level = strands_mcp_logger.level
+    prev_registry_level = strands_registry_logger.level
 
     attached = 0
     for client in mcp_clients:
         strands_mcp_logger.setLevel(logging.CRITICAL)
+        strands_registry_logger.setLevel(logging.CRITICAL)
         try:
             agent.tool_registry.process_tools([client])
             _install_logging_callback(client)
@@ -150,7 +153,8 @@ def attach_mcp_tools(agent: Agent, servers: list[MCPServerConfig]) -> None:
             except BaseException:
                 pass
         finally:
-            strands_mcp_logger.setLevel(prev_level)
+            strands_mcp_logger.setLevel(prev_mcp_level)
+            strands_registry_logger.setLevel(prev_registry_level)
 
     tool_names = list(agent.tool_registry.registry.keys())
     logger.info("Attached %d/%d MCP tool client(s) to agent. Registered tools: %s", attached, len(mcp_clients), tool_names)

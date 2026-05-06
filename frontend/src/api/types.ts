@@ -704,6 +704,7 @@ export interface McpServer {
   has_oauth2_secret: boolean;
   delegation_mode?: "m2m" | "obo";
   obo_grant_type?: "JWT_AUTHORIZATION_GRANT" | "TOKEN_EXCHANGE" | null;
+  oauth2_audience?: string | null;
   api_key_header_name: string | null;
   has_admin_api_key: boolean;
   supports_elicitation: boolean;
@@ -726,6 +727,7 @@ export interface McpServerCreateRequest {
   oauth2_scopes?: string;
   delegation_mode?: "m2m" | "obo";
   obo_grant_type?: "JWT_AUTHORIZATION_GRANT" | "TOKEN_EXCHANGE";
+  oauth2_audience?: string;
   api_key_header_name?: string;
   api_key?: string;
   supports_elicitation?: boolean;
@@ -745,6 +747,7 @@ export interface McpServerUpdateRequest {
   oauth2_scopes?: string;
   delegation_mode?: "m2m" | "obo";
   obo_grant_type?: "JWT_AUTHORIZATION_GRANT" | "TOKEN_EXCHANGE" | null;
+  oauth2_audience?: string;
   api_key_header_name?: string;
   api_key?: string;
   supports_elicitation?: boolean;

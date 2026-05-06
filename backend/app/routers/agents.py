@@ -760,6 +760,7 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
             "oauth2_scopes": s.oauth2_scopes,
             "delegation_mode": (s.delegation_mode or "m2m"),
             "obo_grant_type": s.obo_grant_type,
+            "oauth2_audience": s.oauth2_audience,
             "api_key_header_name": s.api_key_header_name,
             "supports_elicitation": s.supports_elicitation == "true",
         }
@@ -975,6 +976,8 @@ def _deploy_agent_background(
                     auth_entry["well_known_endpoint"] = server["oauth2_well_known_url"]
                 if server["oauth2_scopes"]:
                     auth_entry["scopes"] = server["oauth2_scopes"]
+                if server.get("oauth2_audience"):
+                    auth_entry["audience"] = server["oauth2_audience"]
                 entry["auth"] = auth_entry
             elif server["auth_type"] == "api_key":
                 secret_name = f"loom/mcp/{server['name']}/api-key/{{actor_id}}"
@@ -1061,6 +1064,7 @@ def _deploy_agent_background(
         env_vars = {
             "AGENT_CONFIG_JSON": config_json,
             "OTEL_SERVICE_NAME": request.name,
+            "WORKLOAD_IDENTITY_NAME": f"loom-{request.name}",
             "AGENT_OBSERVABILITY_ENABLED": "true",
             "AWS_REGION": region,
         }

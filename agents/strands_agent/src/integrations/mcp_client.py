@@ -30,11 +30,29 @@ _TOKEN_CACHE: dict[tuple[str, str, str], tuple[str, float]] = {}
 _TOKEN_CACHE_LOCK = threading.Lock()
 _TOKEN_EXPIRY_SKEW_SECS = 30
 
+# User access token for OBO flows — set per invocation from the Lambda payload
+_user_access_token: str | None = None
+_user_access_token_lock = threading.Lock()
+
+
+def set_user_access_token(token: str | None) -> None:
+    """Set the user access token for OBO token exchange flows."""
+    global _user_access_token
+    with _user_access_token_lock:
+        _user_access_token = token
+
+
+def get_user_access_token() -> str | None:
+    """Get the current user access token."""
+    with _user_access_token_lock:
+        return _user_access_token
+
 # Token info events emitted when OBO tokens are acquired.
 # The handler drains this list and yields events to the stream.
 _token_info_events: list[dict[str, Any]] = []
 _token_info_emitted: set[str] = set()
 _token_info_lock = threading.Lock()
+
 
 
 def drain_token_info_events() -> list[dict[str, Any]]:
@@ -126,6 +144,7 @@ class _OAuth2Auth(httpx.Auth):
         scopes: list[str],
         delegation_mode: str = "m2m",
         obo_grant_type: str | None = None,
+        audience: str = "",
     ) -> None:
         self._credential_provider_name = credential_provider_name
         self._scopes = scopes
@@ -133,9 +152,11 @@ class _OAuth2Auth(httpx.Auth):
         self._delegation_mode = (delegation_mode or "m2m").lower()
         self._oauth2_flow = "ON_BEHALF_OF_TOKEN_EXCHANGE" if self._delegation_mode == "obo" else "M2M"
         self._obo_grant_type = obo_grant_type
+        self._audience = audience
         # Capture the workload token eagerly — auth_flow runs in the MCP
         # client's background thread where ContextVar is not propagated.
         self._workload_token = BedrockAgentCoreContext.get_workload_access_token()
+
 
     def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
         workload_token = self._workload_token or BedrockAgentCoreContext.get_workload_access_token()
@@ -146,6 +167,10 @@ class _OAuth2Auth(httpx.Auth):
             )
             yield request
             return
+        logger.info(
+            "Workload token for '%s': prefix=%s len=%d",
+            self._credential_provider_name, workload_token[:50], len(workload_token),
+        )
 
         token = self._fetch_resource_token(workload_token)
         if token:
@@ -203,6 +228,12 @@ class _OAuth2Auth(httpx.Auth):
 
         try:
             identity_client = IdentityClient(self._region)
+
+            # Runtime automatically calls GetWorkloadAccessTokenForJWT when the
+            # invocation includes a user Bearer token. The workload token we
+            # receive already contains the user's identity — no need to call
+            # get_workload_access_token_for_jwt ourselves.
+
             token_kwargs: dict[str, Any] = {
                 'workloadIdentityToken': workload_token,
                 'resourceCredentialProviderName': self._credential_provider_name,
@@ -211,6 +242,12 @@ class _OAuth2Auth(httpx.Auth):
             }
             if self._obo_grant_type == "JWT_AUTHORIZATION_GRANT":
                 token_kwargs['customParameters'] = {'requested_token_use': 'on_behalf_of'}
+            if self._obo_grant_type == "TOKEN_EXCHANGE":
+                if self._audience:
+                    token_kwargs['audiences'] = [self._audience]
+                token_kwargs['customParameters'] = {
+                    'subject_token_type': 'urn:ietf:params:oauth:token-type:access_token',
+                }
             resp = identity_client.dp_client.get_resource_oauth2_token(**token_kwargs)
             token = resp.get("accessToken")
             if not token:
@@ -290,6 +327,7 @@ def _build_transport_callable(config: MCPServerConfig) -> Any:
             scopes=scope_list,
             delegation_mode=delegation_mode,
             obo_grant_type=config.auth.obo_grant_type or None,
+            audience=config.auth.audience or "",
         )
         logger.info(
             "MCP server '%s' configured with OAuth2 auth (credential_provider=%s, scopes=%s, delegation_mode=%s, obo_grant_type=%s)",

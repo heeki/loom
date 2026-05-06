@@ -1586,6 +1586,10 @@ async def invoke_agent_endpoint(
                     auth_entry["scopes"] = server.oauth2_scopes
                 if getattr(server, "delegation_mode", None):
                     auth_entry["delegation_mode"] = server.delegation_mode
+                if getattr(server, "obo_grant_type", None):
+                    auth_entry["obo_grant_type"] = server.obo_grant_type
+                if getattr(server, "oauth2_audience", None):
+                    auth_entry["audience"] = server.oauth2_audience
                 entry["auth"] = auth_entry
             dynamic_mcp_servers.append(entry)
             if server.supports_elicitation == "true":

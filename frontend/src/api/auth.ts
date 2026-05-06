@@ -1,4 +1,4 @@
-import { apiFetch } from "./client";
+import { apiFetch, getBaseUrl } from "./client";
 
 export interface AuthConfig {
   provider_type?: string;
@@ -205,6 +205,13 @@ export async function startOIDCLogin(config: AuthConfig): Promise<void> {
     state: generateRandomString(32),
   });
 
+  // Force fresh login prompt when switching users or after IdP change
+  const forcePrompt = sessionStorage.getItem("oidc_force_prompt");
+  if (forcePrompt) {
+    params.set("prompt", forcePrompt);
+    sessionStorage.removeItem("oidc_force_prompt");
+  }
+
   sessionStorage.setItem("oidc_state", params.get("state")!);
 
   window.location.href = `${config.authorization_endpoint}?${params.toString()}`;
@@ -212,23 +219,20 @@ export async function startOIDCLogin(config: AuthConfig): Promise<void> {
 
 export async function exchangeOIDCCode(
   code: string,
-  config: AuthConfig,
+  _config: AuthConfig,
 ): Promise<OIDCTokenResponse> {
   const codeVerifier = sessionStorage.getItem("oidc_code_verifier") || "";
   const redirectUri = sessionStorage.getItem("oidc_redirect_uri") || `${window.location.origin}/oauth/callback`;
 
-  const params = new URLSearchParams({
-    grant_type: "authorization_code",
-    client_id: config.client_id || "",
-    code,
-    redirect_uri: redirectUri,
-    code_verifier: codeVerifier,
-  });
-
-  const response = await fetch(config.token_endpoint!, {
+  // Exchange via backend proxy — the backend attaches the client_secret
+  const response = await fetch(`${getBaseUrl()}/api/auth/token`, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: params.toString(),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      code,
+      code_verifier: codeVerifier,
+      redirect_uri: redirectUri,
+    }),
   });
 
   if (!response.ok) {
