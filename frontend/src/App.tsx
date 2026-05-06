@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import {
   TimezoneProvider,
   useTimezone,
@@ -607,65 +608,21 @@ function AppContent() {
         </nav>
         <div className="p-2 border-t space-y-1">
           {user && (
-            <div className="px-3 py-1 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground truncate">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="px-3 py-1 flex items-center gap-2 min-w-0">
+                    <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground truncate">
+                      {user.username || "User"}
+                    </span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={4}>
                   {user.username || "User"}
-                </span>
-              </div>
-              <div className="flex items-center gap-1">
-                <div className="relative" ref={themePickerRef}>
-                  <button
-                    type="button"
-                    onClick={() => setShowThemePicker((v) => !v)}
-                    className="text-muted-foreground hover:text-foreground transition-colors"
-                    title="Change theme"
-                  >
-                    <Palette className="h-3.5 w-3.5" />
-                  </button>
-                  {showThemePicker && (
-                    <div className="absolute bottom-6 right-0 z-50 w-44 rounded border bg-white shadow-md py-1">
-                      <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Light</div>
-                      {(Object.entries(THEME_LABELS) as [Theme, string][])
-                        .filter(([k]) => isLightTheme(k as Theme))
-                        .map(([k, v]) => (
-                          <button
-                            key={k}
-                            onClick={() => { setTheme(k); setShowThemePicker(false); }}
-                            className={`w-full text-left px-3 py-1.5 text-xs transition-colors hover:bg-gray-100 text-gray-700 ${theme === k ? "font-bold" : ""}`}
-                          >
-                            {v}
-                          </button>
-                        ))}
-                      <div className="px-3 py-1 mt-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wide border-t border-gray-100">Dark</div>
-                      {(Object.entries(THEME_LABELS) as [Theme, string][])
-                        .filter(([k]) => !isLightTheme(k as Theme))
-                        .map(([k, v]) => (
-                          <button
-                            key={k}
-                            onClick={() => { setTheme(k); setShowThemePicker(false); }}
-                            className={`w-full text-left px-3 py-1.5 text-xs transition-colors hover:bg-gray-100 text-gray-700 ${theme === k ? "font-bold" : ""}`}
-                          >
-                            {v}
-                          </button>
-                        ))}
-                    </div>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "auth", "logout");
-                    logout();
-                  }}
-                  className="text-muted-foreground hover:text-foreground transition-colors"
-                  title="Sign out"
-                >
-                  <LogOut className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
           {isAdmin && (
             <div className="px-3 py-1">
@@ -682,13 +639,62 @@ function AppContent() {
               </Select>
             </div>
           )}
-          <div className="px-3 py-1 flex items-center justify-between">
+          <div className="px-3 py-1 flex items-center justify-end gap-2">
             <span className="inline-flex items-center rounded-full border border-border bg-input-bg px-2 py-0.5">
               <SidebarClock />
             </span>
             <span className="inline-flex items-center rounded-full border border-border bg-input-bg px-2 py-0.5 text-[10px] text-muted-foreground">
               v{__APP_VERSION__}
             </span>
+            <div className="relative" ref={themePickerRef}>
+              <button
+                type="button"
+                onClick={() => setShowThemePicker((v) => !v)}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                title="Change theme"
+              >
+                <Palette className="h-3.5 w-3.5" />
+              </button>
+              {showThemePicker && (
+                <div className="absolute bottom-6 right-0 z-50 w-44 rounded border bg-white shadow-md py-1">
+                  <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Light</div>
+                  {(Object.entries(THEME_LABELS) as [Theme, string][])
+                    .filter(([k]) => isLightTheme(k as Theme))
+                    .map(([k, v]) => (
+                      <button
+                        key={k}
+                        onClick={() => { setTheme(k); setShowThemePicker(false); }}
+                        className={`w-full text-left px-3 py-1.5 text-xs transition-colors hover:bg-gray-100 text-gray-700 ${theme === k ? "font-bold" : ""}`}
+                      >
+                        {v}
+                      </button>
+                    ))}
+                  <div className="px-3 py-1 mt-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wide border-t border-gray-100">Dark</div>
+                  {(Object.entries(THEME_LABELS) as [Theme, string][])
+                    .filter(([k]) => !isLightTheme(k as Theme))
+                    .map(([k, v]) => (
+                      <button
+                        key={k}
+                        onClick={() => { setTheme(k); setShowThemePicker(false); }}
+                        className={`w-full text-left px-3 py-1.5 text-xs transition-colors hover:bg-gray-100 text-gray-700 ${theme === k ? "font-bold" : ""}`}
+                      >
+                        {v}
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, "auth", "logout");
+                logout();
+              }}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+              title="Sign out"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
       </aside>
