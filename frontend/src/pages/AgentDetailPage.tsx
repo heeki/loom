@@ -620,7 +620,7 @@ function resolveRoles(roles: string[] | undefined, groupMappings?: Record<string
 
 function subAnnotation(sub?: string, aud?: string | string[], iss?: string): string | undefined {
   if (!sub) return undefined;
-  if (iss?.includes("okta.com")) {
+  if (iss?.includes("okta.com") || iss?.includes("cognito-idp")) {
     return "user identifier";
   }
   const clientId = Array.isArray(aud) ? aud[0] : aud;
