@@ -356,6 +356,9 @@ Tag profiles are named presets of tag values that satisfy required tag policies.
 | `oauth2_client_id` | TEXT | OAuth2 client ID (required when auth_type is `oauth2`) |
 | `oauth2_client_secret` | TEXT | OAuth2 client secret (write-only, never returned in GET responses) |
 | `oauth2_scopes` | TEXT | Space-separated OAuth2 scopes |
+| `delegation_mode` | TEXT NOT NULL | `m2m` (machine-to-machine) or `obo` (on-behalf-of token exchange). Default `m2m`. |
+| `obo_grant_type` | TEXT | `JWT_AUTHORIZATION_GRANT` or `TOKEN_EXCHANGE`. Required when delegation_mode is `obo`. |
+| `oauth2_audience` | TEXT | Token exchange audience (required for Okta custom authorization servers) |
 | `api_key_header_name` | TEXT | HTTP header name for API key auth (e.g. `x-api-key`, `Authorization`) (nullable) |
 | `has_admin_api_key` | TEXT | `"true"` or `"false"` — whether an admin API key is stored in Secrets Manager (nullable) |
 | `created_at` | DATETIME | Creation timestamp |
@@ -528,6 +531,7 @@ All endpoints are prefixed `/api`.
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/auth/config` | Return Cognito pool ID and region for frontend auth flow. |
+| `GET` | `/api/auth/me` | Return the authenticated user's identity (username, sub, groups). Used for session ownership resolution. |
 
 The `/api/auth/config` endpoint returns only the pool ID and region. The user client ID is configured on the frontend via the `VITE_COGNITO_USER_CLIENT_ID` environment variable. No client secrets are exposed.
 
@@ -542,6 +546,7 @@ The `/api/auth/config` endpoint returns only the pool ID and region. The user cl
 | `DELETE` | `/api/agents/{agent_id}/purge` | Remove agent from local DB only (no AWS call). Used after confirming AWS deletion is complete. |
 | `POST` | `/api/agents/{agent_id}/refresh` | Re-fetch metadata from AgentCore and update the local record. |
 | `POST` | `/api/agents/{agent_id}/redeploy` | Redeploy an agent with current config. |
+| `PUT` | `/api/agents/{agent_id}/redeploy-harness` | Update and redeploy a harness agent with new configuration (UpdateHarness API). |
 | `GET` | `/api/agents/roles` | List IAM roles suitable for AgentCore. |
 | `GET` | `/api/agents/cognito-pools` | List Cognito user pools. |
 | `GET` | `/api/agents/models` | List supported foundation models (with display name and group). |
@@ -626,11 +631,16 @@ The `mcp_servers` configuration is stored in the `AGENT_CONFIG_JSON` config entr
 - `auth.credential_provider_name` — Name of the AgentCore credential provider created during deployment
 - `auth.well_known_endpoint` — OAuth2 discovery URL
 - `auth.scopes` — Array of OAuth2 scopes
+- `auth.delegation_mode` — `m2m` or `obo` (on-behalf-of token exchange)
+- `auth.obo_grant_type` — `TOKEN_EXCHANGE` or `JWT_AUTHORIZATION_GRANT` (when delegation_mode is `obo`)
+- `auth.audience` — Token exchange audience (when required by the authorization server)
 
 The `a2a_agents` configuration is stored in the `AGENT_CONFIG_JSON` config entry under `integrations.a2a_agents` as an array. Each A2A agent with OAuth2 authentication includes:
 - `auth.credential_provider_name` — Name of the AgentCore credential provider created during deployment
 - `auth.well_known_endpoint` — OAuth2 discovery URL
 - `auth.scopes` — OAuth2 scopes string
+- `auth.delegation_mode` — `m2m` or `obo` (on-behalf-of token exchange)
+- `auth.obo_grant_type` — `TOKEN_EXCHANGE` or `JWT_AUTHORIZATION_GRANT` (when delegation_mode is `obo`)
 
 Memory resources are stored in `AGENT_CONFIG_JSON` under `integrations.memory.resources` as an array of `{name, memory_id, arn}` objects. `integrations.memory.enabled` is set to `true` when any memory resources are selected.
 
@@ -723,6 +733,7 @@ Tag profiles are named presets of tag key-value pairs. When creating or updating
 | `DELETE` | `/api/memories/{memory_id}?cleanup_aws=true` | Delete a memory resource; optionally delete from AWS. |
 | `DELETE` | `/api/memories/{memory_id}/purge` | Remove from local DB only (no AWS call). |
 | `GET` | `/api/memories/{memory_id}/records` | Retrieve stored LTM records for the authenticated user. |
+| `GET` | `/api/memories/{memory_id}/export` | Export memory configuration as JSON (name, description, strategies, tags). |
 
 **Naming convention:** Memory names and strategy names must match `[a-zA-Z][a-zA-Z0-9_]{0,47}` — start with a letter, letters/digits/underscores only, max 48 characters. Hyphens are not allowed.
 
@@ -1112,13 +1123,15 @@ AgentCore Harness API wrapper for managed agent deployments:
 - `create_harness(name, execution_role_arn, model_id, system_prompt, tools, allowed_tools, max_iterations, max_tokens, authorizer_config, network_mode, idle_timeout, max_lifetime, tags, region) -> dict` — creates a new AgentCore Harness via the `bedrock-agentcore-control` client. Builds `bedrockModelConfig` with optional model parameters (maxTokens). Supports tool types: `remote_mcp`, `agentcore_code_interpreter`, `agentcore_browser`. Sets `allowedTools: ["*"]` by default. Returns the harness response with ARN in the `"arn"` field.
 - `get_harness(harness_id, region) -> dict` — retrieves current harness state from the control plane.
 - `delete_harness(harness_id, region) -> dict` — deletes a harness.
-- `invoke_harness_stream(harness_arn, session_id, prompt, region, model_id, system_prompt, tools, allowed_tools, max_iterations, timeout_seconds, max_tokens, actor_id, access_token) -> Generator[dict]` — invokes a harness and yields translated events. When `access_token` is provided, configures the `bedrock-agentcore` client with `UNSIGNED` SigV4 and injects `Authorization: Bearer <token>` via a boto3 `before-send` event hook for JWT auth. Translates Converse API streaming format (`messageStart`, `contentBlockStart`, `contentBlockDelta`, `contentBlockStop`, `messageStop`, `metadata`) into `{"type": "text", "content": str}`, `{"type": "structured", "content": {"tool_use": {"name": str}}}`, and `{"type": "metadata", "content": dict}` events. Accumulates token counts from metadata events.
+- `update_harness(harness_id, execution_role_arn, model_id, system_prompt, tools, allowed_tools, max_iterations, max_tokens, authorizer_config, network_mode, idle_timeout, max_lifetime, region) -> dict` — updates an existing harness via the `bedrock-agentcore-control` client. Only sends parameters that are explicitly provided (non-None). Used by the `redeploy-harness` endpoint.
+- `invoke_harness_stream(harness_arn, session_id, prompt, region, model_id, system_prompt, tools, allowed_tools, max_iterations, timeout_seconds, max_tokens, actor_id, access_token, user_access_token) -> Generator[dict]` — invokes a harness and yields translated events. When `access_token` is provided, configures the `bedrock-agentcore` client with `UNSIGNED` SigV4 and injects `Authorization: Bearer <token>` via a boto3 `before-send` event hook for JWT auth. When `user_access_token` is provided, injects it as `X-Loom-User-Access-Token` header for OBO token exchange flows. Translates Converse API streaming format (`messageStart`, `contentBlockStart`, `contentBlockDelta`, `contentBlockStop`, `messageStop`, `metadata`) into `{"type": "text", "content": str}`, `{"type": "structured", "content": {"tool_use": {"name": str}}}`, and `{"type": "metadata", "content": dict}` events. Accumulates token counts from metadata events.
+- `resume_harness_stream(harness_arn, session_id, tool_result, region, ..., user_access_token) -> Generator[dict]` — re-invokes a harness with a `toolResult` to resume after an inline function call. Supports the same `user_access_token` header injection for OBO flows.
 
 ### `services/credential.py`
 
 AgentCore credential provider management:
 
-- `create_oauth2_credential_provider(name: str, client_id: str, client_secret: str, auth_server_url: str, region: str, tags: dict | None) -> dict` — creates or updates an OAuth2 credential provider using the `CustomOauth2` vendor type. If creation fails with a `ValidationException` indicating the provider already exists, automatically falls back to `update_oauth2_credential_provider` (without tags, which the update API does not accept). Retries other transient failures with exponential backoff (4 retries, delays 2s/4s/8s/16s). Raises on exhaustion.
+- `create_oauth2_credential_provider(name: str, client_id: str, client_secret: str, auth_server_url: str, region: str, tags: dict | None, delegation_mode: str = "m2m", obo_grant_type: str | None = None) -> dict` — creates or updates an OAuth2 credential provider using the `CustomOauth2` vendor type. When `delegation_mode` is `"obo"`, configures `onBehalfOfTokenExchangeConfig` with the specified grant type (`TOKEN_EXCHANGE` for RFC 8693 or `JWT_AUTHORIZATION_GRANT` for RFC 7523). TOKEN_EXCHANGE uses `actorTokenContent: NONE` with `CLIENT_SECRET_BASIC` auth method; JWT_AUTHORIZATION_GRANT uses `CLIENT_SECRET_POST`. If creation fails with a `ValidationException` indicating the provider already exists, automatically falls back to `update_oauth2_credential_provider` (without tags, which the update API does not accept). Retries other transient failures with exponential backoff (4 retries, delays 2s/4s/8s/16s). Raises on exhaustion.
 - `delete_credential_provider(provider_name: str, region: str)` — deletes an OAuth2 credential provider by name.
 
 **IAM permissions required:** The ECS task role needs both `bedrock-agentcore:*` actions (for the control plane API) and Secrets Manager permissions scoped to `bedrock-agentcore-identity!*` secrets. Credential providers internally store OAuth2 client credentials in Secrets Manager under this prefix. The task role requires `secretsmanager:GetSecretValue`, `CreateSecret`, `DeleteSecret`, and `PutSecretValue` on `arn:aws:secretsmanager:*:${AccountId}:secret:bedrock-agentcore-identity!*`. The CloudWatch Logs policy covers both `/aws/bedrock-agentcore/*` and `/aws/vendedlogs/bedrock-agentcore/*` log group prefixes (the latter is used for agent observability vended logs).
@@ -1364,7 +1377,7 @@ The backend supports federated authentication via 3rd-party OIDC identity provid
 
 ### `identity_providers` Table
 
-Stores OIDC identity provider configurations. Columns include `name`, `provider_type` (entra_id, okta, auth0, generic_oidc), `issuer`, `client_id`, `discovery_url`, `authorization_endpoint`, `token_endpoint`, `jwks_uri`, `userinfo_endpoint`, `group_claim` (the JWT claim containing group membership), `group_mapping` (JSON dict mapping external groups to Loom groups), `scopes` (space-separated OIDC scopes), `is_active` (boolean, at most one active at a time), `discovery_metadata` (cached `.well-known/openid-configuration` response), and timestamps. Client secrets are never stored in the database.
+Stores OIDC identity provider configurations. Columns include `name`, `provider_type` (entra_id, okta, auth0, generic_oidc), `issuer`, `client_id`, `client_type` (`public` or `confidential`, default `public`), `discovery_url`, `authorization_endpoint`, `token_endpoint`, `jwks_uri`, `userinfo_endpoint`, `group_claim` (the JWT claim containing group membership), `group_mapping` (JSON dict mapping external groups to Loom groups), `scopes` (space-separated OIDC scopes), `is_active` (boolean, at most one active at a time), `discovery_metadata` (cached `.well-known/openid-configuration` response), and timestamps. Client secrets are never stored in the database.
 
 ### Identity Provider Endpoints
 
