@@ -207,6 +207,7 @@ class _OAuth2Auth(httpx.Auth):
                     "aud": claims.get("aud"),
                     "azp": claims.get("azp"),
                     "appid": claims.get("appid"),
+                    "cid": claims.get("cid"),
                     "scp": claims.get("scp"),
                     "roles": claims.get("roles"),
                     "act": claims.get("act"),

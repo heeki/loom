@@ -69,6 +69,7 @@ def _extract_token_summary(token: str, token_type: str = "user", source: str | N
         "iss": claims.get("iss"),
         "sub": claims.get("sub"),
         "aud": claims.get("aud"),
+        "cid": claims.get("cid") or claims.get("client_id"),
         "scp": claims.get("scp"),
         "roles": claims.get("roles"),
         "act": claims.get("act"),

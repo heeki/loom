@@ -648,6 +648,7 @@ function TokenInfoCard({ userToken, oboTokens, groupMappings, authorizerName }: 
               <TokenClaimsRow label="iss" value={userToken.claims.iss} annotation={userToken.claims.iss ? "issuer" : undefined} />
               <TokenClaimsRow label="sub" value={userToken.claims.sub} annotation={subAnnotation(userToken.claims.sub, userToken.claims.aud, userToken.claims.iss)} />
               <TokenClaimsRow label="aud" value={userToken.claims.aud} annotation={userToken.claims.aud ? "audience" : undefined} />
+              <TokenClaimsRow label="cid" value={userToken.claims.cid} annotation={userToken.claims.cid ? "client application" : undefined} />
               <TokenClaimsRow label="scp" value={userToken.claims.scp} annotation={userToken.claims.scp ? "scopes" : undefined} />
               {userToken.claims.roles && userToken.claims.roles.length > 0 && (
                 <TokenClaimsRow label="roles">{resolveRoles(userToken.claims.roles, groupMappings)}</TokenClaimsRow>
@@ -668,6 +669,7 @@ function TokenInfoCard({ userToken, oboTokens, groupMappings, authorizerName }: 
               <TokenClaimsRow label="sub" value={t.claims.sub} annotation={subAnnotation(t.claims.sub, t.claims.aud, t.claims.iss)} />
               <TokenClaimsRow label="aud" value={t.claims.aud} annotation={t.claims.aud ? "audience" : undefined} />
               <TokenClaimsRow label="azp" value={t.claims.azp ?? t.claims.appid} annotation={t.claims.azp || t.claims.appid ? "authorized party: actor that performed the OBO exchange" : undefined} />
+              <TokenClaimsRow label="cid" value={t.claims.cid} annotation={t.claims.cid ? "client that performed the token exchange" : undefined} />
               <TokenClaimsRow label="scp" value={t.claims.scp} annotation={t.claims.scp ? "scopes" : undefined} />
               <TokenClaimsRow label="roles" value={t.claims.roles} />
               <TokenClaimsRow label="act" value={t.claims.act} />
