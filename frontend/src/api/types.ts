@@ -104,6 +104,8 @@ export interface AgentDeployRequest {
   memory_ids: number[];
   mcp_servers: number[];
   a2a_agents: number[];
+  code_interpreter_enabled: boolean;
+  code_interpreter_region: string;
   tags?: Record<string, string>;
 }
 

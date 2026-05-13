@@ -148,6 +148,8 @@ class AgentCreateRequest(BaseModel):
     memory_ids: list[int] = Field(default_factory=list, description="Memory resource IDs to integrate")
     mcp_servers: list[int] = Field(default_factory=list, description="MCP server IDs to integrate")
     a2a_agents: list[int] = Field(default_factory=list, description="A2A agent IDs to integrate")
+    code_interpreter_enabled: bool = Field(default=False, description="Enable Code Interpreter tool")
+    code_interpreter_region: str = Field(default="", description="AWS region for Code Interpreter (empty = agent region)")
     tags: dict[str, str] | None = Field(None, description="Build-time tag values")
     # Harness-specific fields
     harness_tools: list[dict[str, Any]] | None = Field(None, description="Harness tool configurations")
@@ -1048,18 +1050,24 @@ def _deploy_agent_background(
             for m in memory_snapshots
         ]
 
+        integrations_config: dict[str, Any] = {
+            "mcp_servers": mcp_server_configs,
+            "a2a_agents": a2a_agent_configs,
+            "memory": {
+                "enabled": request.memory_enabled or len(memory_configs) > 0,
+                "resources": memory_configs,
+            },
+        }
+        if request.code_interpreter_enabled:
+            integrations_config["code_interpreter"] = {
+                "enabled": True,
+                "region": request.code_interpreter_region or "",
+            }
         config_json = json.dumps({
             "system_prompt": system_prompt,
             "model_id": request.model_id,
             "max_tokens": model_max_tokens,
-            "integrations": {
-                "mcp_servers": mcp_server_configs,
-                "a2a_agents": a2a_agent_configs,
-                "memory": {
-                    "enabled": request.memory_enabled or len(memory_configs) > 0,
-                    "resources": memory_configs,
-                },
-            },
+            "integrations": integrations_config,
         })
         env_vars = {
             "AGENT_CONFIG_JSON": config_json,
@@ -2666,6 +2674,11 @@ def export_agent(agent_id: int, user: UserInfo = Depends(require_scopes("admin:w
         verified = [n for n in names if db.query(Memory).filter(Memory.name == n).first()]
         if verified:
             data["memories"] = verified
+    ci_cfg = integrations.get("code_interpreter", {})
+    if ci_cfg.get("enabled"):
+        data["code_interpreter"] = True
+        if ci_cfg.get("region"):
+            data["code_interpreter_region"] = ci_cfg["region"]
 
     return data
 

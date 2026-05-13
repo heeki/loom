@@ -137,6 +137,8 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
   const [selectedMcpServerIds, setSelectedMcpServerIds] = useState<number[]>([]);
   const [selectedA2aAgentIds, setSelectedA2aAgentIds] = useState<number[]>([]);
   const [selectedMemoryIds, setSelectedMemoryIds] = useState<number[]>([]);
+  const [codeInterpreterEnabled, setCodeInterpreterEnabled] = useState(false);
+  const [codeInterpreterRegion, setCodeInterpreterRegion] = useState("");
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [a2aAgents, setA2aAgents] = useState<A2aAgent[]>([]);
   const [memories, setMemories] = useState<MemoryResponse[]>([]);
@@ -240,6 +242,8 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
           .filter((id): id is number => id !== undefined);
         setSelectedMemoryIds(ids);
       }
+      if (parsed.code_interpreter != null) setCodeInterpreterEnabled(!!parsed.code_interpreter);
+      if (parsed.code_interpreter_region != null) setCodeInterpreterRegion(parsed.code_interpreter_region as string);
       if (parsed.max_iterations != null) setHarnessMaxIterations(String(parsed.max_iterations));
       if (parsed.max_tokens != null) setHarnessMaxTokens(String(parsed.max_tokens));
       if (parsed.human_confirmation != null) setEnableHumanConfirmation(!!parsed.human_confirmation);
@@ -394,6 +398,8 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
         memory_ids: selectedMemoryIds,
         mcp_servers: selectedMcpServerIds,
         a2a_agents: selectedA2aAgentIds,
+        code_interpreter_enabled: codeInterpreterEnabled,
+        code_interpreter_region: codeInterpreterRegion,
         tags: Object.fromEntries(
           Object.entries(tagValues).filter(([, v]) => v.trim() !== "")
         ),
@@ -415,6 +421,8 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
       setSelectedMcpServerIds([]);
       setSelectedA2aAgentIds([]);
       setSelectedMemoryIds([]);
+      setCodeInterpreterEnabled(false);
+      setCodeInterpreterRegion("");
     }
   };
 
@@ -523,6 +531,8 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                         .filter((id: number | undefined): id is number => id !== undefined);
                       setSelectedMemoryIds(ids);
                     }
+                    if (parsed.code_interpreter != null) setCodeInterpreterEnabled(!!parsed.code_interpreter);
+                    if (parsed.code_interpreter_region != null) setCodeInterpreterRegion(parsed.code_interpreter_region);
                     if (parsed.max_iterations != null) setHarnessMaxIterations(String(parsed.max_iterations));
                     if (parsed.max_tokens != null) setHarnessMaxTokens(String(parsed.max_tokens));
                     if (parsed.human_confirmation != null) setEnableHumanConfirmation(!!parsed.human_confirmation);
@@ -585,9 +595,13 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                       return mem?.name ?? id;
                     });
                   }
+                  if (codeInterpreterEnabled) {
+                    result.code_interpreter = true;
+                    if (codeInterpreterRegion) result.code_interpreter_region = codeInterpreterRegion;
+                  }
                   return JSON.stringify(result, null, 2);
                 }}
-                placeholder='{"deployment_type": "custom|managed", "name": "...", "description": "...", "system_prompt": "...", "model": "... (default)", "allowed_models": ["..."], "network_mode": "PUBLIC", "role": "...", "tags": "...", "authorizer": "...", "max_iterations": 75, "max_tokens": 4096, "human_confirmation": true, "confirmation_policy": "...", "mcp_servers": ["..."], "a2a_agents": ["..."], "memories": ["..."]}'
+                placeholder='{"deployment_type": "custom|managed", "name": "...", "system_prompt": "...", "model": "...", "role": "...", "mcp_servers": ["..."], "a2a_agents": ["..."], "memories": ["..."], "code_interpreter": true, "code_interpreter_region": "us-west-2"}'
               />
 
               {/* Deployment Type Selector */}
@@ -1083,6 +1097,30 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                       </div>
                     )}
                   </div>}
+                  {/* Code Interpreter (Custom Agent only) */}
+                  {deploymentType === "custom" && <div className="space-y-1.5">
+                    <label className="flex items-center gap-2 text-xs cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="h-3.5 w-3.5"
+                        checked={codeInterpreterEnabled}
+                        onChange={(e) => setCodeInterpreterEnabled(e.target.checked)}
+                      />
+                      <span>Code Interpreter</span>
+                      <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded">Sandbox</span>
+                    </label>
+                    {codeInterpreterEnabled && (
+                      <div className="pl-5 space-y-1">
+                        <label className="text-[10px] text-muted-foreground">Region (optional, defaults to agent region)</label>
+                        <Input
+                          placeholder="e.g. us-west-2"
+                          value={codeInterpreterRegion}
+                          onChange={(e) => setCodeInterpreterRegion(e.target.value)}
+                          className="text-xs h-7"
+                        />
+                      </div>
+                    )}
+                  </div>}
                 </div>
               </section>
 
@@ -1119,6 +1157,8 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                     setSelectedMcpServerIds([]);
                     setSelectedA2aAgentIds([]);
                     setSelectedMemoryIds([]);
+                    setCodeInterpreterEnabled(false);
+                    setCodeInterpreterRegion("");
                   }}
                   disabled={isLoading}
                 >
