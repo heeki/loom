@@ -635,7 +635,14 @@ Agents support runtime model selection, allowing users to choose from a set of a
 - **`WORKLOAD_IDENTITY_NAME` env var:** Automatically set to `loom-{agent_name}` at deploy time for credential provider discovery.
 - **Agent list registry filtering:** When registry is enabled, `t-user` users see only `APPROVED` agents (previously saw both approved and unregistered). When registry is disabled, the original behavior (show all non-draft) is preserved.
 
-### Phase 29 — Advanced Operations
+### Phase 29 — Code Interpreter for Custom Agents
+- **Config:** `CodeInterpreterConfig` dataclass added to `agents/strands_agent/src/config.py` under `IntegrationsConfig` — fields: `enabled` (bool), `region` (string), `identifier` (string, optional custom interpreter ID).
+- **Agent wiring:** `build_agent()` in `agents/strands_agent/src/agent.py` instantiates `AgentCoreCodeInterpreter` from `strands-agents-tools` when `config.integrations.code_interpreter.enabled` is `True`. The `.code_interpreter` tool is appended to the agent's tool list.
+- **SDK dependency:** Uses `strands-agents-tools` (already in `requirements.txt`) which provides `AgentCoreCodeInterpreter` — a Strands `@tool`-decorated class backed by `bedrock_agentcore.tools.code_interpreter_client.CodeInterpreter`.
+- **Sandbox isolation:** Code executes in an AWS-managed sandbox with no access to the host filesystem or network.
+- **Configuration parsing:** `_parse_integrations()` reads `code_interpreter` from the JSON config and populates `CodeInterpreterConfig`.
+
+### Phase 30 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
 - Alert configuration.

@@ -28,6 +28,7 @@ strands_agent/
 │   ├── __init__.py
 │   ├── test_config.py
 │   ├── test_agent.py
+│   ├── test_code_interpreter.py
 │   ├── test_handler.py
 │   ├── test_telemetry.py
 │   ├── test_mcp_client.py
@@ -83,6 +84,11 @@ The agent reads configuration from one of two sources (checked in order):
     ],
     "memory": {
       "enabled": true
+    },
+    "code_interpreter": {
+      "enabled": true,
+      "region": "us-west-2",
+      "identifier": ""
     }
   }
 }
@@ -193,6 +199,23 @@ When enabled, the agent uses the `MemoryHook` (a Strands `HookProvider`) to load
 **Cost telemetry:** The hook always emits a `LOOM_MEMORY_TELEMETRY: retrievals=N, events_sent=M` structured log line at INFO level after each invocation. The backend parses this to compute memory costs (`stm_cost = events_sent / 1000 * $0.25`, `ltm_cost = retrievals / 1000 * $0.50`).
 
 **Error handling:** `AccessDeniedException` and other errors are caught and logged at WARNING level without interrupting the agent invocation. If memory operations fail, the telemetry line still emits with zero counters.
+
+### Code Interpreter
+
+When enabled, the agent gains access to a sandboxed Code Interpreter tool powered by AWS Bedrock AgentCore. The agent can generate and execute Python, JavaScript, or TypeScript code in an isolated environment — useful for calculations, data analysis, and validating AI-generated logic before surfacing results.
+
+**Configuration fields:**
+- `enabled` (bool) — Toggle the integration on/off.
+- `region` (string, optional) — AWS region for the Code Interpreter service. Defaults to the agent's region if empty.
+- `identifier` (string, optional) — Custom code interpreter identifier. Defaults to the system interpreter (`aws.codeinterpreter.v1`) if empty.
+
+**How it works:**
+1. The `AgentCoreCodeInterpreter` tool from `strands-agents-tools` is registered in the agent's tool list.
+2. The agent can invoke the tool to execute code, read/write files, and run shell commands within the sandbox.
+3. Sessions are managed automatically — no manual lifecycle management required.
+4. Code execution failures (syntax errors, exceptions) are returned as structured errors without crashing the agent.
+
+**Security:** The sandbox has no access to the host filesystem or network. All code runs in an isolated environment managed by AWS.
 
 ### Observability (OTEL)
 

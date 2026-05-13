@@ -6,6 +6,8 @@ from typing import Optional
 from strands import Agent
 from strands.models.bedrock import BedrockModel
 
+from strands_tools.code_interpreter import AgentCoreCodeInterpreter
+
 from src.config import AgentConfig, MCPServerConfig
 from src.integrations.approval import ApprovalHook
 from src.integrations.mcp_client import build_mcp_clients, create_mcp_clients, has_oauth2_servers, _install_logging_callback, TokenInfoHook
@@ -59,6 +61,17 @@ def build_agent(config: AgentConfig, defer_mcp: bool = False) -> tuple[Agent, Ap
             if a2a_clients:
                 tools.extend(a2a_clients)
                 logger.info("Loaded %d A2A client(s)", len(a2a_clients))
+
+    # Code Interpreter tool
+    if config.integrations.code_interpreter.enabled:
+        ci_kwargs: dict = {}
+        if config.integrations.code_interpreter.region:
+            ci_kwargs["region"] = config.integrations.code_interpreter.region
+        if config.integrations.code_interpreter.identifier:
+            ci_kwargs["identifier"] = config.integrations.code_interpreter.identifier
+        ci = AgentCoreCodeInterpreter(**ci_kwargs)
+        tools.append(ci.code_interpreter)
+        logger.info("Loaded Code Interpreter tool (region=%s)", ci_kwargs.get("region", "default"))
 
     # Approval hook (HITL Method 1) — policies injected at invocation time
     approval_hook = ApprovalHook(agent_tags=config.tags if hasattr(config, "tags") else None)

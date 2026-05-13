@@ -61,12 +61,22 @@ class MemoryConfig:
 
 
 @dataclass
+class CodeInterpreterConfig:
+    """Configuration for the Code Interpreter integration."""
+
+    enabled: bool = False
+    region: str = ""
+    identifier: str = ""
+
+
+@dataclass
 class IntegrationsConfig:
     """Configuration for all integrations."""
 
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
     a2a_agents: list[A2AAgentConfig] = field(default_factory=list)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
+    code_interpreter: CodeInterpreterConfig = field(default_factory=CodeInterpreterConfig)
 
 
 @dataclass
@@ -128,6 +138,7 @@ def _parse_integrations(data: Optional[dict]) -> IntegrationsConfig:
     """Parse integrations configuration from a dictionary."""
     if data is None:
         return IntegrationsConfig()
+    ci_data = data.get("code_interpreter", {})
     return IntegrationsConfig(
         mcp_servers=_parse_mcp_servers(data.get("mcp_servers", [])),
         a2a_agents=_parse_a2a_agents(data.get("a2a_agents", [])),
@@ -141,6 +152,11 @@ def _parse_integrations(data: Optional[dict]) -> IntegrationsConfig:
                 )
                 for r in data.get("memory", {}).get("resources", [])
             ],
+        ),
+        code_interpreter=CodeInterpreterConfig(
+            enabled=ci_data.get("enabled", False),
+            region=ci_data.get("region", ""),
+            identifier=ci_data.get("identifier", ""),
         ),
     )
 
