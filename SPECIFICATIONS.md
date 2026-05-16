@@ -641,6 +641,16 @@ Agents support runtime model selection, allowing users to choose from a set of a
 - **SDK dependency:** Uses `strands-agents-tools` (already in `requirements.txt`) which provides `AgentCoreCodeInterpreter` — a Strands `@tool`-decorated class backed by `bedrock_agentcore.tools.code_interpreter_client.CodeInterpreter`.
 - **Sandbox isolation:** Code executes in an AWS-managed sandbox with no access to the host filesystem or network.
 - **Configuration parsing:** `_parse_integrations()` reads `code_interpreter` from the JSON config and populates `CodeInterpreterConfig`.
+- **Custom CI resource:** When a Code Interpreter execution role is configured, the backend creates a custom `bedrock-agentcore-control` Code Interpreter resource in parallel with the runtime artifact build. The resource ID is stored in `agents.code_interpreter_id` and its identifier is injected into `AGENT_CONFIG_JSON` before deployment.
+- **IAM roles — two-role pattern:** Two distinct IAM roles are used. The agent execution role (deployed via `shared/iac/role.yaml`) requires `bedrock-agentcore` actions covering `code-interpreter/*` (system) and `code-interpreter-custom/*` (customer-owned) resource ARNs. A separate CI execution role (deployed via `shared/iac/code_interpreter_role.yaml`, named `loom-ci-role-{sanitized-name}`) is the sandbox identity used by the custom interpreter.
+- **Deployment form:** Registration form exposes Code Interpreter as a peer integration section alongside Memory, MCP, and A2A. Fields: enable toggle, network mode (SANDBOX/PUBLIC), region dropdown, and CI execution role selector (filtered to `role_type="code_interpreter"` managed roles).
+- **JSON manifest:** CI config exported/imported under nested `code_interpreter` key: `{"enabled": true, "region": "us-east-1", "network_mode": "SANDBOX", "role": "loom-ci-role-demo"}`.
+- **CI observability:** `enable_code_interpreter_observability()` wires USAGE_LOGS and APPLICATION_LOGS vended log delivery for the custom CI resource, mirroring the runtime observability pattern. Account ID is extracted from the CI ARN to ensure the log group ARN is always valid.
+- **X-Ray tracing:** Runtime deployments now include `OTEL_TRACES_EXPORTER=awsxray` and `OTEL_PROPAGATORS=xray` environment variables, activating the ADOT auto-instrumentation pipeline already present in the agent package.
+- **Lifecycle:** Deleting an agent also deletes its associated CI resource. If active sessions are present, sessions are terminated first via `StopCodeInterpreterSession` before retrying the delete.
+- **Role management:** `ManagedRole` model extended with `role_type` column (`"agent"` or `"code_interpreter"`). The Role Management panel groups roles by type with collapsible sections.
+- **Status polling:** CI status is surfaced via `code_interpreter_status` on `AgentResponse`. CI polling is skipped when the agent is in `DELETING` state. `ResourceNotFoundException` during CI poll is logged at DEBUG (expected post-deletion).
+- **Deployment phase label:** `creating_ci_resource` displays as "Building artifact & creating Code Interpreter" to reflect the parallel nature of the two operations.
 
 ### Phase 30 — Advanced Operations
 - Real-time metrics auto-refresh.
