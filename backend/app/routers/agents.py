@@ -1118,11 +1118,12 @@ def _deploy_agent_background(
             and bool(ci_config.get("execution_role_arn"))
         )
 
-        def _create_ci_resource() -> str:
+        def _create_ci_resource() -> tuple[str, str]:
             import boto3
             ci_region = (request.code_interpreter_region or "").strip() or region
-            raw_name = f"loom-ci-{request.name}".replace("_", "-")
-            sanitized = re.sub(r"[^a-zA-Z0-9-]", "-", raw_name)[:48]
+            base_name = re.sub(r"_?code_interpreter$", "", request.name).strip("_")
+            raw_name = f"loom_ci_{base_name}"
+            sanitized = re.sub(r"[^a-zA-Z0-9_]", "_", raw_name)[:48]
             network_mode = request.code_interpreter_network_mode or "PUBLIC"
             boto_client = boto3.client("bedrock-agentcore-control", region_name=ci_region)
             resp = boto_client.create_code_interpreter(
@@ -1130,7 +1131,7 @@ def _deploy_agent_background(
                 executionRoleArn=ci_config["execution_role_arn"],
                 networkConfiguration={"networkMode": network_mode},
             )
-            return resp["codeInterpreterId"]
+            return resp["codeInterpreterId"], resp["codeInterpreterArn"]
 
         ci_future: concurrent.futures.Future | None = None
         ci_executor: concurrent.futures.ThreadPoolExecutor | None = None
@@ -1157,12 +1158,27 @@ def _deploy_agent_background(
 
         if ci_future is not None:
             try:
-                ci_id = ci_future.result(timeout=60)
+                ci_id, ci_arn = ci_future.result(timeout=60)
                 agent.code_interpreter_id = ci_id
                 if ci_config is not None:
                     ci_config["identifier"] = ci_id
                 db.commit()
                 logger.info("Created CI resource %s for agent %s", ci_id, agent.id)
+                ci_region = (request.code_interpreter_region or "").strip() or region
+                try:
+                    from app.services.observability import enable_code_interpreter_observability
+                    # Parse account_id from the CI ARN directly — the env var may be empty
+                    ci_arn_parts = ci_arn.split(":")
+                    ci_account_id = ci_arn_parts[4] if len(ci_arn_parts) >= 6 else account_id
+                    ci_obs = enable_code_interpreter_observability(
+                        ci_arn=ci_arn,
+                        ci_id=ci_id,
+                        account_id=ci_account_id,
+                        region=ci_region,
+                    )
+                    logger.info("Enabled CI observability for agent %s: %s", agent.id, ci_obs)
+                except Exception as ci_obs_err:
+                    logger.warning("Failed to enable CI observability for agent %s: %s", agent.id, ci_obs_err)
             except Exception as ci_err:
                 logger.warning("CI resource creation failed for agent %s, continuing: %s", agent.id, ci_err)
             finally:
@@ -1181,6 +1197,8 @@ def _deploy_agent_background(
         env_vars = {
             "AGENT_CONFIG_JSON": config_json,
             "OTEL_SERVICE_NAME": request.name,
+            "OTEL_TRACES_EXPORTER": "awsxray",
+            "OTEL_PROPAGATORS": "xray",
             "WORKLOAD_IDENTITY_NAME": f"loom-{request.name}",
             "AGENT_OBSERVABILITY_ENABLED": "true",
             "AWS_REGION": region,
@@ -1926,6 +1944,58 @@ def _cleanup_role(role_arn: str) -> None:
         logger.warning("Failed to clean up orphaned IAM role %s: %s", role_arn, e)
 
 
+def _delete_code_interpreter(ci_id: str, region: str) -> None:
+    """Best-effort deletion of a custom Code Interpreter resource.
+
+    If active sessions are present, terminates them and retries once.
+    """
+    import boto3
+    client = boto3.client("bedrock-agentcore-control", region_name=region)
+    data_client = boto3.client("bedrock-agentcore", region_name=region)
+
+    def _attempt_delete() -> bool:
+        try:
+            client.delete_code_interpreter(codeInterpreterId=ci_id)
+            logger.info("Deleted CI resource %s", ci_id)
+            return True
+        except client.exceptions.ConflictException as e:
+            raise e
+        except Exception as e:
+            logger.warning("Failed to delete CI resource %s: %s", ci_id, e)
+            return False
+
+    try:
+        _attempt_delete()
+    except Exception as e:
+        err_msg = str(e)
+        if "active sessions" in err_msg.lower() or "ConflictException" in type(e).__name__:
+            logger.info("CI resource %s has active sessions; terminating before retry", ci_id)
+            try:
+                paginator_resp = data_client.list_code_interpreter_sessions(codeInterpreterIdentifier=ci_id)
+                sessions = paginator_resp.get("items", [])
+                for s in sessions:
+                    sid = s.get("sessionId")
+                    if sid:
+                        try:
+                            data_client.stop_code_interpreter_session(
+                                codeInterpreterIdentifier=ci_id,
+                                sessionId=sid,
+                            )
+                            logger.info("Stopped CI session %s", sid)
+                        except Exception as stop_err:
+                            logger.warning("Failed to stop CI session %s: %s", sid, stop_err)
+            except Exception as list_err:
+                logger.warning("Failed to list CI sessions for %s: %s", ci_id, list_err)
+            # Retry delete after terminating sessions
+            try:
+                client.delete_code_interpreter(codeInterpreterId=ci_id)
+                logger.info("Deleted CI resource %s after session cleanup", ci_id)
+            except Exception as retry_err:
+                logger.warning("Failed to delete CI resource %s after session cleanup: %s", ci_id, retry_err)
+        else:
+            logger.warning("Failed to delete CI resource %s: %s", ci_id, e)
+
+
 @router.get("", response_model=list[AgentResponse])
 def list_agents(
     user: UserInfo = Depends(require_scopes("agent:read")),
@@ -2088,7 +2158,7 @@ def get_agent_status(agent_id: int, user: UserInfo = Depends(require_scopes("age
                 logger.warning("Failed to auto-register agent %s in registry: %s", agent.id, reg_err)
 
     ci_status: str | None = None
-    if agent.code_interpreter_id:
+    if agent.code_interpreter_id and agent.status != "DELETING":
         try:
             import boto3
             ci_region = agent.region
@@ -2096,7 +2166,10 @@ def get_agent_status(agent_id: int, user: UserInfo = Depends(require_scopes("age
             ci_resp = boto_client.get_code_interpreter(codeInterpreterId=agent.code_interpreter_id)
             ci_status = ci_resp.get("status")
         except Exception as ci_poll_err:
-            logger.warning("Failed to poll CI status for agent %s: %s", agent.id, ci_poll_err)
+            if _is_resource_not_found(ci_poll_err):
+                logger.debug("CI resource %s not found during poll (already deleted)", agent.code_interpreter_id)
+            else:
+                logger.warning("Failed to poll CI status for agent %s: %s", agent.id, ci_poll_err)
 
     db.commit()
     db.refresh(agent)
@@ -2190,6 +2263,14 @@ def delete_agent(
     _endpoint_name = agent.endpoint_name
     _region = agent.region
     _secret_arn = config_map.get("COGNITO_CLIENT_SECRET_ARN")
+    _ci_id = agent.code_interpreter_id
+    _ci_region = None
+    if _ci_id:
+        try:
+            agent_cfg = json.loads(config_map.get("AGENT_CONFIG_JSON") or "{}")
+            _ci_region = (agent_cfg.get("integrations", {}).get("code_interpreter") or {}).get("region") or _region
+        except (json.JSONDecodeError, TypeError):
+            _ci_region = _region
 
     # Initiate async deletion in AWS
     _harness_id = agent.harness_id
@@ -2217,6 +2298,10 @@ def delete_agent(
             delete_runtime(_runtime_id, _region)
         except Exception as e:
             logger.warning("Failed to delete runtime %s: %s", _runtime_id, e)
+
+    # Delete custom Code Interpreter resource if one was created
+    if _ci_id and _ci_region:
+        _delete_code_interpreter(_ci_id, _ci_region)
 
     # Clean up credential providers
     for cp_name in cp_names:

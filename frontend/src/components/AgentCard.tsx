@@ -46,7 +46,7 @@ function phaseLabel(agent: AgentResponse): string | null {
     case "creating_credentials": return "Creating credential provider";
     case "creating_role": return "Creating IAM role";
     case "building_artifact": return "Building artifact";
-    case "creating_ci_resource": return "Creating Code Interpreter";
+    case "creating_ci_resource": return "Building artifact & creating Code Interpreter";
     case "deploying": return agent.source === "harness" ? "Creating harness" : "Deploying runtime";
     default: break;
   }
