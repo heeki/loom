@@ -9,6 +9,7 @@ class ManagedRole(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     role_name = Column(String, nullable=False)
     role_arn = Column(String, nullable=False, unique=True)
+    role_type = Column(String, nullable=False, default="agent")  # "agent" or "code_interpreter"
     description = Column(Text, default="")
     policy_document = Column(Text, default="{}")  # JSON string
     tags = Column(Text, nullable=True)  # JSON dict
@@ -28,6 +29,7 @@ class ManagedRole(Base):
             "id": self.id,
             "role_name": self.role_name,
             "role_arn": self.role_arn,
+            "role_type": self.role_type or "agent",
             "description": self.description,
             "policy_document": json.loads(self.policy_document) if self.policy_document else {},
             "tags": self.get_tags(),

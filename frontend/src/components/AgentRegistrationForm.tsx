@@ -137,6 +137,10 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
   const [selectedMcpServerIds, setSelectedMcpServerIds] = useState<number[]>([]);
   const [selectedA2aAgentIds, setSelectedA2aAgentIds] = useState<number[]>([]);
   const [selectedMemoryIds, setSelectedMemoryIds] = useState<number[]>([]);
+  const [codeInterpreterEnabled, setCodeInterpreterEnabled] = useState(false);
+  const [codeInterpreterRegion, setCodeInterpreterRegion] = useState("us-east-1");
+  const [codeInterpreterNetworkMode, setCodeInterpreterNetworkMode] = useState("SANDBOX");
+  const [codeInterpreterRoleId, setCodeInterpreterRoleId] = useState<string>("");
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [a2aAgents, setA2aAgents] = useState<A2aAgent[]>([]);
   const [memories, setMemories] = useState<MemoryResponse[]>([]);
@@ -156,7 +160,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
   const [models, setModels] = useState<ModelOption[]>([]);
   const [managedRoles, setManagedRoles] = useState<ManagedRole[]>([]);
   const [authConfigs, setAuthConfigs] = useState<AuthorizerConfigResponse[]>([]);
-  const [defaults, setDefaults] = useState<agentsApi.LoomDefaults>({ idle_timeout_seconds: 300, max_lifetime_seconds: 3600 });
+  const [defaults, setDefaults] = useState<agentsApi.LoomDefaults>({ idle_timeout_seconds: 300, max_lifetime_seconds: 3600, region: "us-east-1" });
 
   const [dataLoaded, setDataLoaded] = useState(false);
   useEffect(() => {
@@ -239,6 +243,20 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
           })
           .filter((id): id is number => id !== undefined);
         setSelectedMemoryIds(ids);
+      }
+      if (parsed.code_interpreter != null) {
+        const ci = typeof parsed.code_interpreter === "object" ? parsed.code_interpreter as Record<string, unknown> : null;
+        if (ci) {
+          setCodeInterpreterEnabled(!!ci.enabled);
+          if (ci.region) setCodeInterpreterRegion(ci.region as string);
+          if (ci.network_mode) setCodeInterpreterNetworkMode(ci.network_mode as string);
+          if (ci.role) {
+            const ciRole = managedRoles.find((r) => r.role_name === ci.role || r.role_arn === ci.role);
+            if (ciRole) setCodeInterpreterRoleId(ciRole.id.toString());
+          }
+        } else {
+          setCodeInterpreterEnabled(!!parsed.code_interpreter);
+        }
       }
       if (parsed.max_iterations != null) setHarnessMaxIterations(String(parsed.max_iterations));
       if (parsed.max_tokens != null) setHarnessMaxTokens(String(parsed.max_tokens));
@@ -394,6 +412,10 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
         memory_ids: selectedMemoryIds,
         mcp_servers: selectedMcpServerIds,
         a2a_agents: selectedA2aAgentIds,
+        code_interpreter_enabled: codeInterpreterEnabled,
+        code_interpreter_region: codeInterpreterRegion,
+        code_interpreter_network_mode: codeInterpreterNetworkMode,
+        code_interpreter_role_id: codeInterpreterRoleId ? parseInt(codeInterpreterRoleId) : null,
         tags: Object.fromEntries(
           Object.entries(tagValues).filter(([, v]) => v.trim() !== "")
         ),
@@ -415,6 +437,10 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
       setSelectedMcpServerIds([]);
       setSelectedA2aAgentIds([]);
       setSelectedMemoryIds([]);
+      setCodeInterpreterEnabled(false);
+      setCodeInterpreterRegion("us-east-1");
+      setCodeInterpreterNetworkMode("SANDBOX");
+      setCodeInterpreterRoleId("");
     }
   };
 
@@ -429,9 +455,10 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
   const filteredMemories = groupRestriction
     ? memories.filter((m) => m.tags?.["loom:group"] === groupRestriction)
     : memories;
-  const filteredRoles = groupRestriction
+  const filteredRoles = (groupRestriction
     ? managedRoles.filter((r) => r.tags?.["loom:group"] === groupRestriction)
-    : managedRoles;
+    : managedRoles
+  ).filter((r) => r.role_type !== "code_interpreter");
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -523,6 +550,20 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                         .filter((id: number | undefined): id is number => id !== undefined);
                       setSelectedMemoryIds(ids);
                     }
+                    if (parsed.code_interpreter != null) {
+                      const ci = typeof parsed.code_interpreter === "object" ? parsed.code_interpreter as Record<string, unknown> : null;
+                      if (ci) {
+                        setCodeInterpreterEnabled(!!ci.enabled);
+                        if (ci.region) setCodeInterpreterRegion(ci.region as string);
+                        if (ci.network_mode) setCodeInterpreterNetworkMode(ci.network_mode as string);
+                        if (ci.role) {
+                          const ciRole = managedRoles.find((r) => r.role_name === ci.role || r.role_arn === ci.role);
+                          if (ciRole) setCodeInterpreterRoleId(ciRole.id.toString());
+                        }
+                      } else {
+                        setCodeInterpreterEnabled(!!parsed.code_interpreter);
+                      }
+                    }
                     if (parsed.max_iterations != null) setHarnessMaxIterations(String(parsed.max_iterations));
                     if (parsed.max_tokens != null) setHarnessMaxTokens(String(parsed.max_tokens));
                     if (parsed.human_confirmation != null) setEnableHumanConfirmation(!!parsed.human_confirmation);
@@ -585,9 +626,21 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                       return mem?.name ?? id;
                     });
                   }
+                  if (codeInterpreterEnabled) {
+                    const ciObj: Record<string, unknown> = {
+                      enabled: true,
+                      region: codeInterpreterRegion || "us-east-1",
+                      network_mode: codeInterpreterNetworkMode,
+                    };
+                    if (codeInterpreterRoleId) {
+                      const ciRole = managedRoles.find((r) => r.id.toString() === codeInterpreterRoleId);
+                      if (ciRole) ciObj.role = ciRole.role_name;
+                    }
+                    result.code_interpreter = ciObj;
+                  }
                   return JSON.stringify(result, null, 2);
                 }}
-                placeholder='{"deployment_type": "custom|managed", "name": "...", "description": "...", "system_prompt": "...", "model": "... (default)", "allowed_models": ["..."], "network_mode": "PUBLIC", "role": "...", "tags": "...", "authorizer": "...", "max_iterations": 75, "max_tokens": 4096, "human_confirmation": true, "confirmation_policy": "...", "mcp_servers": ["..."], "a2a_agents": ["..."], "memories": ["..."]}'
+                placeholder='{"deployment_type": "custom|managed", "name": "...", "system_prompt": "...", "model": "...", "role": "...", "mcp_servers": ["..."], "a2a_agents": ["..."], "memories": ["..."], "code_interpreter": {"enabled": true, "region": "us-east-1", "network_mode": "SANDBOX", "role": "..."}}'
               />
 
               {/* Deployment Type Selector */}
@@ -970,12 +1023,46 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
               <ResourceTagFields onChange={setTagValues} profileId={selectedTagProfileId} groupRestriction={groupRestriction} ownerRestriction={ownerRestriction} />
 
               {/* Integrations */}
+              {/* Memory Resources (Custom Agent only) */}
+              {deploymentType === "custom" && (
               <section className="space-y-3">
-                <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{deploymentType === "managed" ? "MCP Servers (Remote MCP Tools)" : "Integrations"}</h4>
+                <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Memory Resources</h4>
+                <div className="space-y-1.5">
+                  {filteredMemories.length === 0 ? (
+                    <p className="text-xs text-muted-foreground italic">No memory resources available{groupRestriction ? " for your group" : ""}. Create one on the Memory page first.</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {filteredMemories.map((mem) => (
+                        <label key={mem.id} className="flex items-center gap-2 text-xs cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="h-3.5 w-3.5"
+                            checked={selectedMemoryIds.includes(mem.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedMemoryIds((prev) => [...prev, mem.id]);
+                              } else {
+                                setSelectedMemoryIds((prev) => prev.filter((id) => id !== mem.id));
+                              }
+                            }}
+                          />
+                          <span>{mem.name}</span>
+                          {mem.status !== "ACTIVE" && (
+                            <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded">{mem.status}</span>
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </section>
+              )}
+
+              {/* MCP Servers */}
+              <section className="space-y-3">
+                <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">MCP Servers{deploymentType === "managed" ? " (Remote MCP Tools)" : ""}</h4>
                 <div className="space-y-3">
-                  {/* MCP Servers */}
                   <div className="space-y-1.5">
-                    <label className="text-xs text-muted-foreground">MCP Servers</label>
                     {filteredMcpServers.length === 0 ? (
                       <p className="text-xs text-muted-foreground italic">No MCP servers available. Register servers on the MCP Servers page first.</p>
                     ) : (
@@ -1013,78 +1100,103 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                       </div>
                     )}
                   </div>
-                  {/* A2A Agents (Custom Agent only) */}
-                  {deploymentType === "custom" && <div className="space-y-1.5">
-                    <label className="text-xs text-muted-foreground">A2A Agents</label>
-                    {filteredA2aAgents.length === 0 ? (
-                      <p className="text-xs text-muted-foreground italic">No A2A agents available. Register agents on the A2A Agents page first.</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {filteredA2aAgents.map((agent) => (
-                          <label key={agent.id} className="flex items-center gap-2 text-xs cursor-pointer min-w-0">
-                            <input
-                              type="checkbox"
-                              className="h-3.5 w-3.5 shrink-0"
-                              checked={selectedA2aAgentIds.includes(agent.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedA2aAgentIds((prev) => [...prev, agent.id]);
-                                } else {
-                                  setSelectedA2aAgentIds((prev) => prev.filter((id) => id !== agent.id));
-                                }
-                              }}
-                            />
-                            <span className="shrink-0">{agent.name}</span>
-                            {agent.auth_type === "oauth2" && (
-                              <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded shrink-0">OAuth2</span>
-                            )}
-                            {agent.auth_type === "oauth2" && agent.delegation_mode === "obo" && (
-                              <span className="text-[10px] text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-950 px-1 rounded shrink-0">OBO</span>
-                            )}
-                            {agent.auth_type === "oauth2" && agent.delegation_mode !== "obo" && (
-                              <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded shrink-0">M2M</span>
-                            )}
-                            <span className="relative group text-muted-foreground/60 shrink-0">
-                              {(() => { try { return new URL(agent.base_url).host; } catch { return agent.base_url; } })()}
-                              <span className="absolute left-0 top-full mt-1 z-50 hidden group-hover:block text-[10px] text-foreground bg-popover border border-border px-2 py-1 rounded shadow-md whitespace-nowrap">{agent.base_url}</span>
-                            </span>
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </div>}
-                  {/* Memory Resources (Custom Agent only) */}
-                  {deploymentType === "custom" && <div className="space-y-1.5">
-                    <label className="text-xs text-muted-foreground">Memory Resources</label>
-                    {filteredMemories.length === 0 ? (
-                      <p className="text-xs text-muted-foreground italic">No memory resources available{groupRestriction ? " for your group" : ""}. Create one on the Memory page first.</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {filteredMemories.map((mem) => (
-                          <label key={mem.id} className="flex items-center gap-2 text-xs cursor-pointer">
-                            <input
-                              type="checkbox"
-                              className="h-3.5 w-3.5"
-                              checked={selectedMemoryIds.includes(mem.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedMemoryIds((prev) => [...prev, mem.id]);
-                                } else {
-                                  setSelectedMemoryIds((prev) => prev.filter((id) => id !== mem.id));
-                                }
-                              }}
-                            />
-                            <span>{mem.name}</span>
-                            {mem.status !== "ACTIVE" && (
-                              <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded">{mem.status}</span>
-                            )}
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </div>}
                 </div>
               </section>
+
+              {/* A2A Agents (Custom Agent only) */}
+              {deploymentType === "custom" && (
+              <section className="space-y-3">
+                <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">A2A Agents</h4>
+                <div className="space-y-1.5">
+                  {filteredA2aAgents.length === 0 ? (
+                    <p className="text-xs text-muted-foreground italic">No A2A agents available. Register agents on the A2A Agents page first.</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {filteredA2aAgents.map((agent) => (
+                        <label key={agent.id} className="flex items-center gap-2 text-xs cursor-pointer min-w-0">
+                          <input
+                            type="checkbox"
+                            className="h-3.5 w-3.5 shrink-0"
+                            checked={selectedA2aAgentIds.includes(agent.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedA2aAgentIds((prev) => [...prev, agent.id]);
+                              } else {
+                                setSelectedA2aAgentIds((prev) => prev.filter((id) => id !== agent.id));
+                              }
+                            }}
+                          />
+                          <span className="shrink-0">{agent.name}</span>
+                          {agent.auth_type === "oauth2" && (
+                            <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded shrink-0">OAuth2</span>
+                          )}
+                          {agent.auth_type === "oauth2" && agent.delegation_mode === "obo" && (
+                            <span className="text-[10px] text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-950 px-1 rounded shrink-0">OBO</span>
+                          )}
+                          {agent.auth_type === "oauth2" && agent.delegation_mode !== "obo" && (
+                            <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded shrink-0">M2M</span>
+                          )}
+                          <span className="relative group text-muted-foreground/60 shrink-0">
+                            {(() => { try { return new URL(agent.base_url).host; } catch { return agent.base_url; } })()}
+                            <span className="absolute left-0 top-full mt-1 z-50 hidden group-hover:block text-[10px] text-foreground bg-popover border border-border px-2 py-1 rounded shadow-md whitespace-nowrap">{agent.base_url}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </section>
+              )}
+
+              {/* Code Interpreter (Custom Agent only) */}
+              {deploymentType === "custom" && (
+              <section className="space-y-3">
+                <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Code Interpreter</h4>
+                <label className="flex items-center gap-2 text-xs cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5"
+                    checked={codeInterpreterEnabled}
+                    onChange={(e) => setCodeInterpreterEnabled(e.target.checked)}
+                  />
+                  <span>Enable</span>
+                </label>
+                {codeInterpreterEnabled && (
+                  <div className="flex items-center gap-2">
+                    <Select value={codeInterpreterNetworkMode} onValueChange={setCodeInterpreterNetworkMode}>
+                      <SelectTrigger className="text-sm w-36 shrink-0">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="SANDBOX">Sandbox</SelectItem>
+                        <SelectItem value="PUBLIC">Public</SelectItem>
+                        <SelectItem value="VPC" disabled>VPC (coming soon)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={codeInterpreterRegion} onValueChange={setCodeInterpreterRegion}>
+                      <SelectTrigger className="text-sm w-52 shrink-0">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="us-east-1">us-east-1 — N. Virginia</SelectItem>
+                        <SelectItem value="us-west-2">us-west-2 — Oregon</SelectItem>
+                        <SelectItem value="eu-west-1">eu-west-1 — Ireland</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <SearchableSelect
+                      className="flex-1 min-w-0"
+                      options={managedRoles.filter((r) => r.role_type === "code_interpreter").map((r) => ({
+                        value: r.id.toString(),
+                        label: r.role_name,
+                      }))}
+                      value={codeInterpreterRoleId}
+                      onValueChange={setCodeInterpreterRoleId}
+                      placeholder="Execution role (optional)"
+                    />
+                  </div>
+                )}
+              </section>
+              )}
 
               <div className="space-y-1.5">
               <p className="text-[10px] text-muted-foreground italic">
@@ -1119,6 +1231,10 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                     setSelectedMcpServerIds([]);
                     setSelectedA2aAgentIds([]);
                     setSelectedMemoryIds([]);
+                    setCodeInterpreterEnabled(false);
+                    setCodeInterpreterRegion("us-east-1");
+                    setCodeInterpreterNetworkMode("SANDBOX");
+                    setCodeInterpreterRoleId("");
                   }}
                   disabled={isLoading}
                 >

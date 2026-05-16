@@ -215,7 +215,7 @@ uv pip install ".[postgres]"
 | `available_qualifiers` | TEXT | JSON array of endpoint names (e.g., `["DEFAULT"]`) |
 | `raw_metadata` | TEXT | Full JSON from AgentCore describe API |
 | `source` | TEXT | `register`, `deploy`, or `harness` |
-| `deployment_status` | TEXT | `initializing`, `creating_credentials`, `creating_role`, `building_artifact`, `deploying`, `deployed`, `failed`, `removing`, `READY` |
+| `deployment_status` | TEXT | `initializing`, `creating_credentials`, `creating_role`, `building_artifact`, `creating_ci_resource`, `deploying`, `deployed`, `failed`, `removing`, `READY` |
 | `execution_role_arn` | TEXT | IAM execution role ARN |
 | `config_hash` | TEXT | Configuration hash |
 | `endpoint_name` | TEXT | Runtime endpoint name |
@@ -227,6 +227,7 @@ uv pip install ".[postgres]"
 | `tags` | TEXT | JSON dict of resolved tags applied to this agent's AWS resources |
 | `allowed_model_ids` | TEXT | JSON array of model IDs the agent is allowed to use at invoke time (defaults to `[model_id]`) |
 | `harness_id` | VARCHAR | Harness ID for managed agent deployments (nullable, set when `source="harness"`) |
+| `code_interpreter_id` | TEXT | Custom Code Interpreter resource ID (nullable, set when a custom CI resource is created on deploy) |
 | `registered_at` | DATETIME | Timestamp of local registration |
 | `deployed_at` | DATETIME | Deployment timestamp |
 | `last_refreshed_at` | DATETIME | Last time metadata was fetched from AWS |
@@ -259,6 +260,7 @@ uv pip install ".[postgres]"
 | `description` | TEXT | Role description |
 | `policy_document` | TEXT | JSON policy document |
 | `tags` | TEXT | JSON dict of tags fetched from AWS IAM on import |
+| `role_type` | TEXT DEFAULT 'agent' | Role type: `"agent"` or `"code_interpreter"` |
 | `created_at` | DATETIME | Creation timestamp |
 | `updated_at` | DATETIME | Last update timestamp |
 
@@ -1276,6 +1278,7 @@ Wraps `boto3.client('bedrock-agentcore-control')` (control plane) and `boto3.cli
 CloudWatch vended log delivery configuration for agent runtimes and memory resources:
 
 - `enable_runtime_observability(runtime_arn, runtime_id, account_id, region) -> dict` — configures USAGE_LOGS and APPLICATION_LOGS delivery for an agent runtime using the CloudWatch `put_delivery_source`, `put_delivery_destination`, and `create_delivery` APIs. Called during agent deployment to enable cost tracking via vended logs.
+- `enable_code_interpreter_observability(ci_arn, ci_id, account_id, region) -> dict` — configures USAGE_LOGS and APPLICATION_LOGS delivery for a custom Code Interpreter resource. Account ID is parsed from `ci_arn` directly to ensure the log group ARN is valid. Delivery source/destination names use the last 8 characters of the CI ID to stay within CloudWatch's 64-character limit.
 
 ---
 
@@ -1289,8 +1292,8 @@ Deployment runs asynchronously via FastAPI `BackgroundTasks` with progressive `d
 3. Background task progresses through deployment phases:
    - **`creating_credentials`**: For each MCP server or A2A agent with OAuth2 auth, calls `create_oauth2_credential_provider` (vendor=`CustomOauth2`, using `discoveryUrl` from config) with exponential backoff retry. If the provider already exists (e.g., redeployment), automatically falls back to `update_oauth2_credential_provider` to apply the latest configuration. Stores credential provider names in `AGENT_CONFIG_JSON` under `integrations.mcp_servers[].auth.credential_provider_name` or `integrations.a2a_agents[].auth.credential_provider_name`. If credential provider creation fails after all retries, sets `deployment_status="credential_creation_failed"` and returns without deploying.
    - **`creating_role`**: Creates or validates the IAM execution role (if needed).
-   - **`building_artifact`**: Builds the deployment artifact by copying source from `agents/strands_agent/src/`, running `pip install` against `requirements.txt` targeting `linux/arm64` (`manylinux2014_aarch64`), fixing console script shebangs (e.g. `opentelemetry-instrument`) to use `#!/usr/bin/env python3` for Linux compatibility, zipping the package and uploading it to S3.
-   - **`deploying`**: Calls `create_agent_runtime` with the artifact location, environment variables (including `OTEL_SERVICE_NAME` set to the agent name and `AGENT_OBSERVABILITY_ENABLED=true` to activate the `aws-opentelemetry-distro` export pipeline), network/protocol/lifecycle/authorizer configuration.
+   - **`building_artifact`**: Builds the deployment artifact by copying source from `agents/strands_agent/src/`, running `pip install` against `requirements.txt` targeting `linux/arm64` (`manylinux2014_aarch64`), fixing console script shebangs (e.g. `opentelemetry-instrument`) to use `#!/usr/bin/env python3` for Linux compatibility, zipping the package and uploading it to S3. When `code_interpreter_enabled` is true and a CI execution role is configured, a custom Code Interpreter resource is created in parallel via `ThreadPoolExecutor`. The resulting resource ID is stored in `agents.code_interpreter_id` and injected into `AGENT_CONFIG_JSON` as `integrations.code_interpreter.identifier`.
+   - **`deploying`**: Calls `create_agent_runtime` with the artifact location, environment variables (including `OTEL_SERVICE_NAME` set to the agent name, `AGENT_OBSERVABILITY_ENABLED=true` to activate the `aws-opentelemetry-distro` export pipeline, `OTEL_TRACES_EXPORTER=awsxray`, and `OTEL_PROPAGATORS=xray` to activate X-Ray tracing), network/protocol/lifecycle/authorizer configuration.
    - **`deployed`**: Stores authorizer config on the agent record. Stores the Cognito `client_id` as a config entry. Stores the `client_secret` in AWS Secrets Manager and saves the resulting ARN as a config entry. Updates `deployment_status="deployed"` and `status="READY"`.
 4. On error during any phase: sets `deployment_status="failed"` (or `"credential_creation_failed"` specifically for credential failures).
 5. Frontend polls the status endpoint to track progress. Smart polling returns DB state immediately during local build phases (`creating_credentials`, `creating_role`, `building_artifact`) without AWS API calls. Only when `deployment_status="deployed"` does the status endpoint query AWS for runtime state.

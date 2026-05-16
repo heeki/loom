@@ -28,6 +28,7 @@ strands_agent/
 │   ├── __init__.py
 │   ├── test_config.py
 │   ├── test_agent.py
+│   ├── test_code_interpreter.py
 │   ├── test_handler.py
 │   ├── test_telemetry.py
 │   ├── test_mcp_client.py
@@ -83,6 +84,11 @@ The agent reads configuration from one of two sources (checked in order):
     ],
     "memory": {
       "enabled": true
+    },
+    "code_interpreter": {
+      "enabled": true,
+      "region": "us-west-2",
+      "identifier": ""
     }
   }
 }
@@ -193,6 +199,31 @@ When enabled, the agent uses the `MemoryHook` (a Strands `HookProvider`) to load
 **Cost telemetry:** The hook always emits a `LOOM_MEMORY_TELEMETRY: retrievals=N, events_sent=M` structured log line at INFO level after each invocation. The backend parses this to compute memory costs (`stm_cost = events_sent / 1000 * $0.25`, `ltm_cost = retrievals / 1000 * $0.50`).
 
 **Error handling:** `AccessDeniedException` and other errors are caught and logged at WARNING level without interrupting the agent invocation. If memory operations fail, the telemetry line still emits with zero counters.
+
+### Code Interpreter
+
+When enabled, the agent gains access to a sandboxed Code Interpreter tool powered by AWS Bedrock AgentCore. The agent can generate and execute Python, JavaScript, or TypeScript code in an isolated environment — useful for calculations, data analysis, and validating AI-generated logic before surfacing results.
+
+**Configuration fields:**
+- `enabled` (bool) — Toggle the integration on/off.
+- `region` (string, optional) — AWS region for the Code Interpreter service. Defaults to the agent's region if empty.
+- `identifier` (string, optional) — Custom code interpreter identifier. When set, the agent uses the specified customer-owned Code Interpreter resource instead of the default system interpreter (`aws.codeinterpreter.v1`). The backend populates this automatically when a custom CI resource is created during deployment.
+
+**How it works:**
+1. The `AgentCoreCodeInterpreter` tool from `strands-agents-tools` is registered in the agent's tool list.
+2. The agent can invoke the tool to execute code, read/write files, and run shell commands within the sandbox.
+3. Sessions are managed automatically — no manual lifecycle management required.
+4. Code execution failures (syntax errors, exceptions) are returned as structured errors without crashing the agent.
+
+**Custom Code Interpreter resource:** When a CI execution role is configured in the deployment form, the backend creates a custom `bedrock-agentcore-control` Code Interpreter resource and stores its ID in `agents.code_interpreter_id`. The resource identifier is then injected into `AGENT_CONFIG_JSON` as `integrations.code_interpreter.identifier` before the runtime is deployed.
+
+**IAM permissions:** The agent execution role must include `bedrock-agentcore` actions for two ARN patterns:
+- `code-interpreter/*` — system-managed interpreters
+- `code-interpreter-custom/*` — customer-owned interpreter resources
+
+A separate CI execution role (deployed via `shared/iac/code_interpreter_role.yaml`) serves as the sandbox identity for the custom interpreter. This two-role pattern keeps agent execution permissions separate from sandbox execution permissions.
+
+**Security:** The sandbox has no access to the host filesystem or network. All code runs in an isolated environment managed by AWS.
 
 ### Observability (OTEL)
 

@@ -423,7 +423,7 @@ async def invoke(payload: dict[str, Any]) -> AsyncGenerator[Any, None]:
                             yield text
                             continue
                         event_keys = list(event.keys())
-                        logger.info("Stream event keys: %s", event_keys)
+                        logger.debug("Stream event keys: %s", event_keys)
                         chunk = event.get("event")
                         if isinstance(chunk, dict):
                             if "contentBlockStart" in chunk:

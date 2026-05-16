@@ -1,4 +1,5 @@
 """Agent registration, deployment, and management endpoints."""
+import concurrent.futures
 import json
 import logging
 import os
@@ -148,6 +149,10 @@ class AgentCreateRequest(BaseModel):
     memory_ids: list[int] = Field(default_factory=list, description="Memory resource IDs to integrate")
     mcp_servers: list[int] = Field(default_factory=list, description="MCP server IDs to integrate")
     a2a_agents: list[int] = Field(default_factory=list, description="A2A agent IDs to integrate")
+    code_interpreter_enabled: bool = Field(default=False, description="Enable Code Interpreter tool")
+    code_interpreter_region: str = Field(default="", description="AWS region for Code Interpreter (empty = agent region)")
+    code_interpreter_network_mode: str = Field(default="SANDBOX", description="Code Interpreter network mode: PUBLIC, SANDBOX, or VPC")
+    code_interpreter_role_id: int | None = Field(None, description="Managed role ID for Code Interpreter execution role")
     tags: dict[str, str] | None = Field(None, description="Build-time tag values")
     # Harness-specific fields
     harness_tools: list[dict[str, Any]] | None = Field(None, description="Harness tool configurations")
@@ -191,6 +196,8 @@ class AgentResponse(BaseModel):
     memory_names: list[str] = []
     mcp_names: list[str] = []
     a2a_names: list[str] = []
+    code_interpreter_id: str | None = None
+    code_interpreter_status: str | None = None
 
 
 class ConfigEntryResponse(BaseModel):
@@ -369,7 +376,8 @@ def _agent_response(agent: Agent, db: Session) -> AgentResponse:
         active_session_count=compute_active_session_count(agent.id, db),
         memory_names=memory_names,
         mcp_names=mcp_names,
-        a2a_names=a2a_names
+        a2a_names=a2a_names,
+        code_interpreter_status=None,
     )
     if inv_count > 0 and grand_total > 0:
         result.cost_summary = {
@@ -481,6 +489,7 @@ def get_defaults(user: UserInfo = Depends(require_scopes("agent:read"))) -> dict
     return {
         "idle_timeout_seconds": int(os.getenv("LOOM_SESSION_IDLE_TIMEOUT_SECONDS", "300")),
         "max_lifetime_seconds": int(os.getenv("LOOM_SESSION_MAX_LIFETIME_SECONDS", "3600")),
+        "region": DEFAULT_REGION,
     }
 
 
@@ -1048,37 +1057,26 @@ def _deploy_agent_background(
             for m in memory_snapshots
         ]
 
-        config_json = json.dumps({
-            "system_prompt": system_prompt,
-            "model_id": request.model_id,
-            "max_tokens": model_max_tokens,
-            "integrations": {
-                "mcp_servers": mcp_server_configs,
-                "a2a_agents": a2a_agent_configs,
-                "memory": {
-                    "enabled": request.memory_enabled or len(memory_configs) > 0,
-                    "resources": memory_configs,
-                },
+        integrations_config: dict[str, Any] = {
+            "mcp_servers": mcp_server_configs,
+            "a2a_agents": a2a_agent_configs,
+            "memory": {
+                "enabled": request.memory_enabled or len(memory_configs) > 0,
+                "resources": memory_configs,
             },
-        })
-        env_vars = {
-            "AGENT_CONFIG_JSON": config_json,
-            "OTEL_SERVICE_NAME": request.name,
-            "WORKLOAD_IDENTITY_NAME": f"loom-{request.name}",
-            "AGENT_OBSERVABILITY_ENABLED": "true",
-            "AWS_REGION": region,
         }
-
-        # Store config entries
-        for key, value in env_vars.items():
-            db.add(ConfigEntry(
-                agent_id=agent.id,
-                key=key,
-                value=value,
-                is_secret=False,
-                source="env_var",
-            ))
-        db.commit()
+        ci_config: dict[str, Any] | None = None
+        if request.code_interpreter_enabled:
+            ci_config = {
+                "enabled": True,
+                "region": request.code_interpreter_region or "",
+                "network_mode": request.code_interpreter_network_mode or "SANDBOX",
+            }
+            if request.code_interpreter_role_id:
+                ci_role = db.query(ManagedRole).filter(ManagedRole.id == request.code_interpreter_role_id).first()
+                if ci_role:
+                    ci_config["execution_role_arn"] = ci_role.role_arn
+            integrations_config["code_interpreter"] = ci_config
 
         # --- Step 2: Create or use provided IAM execution role ---
         agent.deployment_status = "creating_role"
@@ -1095,6 +1093,7 @@ def _deploy_agent_background(
                     account_id=account_id,
                     tag_policies=tag_policy_dicts,
                     extra_tags=resolved_tags,
+                    code_interpreter=request.code_interpreter_enabled,
                 )
                 created_role = True
                 agent.execution_role_arn = execution_role_arn
@@ -1109,9 +1108,38 @@ def _deploy_agent_background(
             agent.execution_role_arn = execution_role_arn
             db.commit()
 
-        # --- Step 3: Build agent artifact ---
+        # --- Step 3: Build agent artifact (and optionally create CI resource in parallel) ---
         agent.deployment_status = "building_artifact"
         db.commit()
+
+        _needs_ci_resource = (
+            request.code_interpreter_enabled
+            and ci_config is not None
+            and bool(ci_config.get("execution_role_arn"))
+        )
+
+        def _create_ci_resource() -> tuple[str, str]:
+            import boto3
+            ci_region = (request.code_interpreter_region or "").strip() or region
+            base_name = re.sub(r"_?code_interpreter$", "", request.name).strip("_")
+            raw_name = f"loom_ci_{base_name}"
+            sanitized = re.sub(r"[^a-zA-Z0-9_]", "_", raw_name)[:48]
+            network_mode = request.code_interpreter_network_mode or "PUBLIC"
+            boto_client = boto3.client("bedrock-agentcore-control", region_name=ci_region)
+            resp = boto_client.create_code_interpreter(
+                name=sanitized,
+                executionRoleArn=ci_config["execution_role_arn"],
+                networkConfiguration={"networkMode": network_mode},
+            )
+            return resp["codeInterpreterId"], resp["codeInterpreterArn"]
+
+        ci_future: concurrent.futures.Future | None = None
+        ci_executor: concurrent.futures.ThreadPoolExecutor | None = None
+        if _needs_ci_resource:
+            agent.deployment_status = "creating_ci_resource"
+            db.commit()
+            ci_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            ci_future = ci_executor.submit(_create_ci_resource)
 
         try:
             artifact_bucket, artifact_key = build_agent_artifact(region)
@@ -1119,10 +1147,72 @@ def _deploy_agent_background(
             agent.deployment_status = "failed"
             agent.status = "FAILED"
             db.commit()
+            if ci_future is not None:
+                ci_future.cancel()
+            if ci_executor is not None:
+                ci_executor.shutdown(wait=False)
             if created_role and execution_role_arn:
                 _cleanup_role(execution_role_arn)
             logger.error("Failed to build artifact for agent %s: %s", agent.id, e)
             return
+
+        if ci_future is not None:
+            try:
+                ci_id, ci_arn = ci_future.result(timeout=60)
+                agent.code_interpreter_id = ci_id
+                if ci_config is not None:
+                    ci_config["identifier"] = ci_id
+                db.commit()
+                logger.info("Created CI resource %s for agent %s", ci_id, agent.id)
+                ci_region = (request.code_interpreter_region or "").strip() or region
+                try:
+                    from app.services.observability import enable_code_interpreter_observability
+                    # Parse account_id from the CI ARN directly — the env var may be empty
+                    ci_arn_parts = ci_arn.split(":")
+                    ci_account_id = ci_arn_parts[4] if len(ci_arn_parts) >= 6 else account_id
+                    ci_obs = enable_code_interpreter_observability(
+                        ci_arn=ci_arn,
+                        ci_id=ci_id,
+                        account_id=ci_account_id,
+                        region=ci_region,
+                    )
+                    logger.info("Enabled CI observability for agent %s: %s", agent.id, ci_obs)
+                except Exception as ci_obs_err:
+                    logger.warning("Failed to enable CI observability for agent %s: %s", agent.id, ci_obs_err)
+            except Exception as ci_err:
+                logger.warning("CI resource creation failed for agent %s, continuing: %s", agent.id, ci_err)
+            finally:
+                if ci_executor is not None:
+                    ci_executor.shutdown(wait=False)
+
+        agent.deployment_status = "building_artifact"
+        db.commit()
+
+        config_json = json.dumps({
+            "system_prompt": system_prompt,
+            "model_id": request.model_id,
+            "max_tokens": model_max_tokens,
+            "integrations": integrations_config,
+        })
+        env_vars = {
+            "AGENT_CONFIG_JSON": config_json,
+            "OTEL_SERVICE_NAME": request.name,
+            "OTEL_TRACES_EXPORTER": "awsxray",
+            "OTEL_PROPAGATORS": "xray",
+            "WORKLOAD_IDENTITY_NAME": f"loom-{request.name}",
+            "AGENT_OBSERVABILITY_ENABLED": "true",
+            "AWS_REGION": region,
+        }
+
+        for key, value in env_vars.items():
+            db.add(ConfigEntry(
+                agent_id=agent.id,
+                key=key,
+                value=value,
+                is_secret=False,
+                source="env_var",
+            ))
+        db.commit()
 
         # Build optional configs
         lifecycle_config = None
@@ -1854,6 +1944,58 @@ def _cleanup_role(role_arn: str) -> None:
         logger.warning("Failed to clean up orphaned IAM role %s: %s", role_arn, e)
 
 
+def _delete_code_interpreter(ci_id: str, region: str) -> None:
+    """Best-effort deletion of a custom Code Interpreter resource.
+
+    If active sessions are present, terminates them and retries once.
+    """
+    import boto3
+    client = boto3.client("bedrock-agentcore-control", region_name=region)
+    data_client = boto3.client("bedrock-agentcore", region_name=region)
+
+    def _attempt_delete() -> bool:
+        try:
+            client.delete_code_interpreter(codeInterpreterId=ci_id)
+            logger.info("Deleted CI resource %s", ci_id)
+            return True
+        except client.exceptions.ConflictException as e:
+            raise e
+        except Exception as e:
+            logger.warning("Failed to delete CI resource %s: %s", ci_id, e)
+            return False
+
+    try:
+        _attempt_delete()
+    except Exception as e:
+        err_msg = str(e)
+        if "active sessions" in err_msg.lower() or "ConflictException" in type(e).__name__:
+            logger.info("CI resource %s has active sessions; terminating before retry", ci_id)
+            try:
+                paginator_resp = data_client.list_code_interpreter_sessions(codeInterpreterIdentifier=ci_id)
+                sessions = paginator_resp.get("items", [])
+                for s in sessions:
+                    sid = s.get("sessionId")
+                    if sid:
+                        try:
+                            data_client.stop_code_interpreter_session(
+                                codeInterpreterIdentifier=ci_id,
+                                sessionId=sid,
+                            )
+                            logger.info("Stopped CI session %s", sid)
+                        except Exception as stop_err:
+                            logger.warning("Failed to stop CI session %s: %s", sid, stop_err)
+            except Exception as list_err:
+                logger.warning("Failed to list CI sessions for %s: %s", ci_id, list_err)
+            # Retry delete after terminating sessions
+            try:
+                client.delete_code_interpreter(codeInterpreterId=ci_id)
+                logger.info("Deleted CI resource %s after session cleanup", ci_id)
+            except Exception as retry_err:
+                logger.warning("Failed to delete CI resource %s after session cleanup: %s", ci_id, retry_err)
+        else:
+            logger.warning("Failed to delete CI resource %s: %s", ci_id, e)
+
+
 @router.get("", response_model=list[AgentResponse])
 def list_agents(
     user: UserInfo = Depends(require_scopes("agent:read")),
@@ -1901,7 +2043,7 @@ def get_agent_status(agent_id: int, user: UserInfo = Depends(require_scopes("age
     agent = get_agent_or_404(agent_id, db)
 
     # Local build phases — runtime doesn't exist in AWS yet, just return DB state
-    _local_phases = {"initializing", "creating_credentials", "creating_role", "building_artifact", "deploying"}
+    _local_phases = {"initializing", "creating_credentials", "creating_role", "building_artifact", "creating_ci_resource", "deploying"}
     if agent.deployment_status in _local_phases:
         return _agent_response(agent, db)
 
@@ -2015,10 +2157,27 @@ def get_agent_status(agent_id: int, user: UserInfo = Depends(require_scopes("age
             except Exception as reg_err:
                 logger.warning("Failed to auto-register agent %s in registry: %s", agent.id, reg_err)
 
+    ci_status: str | None = None
+    if agent.code_interpreter_id and agent.status != "DELETING":
+        try:
+            import boto3
+            ci_region = agent.region
+            boto_client = boto3.client("bedrock-agentcore-control", region_name=ci_region)
+            ci_resp = boto_client.get_code_interpreter(codeInterpreterId=agent.code_interpreter_id)
+            ci_status = ci_resp.get("status")
+        except Exception as ci_poll_err:
+            if _is_resource_not_found(ci_poll_err):
+                logger.debug("CI resource %s not found during poll (already deleted)", agent.code_interpreter_id)
+            else:
+                logger.warning("Failed to poll CI status for agent %s: %s", agent.id, ci_poll_err)
+
     db.commit()
     db.refresh(agent)
 
-    return _agent_response(agent, db)
+    response = _agent_response(agent, db)
+    if ci_status is not None:
+        response.code_interpreter_status = ci_status
+    return response
 
 
 @router.delete("/{agent_id}", response_model=AgentResponse)
@@ -2104,6 +2263,14 @@ def delete_agent(
     _endpoint_name = agent.endpoint_name
     _region = agent.region
     _secret_arn = config_map.get("COGNITO_CLIENT_SECRET_ARN")
+    _ci_id = agent.code_interpreter_id
+    _ci_region = None
+    if _ci_id:
+        try:
+            agent_cfg = json.loads(config_map.get("AGENT_CONFIG_JSON") or "{}")
+            _ci_region = (agent_cfg.get("integrations", {}).get("code_interpreter") or {}).get("region") or _region
+        except (json.JSONDecodeError, TypeError):
+            _ci_region = _region
 
     # Initiate async deletion in AWS
     _harness_id = agent.harness_id
@@ -2131,6 +2298,10 @@ def delete_agent(
             delete_runtime(_runtime_id, _region)
         except Exception as e:
             logger.warning("Failed to delete runtime %s: %s", _runtime_id, e)
+
+    # Delete custom Code Interpreter resource if one was created
+    if _ci_id and _ci_region:
+        _delete_code_interpreter(_ci_id, _ci_region)
 
     # Clean up credential providers
     for cp_name in cp_names:
@@ -2666,6 +2837,21 @@ def export_agent(agent_id: int, user: UserInfo = Depends(require_scopes("admin:w
         verified = [n for n in names if db.query(Memory).filter(Memory.name == n).first()]
         if verified:
             data["memories"] = verified
+    ci_cfg = integrations.get("code_interpreter", {})
+    if ci_cfg.get("enabled"):
+        ci_export: dict[str, Any] = {
+            "enabled": True,
+            "region": ci_cfg.get("region") or "us-east-1",
+            "network_mode": ci_cfg.get("network_mode") or "SANDBOX",
+        }
+        if ci_cfg.get("execution_role_arn"):
+            role_arn = ci_cfg["execution_role_arn"]
+            managed_role = db.query(ManagedRole).filter(ManagedRole.role_arn == role_arn).first()
+            if managed_role:
+                ci_export["role"] = managed_role.role_name
+            else:
+                ci_export["role"] = role_arn
+        data["code_interpreter"] = ci_export
 
     return data
 

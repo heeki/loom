@@ -56,6 +56,7 @@ class CreateRoleRequest(BaseModel):
     mode: str = Field(..., description="'import' or 'wizard'")
     role_arn: str | None = Field(None, description="Existing role ARN (import mode)")
     role_name: str | None = Field(None, description="New role name (wizard mode)")
+    role_type: str = Field(default="agent", description="Role type: 'agent' or 'code_interpreter'")
     description: str = Field(default="", description="Role description")
     policy_document: dict = Field(default_factory=dict, description="IAM policy document (wizard mode)")
     tags: dict[str, str] | None = Field(None, description="Tags to apply (merged with AWS IAM tags on import)")
@@ -158,6 +159,7 @@ def create_role(request: CreateRoleRequest, user: UserInfo = Depends(require_sco
         role = ManagedRole(
             role_name=role_name,
             role_arn=request.role_arn,
+            role_type=request.role_type,
             description=request.description,
             policy_document=json.dumps(policy_doc),
         )
@@ -184,6 +186,7 @@ def create_role(request: CreateRoleRequest, user: UserInfo = Depends(require_sco
         role = ManagedRole(
             role_name=request.role_name,
             role_arn=role_arn,
+            role_type=request.role_type,
             description=request.description,
             policy_document=json.dumps(request.policy_document),
         )

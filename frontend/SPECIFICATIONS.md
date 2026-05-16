@@ -187,7 +187,7 @@ Each card displays:
 - Protocol badge (e.g., `HTTP`) — inline with name
 - Status badge (color-coded: READY=default, CREATING=secondary, FAILED=destructive) — inline with name
 - Deployment type badge (`MANAGED` or `CUSTOM`) and cost badge displayed below the info box as outline badges (not in the header row)
-- Progressive deployment status phases: `initializing`, `creating_credentials` (Creating credential provider), `creating_role` (Creating IAM role), `building_artifact` (Building artifact), `deploying` (Deploying runtime / Creating harness), then "Completing deployment" / "Creating harness", "Finalizing endpoint"
+- Progressive deployment status phases: `initializing`, `creating_credentials` (Creating credential provider), `creating_role` (Creating IAM role), `building_artifact` (Building artifact), `creating_ci_resource` (Building artifact & creating Code Interpreter), `deploying` (Deploying runtime / Creating harness), then "Completing deployment" / "Creating harness", "Finalizing endpoint"
 - Spinner animation when agent is in a creating/deploying state
 - Spinner animation and elapsed timer when agent is in DELETING state, using `deleteStartTime` prop for accurate timer display
 - Endpoint status badge hidden during DELETING state
@@ -245,7 +245,7 @@ Full deployment form with sections:
 - **Harness Parameters** (managed only): max iterations and timeout seconds — positioned between Authorizer and Lifecycle.
 - **Lifecycle**: idle timeout and max lifetime fields with dynamic placeholders fetched from `/api/agents/defaults` (e.g., "300" and "3600")
 - **Resource Tags**: `ResourceTagFields` component with tag profile dropdown (persisted in `sessionStorage`). Deploy-time tags are auto-applied; build-time tags are resolved from the selected tag profile.
-- **Integrations**: Memory (enabled, with multi-select dropdown for memory resources, custom only), MCP Servers (enabled with multi-select dropdown), A2A Agents (enabled with multi-select dropdown, custom only)
+- **Integrations**: Memory (enabled, with multi-select dropdown for memory resources, custom only), MCP Servers (enabled with multi-select dropdown), A2A Agents (enabled with multi-select dropdown, custom only), Code Interpreter (custom only — peer integration section with enable toggle, network mode select (SANDBOX/PUBLIC), region labeled dropdown, and CI execution role selector filtered to `role_type="code_interpreter"` managed roles). JSON import/export uses nested `code_interpreter` key: `{"enabled": true, "region": "us-east-1", "network_mode": "SANDBOX", "role": "loom-ci-role-demo"}`.
 
 ---
 
@@ -316,7 +316,7 @@ Full deployment form with sections:
 
 **Content:**
 - `SecurityAdminPage` with sections for:
-  - **Managed Roles**: list, create (import existing / wizard), view policy document, delete. Uses `SortableCardGrid` with drag-to-reorder (storage key `security-roles`), full-width single-column layout (role cards contain long ARNs and expandable policy documents), default alphabetical sort by role name, and A-Z/Z-A sort toggle.
+  - **Managed Roles**: list, create (import existing / wizard), view policy document, delete. Uses `SortableCardGrid` with drag-to-reorder (storage key `security-roles`), full-width single-column layout (role cards contain long ARNs and expandable policy documents), default alphabetical sort by role name, and A-Z/Z-A sort toggle. Roles are grouped by `role_type` into collapsible sections ("Agent Roles" for `"agent"`, "Code Interpreter Roles" for `"code_interpreter"`). The import form includes a role type selector to set this field on import. `AgentResponse` includes `code_interpreter_id?: string | null` and `code_interpreter_status?: string | null` to surface CI resource status. `ManagedRole` interface includes `role_type: "agent" | "code_interpreter"`.
   - **Authorizer Configs**: list, create (Amazon Cognito, Microsoft Entra ID, Okta, or Other type with auto-populated discovery URL for Cognito), update, delete. Uses `SortableCardGrid` with drag-to-reorder (storage key `security-authorizers`), default alphabetical sort by config name, and A-Z/Z-A sort toggle.
   - **Authorizer Credentials**: per-config credential management (add label + client_id + client_secret, list, delete). Credential form uses 1/4 / 1/4 / 1/2 field widths. Authorizer type displayed as "Amazon Cognito", "Microsoft Entra ID", or "Okta" for known types.
   - **Permission Requests**: create requests for additional IAM permissions, review (approve/deny) with role application. Uses `SortableCardGrid` with drag-to-reorder (storage key `security-permissions`), default alphabetical sort by role name, and A-Z/Z-A sort toggle.

@@ -104,6 +104,83 @@ def enable_runtime_observability(
     return result
 
 
+def enable_code_interpreter_observability(
+    ci_arn: str,
+    ci_id: str,
+    account_id: str,
+    region: str = "us-east-1",
+) -> dict[str, Any]:
+    """Enable USAGE_LOGS and APPLICATION_LOGS delivery for a Code Interpreter resource.
+
+    Args:
+        ci_arn: Full ARN of the code interpreter resource.
+        ci_id: Code interpreter resource ID (short form).
+        account_id: AWS account ID.
+        region: AWS region name.
+
+    Returns:
+        Dictionary with ``log_group``, ``usage_delivery_id``, and
+        ``app_delivery_id`` keys.
+    """
+    import boto3
+
+    logs = boto3.client("logs", region_name=region)
+
+    log_group = f"/aws/vendedlogs/bedrock-agentcore/code-interpreter/{ci_id}"
+
+    try:
+        logs.create_log_group(logGroupName=log_group)
+        logger.info("Created CI observability log group: %s", log_group)
+    except logs.exceptions.ResourceAlreadyExistsException:
+        logger.debug("CI log group already exists: %s", log_group)
+
+    result: dict[str, Any] = {"log_group": log_group}
+
+    # Use last 8 chars of ci_id (the random suffix) to keep names short
+    ci_short = ci_id[-8:] if len(ci_id) > 8 else ci_id
+    dest_name = f"loom-ci-{ci_short}-dest"
+    log_group_arn = f"arn:aws:logs:{region}:{account_id}:log-group:{log_group}"
+    try:
+        dest_resp = logs.put_delivery_destination(
+            name=dest_name,
+            deliveryDestinationType="CWL",
+            deliveryDestinationConfiguration={
+                "destinationResourceArn": log_group_arn,
+            },
+        )
+        dest_arn = dest_resp["deliveryDestination"]["arn"]
+        logger.info("Created CI delivery destination: %s", dest_name)
+    except Exception as e:
+        logger.warning("Failed to create CI delivery destination %s: %s", dest_name, e)
+        return result
+
+    for log_type, suffix in [("USAGE_LOGS", "usage"), ("APPLICATION_LOGS", "app")]:
+        source_name = f"loom-ci-{ci_short}-{suffix}-source"
+        try:
+            logs.put_delivery_source(
+                name=source_name,
+                logType=log_type,
+                resourceArn=ci_arn,
+            )
+            logger.info("Created CI delivery source: %s (%s)", source_name, log_type)
+        except Exception as e:
+            logger.warning("Failed to create CI delivery source %s: %s", source_name, e)
+            continue
+
+        delivery_key = f"{suffix}_delivery_id"
+        try:
+            delivery_resp = logs.create_delivery(
+                deliverySourceName=source_name,
+                deliveryDestinationArn=dest_arn,
+            )
+            result[delivery_key] = delivery_resp.get("delivery", {}).get("id")
+            logger.info("Created CI delivery for %s: %s", log_type, result.get(delivery_key))
+        except Exception as e:
+            logger.warning("Failed to create CI delivery for %s: %s", log_type, e)
+
+    return result
+
+
 def cleanup_runtime_observability(
     runtime_id: str,
     region: str = "us-east-1",

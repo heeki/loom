@@ -125,6 +125,7 @@ export function fetchModels(): Promise<ModelOption[]> {
 export interface LoomDefaults {
   idle_timeout_seconds: number;
   max_lifetime_seconds: number;
+  region: string;
 }
 
 export function fetchDefaults(): Promise<LoomDefaults> {

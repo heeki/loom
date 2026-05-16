@@ -20,6 +20,7 @@ const DEPLOY_IN_PROGRESS = new Set([
   "creating_credentials",
   "creating_role",
   "building_artifact",
+  "creating_ci_resource",
   "deploying",
   "ENDPOINT_CREATING",
 ]);
@@ -187,6 +188,15 @@ export function DeploymentPanel({ agent, onPatchAgent }: DeploymentPanelProps) {
         </div>
         {agent.source !== "harness" && <div>Protocol: {agent.protocol ?? "—"}</div>}
         <div>Network: {agent.network_mode ?? "—"}</div>
+        {agent.code_interpreter_id && (
+          <div className="flex items-center gap-1.5">
+            <span>Code Interpreter:</span>
+            <Badge variant={statusVariant(agent.code_interpreter_status ?? null)} className="text-[10px] px-1.5 py-0">
+              {agent.code_interpreter_status ?? "UNKNOWN"}
+            </Badge>
+            <span className="text-[10px] text-muted-foreground/60 font-mono truncate">{agent.code_interpreter_id}</span>
+          </div>
+        )}
         <div className="truncate">Execution Role: {agent.execution_role_arn ?? "—"}</div>
         {agent.deployed_at && (
           <div>Deployed: {formatTimestamp(agent.deployed_at, timezone)}</div>

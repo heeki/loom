@@ -142,6 +142,8 @@ def _migrate_add_columns(eng) -> None:
         ("mcp_servers", "obo_grant_type", "VARCHAR"),
         ("a2a_agents", "obo_grant_type", "VARCHAR"),
         ("mcp_servers", "oauth2_audience", "VARCHAR"),
+        ("managed_roles", "role_type", "VARCHAR DEFAULT 'agent'"),
+        ("agents", "code_interpreter_id", "VARCHAR"),
     ]
 
     is_postgres = eng.dialect.name == "postgresql"
