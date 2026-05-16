@@ -25,6 +25,13 @@ Parameters:
     Type: String
     Description: ARN of an AgentCore Memory resource to grant access to (leave empty to skip memory policy)
     Default: ""
+  pEnableCodeInterpreter:
+    Type: String
+    Description: Set to "true" to include Code Interpreter sandbox permissions
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
   pTagApplication:
     Type: String
     Description: Value for the loom:application tag
@@ -37,6 +44,7 @@ Parameters:
 
 Conditions:
   IncludeMemoryPolicy: !Not [!Equals [!Ref pMemoryArn, ""]]
+  IncludeCodeInterpreterPolicy: !Equals [!Ref pEnableCodeInterpreter, "true"]
 
 Resources:
   AgentRole:
@@ -132,6 +140,28 @@ Resources:
                     - bedrock-agentcore:ListSessions
                     - bedrock-agentcore:RetrieveMemoryRecords
                   Resource: !Ref pMemoryArn
+          - !Ref AWS::NoValue
+        - !If
+          - IncludeCodeInterpreterPolicy
+          - PolicyName: code-interpreter
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - bedrock-agentcore:CreateCodeInterpreter
+                    - bedrock-agentcore:DeleteCodeInterpreter
+                    - bedrock-agentcore:GetCodeInterpreter
+                    - bedrock-agentcore:ListCodeInterpreters
+                    - bedrock-agentcore:StartCodeInterpreterSession
+                    - bedrock-agentcore:StopCodeInterpreterSession
+                    - bedrock-agentcore:InvokeCodeInterpreter
+                    - bedrock-agentcore:GetCodeInterpreterSession
+                    - bedrock-agentcore:ListCodeInterpreterSessions
+                  Resource:
+                    - !Sub "arn:aws:bedrock-agentcore:${pAgentCoreRegions}:aws:code-interpreter/*"
+                    - !Sub "arn:aws:bedrock-agentcore:${pAgentCoreRegions}:${AWS::AccountId}:code-interpreter/*"
+                    - !Sub "arn:aws:bedrock-agentcore:${pAgentCoreRegions}:${AWS::AccountId}:code-interpreter-custom/*"
           - !Ref AWS::NoValue
 
 Outputs:

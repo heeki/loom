@@ -26,6 +26,7 @@ role.deploy:
 			pAgentCoreRegions=$(P_AGENTCORE_REGIONS) \
 			pLogsRegion=$(P_LOGS_REGION) \
 			pMemoryArn=${P_MEMORY_ARN} \
+			pEnableCodeInterpreter=$(P_ENABLE_CODE_INTERPRETER) \
 			pTagApplication=$(P_TAG_APPLICATION) \
 			pTagGroup=$(P_TAG_GROUP) \
 			pTagOwner=$(P_TAG_OWNER) \
@@ -37,6 +38,41 @@ role.delete:
 		--profile $(PROFILE) \
 		--region $(REGION) \
 		--stack-name $(P_ROLE_STACK) \
+		--no-prompts
+
+# code interpreter role
+ci-role: ci-role.package ci-role.deploy
+ci-role.package:
+	sam package \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_CI_ROLE_TEMPLATE) \
+		--output-template-file $(P_CI_ROLE_OUTPUT) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_CI_ROLE_STACK)
+
+ci-role.deploy:
+	sam deploy \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_CI_ROLE_OUTPUT) \
+		--stack-name $(P_CI_ROLE_STACK) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_CI_ROLE_STACK) \
+		--parameter-overrides \
+			pRoleSuffix=$(P_AGENT_NAME_SANITIZED) \
+			pCodeInterpreterRegions=$(P_CI_REGIONS) \
+			pTagApplication=$(P_TAG_APPLICATION) \
+			pTagGroup=$(P_TAG_GROUP) \
+			pTagOwner=$(P_TAG_OWNER) \
+		--capabilities CAPABILITY_NAMED_IAM \
+		--no-confirm-changeset
+
+ci-role.delete:
+	sam delete \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_CI_ROLE_STACK) \
 		--no-prompts
 
 # cognito

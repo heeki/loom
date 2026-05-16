@@ -122,6 +122,7 @@ def create_execution_role(
     account_id: str,
     tag_policies: list[dict[str, Any]] | None = None,
     extra_tags: dict[str, str] | None = None,
+    code_interpreter: bool = False,
 ) -> str:
     """
     Create an IAM execution role for an agent runtime.
@@ -131,6 +132,7 @@ def create_execution_role(
         runtime_id: AgentCore Runtime ID (used in role naming)
         region: AWS region name
         account_id: AWS account ID
+        code_interpreter: If True, include Code Interpreter permissions
 
     Returns:
         ARN of the created IAM role
@@ -141,7 +143,7 @@ def create_execution_role(
 
     role_name = f"loom-agent-{runtime_id}"
     trust_policy = build_trust_policy()
-    base_policy = build_base_policy(region, account_id, agent_name)
+    base_policy = build_base_policy(region, account_id, agent_name, code_interpreter=code_interpreter)
 
     response = client.create_role(
         RoleName=role_name,
@@ -181,7 +183,12 @@ def build_trust_policy() -> dict:
     }
 
 
-def build_base_policy(region: str, account_id: str, agent_name: str) -> dict:
+def build_base_policy(
+    region: str,
+    account_id: str,
+    agent_name: str,
+    code_interpreter: bool = False,
+) -> dict:
     """
     Build the base IAM policy for workload access token permissions.
 
@@ -189,52 +196,74 @@ def build_base_policy(region: str, account_id: str, agent_name: str) -> dict:
         region: AWS region name
         account_id: AWS account ID
         agent_name: Name of the agent (used for resource scoping)
+        code_interpreter: If True, include Code Interpreter sandbox permissions
 
     Returns:
         IAM policy document with bedrock-agentcore workload identity permissions
     """
+    statements = [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "bedrock-agentcore:GetWorkloadAccessToken",
+                "bedrock-agentcore:GetWorkloadAccessTokenForJWT",
+                "bedrock-agentcore:GetWorkloadAccessTokenForUserId",
+            ],
+            "Resource": [
+                f"arn:aws:bedrock-agentcore:{region}:{account_id}:workload-identity-directory/default",
+                f"arn:aws:bedrock-agentcore:{region}:{account_id}:workload-identity-directory/default/workload-identity/{agent_name}-*",
+                f"arn:aws:bedrock-agentcore:{region}:{account_id}:workload-identity-directory/default/workload-identity/harness_{agent_name}-*",
+            ],
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "bedrock-agentcore:GetResourceOauth2Token",
+            ],
+            "Resource": [
+                f"arn:aws:bedrock-agentcore:{region}:{account_id}:token-vault/default/oauth2credentialprovider/*",
+            ],
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+                "logs:DescribeLogGroups",
+                "logs:DescribeLogStreams",
+            ],
+            "Resource": [
+                f"arn:aws:logs:{region}:{account_id}:log-group:/aws/bedrock-agentcore/runtimes/{agent_name}*",
+                f"arn:aws:logs:{region}:{account_id}:log-group:/aws/bedrock-agentcore/runtimes/{agent_name}*:*",
+                f"arn:aws:logs:{region}:{account_id}:log-group:/aws/bedrock-agentcore/runtimes/harness_{agent_name}*",
+                f"arn:aws:logs:{region}:{account_id}:log-group:/aws/bedrock-agentcore/runtimes/harness_{agent_name}*:*",
+            ],
+        },
+    ]
+    if code_interpreter:
+        statements.append({
+            "Effect": "Allow",
+            "Action": [
+                "bedrock-agentcore:CreateCodeInterpreter",
+                "bedrock-agentcore:DeleteCodeInterpreter",
+                "bedrock-agentcore:GetCodeInterpreter",
+                "bedrock-agentcore:ListCodeInterpreters",
+                "bedrock-agentcore:StartCodeInterpreterSession",
+                "bedrock-agentcore:StopCodeInterpreterSession",
+                "bedrock-agentcore:InvokeCodeInterpreter",
+                "bedrock-agentcore:GetCodeInterpreterSession",
+                "bedrock-agentcore:ListCodeInterpreterSessions",
+            ],
+            "Resource": [
+                f"arn:aws:bedrock-agentcore:{region}:aws:code-interpreter/*",
+                f"arn:aws:bedrock-agentcore:{region}:{account_id}:code-interpreter/*",
+                f"arn:aws:bedrock-agentcore:{region}:{account_id}:code-interpreter-custom/*",
+            ],
+        })
     return {
         "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Effect": "Allow",
-                "Action": [
-                    "bedrock-agentcore:GetWorkloadAccessToken",
-                    "bedrock-agentcore:GetWorkloadAccessTokenForJWT",
-                    "bedrock-agentcore:GetWorkloadAccessTokenForUserId",
-                ],
-                "Resource": [
-                    f"arn:aws:bedrock-agentcore:{region}:{account_id}:workload-identity-directory/default",
-                    f"arn:aws:bedrock-agentcore:{region}:{account_id}:workload-identity-directory/default/workload-identity/{agent_name}-*",
-                    f"arn:aws:bedrock-agentcore:{region}:{account_id}:workload-identity-directory/default/workload-identity/harness_{agent_name}-*",
-                ],
-            },
-            {
-                "Effect": "Allow",
-                "Action": [
-                    "bedrock-agentcore:GetResourceOauth2Token",
-                ],
-                "Resource": [
-                    f"arn:aws:bedrock-agentcore:{region}:{account_id}:token-vault/default/oauth2credentialprovider/*",
-                ],
-            },
-            {
-                "Effect": "Allow",
-                "Action": [
-                    "logs:CreateLogGroup",
-                    "logs:CreateLogStream",
-                    "logs:PutLogEvents",
-                    "logs:DescribeLogGroups",
-                    "logs:DescribeLogStreams",
-                ],
-                "Resource": [
-                    f"arn:aws:logs:{region}:{account_id}:log-group:/aws/bedrock-agentcore/runtimes/{agent_name}*",
-                    f"arn:aws:logs:{region}:{account_id}:log-group:/aws/bedrock-agentcore/runtimes/{agent_name}*:*",
-                    f"arn:aws:logs:{region}:{account_id}:log-group:/aws/bedrock-agentcore/runtimes/harness_{agent_name}*",
-                    f"arn:aws:logs:{region}:{account_id}:log-group:/aws/bedrock-agentcore/runtimes/harness_{agent_name}*:*",
-                ],
-            },
-        ],
+        "Statement": statements,
     }
 
 
@@ -377,6 +406,7 @@ def update_role_policy(
     region: str,
     account_id: str,
     agent_name: str,
+    code_interpreter: bool = False,
 ) -> None:
     """
     Update the inline policy on an execution role.
@@ -387,12 +417,13 @@ def update_role_policy(
         region: AWS region name
         account_id: AWS account ID
         agent_name: Name of the agent (used for resource scoping)
+        code_interpreter: If True, include Code Interpreter permissions
     """
     import boto3
 
     client = boto3.client("iam")
 
-    base_policy = build_base_policy(region, account_id, agent_name)
+    base_policy = build_base_policy(region, account_id, agent_name, code_interpreter=code_interpreter)
     integration_statements = build_integration_policy_statements(integrations)
 
     if integration_statements:

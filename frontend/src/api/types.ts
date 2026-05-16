@@ -42,6 +42,8 @@ export interface AgentResponse {
   harness_id: string | null;
   registry_record_id: string | null;
   registry_status: string | null;
+  code_interpreter_id?: string | null;
+  code_interpreter_status?: string | null;
 }
 
 export interface AgentHarnessDeployRequest {
@@ -106,6 +108,8 @@ export interface AgentDeployRequest {
   a2a_agents: number[];
   code_interpreter_enabled: boolean;
   code_interpreter_region: string;
+  code_interpreter_network_mode: string;
+  code_interpreter_role_id: number | null;
   tags?: Record<string, string>;
 }
 
@@ -337,6 +341,7 @@ export interface ManagedRole {
   id: number;
   role_name: string;
   role_arn: string;
+  role_type: "agent" | "code_interpreter";
   description: string;
   policy_document: PolicyDocument;
   tags: Record<string, string>;
@@ -360,6 +365,7 @@ export interface ManagedRoleCreateRequest {
   mode: "import" | "wizard";
   role_arn?: string;
   role_name?: string;
+  role_type?: "agent" | "code_interpreter";
   description?: string;
   policy_document?: PolicyDocument;
   tags?: Record<string, string>;

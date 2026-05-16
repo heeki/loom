@@ -1,4 +1,5 @@
 """Agent registration, deployment, and management endpoints."""
+import concurrent.futures
 import json
 import logging
 import os
@@ -150,6 +151,8 @@ class AgentCreateRequest(BaseModel):
     a2a_agents: list[int] = Field(default_factory=list, description="A2A agent IDs to integrate")
     code_interpreter_enabled: bool = Field(default=False, description="Enable Code Interpreter tool")
     code_interpreter_region: str = Field(default="", description="AWS region for Code Interpreter (empty = agent region)")
+    code_interpreter_network_mode: str = Field(default="SANDBOX", description="Code Interpreter network mode: PUBLIC, SANDBOX, or VPC")
+    code_interpreter_role_id: int | None = Field(None, description="Managed role ID for Code Interpreter execution role")
     tags: dict[str, str] | None = Field(None, description="Build-time tag values")
     # Harness-specific fields
     harness_tools: list[dict[str, Any]] | None = Field(None, description="Harness tool configurations")
@@ -193,6 +196,8 @@ class AgentResponse(BaseModel):
     memory_names: list[str] = []
     mcp_names: list[str] = []
     a2a_names: list[str] = []
+    code_interpreter_id: str | None = None
+    code_interpreter_status: str | None = None
 
 
 class ConfigEntryResponse(BaseModel):
@@ -371,7 +376,8 @@ def _agent_response(agent: Agent, db: Session) -> AgentResponse:
         active_session_count=compute_active_session_count(agent.id, db),
         memory_names=memory_names,
         mcp_names=mcp_names,
-        a2a_names=a2a_names
+        a2a_names=a2a_names,
+        code_interpreter_status=None,
     )
     if inv_count > 0 and grand_total > 0:
         result.cost_summary = {
@@ -483,6 +489,7 @@ def get_defaults(user: UserInfo = Depends(require_scopes("agent:read"))) -> dict
     return {
         "idle_timeout_seconds": int(os.getenv("LOOM_SESSION_IDLE_TIMEOUT_SECONDS", "300")),
         "max_lifetime_seconds": int(os.getenv("LOOM_SESSION_MAX_LIFETIME_SECONDS", "3600")),
+        "region": DEFAULT_REGION,
     }
 
 
@@ -1058,35 +1065,18 @@ def _deploy_agent_background(
                 "resources": memory_configs,
             },
         }
+        ci_config: dict[str, Any] | None = None
         if request.code_interpreter_enabled:
-            integrations_config["code_interpreter"] = {
+            ci_config = {
                 "enabled": True,
                 "region": request.code_interpreter_region or "",
+                "network_mode": request.code_interpreter_network_mode or "SANDBOX",
             }
-        config_json = json.dumps({
-            "system_prompt": system_prompt,
-            "model_id": request.model_id,
-            "max_tokens": model_max_tokens,
-            "integrations": integrations_config,
-        })
-        env_vars = {
-            "AGENT_CONFIG_JSON": config_json,
-            "OTEL_SERVICE_NAME": request.name,
-            "WORKLOAD_IDENTITY_NAME": f"loom-{request.name}",
-            "AGENT_OBSERVABILITY_ENABLED": "true",
-            "AWS_REGION": region,
-        }
-
-        # Store config entries
-        for key, value in env_vars.items():
-            db.add(ConfigEntry(
-                agent_id=agent.id,
-                key=key,
-                value=value,
-                is_secret=False,
-                source="env_var",
-            ))
-        db.commit()
+            if request.code_interpreter_role_id:
+                ci_role = db.query(ManagedRole).filter(ManagedRole.id == request.code_interpreter_role_id).first()
+                if ci_role:
+                    ci_config["execution_role_arn"] = ci_role.role_arn
+            integrations_config["code_interpreter"] = ci_config
 
         # --- Step 2: Create or use provided IAM execution role ---
         agent.deployment_status = "creating_role"
@@ -1103,6 +1093,7 @@ def _deploy_agent_background(
                     account_id=account_id,
                     tag_policies=tag_policy_dicts,
                     extra_tags=resolved_tags,
+                    code_interpreter=request.code_interpreter_enabled,
                 )
                 created_role = True
                 agent.execution_role_arn = execution_role_arn
@@ -1117,9 +1108,37 @@ def _deploy_agent_background(
             agent.execution_role_arn = execution_role_arn
             db.commit()
 
-        # --- Step 3: Build agent artifact ---
+        # --- Step 3: Build agent artifact (and optionally create CI resource in parallel) ---
         agent.deployment_status = "building_artifact"
         db.commit()
+
+        _needs_ci_resource = (
+            request.code_interpreter_enabled
+            and ci_config is not None
+            and bool(ci_config.get("execution_role_arn"))
+        )
+
+        def _create_ci_resource() -> str:
+            import boto3
+            ci_region = (request.code_interpreter_region or "").strip() or region
+            raw_name = f"loom-ci-{request.name}".replace("_", "-")
+            sanitized = re.sub(r"[^a-zA-Z0-9-]", "-", raw_name)[:48]
+            network_mode = request.code_interpreter_network_mode or "PUBLIC"
+            boto_client = boto3.client("bedrock-agentcore-control", region_name=ci_region)
+            resp = boto_client.create_code_interpreter(
+                name=sanitized,
+                executionRoleArn=ci_config["execution_role_arn"],
+                networkConfiguration={"networkMode": network_mode},
+            )
+            return resp["codeInterpreterId"]
+
+        ci_future: concurrent.futures.Future | None = None
+        ci_executor: concurrent.futures.ThreadPoolExecutor | None = None
+        if _needs_ci_resource:
+            agent.deployment_status = "creating_ci_resource"
+            db.commit()
+            ci_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            ci_future = ci_executor.submit(_create_ci_resource)
 
         try:
             artifact_bucket, artifact_key = build_agent_artifact(region)
@@ -1127,10 +1146,55 @@ def _deploy_agent_background(
             agent.deployment_status = "failed"
             agent.status = "FAILED"
             db.commit()
+            if ci_future is not None:
+                ci_future.cancel()
+            if ci_executor is not None:
+                ci_executor.shutdown(wait=False)
             if created_role and execution_role_arn:
                 _cleanup_role(execution_role_arn)
             logger.error("Failed to build artifact for agent %s: %s", agent.id, e)
             return
+
+        if ci_future is not None:
+            try:
+                ci_id = ci_future.result(timeout=60)
+                agent.code_interpreter_id = ci_id
+                if ci_config is not None:
+                    ci_config["identifier"] = ci_id
+                db.commit()
+                logger.info("Created CI resource %s for agent %s", ci_id, agent.id)
+            except Exception as ci_err:
+                logger.warning("CI resource creation failed for agent %s, continuing: %s", agent.id, ci_err)
+            finally:
+                if ci_executor is not None:
+                    ci_executor.shutdown(wait=False)
+
+        agent.deployment_status = "building_artifact"
+        db.commit()
+
+        config_json = json.dumps({
+            "system_prompt": system_prompt,
+            "model_id": request.model_id,
+            "max_tokens": model_max_tokens,
+            "integrations": integrations_config,
+        })
+        env_vars = {
+            "AGENT_CONFIG_JSON": config_json,
+            "OTEL_SERVICE_NAME": request.name,
+            "WORKLOAD_IDENTITY_NAME": f"loom-{request.name}",
+            "AGENT_OBSERVABILITY_ENABLED": "true",
+            "AWS_REGION": region,
+        }
+
+        for key, value in env_vars.items():
+            db.add(ConfigEntry(
+                agent_id=agent.id,
+                key=key,
+                value=value,
+                is_secret=False,
+                source="env_var",
+            ))
+        db.commit()
 
         # Build optional configs
         lifecycle_config = None
@@ -1909,7 +1973,7 @@ def get_agent_status(agent_id: int, user: UserInfo = Depends(require_scopes("age
     agent = get_agent_or_404(agent_id, db)
 
     # Local build phases — runtime doesn't exist in AWS yet, just return DB state
-    _local_phases = {"initializing", "creating_credentials", "creating_role", "building_artifact", "deploying"}
+    _local_phases = {"initializing", "creating_credentials", "creating_role", "building_artifact", "creating_ci_resource", "deploying"}
     if agent.deployment_status in _local_phases:
         return _agent_response(agent, db)
 
@@ -2023,10 +2087,24 @@ def get_agent_status(agent_id: int, user: UserInfo = Depends(require_scopes("age
             except Exception as reg_err:
                 logger.warning("Failed to auto-register agent %s in registry: %s", agent.id, reg_err)
 
+    ci_status: str | None = None
+    if agent.code_interpreter_id:
+        try:
+            import boto3
+            ci_region = agent.region
+            boto_client = boto3.client("bedrock-agentcore-control", region_name=ci_region)
+            ci_resp = boto_client.get_code_interpreter(codeInterpreterId=agent.code_interpreter_id)
+            ci_status = ci_resp.get("status")
+        except Exception as ci_poll_err:
+            logger.warning("Failed to poll CI status for agent %s: %s", agent.id, ci_poll_err)
+
     db.commit()
     db.refresh(agent)
 
-    return _agent_response(agent, db)
+    response = _agent_response(agent, db)
+    if ci_status is not None:
+        response.code_interpreter_status = ci_status
+    return response
 
 
 @router.delete("/{agent_id}", response_model=AgentResponse)
@@ -2676,9 +2754,19 @@ def export_agent(agent_id: int, user: UserInfo = Depends(require_scopes("admin:w
             data["memories"] = verified
     ci_cfg = integrations.get("code_interpreter", {})
     if ci_cfg.get("enabled"):
-        data["code_interpreter"] = True
-        if ci_cfg.get("region"):
-            data["code_interpreter_region"] = ci_cfg["region"]
+        ci_export: dict[str, Any] = {
+            "enabled": True,
+            "region": ci_cfg.get("region") or "us-east-1",
+            "network_mode": ci_cfg.get("network_mode") or "SANDBOX",
+        }
+        if ci_cfg.get("execution_role_arn"):
+            role_arn = ci_cfg["execution_role_arn"]
+            managed_role = db.query(ManagedRole).filter(ManagedRole.role_arn == role_arn).first()
+            if managed_role:
+                ci_export["role"] = managed_role.role_name
+            else:
+                ci_export["role"] = role_arn
+        data["code_interpreter"] = ci_export
 
     return data
 
