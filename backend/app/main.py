@@ -126,9 +126,10 @@ if __name__ == "__main__":
     import uvicorn
 
     port = int(os.getenv("LOOM_BACKEND_PORT", "8000"))
+    host = os.getenv("LOOM_BACKEND_HOST", "127.0.0.1")  # nosec B104
     uvicorn.run(
         "app.main:app",
-        host="0.0.0.0",
+        host=host,
         port=port,
         reload=True,
         log_level=LOG_LEVEL.lower()

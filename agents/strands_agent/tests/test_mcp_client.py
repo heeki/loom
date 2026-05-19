@@ -24,7 +24,7 @@ class TestCreateMCPClients(unittest.TestCase):
                 auth=AuthConfig(
                     type="oauth2",
                     well_known_endpoint="https://auth.example.com/.well-known/openid-configuration",
-                    credentials_secret_arn="arn:aws:secretsmanager:us-east-1:123456789012:secret:test",
+                    credentials_secret_arn="arn:aws:secretsmanager:us-east-1:000000000000:secret:test-secret",  # nosec B106
                 ),
             )
         ]

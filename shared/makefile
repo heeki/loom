@@ -228,6 +228,7 @@ infra.deploy:
 		--s3-prefix $(P_INFRA_STACK) \
 		--parameter-overrides \
 			pArtifactBucketName=$(P_LOOM_ARTIFACT_BUCKET) \
+			pLoggingBucketName=$(P_LOOM_LOGGING_BUCKET) \
 			pVpcId=$(P_INFRA_VPC_ID) \
 			pPublicSubnetIds=$(P_INFRA_PUBLIC_SUBNET_IDS) \
 			pDomainName=$(P_INFRA_DOMAIN_NAME) \

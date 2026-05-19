@@ -5,6 +5,9 @@ Parameters:
   pArtifactBucketName:
     Type: String
     Description: Name for the S3 artifact bucket
+  pLoggingBucketName:
+    Type: String
+    Description: Pre-existing S3 bucket for artifact bucket access logs (created outside this stack)
   pVpcId:
     Type: AWS::EC2::VPC::Id
     Description: VPC ID for ALB and ECS security groups
@@ -56,6 +59,9 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
+      LoggingConfiguration:
+        DestinationBucketName: !Ref pLoggingBucketName
+        LogFilePrefix: !Sub "artifact-bucket/${AWS::StackName}/"
       LifecycleConfiguration:
         Rules:
           - Id: CleanupOldVersions
@@ -71,6 +77,45 @@ Resources:
           Value: !Ref pTagOwner
 
   # ---------------------------------------------------------------------------
+  # KMS — ECR encryption key
+  # ---------------------------------------------------------------------------
+  EcrKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for ECR repository encryption
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowAccountAdmin
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "kms:*" # cfn-lint disable=EA017 - AWS-recommended root admin statement to prevent unrecoverable key lockout
+            Resource: "*"
+          - Sid: AllowECRService
+            Effect: Allow
+            Principal:
+              Service: ecr.amazonaws.com
+            Action:
+              - kms:GenerateDataKey
+              - kms:Decrypt
+            Resource: "*"
+      Tags:
+        - Key: loom:application
+          Value: !Ref pTagApplication
+        - Key: loom:group
+          Value: !Ref pTagGroup
+        - Key: loom:owner
+          Value: !Ref pTagOwner
+
+  EcrKmsKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${AWS::StackName}-ecr"
+      TargetKeyId: !Ref EcrKmsKey
+
+  # ---------------------------------------------------------------------------
   # ECR — Container image repositories
   # ---------------------------------------------------------------------------
   FrontendRepository:
@@ -79,6 +124,9 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       RepositoryName: !Ref pFrontendRepoName
+      EncryptionConfiguration:
+        EncryptionType: KMS
+        KmsKey: !GetAtt EcrKmsKey.Arn
       ImageScanningConfiguration:
         ScanOnPush: true
       LifecyclePolicy:
@@ -113,6 +161,9 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       RepositoryName: !Ref pBackendRepoName
+      EncryptionConfiguration:
+        EncryptionType: KMS
+        KmsKey: !GetAtt EcrKmsKey.Arn
       ImageScanningConfiguration:
         ScanOnPush: true
       LifecyclePolicy:
@@ -166,17 +217,13 @@ Resources:
   AlbSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow inbound HTTP and HTTPS traffic to the ALB
+      GroupDescription: Allow inbound HTTPS traffic to the ALB
       VpcId: !Ref pVpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
+          CidrIp: 0.0.0.0/0 # checkov:skip=CKV_AWS_260 ALB requires open ingress for public HTTPS access
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-alb-sg"
@@ -193,10 +240,6 @@ Resources:
       GroupDescription: Allow inbound traffic from ALB to ECS tasks
       VpcId: !Ref pVpcId
       SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          SourceSecurityGroupId: !GetAtt AlbSecurityGroup.GroupId
         - IpProtocol: tcp
           FromPort: 8000
           ToPort: 8000
@@ -249,19 +292,6 @@ Resources:
       DefaultActions:
         - Type: forward
           TargetGroupArn: !Ref FrontendTargetGroup
-
-  HttpListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      LoadBalancerArn: !Ref ApplicationLoadBalancer
-      Port: 80
-      Protocol: HTTP
-      DefaultActions:
-        - Type: redirect
-          RedirectConfig:
-            Protocol: HTTPS
-            Port: "443"
-            StatusCode: HTTP_301
 
   # ---------------------------------------------------------------------------
   # Target Groups
@@ -348,6 +378,9 @@ Outputs:
   oArtifactBucketArn:
     Description: ARN of the S3 artifact bucket
     Value: !GetAtt ArtifactBucket.Arn
+  oEcrKmsKeyArn:
+    Description: ARN of the KMS key used to encrypt ECR repositories
+    Value: !GetAtt EcrKmsKey.Arn
   oFrontendRepositoryUri:
     Description: ECR repository URI for the frontend image
     Value: !GetAtt FrontendRepository.RepositoryUri

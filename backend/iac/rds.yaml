@@ -107,6 +107,45 @@ Resources:
           Value: !Ref pTagOwner
 
   # ---------------------------------------------------------------------------
+  # KMS — Secrets Manager encryption key
+  # ---------------------------------------------------------------------------
+  SecretsKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for Secrets Manager secrets in the RDS stack
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowAccountAdmin
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "kms:*" # cfn-lint disable=EA017 - AWS-recommended root admin statement to prevent unrecoverable key lockout
+            Resource: "*"
+          - Sid: AllowSecretsManagerService
+            Effect: Allow
+            Principal:
+              Service: secretsmanager.amazonaws.com
+            Action:
+              - kms:GenerateDataKey
+              - kms:Decrypt
+            Resource: "*"
+      Tags:
+        - Key: loom:application
+          Value: !Ref pTagApplication
+        - Key: loom:group
+          Value: !Ref pTagGroup
+        - Key: loom:owner
+          Value: !Ref pTagOwner
+
+  SecretsKmsKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${AWS::StackName}-secrets"
+      TargetKeyId: !Ref SecretsKmsKey
+
+  # ---------------------------------------------------------------------------
   # Secrets Manager — credentials (required by RDS Proxy) and connection URL
   # ---------------------------------------------------------------------------
   RdsCredentialsSecret:
@@ -114,6 +153,7 @@ Resources:
     Properties:
       Name: !Sub "${AWS::StackName}/credentials"
       Description: RDS master credentials used by RDS Proxy for authentication
+      KmsKeyId: !Ref SecretsKmsKey
       SecretString: !Sub '{"username":"${pDbUsername}","password":"${pDbPassword}"}'
       Tags:
         - Key: loom:application
@@ -140,6 +180,7 @@ Resources:
       AllocatedStorage: !Ref pDbAllocatedStorage
       StorageType: gp3
       StorageEncrypted: true
+      EnableIAMDatabaseAuthentication: true
       MultiAZ: !Ref pDbMultiAZ
       DBSubnetGroupName: !Ref RdsSubnetGroup
       VPCSecurityGroups:
@@ -180,6 +221,15 @@ Resources:
                   - secretsmanager:GetSecretValue
                   - secretsmanager:DescribeSecret
                 Resource: !Ref RdsCredentialsSecret
+        - PolicyName: SecretsKmsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource: !GetAtt SecretsKmsKey.Arn
       Tags:
         - Key: loom:application
           Value: !Ref pTagApplication
@@ -234,6 +284,7 @@ Resources:
     Properties:
       Name: !Sub "${AWS::StackName}/database-url"
       Description: SQLAlchemy connection URL for the Loom backend (proxy endpoint when proxy is enabled)
+      KmsKeyId: !Ref SecretsKmsKey
       SecretString: !Sub
         - '{"url":"postgresql+psycopg2://${pDbUsername}:${pDbPassword}@${ConnectEndpoint}:5432/${pDbName}"}'
         - ConnectEndpoint: !If
@@ -268,6 +319,9 @@ Outputs:
       - ProxyEnabled
       - !GetAtt RdsProxy.Endpoint
       - !GetAtt RdsInstance.Endpoint.Address
+  oSecretsKmsKeyArn:
+    Description: ARN of the KMS key used to encrypt Secrets Manager secrets in this stack
+    Value: !GetAtt SecretsKmsKey.Arn
   oRdsSecretArn:
     Description: Secrets Manager ARN containing the full SQLAlchemy database URL
     Value: !Ref RdsConnectionSecret
