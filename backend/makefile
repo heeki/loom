@@ -159,7 +159,7 @@ ec2.deploy:
 		--s3-prefix $(P_EC2_STACK) \
 		--parameter-overrides \
 			pVpcId=$(P_RDS_VPC_ID) \
-			pSubnetId=$(P_EC2_PUBLIC_SUBNET_ID) \
+			pSubnetId=$(P_EC2_PRIVATE_SUBNET_ID) \
 			pInstanceType=$(P_EC2_INSTANCE_TYPE) \
 			pTagApplication=$(P_TAG_APPLICATION) \
 			pTagGroup=$(P_TAG_GROUP) \
@@ -206,6 +206,8 @@ ecs.deploy:
 			pEcsClusterArn=$(O_ECS_CLUSTER_ARN) \
 			pEcsClusterName=$(O_ECS_CLUSTER_NAME) \
 			pEcsSecurityGroupId=$(O_INFRA_ECS_SG_ID) \
+			pEcrKmsKeyArn=$(O_INFRA_ECR_KMS_KEY_ARN) \
+			pSecretsKmsKeyArn=$(O_RDS_SECRETS_KMS_KEY_ARN) \
 			pTargetGroupArn=$(O_INFRA_BACKEND_TG_ARN) \
 			pPrivateSubnetIds=$(P_ECS_PRIVATE_SUBNET_IDS) \
 			pImageUri=$(O_ECR_BACKEND_URI):$(IMAGE_TAG) \

@@ -8,7 +8,7 @@ Parameters:
     Description: VPC ID for the security group
   pSubnetId:
     Type: AWS::EC2::Subnet::Id
-    Description: Public subnet ID for the EC2 instance (requires outbound internet for SSM)
+    Description: Private subnet ID for the EC2 instance (SSM connectivity via VPC endpoints, no public IP required)
   pInstanceType:
     Type: String
     Description: EC2 instance type
@@ -86,7 +86,7 @@ Resources:
       InstanceType: !Ref pInstanceType
       IamInstanceProfile: !Ref Ec2InstanceProfile
       NetworkInterfaces:
-        - AssociatePublicIpAddress: true
+        - AssociatePublicIpAddress: false
           DeviceIndex: 0
           SubnetId: !Ref pSubnetId
           GroupSet:

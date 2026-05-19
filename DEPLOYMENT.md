@@ -17,13 +17,20 @@ The deployment model has three phases:
 **AWS infrastructure** (required for Phase 2 and Phase 3):
 
 **VPC and networking:**
-- VPC with at least 1 public subnet for ALB and EC2 bastion and at least 2 private subnets in different AZs (required for RDS Multi-AZ)
+- VPC with at least 1 public subnet for the ALB and at least 2 private subnets in different AZs (required for RDS Multi-AZ and for the EC2 bastion, which runs in a private subnet and uses SSM Session Manager)
 - Internet gateway for public subnets
 - NAT gateway in a public subnet for private subnet outbound traffic (required for ECR image pulls)
 
 **S3 bucket for SAM deployments:**
 - Create an S3 bucket for CloudFormation template artifacts with versioning enabled
 - Set the `BUCKET` variable in `shared/etc/common.sh`
+
+**S3 bucket for access logging (prerequisite — create manually before deploying `loom-infra`):**
+- Create a dedicated S3 bucket for S3 server access logs (separate from the artifact bucket)
+- Enable the [S3 Log Delivery group ACL](https://docs.aws.amazon.com/AmazonS3/latest/userguide/enable-server-access-logging.html) on this bucket so S3 can write access logs to it
+- Do **not** enable access logging on the logging bucket itself (circular dependency)
+- Set the `LOOM_LOGGING_BUCKET` variable in `shared/etc/common.sh`
+- This bucket is intentionally managed outside CloudFormation to avoid log loss during stack teardown
 
 **Domain and Route 53:**
 - Parent Route 53 hosted zone must be accessible for NS delegation
@@ -73,6 +80,7 @@ Environment configuration is centralized in `shared/etc/common.sh`. Update the f
 | `COGNITO_POOL_NAME` | Desired Cognito User Pool name |
 | `COGNITO_DOMAIN` | Globally unique Cognito domain prefix |
 | `LOOM_ARTIFACT_BUCKET` | S3 bucket for Loom deployment artifacts |
+| `LOOM_LOGGING_BUCKET` | Pre-existing S3 bucket for artifact bucket access logs (see prerequisite above) |
 | `RDS_PASSWORD` | Unique password for RDS admin user |
 | `SUPER_ADMIN_PASSWORD` | Unique password for super admin Cognito user |
 | `DEMO_USER_*_PASSWORD` | Unique passwords for demo users (1-9) |
@@ -132,6 +140,8 @@ make run        # Start FastAPI dev server on LOOM_BACKEND_PORT (default 8000)
 
 The backend uses SQLite by default (`sqlite:///./loom.db`). Tables are auto-created on startup.
 
+> **Note:** When running via `make run` or `python -m app.main`, the server binds to `127.0.0.1` by default. Set `LOOM_BACKEND_HOST=0.0.0.0` only if you need to expose the backend on all interfaces (e.g., running in a VM or container locally). In ECS, the backend is started via the Dockerfile `CMD` directly with uvicorn, not via `__main__`, so this variable is not used in production.
+
 **Step 3: Start the frontend**
 
 ```bash
@@ -148,6 +158,18 @@ This phase deploys RDS PostgreSQL to AWS and uses an SSM tunnel to connect the l
 **In this phase, you can** test with production-grade PostgreSQL, share a centralized database across team members while still developing locally, validate data persistence and migration strategies, and prepare for full cloud deployment — all while maintaining fast local iteration cycles.
 
 ![Phase 2: Hybrid Deployment](assets/loom_p2_hybrid.png)
+
+**SSM VPC endpoints prerequisite:**
+
+The EC2 bastion runs in a private subnet with no public IP. SSM Session Manager requires the following VPC endpoints to be present in the private subnets so the SSM agent can reach the SSM service without internet access:
+
+- `com.amazonaws.<region>.ssm`
+- `com.amazonaws.<region>.ssmmessages`
+- `com.amazonaws.<region>.ec2messages`
+
+If these endpoints are not already in your VPC, create them before deploying the EC2 stack — otherwise the SSM agent will be unreachable and `make tunnel` will fail.
+
+The security group attached to the `ssmmessages` and `ec2messages` endpoints must allow **inbound TCP 443** from the VPC CIDR (e.g., `10.0.0.0/16`). Without this rule, the SSM agent on the EC2 instance can reach the endpoints at the network level, but the TLS handshake for the session channel is blocked and `start-session` returns `TargetNotConnected`. The `ssm` endpoint (used for API calls) typically uses a broader security group and is not affected by this.
 
 **Step 1: Deploy RDS and EC2 bastion**
 
@@ -236,8 +258,8 @@ Update root domain with the nameserver records displayed by `dns.outputs`.
 
 ```bash
 cd shared
-make infra       # S3, ECR, ACM, ALB (~3 min)
-make outputs     # Capture ECR repository URIs (required for ECS cluster)
+make infra       # S3 (with access logging), ECR (KMS-encrypted), ACM, ALB (~3 min)
+make outputs     # Capture ECR repository URIs and KMS key ARN (required for ECS cluster)
 ```
 
 **Step 2: Deploy ECS cluster** (depends on ECR repository from infra stack)
@@ -279,11 +301,13 @@ This writes all `O_*` variables (Cognito IDs, ECR URIs, ECS cluster ARN, ALB tar
 | `loom-infra` | `oBackendTargetGroupArn` | `O_INFRA_BACKEND_TG_ARN` |
 | `loom-infra` | `oFrontendRepositoryUri` | `O_ECR_FRONTEND_URI` |
 | `loom-infra` | `oBackendRepositoryUri` | `O_ECR_BACKEND_URI` |
+| `loom-infra` | `oEcrKmsKeyArn` | `O_INFRA_ECR_KMS_KEY_ARN` |
 | `loom-cognito` | `oCognitoUserPoolId` | `O_COGNITO_USER_POOL_ID` |
 | `loom-cognito` | `oUserClientId` | `O_COGNITO_USER_CLIENT_ID` |
 | `loom-rds` | `oRdsSecretArn` | `O_RDS_SECRET_ARN` |
 | `loom-rds` | `oConnectEndpoint` | `O_RDS_PROXY_ENDPOINT` |
 | `loom-rds` | `oRdsPort` | `O_RDS_PORT` |
+| `loom-rds` | `oSecretsKmsKeyArn` | `O_RDS_SECRETS_KMS_KEY_ARN` |
 | `loom-ec2` | `oInstanceId` | `O_EC2_INSTANCE_ID` |
 
 ### Phase 3.3 — Deploy backend and frontend
@@ -308,11 +332,13 @@ agentcore.init
 ecs.init --+     infra    (~3 min)  --+
            |     cognito  (~1 min)  --|
 dns -------+     role*    (~1 min)  --+--------> loom-ecs-frontend (~3 min)
-                 ecs      (~1 min)  --|          loom-ecs-backend  (~3 min)
+                 ecs      (~1 min)  --|          loom-ecs-backend  (~3 min) *
                  rds      (~25 min) --|
                  ec2      (~3 min)  --+ (optional)
 
 * A role stack is deployed per application prefix (e.g., demo -> demo_* agents)
+* loom-ecs-backend requires outputs from both loom-infra (O_INFRA_ECR_KMS_KEY_ARN) and
+  loom-rds (O_RDS_SECRETS_KMS_KEY_ARN) — run `make outputs` after Phase 3.1 before deploying
 ```
 
 **Approximate total deployment time:** ~35 minutes end-to-end (dominated by RDS at ~25 min; Phase 3.1 stacks deploy in parallel).

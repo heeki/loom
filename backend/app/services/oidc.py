@@ -2,6 +2,7 @@
 
 import json
 import logging
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -10,6 +11,13 @@ logger = logging.getLogger(__name__)
 
 class OIDCDiscoveryError(Exception):
     """Raised when OIDC discovery fails."""
+
+
+def require_https_url(url: str) -> None:
+    """Raise ValueError if url is not http or https (guards against file:// and custom schemes)."""
+    scheme = urllib.parse.urlparse(url).scheme
+    if scheme not in ("http", "https"):
+        raise ValueError(f"Disallowed URL scheme: {scheme!r}")
 
 
 def fetch_discovery(issuer_url: str) -> dict[str, Any]:
@@ -26,11 +34,12 @@ def fetch_discovery(issuer_url: str) -> dict[str, Any]:
     """
     stripped = issuer_url.rstrip("/")
     url = stripped if "/.well-known/openid-configuration" in stripped else stripped + "/.well-known/openid-configuration"
+    require_https_url(url)
     logger.info("Fetching OIDC discovery from %s", url)
 
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
             doc = json.loads(resp.read().decode())
     except Exception as e:
         raise OIDCDiscoveryError(f"Failed to fetch discovery document from {url}: {e}") from e

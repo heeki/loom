@@ -68,7 +68,7 @@ class TestJWTValidator(unittest.TestCase):
         """Test that an invalid token raises an error."""
         with self.assertRaises(jwt.exceptions.DecodeError):
             validate_cognito_token(
-                token="not-a-valid-jwt",
+                token="not-a-valid-jwt",  # nosec B106
                 user_pool_id="us-east-1_TestPool",
                 region="us-east-1",
             )
@@ -77,7 +77,7 @@ class TestJWTValidator(unittest.TestCase):
         """Test that an empty token raises an error."""
         with self.assertRaises(jwt.exceptions.DecodeError):
             validate_cognito_token(
-                token="",
+                token="",  # nosec B106
                 user_pool_id="us-east-1_TestPool",
                 region="us-east-1",
             )

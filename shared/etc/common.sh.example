@@ -22,6 +22,7 @@ COGNITO_DOMAIN=<your-desired-cognito-domain>
 
 # Loom configurations
 LOOM_ARTIFACT_BUCKET=<your-loom-deployment-bucket>
+LOOM_LOGGING_BUCKET=<your-pre-existing-s3-access-logging-bucket>
 
 # Passwords
 RDS_PASSWORD=<unique-password-for-rds-admin>

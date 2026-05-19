@@ -439,7 +439,7 @@ class TestAuthConfigEndpoint(unittest.TestCase):
         mock_idp = MagicMock()
         mock_idp.provider_type = "entra_id"
         mock_idp.authorization_endpoint = "https://login.microsoftonline.com/authorize"
-        mock_idp.token_endpoint = "https://login.microsoftonline.com/token"
+        mock_idp.token_endpoint = "https://login.microsoftonline.com/token"  # nosec B105
         mock_idp.client_id = "my-client"
         mock_idp.scopes = "openid profile"
         mock_idp.issuer_url = "https://login.microsoftonline.com/tenant/v2.0"
@@ -520,7 +520,7 @@ class TestGenericTokenEndpoint(unittest.TestCase):
             authorizer_config_id=auth.id,
             label="test-cred",
             client_id="cred-client-id",
-            client_secret_arn="arn:aws:secretsmanager:us-east-1:123456789012:secret:cred-secret",
+            client_secret_arn="arn:aws:secretsmanager:us-east-1:000000000000:secret:test-cred-secret",  # nosec B106
         )
         self.session.add(cred)
         self.session.commit()
