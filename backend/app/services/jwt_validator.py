@@ -8,6 +8,8 @@ from typing import Any
 import jwt
 from jwt import algorithms as jwt_algorithms
 
+from app.services.oidc import require_https_url
+
 logger = logging.getLogger(__name__)
 
 # Cache for JWKS keys: {jwks_url: (keys, fetch_time)}
@@ -23,9 +25,10 @@ def _get_jwks(jwks_url: str) -> dict[str, Any]:
         if now - fetch_time < JWKS_CACHE_TTL:
             return keys
 
+    require_https_url(jwks_url)
     logger.info("Fetching JWKS from %s", jwks_url)
     req = urllib.request.Request(jwks_url)
-    with urllib.request.urlopen(req, timeout=10) as resp:
+    with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
         jwks = json.loads(resp.read().decode())
 
     _jwks_cache[jwks_url] = (jwks, now)

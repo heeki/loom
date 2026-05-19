@@ -69,7 +69,7 @@ class TestMcpRouter(unittest.TestCase):
             auth_type="oauth2",
             oauth2_well_known_url="http://auth.example.com/.well-known/openid-configuration",
             oauth2_client_id="my-client-id",
-            oauth2_client_secret="my-secret",
+            oauth2_client_secret="my-test-secret",  # nosec B106
             oauth2_scopes="read write",
         )
         self.assertEqual(data["auth_type"], "oauth2")
@@ -83,7 +83,7 @@ class TestMcpRouter(unittest.TestCase):
             auth_type="oauth2",
             oauth2_well_known_url="http://auth.example.com/.well-known/openid-configuration",
             oauth2_client_id="cid",
-            oauth2_client_secret="super-secret",
+            oauth2_client_secret="my-test-secret",  # nosec B106
         )
         self.assertNotIn("oauth2_client_secret", data)
 

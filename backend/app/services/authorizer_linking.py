@@ -9,7 +9,7 @@ import urllib.request
 from typing import Any
 
 from app.services.secrets import store_secret, get_secret, delete_secret
-from app.services.oidc import fetch_discovery
+from app.services.oidc import fetch_discovery, require_https_url
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +79,7 @@ def resolve_access_token(
             "refresh_token": refresh_token,
             "client_id": user_client_id,
         }
+        require_https_url(token_url)
         data = urllib.parse.urlencode(body_params).encode()
         headers: dict[str, str] = {
             "Content-Type": "application/x-www-form-urlencoded",
@@ -94,7 +95,7 @@ def resolve_access_token(
             headers=headers,
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
             result: dict[str, Any] = json.loads(resp.read().decode())
 
         access_token = result["access_token"]
@@ -128,6 +129,7 @@ def exchange_code_for_tokens(
         "code_verifier": code_verifier,
         "client_id": user_client_id,
     }
+    require_https_url(token_url)
     data = urllib.parse.urlencode(body_params).encode()
     headers: dict[str, str] = {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -143,5 +145,5 @@ def exchange_code_for_tokens(
         headers=headers,
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=10) as resp:
+    with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
         return json.loads(resp.read().decode())

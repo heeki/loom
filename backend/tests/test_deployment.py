@@ -346,7 +346,7 @@ class TestUpdateSecret(unittest.TestCase):
         mock_client = MagicMock()
         mock_boto_client.return_value = mock_client
 
-        secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:my-secret"
+        secret_arn = "arn:aws:secretsmanager:us-east-1:000000000000:secret:test-secret"  # nosec B105
         update_secret(secret_arn, "new-value", "us-east-1")
 
         mock_client.put_secret_value.assert_called_once_with(
@@ -364,7 +364,7 @@ class TestDeleteSecret(unittest.TestCase):
         mock_client = MagicMock()
         mock_boto_client.return_value = mock_client
 
-        secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:my-secret"
+        secret_arn = "arn:aws:secretsmanager:us-east-1:000000000000:secret:test-secret"  # nosec B105
         delete_secret(secret_arn, "us-east-1")
 
         mock_client.delete_secret.assert_called_once_with(

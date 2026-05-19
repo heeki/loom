@@ -59,6 +59,12 @@ Parameters:
     Type: String
     Description: Agent Registry ID (from bedrock-agentcore-control list-registries)
     Default: ""
+  pEcrKmsKeyArn:
+    Type: String
+    Description: ARN of the KMS key used to encrypt ECR repositories (from infra stack output oEcrKmsKeyArn)
+  pSecretsKmsKeyArn:
+    Type: String
+    Description: ARN of the KMS key used to encrypt Secrets Manager secrets (from rds stack output oSecretsKmsKeyArn)
   pTagApplication:
     Type: String
     Description: Value for the loom:application tag
@@ -134,6 +140,23 @@ Resources:
                 Action:
                   - secretsmanager:GetSecretValue
                 Resource: !Ref pDatabaseSecretArn
+        - PolicyName: EcrKmsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource: !Ref pEcrKmsKeyArn
+        - PolicyName: SecretsKmsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: !Ref pSecretsKmsKeyArn
       Tags:
         - Key: loom:application
           Value: !Ref pTagApplication
@@ -273,6 +296,15 @@ Resources:
                   - secretsmanager:DeleteSecret
                   - secretsmanager:PutSecretValue
                 Resource: !Sub "arn:aws:secretsmanager:*:${AWS::AccountId}:secret:loom/*"
+        - PolicyName: SecretsKmsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource: !Ref pSecretsKmsKeyArn
         - PolicyName: CognitoPolicy
           PolicyDocument:
             Version: "2012-10-17"

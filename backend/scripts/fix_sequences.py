@@ -35,8 +35,11 @@ with engine.begin() as conn:
         sys.exit(0)
 
     for table in tables:
-        row = conn.execute(text(f"SELECT COALESCE(MAX(id), 1) FROM {table}")).scalar()
-        conn.execute(text(f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), :max_id)"), {"max_id": row})
+        if not table.replace("_", "").isalnum():
+            print(f"ERROR: Unexpected table name from information_schema: {table!r}", file=sys.stderr)
+            sys.exit(1)
+        row = conn.execute(text(f"SELECT COALESCE(MAX(id), 1) FROM {table}")).scalar()  # nosec B608 — table name sourced from information_schema and validated above
+        conn.execute(text(f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), :max_id)"), {"max_id": row})  # nosec B608 — same; max_id is bound parameter
         print(f"  {table}: sequence reset to {row}")
 
 print("Done.")

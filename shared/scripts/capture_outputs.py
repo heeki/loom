@@ -31,6 +31,7 @@ OUTPUT_MAP: dict[tuple[str, str], str] = {
     ("loom-infra", "oBackendTargetGroupArn"): "O_INFRA_BACKEND_TG_ARN",
     ("loom-infra", "oFrontendRepositoryUri"): "O_ECR_FRONTEND_URI",
     ("loom-infra", "oBackendRepositoryUri"): "O_ECR_BACKEND_URI",
+    ("loom-infra", "oEcrKmsKeyArn"): "O_INFRA_ECR_KMS_KEY_ARN",
     # loom-cognito
     ("loom-cognito", "oCognitoUserPoolId"): "O_COGNITO_USER_POOL_ID",
     ("loom-cognito", "oUserClientId"): "O_COGNITO_USER_CLIENT_ID",
@@ -38,6 +39,7 @@ OUTPUT_MAP: dict[tuple[str, str], str] = {
     ("loom-rds", "oRdsSecretArn"): "O_RDS_SECRET_ARN",
     ("loom-rds", "oConnectEndpoint"): "O_RDS_PROXY_ENDPOINT",
     ("loom-rds", "oRdsPort"): "O_RDS_PORT",
+    ("loom-rds", "oSecretsKmsKeyArn"): "O_RDS_SECRETS_KMS_KEY_ARN",
     # loom-ec2
     ("loom-ec2", "oInstanceId"): "O_EC2_INSTANCE_ID",
 }

@@ -161,11 +161,11 @@ def _migrate_add_columns(eng) -> None:
                     pg_type = "DOUBLE PRECISION"
                 logger.info("Migrating: ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s %s", table, column, pg_type)
                 with eng.begin() as conn:
-                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {pg_type}"))
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {pg_type}"))  # nosec B608 — table/column/type are compile-time constants from the migrations tuple above, never user input
             else:
                 logger.info("Migrating: ALTER TABLE %s ADD COLUMN %s %s", table, column, col_type)
                 with eng.begin() as conn:
-                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))  # nosec B608 — same as above
 
 
 def _backfill_session_users(eng) -> None:

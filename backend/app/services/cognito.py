@@ -7,6 +7,8 @@ import urllib.request
 import json
 from typing import Any
 
+from app.services.oidc import require_https_url
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,10 +44,11 @@ def get_cognito_token(
     if scopes:
         body_params["scope"] = " ".join(scopes)
 
+    require_https_url(token_url)
     data = urllib.parse.urlencode(body_params).encode()
     req = urllib.request.Request(token_url, data=data, headers=headers, method="POST")
 
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(req) as resp:  # nosec B310
         result = json.loads(resp.read().decode())
 
     return result

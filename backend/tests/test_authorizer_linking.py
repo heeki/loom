@@ -113,7 +113,7 @@ class TestExchangeCodeForTokens(unittest.TestCase):
         result = exchange_code_for_tokens(
             discovery_url="https://issuer",
             user_client_id="cid",
-            user_client_secret="csecret",
+            user_client_secret="my-test-secret",  # nosec B106
             code="auth-code",
             code_verifier="verifier",
             redirect_uri="https://app/callback",
