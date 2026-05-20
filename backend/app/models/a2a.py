@@ -69,7 +69,7 @@ class A2aAgent(Base):
             "oauth2_well_known_url": self.oauth2_well_known_url,
             "oauth2_client_id": self.oauth2_client_id,
             "oauth2_scopes": self.oauth2_scopes,
-            "has_oauth2_secret": self.oauth2_client_secret is not None and self.oauth2_client_secret != "",
+            "has_oauth2_secret": bool(self.oauth2_client_secret),
             "delegation_mode": self.delegation_mode or "m2m",
             "obo_grant_type": self.obo_grant_type,
             "agentcore_session_id": self.agentcore_session_id,

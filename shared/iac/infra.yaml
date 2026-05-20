@@ -28,6 +28,9 @@ Parameters:
     Type: String
     Description: ECR repository name for the backend image
     Default: loom-backend
+  pAlbIngressCidr:
+    Type: String
+    Description: CIDR block allowed to reach the ALB on HTTPS
   pTagApplication:
     Type: String
     Description: Value for the loom:application tag
@@ -81,6 +84,11 @@ Resources:
   # ---------------------------------------------------------------------------
   EcrKmsKey:
     Type: AWS::KMS::Key
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - EA017
     Properties:
       Description: KMS key for ECR repository encryption
       EnableKeyRotation: true
@@ -91,7 +99,7 @@ Resources:
             Effect: Allow
             Principal:
               AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
-            Action: "kms:*" # cfn-lint disable=EA017 - AWS-recommended root admin statement to prevent unrecoverable key lockout
+            Action: "kms:*"
             Resource: "*"
           - Sid: AllowECRService
             Effect: Allow
@@ -216,6 +224,15 @@ Resources:
   # ---------------------------------------------------------------------------
   AlbSecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - EA022
+      checkov:
+        skip:
+          - id: CKV_AWS_260
+            comment: ALB requires open ingress for public HTTPS access
     Properties:
       GroupDescription: Allow inbound HTTPS traffic to the ALB
       VpcId: !Ref pVpcId
@@ -223,7 +240,7 @@ Resources:
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
-          CidrIp: 0.0.0.0/0 # checkov:skip=CKV_AWS_260 # cfn-lint disable=EA022 — ALB requires open ingress for public HTTPS access
+          CidrIp: !Ref pAlbIngressCidr
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-alb-sg"

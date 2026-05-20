@@ -50,7 +50,7 @@ class McpServer(Base):
             "delegation_mode": self.delegation_mode or "m2m",
             "obo_grant_type": self.obo_grant_type,
             "oauth2_audience": self.oauth2_audience,
-            "has_oauth2_secret": self.oauth2_client_secret is not None and self.oauth2_client_secret != "",
+            "has_oauth2_secret": bool(self.oauth2_client_secret),
             "api_key_header_name": self.api_key_header_name,
             "has_admin_api_key": self.has_admin_api_key == "true",
             "supports_elicitation": self.supports_elicitation == "true",

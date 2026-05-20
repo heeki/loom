@@ -7,7 +7,8 @@ max ID in its table so that new inserts do not collide.
 """
 import os
 import sys
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, func, select, text
+from sqlalchemy.sql import literal_column, table as sql_table, column as sql_column
 
 DATABASE_URL = os.environ.get("LOOM_DATABASE_URL")
 if not DATABASE_URL:
@@ -38,8 +39,9 @@ with engine.begin() as conn:
         if not table.replace("_", "").isalnum():
             print(f"ERROR: Unexpected table name from information_schema: {table!r}", file=sys.stderr)
             sys.exit(1)
-        row = conn.execute(text(f"SELECT COALESCE(MAX(id), 1) FROM {table}")).scalar()  # nosec B608 # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text — table name sourced from information_schema and validated above
-        conn.execute(text(f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), :max_id)"), {"max_id": row})  # nosec B608 # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text — same; max_id is bound parameter
+        tbl = sql_table(table, sql_column("id"))
+        row = conn.execute(select(func.coalesce(func.max(tbl.c.id), 1))).scalar()
+        conn.execute(select(func.setval(func.pg_get_serial_sequence(table, "id"), row)))
         print(f"  {table}: sequence reset to {row}")
 
 print("Done.")

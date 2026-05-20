@@ -12,7 +12,7 @@ import argparse
 from collections import defaultdict
 from typing import List
 
-from sqlalchemy import MetaData, create_engine, select, text
+from sqlalchemy import MetaData, create_engine, func, select, text
 from sqlalchemy.engine import Engine
 
 
@@ -82,7 +82,7 @@ def migrate(source_url: str, dest_url: str, skip_existing: bool) -> None:
                 try:
                     if skip_existing:
                         row_count_result = dest_conn.execute(
-                            text(f"SELECT COUNT(*) FROM {dest_table.name}")  # nosec B608 # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text — table name comes from SQLAlchemy metadata reflection, never user input
+                            select(func.count()).select_from(dest_table)
                         )
                         existing_count = row_count_result.scalar()
                         if existing_count and existing_count > 0:

@@ -62,6 +62,11 @@ Resources:
   # ---------------------------------------------------------------------------
   ExecutionRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - EA017
     Properties:
       RoleName: !Sub "${AWS::StackName}-exec-role"
       AssumeRolePolicyDocument:

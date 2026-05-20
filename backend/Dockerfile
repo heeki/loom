@@ -1,4 +1,4 @@
-FROM python:3.13-slim  # nosec bosco/non-ecr-docker-image — open-source project; no internal ECR mirror available in customer accounts
+FROM public.ecr.aws/docker/library/python:3.13-slim
 
 RUN groupadd --system appuser && useradd --system --gid appuser appuser
 

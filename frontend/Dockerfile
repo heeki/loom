@@ -1,4 +1,4 @@
-FROM node:20-alpine AS build  # nosec bosco/non-ecr-docker-image — open-source project; no internal ECR mirror available in customer accounts
+FROM public.ecr.aws/docker/library/node:20-alpine AS build
 
 WORKDIR /app
 
@@ -14,7 +14,7 @@ ENV VITE_COGNITO_USER_CLIENT_ID=$VITE_COGNITO_USER_CLIENT_ID
 
 RUN npm run build
 
-FROM nginx:alpine  # nosec bosco/non-ecr-docker-image — open-source project; no internal ECR mirror available in customer accounts
+FROM public.ecr.aws/docker/library/nginx:alpine
 
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf

@@ -100,6 +100,11 @@ Resources:
   # ---------------------------------------------------------------------------
   ExecutionRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - EA017
     Properties:
       RoleName: !Sub "${AWS::StackName}-exec-role"
       AssumeRolePolicyDocument:
@@ -120,7 +125,7 @@ Resources:
                   - ecr:BatchCheckLayerAvailability
                   - ecr:GetDownloadUrlForLayer
                   - ecr:BatchGetImage
-                Resource: "*"  # cfn-lint disable=EA017 — ECR GetAuthorizationToken requires wildcard resource
+                Resource: "*"
         - PolicyName: CloudWatchLogsPolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -170,6 +175,11 @@ Resources:
   # ---------------------------------------------------------------------------
   TaskRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - EA017
     Properties:
       RoleName: !Sub "${AWS::StackName}-task-role"
       AssumeRolePolicyDocument:
@@ -312,7 +322,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - cognito-idp:ListUserPools
-                Resource: "*"  # cfn-lint disable=EA017 — Cognito ListUserPools requires wildcard resource
+                Resource: "*"
               - Effect: Allow
                 Action:
                   - cognito-idp:AdminListGroupsForUser

@@ -235,6 +235,7 @@ infra.deploy:
 			pHostedZoneId=$(O_INFRA_HOSTED_ZONE_ID) \
 			pFrontendRepoName=$(P_ECR_FRONTEND_REPO) \
 			pBackendRepoName=$(P_ECR_BACKEND_REPO) \
+			pAlbIngressCidr=$(P_INFRA_ALB_INGRESS_CIDR) \
 			pTagApplication=$(P_TAG_APPLICATION) \
 			pTagGroup=$(P_TAG_GROUP) \
 			pTagOwner=$(P_TAG_OWNER) \
