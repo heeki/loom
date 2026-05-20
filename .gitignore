@@ -9,6 +9,7 @@ build
 tmp
 
 # files
+*.tsbuildinfo
 .env
 .env.*
 !.env.example
