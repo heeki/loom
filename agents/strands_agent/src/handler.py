@@ -64,6 +64,7 @@ _dynamic_mcp_clients: dict[str, Any] = {}  # keyed by (server_name, actor_id)
 _default_model: BedrockModel | None = None
 _model_cache: dict[str, BedrockModel] = {}  # keyed by model_id
 _approval_hook: ApprovalHook | None = None
+_code_interpreter = None  # AgentCoreCodeInterpreter instance for pre-warm
 
 # Elicitation bridge state (persists across HTTP invocations on same container)
 # When a tool calls ctx.elicit(), the agent task blocks. The HTTP response ends
@@ -75,6 +76,21 @@ _elicit_queues: dict[str, asyncio.Queue] = {}  # session_id -> event queue from 
 _agent_tasks: dict[str, asyncio.Task] = {}  # session_id -> background agent task
 
 
+def _prewarm_code_interpreter(ci) -> None:
+    """Pre-warm the code interpreter session in a background thread.
+
+    Session creation takes 30-60s. Calling _ensure_session here at container
+    startup means the session is READY before the first tool invocation arrives,
+    avoiding the AgentCore Runtime HTTP streaming timeout.
+    """
+    try:
+        logger.info("Pre-warming code interpreter session in background thread")
+        ci._ensure_session(None)
+        logger.info("Code interpreter session pre-warm complete")
+    except Exception as e:
+        logger.warning("Code interpreter pre-warm failed: %s. Session will be created on first use.", e)
+
+
 def _get_agent():
     """Get or initialize the singleton agent instance.
 
@@ -82,14 +98,17 @@ def _get_agent():
     MCP client initialization is deferred until the first invocation
     when the workload access token is available in the request context.
     """
-    global _agent, _config, _default_model, _approval_hook
+    global _agent, _config, _default_model, _approval_hook, _code_interpreter
     if _agent is None:
         _config = load_config()
         defer_mcp = has_deferred_auth_servers(_config.integrations.mcp_servers)
         if defer_mcp:
             logger.info("Deferring MCP client init — authenticated servers require invocation context")
-        _agent, _approval_hook = build_agent(_config, defer_mcp=defer_mcp)
+        _agent, _approval_hook, _code_interpreter = build_agent(_config, defer_mcp=defer_mcp)
         _default_model = _agent.model
+        if _code_interpreter is not None:
+            t = threading.Thread(target=_prewarm_code_interpreter, args=(_code_interpreter,), daemon=True)
+            t.start()
         logger.info("Agent initialized successfully")
     return _agent
 

@@ -18,7 +18,7 @@ from src.telemetry import TelemetryHook
 logger = logging.getLogger(__name__)
 
 
-def build_agent(config: AgentConfig, defer_mcp: bool = False) -> tuple[Agent, ApprovalHook]:
+def build_agent(config: AgentConfig, defer_mcp: bool = False) -> tuple[Agent, ApprovalHook, "AgentCoreCodeInterpreter | None"]:
     """Build a Strands Agent from the provided configuration.
 
     Initializes the Bedrock model, loads enabled integrations
@@ -44,6 +44,7 @@ def build_agent(config: AgentConfig, defer_mcp: bool = False) -> tuple[Agent, Ap
 
     tools: list = []
     hooks: list = []
+    ci: "AgentCoreCodeInterpreter | None" = None
 
     # MCP tool clients (R3) — may be deferred for authenticated servers
     if not defer_mcp and config.integrations.mcp_servers:
@@ -124,7 +125,7 @@ def build_agent(config: AgentConfig, defer_mcp: bool = False) -> tuple[Agent, Ap
         else:
             raise
     logger.info("Agent initialized with %d tool(s) and %d hook(s)", len(agent.tool_registry.registry), len(hooks))
-    return agent, approval_hook
+    return agent, approval_hook, ci
 
 
 def attach_mcp_tools(agent: Agent, servers: list[MCPServerConfig]) -> None:
