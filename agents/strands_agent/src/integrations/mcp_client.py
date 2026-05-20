@@ -69,7 +69,7 @@ def reset_token_info_state() -> None:
         _token_info_emitted.clear()
 
 
-_TOKEN_INFO_PREFIX = "__TOKEN_INFO__:"
+_TOKEN_INFO_PREFIX = "__TOKEN_INFO__:"  # nosec B105 — protocol prefix string, not a password
 
 
 class TokenInfoHook(HookProvider):

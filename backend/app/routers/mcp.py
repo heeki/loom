@@ -50,7 +50,7 @@ class McpServerCreateRequest(BaseModel):
     def validate_auth_fields(self):
         if self.auth_type == "oauth2":
             if not self.oauth2_well_known_url:
-                raise ValueError("oauth2_well_known_url is required when auth_type is 'oauth2'")
+                raise ValueError("oauth2_well_known_url is required when auth_type is 'oauth2'")  # nosec B105 — validation error message, not a password
             if not self.oauth2_client_id:
                 raise ValueError("oauth2_client_id is required when auth_type is 'oauth2'")
         if self.auth_type == "api_key":

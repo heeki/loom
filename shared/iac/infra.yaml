@@ -223,7 +223,7 @@ Resources:
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
-          CidrIp: 0.0.0.0/0 # checkov:skip=CKV_AWS_260 ALB requires open ingress for public HTTPS access
+          CidrIp: 0.0.0.0/0 # checkov:skip=CKV_AWS_260 # cfn-lint disable=EA022 — ALB requires open ingress for public HTTPS access
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-alb-sg"

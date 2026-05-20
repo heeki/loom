@@ -82,7 +82,7 @@ def migrate(source_url: str, dest_url: str, skip_existing: bool) -> None:
                 try:
                     if skip_existing:
                         row_count_result = dest_conn.execute(
-                            text(f"SELECT COUNT(*) FROM {dest_table.name}")  # nosec B608 — table name comes from SQLAlchemy metadata reflection, never user input
+                            text(f"SELECT COUNT(*) FROM {dest_table.name}")  # nosec B608 # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text — table name comes from SQLAlchemy metadata reflection, never user input
                         )
                         existing_count = row_count_result.scalar()
                         if existing_count and existing_count > 0:

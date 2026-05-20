@@ -57,7 +57,7 @@ def _decode_jwt_claims(token: str) -> dict[str, Any] | None:
         return None
 
 
-def _extract_token_summary(token: str, token_type: str = "user", source: str | None = None) -> dict[str, Any] | None:
+def _extract_token_summary(token: str, token_type: str = "user", source: str | None = None) -> dict[str, Any] | None:  # nosec B107 — "user" is a token-type label, not a password
     """Extract key claims from a JWT for admin display."""
     claims = _decode_jwt_claims(token)
     if not claims:
@@ -1455,7 +1455,7 @@ async def invoke_agent_endpoint(
     # Priority 0: Use manually provided bearer token
     if request_body.bearer_token:
         access_token = request_body.bearer_token
-        token_source = "manual"
+        token_source = "manual"  # nosec B105 — log label, not a password
         logger.info("Using manually provided bearer token for agent invocation")
 
     # Priority 1: Use credential_id if provided (M2M for integrations)
@@ -1508,7 +1508,7 @@ async def invoke_agent_endpoint(
                     )
                     if linked_token:
                         access_token = linked_token
-                        token_source = "linked-user"
+                        token_source = "linked-user"  # nosec B105 — log label, not a password
                         logger.info("Using linked-user token for agent invocation (authorizer=%s)", linked_auth.name)
                     else:
                         logger.warning("Linked-user token resolution returned None for authorizer=%s user=%s", linked_auth.name, user.sub)
@@ -1527,7 +1527,7 @@ async def invoke_agent_endpoint(
             auth_header = request.headers.get("Authorization", "")
             if auth_header.startswith("Bearer "):
                 access_token = auth_header[7:]
-                token_source = "user"
+                token_source = "user"  # nosec B105 — log label, not a password
                 logger.info("Using user login token for agent invocation")
 
     # Priority 3: Fall back to agent config M2M flow
@@ -1547,7 +1547,7 @@ async def invoke_agent_endpoint(
                         scopes=auth_config.get("allowed_scopes") or None,
                     )
                     access_token = token_response.get("access_token")
-                    token_source = "agent-config"
+                    token_source = "agent-config"  # nosec B105 — log label, not a password
                 except Exception as e:
                     logger.warning("Failed to get Cognito token for agent %s: %s", agent_id, e)
 
@@ -1629,7 +1629,7 @@ async def invoke_agent_endpoint(
         if incoming_auth.startswith("Bearer "):
             user_access_token = incoming_auth[7:]
         # If the resolved agent bearer came from the user's login token, reuse it.
-        elif token_source == "user" and access_token:
+        elif token_source == "user" and access_token:  # nosec B105 — "user" is a token-source label, not a password
             user_access_token = access_token
         logger.info(
             "OBO delegation active for agent %s: user_access_token_present=%s",

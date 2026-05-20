@@ -69,7 +69,7 @@ class A2aAgentResponse(BaseModel):
     id: int
     base_url: str
     name: str
-    description: str
+    description: str  # nosec B105 — field type annotation, not a password
     agent_version: str
     documentation_url: str | None = None
     provider_organization: str | None = None

@@ -120,7 +120,7 @@ Resources:
                   - ecr:BatchCheckLayerAvailability
                   - ecr:GetDownloadUrlForLayer
                   - ecr:BatchGetImage
-                Resource: "*"
+                Resource: "*"  # cfn-lint disable=EA017 — ECR GetAuthorizationToken requires wildcard resource
         - PolicyName: CloudWatchLogsPolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -312,7 +312,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - cognito-idp:ListUserPools
-                Resource: "*"
+                Resource: "*"  # cfn-lint disable=EA017 — Cognito ListUserPools requires wildcard resource
               - Effect: Allow
                 Action:
                   - cognito-idp:AdminListGroupsForUser
