@@ -1197,8 +1197,8 @@ def _deploy_agent_background(
         env_vars = {
             "AGENT_CONFIG_JSON": config_json,
             "OTEL_SERVICE_NAME": request.name,
-            "OTEL_TRACES_EXPORTER": "awsxray",
-            "OTEL_PROPAGATORS": "xray",
+            "OTEL_TRACES_EXPORTER": "otlp",
+            "OTEL_PROPAGATORS": "xray,tracecontext,b3",
             "WORKLOAD_IDENTITY_NAME": f"loom-{request.name}",
             "AGENT_OBSERVABILITY_ENABLED": "true",
             "AWS_REGION": region,
