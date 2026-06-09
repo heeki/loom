@@ -52,6 +52,8 @@ class Agent(Base):
     allowed_model_ids = Column(Text, nullable=True)  # JSON array of allowed model IDs
     harness_id = Column(String, nullable=True)  # Harness ID for managed agent deployments
     code_interpreter_id = Column(String, nullable=True)
+    vpc_subnet_ids = Column(Text, nullable=True)      # JSON array of subnet IDs for VPC network mode
+    vpc_security_group_ids = Column(Text, nullable=True)  # JSON array of security group IDs for VPC network mode
 
     # Relationships
     sessions = relationship("InvocationSession", back_populates="agent", cascade="all, delete-orphan")
@@ -124,6 +126,32 @@ class Agent(Base):
         """Serialize authorizer_config to JSON text."""
         self.authorizer_config = json.dumps(config) if config else None
 
+    def get_vpc_subnet_ids(self) -> list[str]:
+        """Parse vpc_subnet_ids from JSON text."""
+        if not self.vpc_subnet_ids:
+            return []
+        try:
+            return json.loads(self.vpc_subnet_ids)
+        except json.JSONDecodeError:
+            return []
+
+    def set_vpc_subnet_ids(self, subnet_ids: list[str] | None) -> None:
+        """Serialize vpc_subnet_ids to JSON text."""
+        self.vpc_subnet_ids = json.dumps(subnet_ids) if subnet_ids else None
+
+    def get_vpc_security_group_ids(self) -> list[str]:
+        """Parse vpc_security_group_ids from JSON text."""
+        if not self.vpc_security_group_ids:
+            return []
+        try:
+            return json.loads(self.vpc_security_group_ids)
+        except json.JSONDecodeError:
+            return []
+
+    def set_vpc_security_group_ids(self, sg_ids: list[str] | None) -> None:
+        """Serialize vpc_security_group_ids to JSON text."""
+        self.vpc_security_group_ids = json.dumps(sg_ids) if sg_ids else None
+
     def to_dict(self) -> dict:
         """Convert agent to dictionary for API responses."""
         return {
@@ -156,4 +184,6 @@ class Agent(Base):
             "allowed_model_ids": self.get_allowed_model_ids(),
             "harness_id": self.harness_id,
             "code_interpreter_id": self.code_interpreter_id,
+            "vpc_subnet_ids": self.get_vpc_subnet_ids(),
+            "vpc_security_group_ids": self.get_vpc_security_group_ids(),
         }

@@ -101,12 +101,13 @@ class AgentDeployRequest(BaseModel):
     role_arn: str | None = Field(None, description="Existing IAM role ARN or null to create new")
     protocol: str = Field(default="HTTP", description="HTTP, MCP, or A2A")
     network_mode: str = Field(default="PUBLIC", description="PUBLIC or VPC")
+    vpc_subnet_ids: list[str] = Field(default_factory=list, description="Subnet IDs for VPC network mode")
+    vpc_security_group_ids: list[str] = Field(default_factory=list, description="Security group IDs for VPC network mode")
     idle_timeout: int | None = Field(None, description="Idle runtime session timeout (seconds)")
     max_lifetime: int | None = Field(None, description="Max lifetime (seconds)")
     authorizer_type: str | None = Field(None, description="Authorizer type: 'cognito', 'entra_id', 'okta', or 'other'")
     authorizer_pool_id: str | None = Field(None, description="Cognito pool ID for authorizer (when type is 'cognito')")
     authorizer_discovery_url: str | None = Field(None, description="OIDC discovery URL (when type is 'other')")
-    authorizer_allowed_audience: list[str] = Field(default_factory=list, description="Allowed JWT audience values")
     authorizer_allowed_audience: list[str] = Field(default_factory=list, description="Allowed JWT audience values")
     authorizer_allowed_clients: list[str] = Field(default_factory=list, description="Allowed client IDs")
     authorizer_allowed_scopes: list[str] = Field(default_factory=list, description="Allowed OAuth scopes")
@@ -135,6 +136,8 @@ class AgentCreateRequest(BaseModel):
     role_arn: str | None = Field(None, description="Existing IAM role ARN or null to create new")
     protocol: str = Field(default="HTTP", description="HTTP, MCP, or A2A")
     network_mode: str = Field(default="PUBLIC", description="PUBLIC or VPC")
+    vpc_subnet_ids: list[str] = Field(default_factory=list, description="Subnet IDs for VPC network mode")
+    vpc_security_group_ids: list[str] = Field(default_factory=list, description="Security group IDs for VPC network mode")
     idle_timeout: int | None = Field(None, description="Idle runtime session timeout (seconds)")
     max_lifetime: int | None = Field(None, description="Max lifetime (seconds)")
     authorizer_type: str | None = Field(None, description="Authorizer type: 'cognito', 'entra_id', 'okta', or 'other'")
@@ -181,6 +184,8 @@ class AgentResponse(BaseModel):
     endpoint_status: str | None = None
     protocol: str | None = None
     network_mode: str | None = None
+    vpc_subnet_ids: list[str] = []
+    vpc_security_group_ids: list[str] = []
     tags: dict[str, str] = {}
     authorizer_config: dict | None = None
     model_id: str | None = None
@@ -823,6 +828,9 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
         registered_at=datetime.utcnow(),
     )
     agent.set_allowed_model_ids(effective_allowed)
+    if request.network_mode == "VPC":
+        agent.set_vpc_subnet_ids(request.vpc_subnet_ids or None)
+        agent.set_vpc_security_group_ids(request.vpc_security_group_ids or None)
     db.add(agent)
     db.commit()
     db.refresh(agent)
@@ -1265,6 +1273,8 @@ def _deploy_agent_background(
                 role_arn=execution_role_arn,
                 env_vars=env_vars,
                 network_mode=request.network_mode,
+                vpc_subnet_ids=request.vpc_subnet_ids or None,
+                vpc_security_group_ids=request.vpc_security_group_ids or None,
                 protocol=request.protocol,
                 lifecycle_config=lifecycle_config,
                 authorizer_config=authorizer_config,
@@ -1623,12 +1633,20 @@ def _update_deploy_agent_background(
                 artifact_bucket=artifact_bucket,
                 artifact_prefix=artifact_key,
                 network_mode=request.network_mode,
+                vpc_subnet_ids=request.vpc_subnet_ids or None,
+                vpc_security_group_ids=request.vpc_security_group_ids or None,
                 lifecycle_config=lifecycle_config,
                 region=region,
             )
 
             agent.description = request.description or agent.description
             agent.network_mode = request.network_mode
+            if request.network_mode == "VPC":
+                agent.set_vpc_subnet_ids(request.vpc_subnet_ids or None)
+                agent.set_vpc_security_group_ids(request.vpc_security_group_ids or None)
+            else:
+                agent.set_vpc_subnet_ids(None)
+                agent.set_vpc_security_group_ids(None)
             agent.deployment_status = "deployed"
             agent.status = response.get("status", "UPDATING")
             agent.deployed_at = datetime.utcnow()
@@ -2793,6 +2811,9 @@ def refresh_agent(agent_id: int, user: UserInfo = Depends(require_scopes("agent:
     agent.protocol = protocol_config.get("serverProtocol", agent.protocol or "HTTP")
     network_config = metadata.get("networkConfiguration", {})
     agent.network_mode = network_config.get("networkMode", agent.network_mode or "PUBLIC")
+    if agent.network_mode == "VPC":
+        agent.set_vpc_subnet_ids(network_config.get("vpcSubnetIds") or agent.get_vpc_subnet_ids() or None)
+        agent.set_vpc_security_group_ids(network_config.get("vpcSecurityGroupIds") or agent.get_vpc_security_group_ids() or None)
     if not agent.account_id:
         try:
             _, arn_account_id, _ = parse_arn(agent.arn)
@@ -3081,6 +3102,12 @@ def redeploy_harness_agent(
     agent.description = request.description or agent.description
     agent.execution_role_arn = request.role_arn or agent.execution_role_arn
     agent.network_mode = request.network_mode or agent.network_mode
+    if agent.network_mode == "VPC":
+        agent.set_vpc_subnet_ids(request.vpc_subnet_ids or agent.get_vpc_subnet_ids() or None)
+        agent.set_vpc_security_group_ids(request.vpc_security_group_ids or agent.get_vpc_security_group_ids() or None)
+    else:
+        agent.set_vpc_subnet_ids(None)
+        agent.set_vpc_security_group_ids(None)
     agent.status = "UPDATING"
     agent.deployment_status = "updating"
 
@@ -3228,6 +3255,15 @@ def export_agent(agent_id: int, user: UserInfo = Depends(require_scopes("admin:w
 
     if agent.network_mode and agent.network_mode != "PUBLIC":
         data["network_mode"] = agent.network_mode
+        if agent.network_mode == "VPC":
+            vpc_subnets = agent.get_vpc_subnet_ids()
+            vpc_sgs = agent.get_vpc_security_group_ids()
+            if vpc_subnets or vpc_sgs:
+                data["vpc"] = {}
+                if vpc_subnets:
+                    data["vpc"]["subnet_ids"] = vpc_subnets
+                if vpc_sgs:
+                    data["vpc"]["security_group_ids"] = vpc_sgs
 
     if agent.execution_role_arn:
         managed_role = db.query(ManagedRole).filter(ManagedRole.role_arn == agent.execution_role_arn).first()

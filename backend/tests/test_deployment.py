@@ -221,6 +221,184 @@ class TestDeleteRuntimeEndpoint(unittest.TestCase):
         )
 
 
+class TestCreateRuntimeVpc(unittest.TestCase):
+    """Test VPC configuration in create_runtime."""
+
+    @patch("boto3.client")
+    def test_create_runtime_public_mode_no_vpc_fields(self, mock_boto_client: MagicMock) -> None:
+        """PUBLIC mode should not include vpcSubnetIds or vpcSecurityGroupIds."""
+        mock_client = MagicMock()
+        mock_boto_client.return_value = mock_client
+        mock_client.create_agent_runtime.return_value = {"agentRuntimeId": "rt-pub"}
+
+        create_runtime(
+            name="pub-agent",
+            description="",
+            role_arn="arn:aws:iam::123:role/r",
+            env_vars={},
+            network_mode="PUBLIC",
+            artifact_bucket="b",
+            artifact_prefix="p",
+            region="us-east-1",
+        )
+
+        call_kwargs = mock_client.create_agent_runtime.call_args[1]
+        net = call_kwargs["networkConfiguration"]
+        self.assertEqual(net["networkMode"], "PUBLIC")
+        self.assertNotIn("vpcSubnetIds", net)
+        self.assertNotIn("vpcSecurityGroupIds", net)
+
+    @patch("boto3.client")
+    def test_create_runtime_vpc_mode_passes_subnet_and_sg(self, mock_boto_client: MagicMock) -> None:
+        """VPC mode should include vpcSubnetIds and vpcSecurityGroupIds in networkConfiguration."""
+        mock_client = MagicMock()
+        mock_boto_client.return_value = mock_client
+        mock_client.create_agent_runtime.return_value = {"agentRuntimeId": "rt-vpc"}
+
+        create_runtime(
+            name="vpc-agent",
+            description="",
+            role_arn="arn:aws:iam::123:role/r",
+            env_vars={},
+            network_mode="VPC",
+            vpc_subnet_ids=["subnet-aaa", "subnet-bbb"],
+            vpc_security_group_ids=["sg-ccc"],
+            artifact_bucket="b",
+            artifact_prefix="p",
+            region="us-east-1",
+        )
+
+        call_kwargs = mock_client.create_agent_runtime.call_args[1]
+        net = call_kwargs["networkConfiguration"]
+        self.assertEqual(net["networkMode"], "VPC")
+        self.assertEqual(net["vpcSubnetIds"], ["subnet-aaa", "subnet-bbb"])
+        self.assertEqual(net["vpcSecurityGroupIds"], ["sg-ccc"])
+
+    @patch("boto3.client")
+    def test_create_runtime_vpc_mode_no_subnets(self, mock_boto_client: MagicMock) -> None:
+        """VPC mode without subnet/SG args should set networkMode without subnet fields."""
+        mock_client = MagicMock()
+        mock_boto_client.return_value = mock_client
+        mock_client.create_agent_runtime.return_value = {"agentRuntimeId": "rt-vpc2"}
+
+        create_runtime(
+            name="vpc-agent2",
+            description="",
+            role_arn="arn:aws:iam::123:role/r",
+            env_vars={},
+            network_mode="VPC",
+            artifact_bucket="b",
+            artifact_prefix="p",
+            region="us-east-1",
+        )
+
+        call_kwargs = mock_client.create_agent_runtime.call_args[1]
+        net = call_kwargs["networkConfiguration"]
+        self.assertEqual(net["networkMode"], "VPC")
+        self.assertNotIn("vpcSubnetIds", net)
+        self.assertNotIn("vpcSecurityGroupIds", net)
+
+
+class TestUpdateRuntimeVpc(unittest.TestCase):
+    """Test VPC configuration in update_runtime."""
+
+    @patch("boto3.client")
+    def test_update_runtime_vpc_mode_passes_subnet_and_sg(self, mock_boto_client: MagicMock) -> None:
+        """Updating to VPC mode should include subnet and SG IDs."""
+        mock_client = MagicMock()
+        mock_boto_client.return_value = mock_client
+        mock_client.update_agent_runtime.return_value = {"status": "UPDATING"}
+
+        update_runtime(
+            runtime_id="rt-123",
+            network_mode="VPC",
+            vpc_subnet_ids=["subnet-111", "subnet-222"],
+            vpc_security_group_ids=["sg-333"],
+            region="us-east-1",
+        )
+
+        call_kwargs = mock_client.update_agent_runtime.call_args[1]
+        net = call_kwargs["networkConfiguration"]
+        self.assertEqual(net["networkMode"], "VPC")
+        self.assertEqual(net["vpcSubnetIds"], ["subnet-111", "subnet-222"])
+        self.assertEqual(net["vpcSecurityGroupIds"], ["sg-333"])
+
+    @patch("boto3.client")
+    def test_update_runtime_public_mode_no_vpc_fields(self, mock_boto_client: MagicMock) -> None:
+        """Updating to PUBLIC mode should not include VPC fields."""
+        mock_client = MagicMock()
+        mock_boto_client.return_value = mock_client
+        mock_client.update_agent_runtime.return_value = {"status": "UPDATING"}
+
+        update_runtime(
+            runtime_id="rt-123",
+            network_mode="PUBLIC",
+            region="us-east-1",
+        )
+
+        call_kwargs = mock_client.update_agent_runtime.call_args[1]
+        net = call_kwargs["networkConfiguration"]
+        self.assertEqual(net["networkMode"], "PUBLIC")
+        self.assertNotIn("vpcSubnetIds", net)
+        self.assertNotIn("vpcSecurityGroupIds", net)
+
+    @patch("boto3.client")
+    def test_update_runtime_no_network_mode_omits_network_config(self, mock_boto_client: MagicMock) -> None:
+        """Omitting network_mode should not include networkConfiguration at all."""
+        mock_client = MagicMock()
+        mock_boto_client.return_value = mock_client
+        mock_client.update_agent_runtime.return_value = {"status": "UPDATING"}
+
+        update_runtime(runtime_id="rt-123", region="us-east-1")
+
+        call_kwargs = mock_client.update_agent_runtime.call_args[1]
+        self.assertNotIn("networkConfiguration", call_kwargs)
+
+
+class TestAgentModelVpc(unittest.TestCase):
+    """Test VPC helpers on the Agent model."""
+
+    def test_get_vpc_subnet_ids_empty(self) -> None:
+        from app.models.agent import Agent
+        agent = Agent(arn="a", runtime_id="r", region="us-east-1", account_id="123")
+        self.assertEqual(agent.get_vpc_subnet_ids(), [])
+
+    def test_set_get_vpc_subnet_ids(self) -> None:
+        from app.models.agent import Agent
+        agent = Agent(arn="a", runtime_id="r", region="us-east-1", account_id="123")
+        agent.set_vpc_subnet_ids(["subnet-aaa", "subnet-bbb"])
+        self.assertEqual(agent.get_vpc_subnet_ids(), ["subnet-aaa", "subnet-bbb"])
+
+    def test_set_vpc_subnet_ids_none_clears(self) -> None:
+        from app.models.agent import Agent
+        agent = Agent(arn="a", runtime_id="r", region="us-east-1", account_id="123")
+        agent.set_vpc_subnet_ids(["subnet-aaa"])
+        agent.set_vpc_subnet_ids(None)
+        self.assertIsNone(agent.vpc_subnet_ids)
+        self.assertEqual(agent.get_vpc_subnet_ids(), [])
+
+    def test_get_vpc_security_group_ids_empty(self) -> None:
+        from app.models.agent import Agent
+        agent = Agent(arn="a", runtime_id="r", region="us-east-1", account_id="123")
+        self.assertEqual(agent.get_vpc_security_group_ids(), [])
+
+    def test_set_get_vpc_security_group_ids(self) -> None:
+        from app.models.agent import Agent
+        agent = Agent(arn="a", runtime_id="r", region="us-east-1", account_id="123")
+        agent.set_vpc_security_group_ids(["sg-abc"])
+        self.assertEqual(agent.get_vpc_security_group_ids(), ["sg-abc"])
+
+    def test_to_dict_includes_vpc_fields(self) -> None:
+        from app.models.agent import Agent
+        agent = Agent(arn="a", runtime_id="r", region="us-east-1", account_id="123",
+                      name="test", status="READY", registered_at=None)
+        agent.set_vpc_subnet_ids(["subnet-aaa"])
+        agent.set_vpc_security_group_ids(["sg-bbb"])
+        d = agent.to_dict()
+        self.assertEqual(d["vpc_subnet_ids"], ["subnet-aaa"])
+        self.assertEqual(d["vpc_security_group_ids"], ["sg-bbb"])
+
+
 class TestUpdateRuntime(unittest.TestCase):
     """Test cases for update_runtime function."""
 
