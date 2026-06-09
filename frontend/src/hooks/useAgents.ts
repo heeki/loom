@@ -20,7 +20,7 @@ function needsPolling(agent: AgentResponse): boolean {
   return (
     agent.status === "DELETING" ||
     (agent.source === "deploy" &&
-      (agent.status === "CREATING" ||
+      (agent.status === "CREATING" || agent.status === "UPDATING" ||
         DEPLOY_IN_PROGRESS.has(agent.deployment_status ?? "") ||
         agent.endpoint_status === "CREATING")) ||
     (agent.source === "harness" &&
@@ -34,6 +34,7 @@ export function useAgents() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleteStartTimes, setDeleteStartTimes] = useState<Record<number, number>>({});
+  const [updateStartTimes, setUpdateStartTimes] = useState<Record<number, number>>({});
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const initialLoadDone = useRef(false);
@@ -93,6 +94,14 @@ export function useAgents() {
           setAgents((prev) =>
             prev.map((a) => (a.id === updated.id ? updated : a)),
           );
+          // Clear update start time once the agent leaves UPDATING
+          if (agent.status === "UPDATING" && updated.status !== "UPDATING") {
+            setUpdateStartTimes((prev) => {
+              const next = { ...prev };
+              delete next[agent.id];
+              return next;
+            });
+          }
         } catch (e) {
           // If a DELETING agent returns 404, it's gone from AWS — purge locally
           if (agent.status === "DELETING" && e instanceof ApiError && e.status === 404) {
@@ -131,8 +140,13 @@ export function useAgents() {
   );
 
   const deployAgent = useCallback(
-    async (request: AgentDeployRequest) => {
-      const agent = await agentsApi.deployAgent(request);
+    async (request: AgentDeployRequest, existingAgentId?: number) => {
+      const agent = existingAgentId
+        ? await agentsApi.updateDeployAgent(existingAgentId, request)
+        : await agentsApi.deployAgent(request);
+      if (existingAgentId) {
+        setUpdateStartTimes((prev) => ({ ...prev, [existingAgentId]: Date.now() }));
+      }
       await fetchAgents();
       return agent;
     },
@@ -144,6 +158,9 @@ export function useAgents() {
       const agent = existingAgentId
         ? await agentsApi.updateHarnessAgent(existingAgentId, request)
         : await agentsApi.deployHarnessAgent(request);
+      if (existingAgentId) {
+        setUpdateStartTimes((prev) => ({ ...prev, [existingAgentId]: Date.now() }));
+      }
       await fetchAgents();
       return agent;
     },
@@ -194,5 +211,5 @@ export function useAgents() {
     [],
   );
 
-  return { agents, loading, error, deleteStartTimes, fetchAgents, registerAgent, deployAgent, deployHarnessAgent, redeployAgent, refreshAgent, patchAgent, deleteAgent };
+  return { agents, loading, error, deleteStartTimes, updateStartTimes, fetchAgents, registerAgent, deployAgent, deployHarnessAgent, redeployAgent, refreshAgent, patchAgent, deleteAgent };
 }

@@ -38,6 +38,16 @@ export function deployAgent(
   });
 }
 
+export function updateDeployAgent(
+  id: number,
+  request: AgentDeployRequest,
+): Promise<AgentResponse> {
+  return apiFetch<AgentResponse>(`/api/agents/${id}/redeploy-deploy`, {
+    method: "PUT",
+    body: JSON.stringify(request),
+  });
+}
+
 export function deployHarnessAgent(
   request: AgentHarnessDeployRequest,
 ): Promise<AgentResponse> {

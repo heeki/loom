@@ -350,6 +350,10 @@ def update_runtime(
     env_vars: dict[str, str] | None = None,
     role_arn: str | None = None,
     authorizer_config: dict[str, Any] | None = None,
+    artifact_bucket: str | None = None,
+    artifact_prefix: str | None = None,
+    network_mode: str | None = None,
+    lifecycle_config: dict | None = None,
     region: str = "us-east-1",
 ) -> dict[str, Any]:
     """
@@ -361,6 +365,10 @@ def update_runtime(
         env_vars: Optional updated environment variables
         role_arn: Optional updated role ARN
         authorizer_config: Optional authorizer configuration (e.g., {"customJWTAuthorizer": {...}})
+        artifact_bucket: Optional S3 bucket for updated artifact
+        artifact_prefix: Optional S3 key for updated artifact
+        network_mode: Optional updated network mode
+        lifecycle_config: Optional updated lifecycle configuration
         region: AWS region name
 
     Returns:
@@ -379,6 +387,23 @@ def update_runtime(
         params["roleArn"] = role_arn
     if authorizer_config is not None:
         params["authorizerConfiguration"] = authorizer_config
+    if artifact_bucket and artifact_prefix:
+        params["agentRuntimeArtifact"] = {
+            "codeConfiguration": {
+                "code": {
+                    "s3": {
+                        "bucket": artifact_bucket,
+                        "prefix": artifact_prefix,
+                    }
+                },
+                "runtime": "PYTHON_3_13",
+                "entryPoint": ["opentelemetry-instrument", "src/handler.py"],
+            }
+        }
+    if network_mode is not None:
+        params["networkConfiguration"] = {"networkMode": network_mode}
+    if lifecycle_config is not None:
+        params["lifecycleConfiguration"] = lifecycle_config
 
     return client.update_agent_runtime(**params)
 

@@ -17,6 +17,7 @@ interface AgentCardProps {
   readOnly?: boolean;
   showOnCardKeys?: string[];
   deleteStartTime?: number;
+  updateStartTime?: number;
   userGroups?: string[];
   registryEnabled?: boolean;
 }
@@ -28,11 +29,13 @@ const DEPLOY_IN_PROGRESS = new Set([
   "building_artifact",
   "creating_ci_resource",
   "deploying",
+  "updating",
 ]);
 
 function isTransitional(agent: AgentResponse): boolean {
   return (
     agent.status === "CREATING" ||
+    agent.status === "UPDATING" ||
     agent.status === "DELETING" ||
     DEPLOY_IN_PROGRESS.has(agent.deployment_status ?? "") ||
     agent.endpoint_status === "CREATING"
@@ -43,6 +46,7 @@ function phaseLabel(agent: AgentResponse): string | null {
   if (agent.status === "DELETING") return "Deleting";
   switch (agent.deployment_status) {
     case "initializing": return "Initializing";
+    case "updating": return "Updating";
     case "creating_credentials": return "Creating credential provider";
     case "creating_role": return "Creating IAM role";
     case "building_artifact": return "Building artifact";
@@ -50,6 +54,7 @@ function phaseLabel(agent: AgentResponse): string | null {
     case "deploying": return agent.source === "harness" ? "Creating harness" : "Deploying runtime";
     default: break;
   }
+  if (agent.status === "UPDATING") return "Updating";
   if (agent.status === "CREATING") return agent.source === "harness" ? "Creating harness" : "Completing deployment";
   if (agent.status === "READY" && agent.endpoint_status === "CREATING") return "Finalizing endpoint";
   return null;
@@ -65,7 +70,7 @@ function existsInAgentCore(agent: AgentResponse): boolean {
   return !!agent.runtime_id;
 }
 
-export function AgentCard({ agent, onSelect, onDelete, onEdit, readOnly, showOnCardKeys, deleteStartTime, userGroups = [], registryEnabled = true }: AgentCardProps) {
+export function AgentCard({ agent, onSelect, onDelete, onEdit, readOnly, showOnCardKeys, deleteStartTime, updateStartTime, userGroups = [], registryEnabled = true }: AgentCardProps) {
   const { timezone } = useTimezone();
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [cleanupAws, setCleanupAws] = useState(false);
@@ -98,7 +103,11 @@ export function AgentCard({ agent, onSelect, onDelete, onEdit, readOnly, showOnC
       if (!deleteStartTime) return 0;
       return Math.max(0, Math.floor((now - deleteStartTime) / 1000));
     }
-    const ts = agent.registered_at ?? agent.deployed_at;
+    if (agent.status === "UPDATING") {
+      if (!updateStartTime) return 0;
+      return Math.max(0, Math.floor((now - updateStartTime) / 1000));
+    }
+    const ts = agent.registered_at;
     if (!ts) return 0;
     return Math.max(0, Math.floor((now - new Date(ts).getTime()) / 1000));
   })();

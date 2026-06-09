@@ -300,7 +300,7 @@ function AppContent() {
       ? `demo-user-${_demoAdminMatch[1]}`
       : undefined;
 
-  const { agents, loading, deleteStartTimes, fetchAgents, registerAgent, deployAgent, deployHarnessAgent, redeployAgent, refreshAgent, patchAgent, deleteAgent } = useAgents();
+  const { agents, loading, deleteStartTimes, updateStartTimes, fetchAgents, registerAgent, deployAgent, deployHarnessAgent, redeployAgent, refreshAgent, patchAgent, deleteAgent } = useAgents();
 
   // Re-fetch agents after authentication completes and when navigating to agent tabs
   useEffect(() => {
@@ -772,6 +772,7 @@ function AppContent() {
                   groupRestriction={groupRestriction}
                   ownerRestriction={ownerRestriction}
                   deleteStartTimes={deleteStartTimes}
+                  updateStartTimes={updateStartTimes}
                   userGroups={viewAsUser ? (USER_GROUPS[viewAsUser] ?? []) : (user?.groups ?? [])}
                 />
               )}

@@ -1368,6 +1368,314 @@ def _deploy_agent_background(
         db.close()
 
 
+def _update_deploy_agent_background(
+    agent_id: int,
+    request: AgentCreateRequest,
+    mcp_snapshots: list[dict[str, Any]],
+    a2a_snapshots: list[dict[str, Any]],
+    memory_snapshots: list[dict[str, Any]],
+    resolved_tags: dict[str, str],
+    tag_policy_dicts: list[dict[str, Any]],
+    system_prompt: str,
+    model_max_tokens: int,
+    old_cp_names: set[str],
+    region: str,
+    account_id: str,
+) -> None:
+    """Background task that updates an existing deploy-type agent runtime in-place.
+
+    Rebuilds the artifact, reconciles credential providers, and calls update_runtime
+    so the existing AgentCore Runtime ID is preserved.
+    """
+    db = SessionLocal()
+    try:
+        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        if not agent:
+            logger.error("Background deploy update: agent %s not found", agent_id)
+            return
+
+        # --- Step 1: Reconcile credential providers ---
+        new_cp_names: set[str] = set()
+        mcp_server_configs: list[dict[str, Any]] = []
+
+        for server in mcp_snapshots:
+            entry: dict[str, Any] = {
+                "name": server["name"],
+                "enabled": True,
+                "transport": server["transport_type"],
+                "endpoint_url": server["endpoint_url"],
+            }
+            if server["auth_type"] == "oauth2":
+                cp_name = f"loom-{request.name}-mcp-{server['name']}"
+                new_cp_names.add(cp_name)
+                mcp_delegation = server.get("delegation_mode") or "m2m"
+                mcp_obo_grant = server.get("obo_grant_type")
+                if cp_name not in old_cp_names:
+                    try:
+                        create_oauth2_credential_provider(
+                            name=cp_name,
+                            client_id=server["oauth2_client_id"] or "",
+                            client_secret=server["oauth2_client_secret"] or "",
+                            auth_server_url=server["oauth2_well_known_url"] or "",
+                            region=region,
+                            tags=resolved_tags,
+                            delegation_mode=mcp_delegation,
+                            obo_grant_type=mcp_obo_grant,
+                        )
+                        logger.info("Created credential provider '%s' for MCP server '%s'", cp_name, server["name"])
+                    except Exception as e:
+                        logger.error("Failed to create credential provider for MCP '%s': %s", server["name"], e)
+                        agent.status = "FAILED"
+                        agent.deployment_status = "credential_creation_failed"
+                        db.commit()
+                        return
+                auth_entry: dict[str, str] = {
+                    "type": "oauth2",
+                    "credential_provider_name": cp_name,
+                    "delegation_mode": mcp_delegation,
+                }
+                if mcp_obo_grant:
+                    auth_entry["obo_grant_type"] = mcp_obo_grant
+                if server["oauth2_well_known_url"]:
+                    auth_entry["well_known_endpoint"] = server["oauth2_well_known_url"]
+                if server["oauth2_scopes"]:
+                    auth_entry["scopes"] = server["oauth2_scopes"]
+                if server.get("oauth2_audience"):
+                    auth_entry["audience"] = server["oauth2_audience"]
+                entry["auth"] = auth_entry
+            elif server["auth_type"] == "api_key":
+                secret_name = f"loom/mcp/{server['name']}/api-key/{{actor_id}}"
+                entry["auth"] = {
+                    "type": "api_key",
+                    "credentials_secret_arn": secret_name,
+                    "api_key_header_name": server["api_key_header_name"] or "x-api-key",
+                }
+            entry["delegation_mode"] = server.get("delegation_mode") or "m2m"
+            if server.get("supports_elicitation"):
+                entry["supports_elicitation"] = "true"
+            mcp_server_configs.append(entry)
+
+        removed_cps = old_cp_names - new_cp_names
+        for cp_name in removed_cps:
+            try:
+                delete_credential_provider(cp_name, region)
+                logger.info("Deleted old credential provider '%s'", cp_name)
+            except Exception as e:
+                logger.warning("Failed to delete old credential provider '%s': %s", cp_name, e)
+
+        # Build A2A agent configs
+        a2a_agent_configs: list[dict[str, Any]] = []
+        for a2a in a2a_snapshots:
+            entry = {
+                "name": a2a["name"],
+                "enabled": True,
+                "endpoint_url": a2a["base_url"],
+            }
+            if a2a["auth_type"] == "oauth2":
+                cp_name = f"loom-{request.name}-a2a-{a2a['name']}"
+                new_cp_names.add(cp_name)
+                a2a_delegation = a2a.get("delegation_mode") or "m2m"
+                a2a_obo_grant = a2a.get("obo_grant_type")
+                if cp_name not in old_cp_names:
+                    try:
+                        create_oauth2_credential_provider(
+                            name=cp_name,
+                            client_id=a2a["oauth2_client_id"] or "",
+                            client_secret=a2a["oauth2_client_secret"] or "",
+                            auth_server_url=a2a["oauth2_well_known_url"] or "",
+                            region=region,
+                            tags=resolved_tags,
+                            delegation_mode=a2a_delegation,
+                            obo_grant_type=a2a_obo_grant,
+                        )
+                    except Exception as e:
+                        logger.error("Failed to create credential provider for A2A '%s': %s", a2a["name"], e)
+                        agent.status = "FAILED"
+                        agent.deployment_status = "credential_creation_failed"
+                        db.commit()
+                        return
+                a2a_auth: dict[str, str] = {
+                    "type": "oauth2",
+                    "credential_provider_name": cp_name,
+                    "delegation_mode": a2a_delegation,
+                }
+                if a2a_obo_grant:
+                    a2a_auth["obo_grant_type"] = a2a_obo_grant
+                if a2a["oauth2_well_known_url"]:
+                    a2a_auth["well_known_endpoint"] = a2a["oauth2_well_known_url"]
+                if a2a["oauth2_scopes"]:
+                    a2a_auth["scopes"] = a2a["oauth2_scopes"]
+                entry["auth"] = a2a_auth
+            entry["delegation_mode"] = a2a.get("delegation_mode") or "m2m"
+            a2a_agent_configs.append(entry)
+
+        memory_configs = [
+            {"name": m["name"], "memory_id": m["memory_id"], "arn": m["arn"]}
+            for m in memory_snapshots
+        ]
+
+        integrations_config: dict[str, Any] = {
+            "mcp_servers": mcp_server_configs,
+            "a2a_agents": a2a_agent_configs,
+            "memory": {
+                "enabled": request.memory_enabled or len(memory_configs) > 0,
+                "resources": memory_configs,
+            },
+        }
+        if request.code_interpreter_enabled:
+            ci_config: dict[str, Any] = {
+                "enabled": True,
+                "region": request.code_interpreter_region or "",
+                "network_mode": request.code_interpreter_network_mode or "SANDBOX",
+            }
+            if request.code_interpreter_role_id:
+                ci_role = db.query(ManagedRole).filter(ManagedRole.id == request.code_interpreter_role_id).first()
+                if ci_role:
+                    ci_config["execution_role_arn"] = ci_role.role_arn
+            integrations_config["code_interpreter"] = ci_config
+
+        # --- Step 2: Rebuild artifact ---
+        agent.deployment_status = "building_artifact"
+        db.commit()
+
+        try:
+            artifact_bucket, artifact_key = build_agent_artifact(region)
+        except Exception as e:
+            agent.deployment_status = "failed"
+            agent.status = "FAILED"
+            db.commit()
+            logger.error("Failed to build artifact for agent %s: %s", agent.id, e)
+            return
+
+        config_json = json.dumps({
+            "system_prompt": system_prompt,
+            "model_id": request.model_id,
+            "max_tokens": model_max_tokens,
+            "integrations": integrations_config,
+        })
+        env_vars = {
+            "AGENT_CONFIG_JSON": config_json,
+            "OTEL_SERVICE_NAME": request.name,
+            "OTEL_TRACES_EXPORTER": "otlp",
+            "OTEL_PROPAGATORS": "xray,tracecontext,b3",
+            "WORKLOAD_IDENTITY_NAME": f"loom-{request.name}",
+            "AGENT_OBSERVABILITY_ENABLED": "true",
+            "AWS_REGION": region,
+        }
+
+        # Replace config entries
+        db.query(ConfigEntry).filter(ConfigEntry.agent_id == agent_id).delete()
+        for key, value in env_vars.items():
+            db.add(ConfigEntry(
+                agent_id=agent.id,
+                key=key,
+                value=value,
+                is_secret=False,
+                source="env_var",
+            ))
+        db.commit()
+
+        lifecycle_config = None
+        if request.idle_timeout or request.max_lifetime:
+            lifecycle_config = {}
+            if request.idle_timeout:
+                lifecycle_config["idleRuntimeSessionTimeout"] = request.idle_timeout
+            if request.max_lifetime:
+                lifecycle_config["maxLifetime"] = request.max_lifetime
+
+        authorizer_config = None
+        user_client_id = os.getenv("LOOM_COGNITO_USER_CLIENT_ID", "")
+        if request.authorizer_type == "cognito" and request.authorizer_pool_id:
+            jwt_config: dict[str, Any] = {
+                "discoveryUrl": f"https://cognito-idp.{region}.amazonaws.com/{request.authorizer_pool_id}/.well-known/openid-configuration"
+            }
+            allowed_clients = list(request.authorizer_allowed_clients) if request.authorizer_allowed_clients else []
+            if user_client_id and user_client_id not in allowed_clients:
+                allowed_clients.append(user_client_id)
+            if allowed_clients:
+                jwt_config["allowedClients"] = allowed_clients
+            if request.authorizer_allowed_audience:
+                jwt_config["allowedAudience"] = request.authorizer_allowed_audience
+            if request.authorizer_allowed_scopes:
+                jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
+            authorizer_config = {"customJWTAuthorizer": jwt_config}
+        elif request.authorizer_type in ("other", "entra_id", "okta") and request.authorizer_discovery_url:
+            jwt_config = {"discoveryUrl": request.authorizer_discovery_url}
+            if request.authorizer_allowed_audience:
+                jwt_config["allowedAudience"] = request.authorizer_allowed_audience
+            if request.authorizer_allowed_clients and request.authorizer_type not in ("entra_id", "okta"):
+                jwt_config["allowedClients"] = request.authorizer_allowed_clients
+            if request.authorizer_allowed_scopes:
+                jwt_config["allowedScopes"] = request.authorizer_allowed_scopes
+            authorizer_config = {"customJWTAuthorizer": jwt_config}
+
+        # --- Step 3: Update runtime in-place ---
+        agent.deployment_status = "deploying"
+        db.commit()
+
+        try:
+            response = update_runtime(
+                runtime_id=agent.runtime_id,
+                description=request.description,
+                role_arn=agent.execution_role_arn,
+                env_vars=env_vars,
+                authorizer_config=authorizer_config,
+                artifact_bucket=artifact_bucket,
+                artifact_prefix=artifact_key,
+                network_mode=request.network_mode,
+                lifecycle_config=lifecycle_config,
+                region=region,
+            )
+
+            agent.description = request.description or agent.description
+            agent.network_mode = request.network_mode
+            agent.deployment_status = "deployed"
+            agent.status = response.get("status", "UPDATING")
+            agent.deployed_at = datetime.utcnow()
+            agent.last_refreshed_at = datetime.utcnow()
+
+            effective_allowed = request.allowed_model_ids if request.allowed_model_ids else [request.model_id]
+            if request.model_id not in effective_allowed:
+                effective_allowed = [request.model_id] + effective_allowed
+            agent.set_allowed_model_ids(effective_allowed)
+
+            if resolved_tags:
+                agent.set_tags(resolved_tags)
+
+            if request.authorizer_type:
+                stored_clients = list(request.authorizer_allowed_clients) if request.authorizer_allowed_clients else []
+                if user_client_id and user_client_id not in stored_clients:
+                    stored_clients.append(user_client_id)
+                agent.set_authorizer_config({
+                    "type": request.authorizer_type,
+                    "pool_id": request.authorizer_pool_id,
+                    "discovery_url": request.authorizer_discovery_url,
+                    "allowed_audience": request.authorizer_allowed_audience,
+                    "allowed_clients": stored_clients,
+                    "allowed_scopes": request.authorizer_allowed_scopes,
+                })
+
+            db.commit()
+            logger.info("Deploy agent update complete: agent=%s runtime_id=%s", agent_id, agent.runtime_id)
+        except Exception as e:
+            agent.deployment_status = "failed"
+            agent.status = "FAILED"
+            db.commit()
+            logger.error("Failed to update runtime for agent %s: %s", agent.id, e)
+    except Exception as e:
+        logger.error("Unexpected error in background deploy update for agent %s: %s", agent_id, e)
+        try:
+            agent = db.query(Agent).filter(Agent.id == agent_id).first()
+            if agent:
+                agent.deployment_status = "failed"
+                agent.status = "FAILED"
+                db.commit()
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
 def _deploy_harness(request: AgentCreateRequest, db: Session, background_tasks: BackgroundTasks) -> AgentResponse:
     """Deploy a managed agent via AgentCore Harness.
 
@@ -2559,6 +2867,161 @@ def redeploy_agent_endpoint(agent_id: int, user: UserInfo = Depends(require_scop
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Failed to redeploy agent: {str(e)}"
         )
+
+    return _agent_response(agent, db)
+
+
+@router.put("/{agent_id}/redeploy-deploy", response_model=AgentResponse)
+def redeploy_deploy_agent(
+    agent_id: int,
+    request: AgentCreateRequest,
+    background_tasks: BackgroundTasks,
+    user: UserInfo = Depends(require_scopes("agent:write")),
+    db: Session = Depends(get_db),
+) -> AgentResponse:
+    """Update and redeploy a deploy-type agent with new configuration.
+
+    Rebuilds the artifact and calls update_agent_runtime in-place so the
+    existing runtime ID and ARN are preserved.
+    """
+    agent = get_agent_or_404(agent_id, db)
+
+    if agent.source != "deploy":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only deploy-type agents can be updated via this endpoint",
+        )
+
+    if not agent.runtime_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Agent has no runtime_id — cannot update. Delete and redeploy instead.",
+        )
+
+    region = os.getenv("AWS_REGION", DEFAULT_REGION)
+    account_id = os.getenv("AWS_ACCOUNT_ID", "")
+
+    # Collect old credential provider names before wiping config entries
+    old_config_entry = db.query(ConfigEntry).filter(
+        ConfigEntry.agent_id == agent_id, ConfigEntry.key == "AGENT_CONFIG_JSON"
+    ).first()
+    old_cp_names: set[str] = set()
+    if old_config_entry:
+        try:
+            old_config = json.loads(old_config_entry.value)
+            for srv in old_config.get("integrations", {}).get("mcp_servers", []):
+                cp_name = (srv.get("auth", {}) or {}).get("credential_provider_name")
+                if cp_name:
+                    old_cp_names.add(cp_name)
+            for a2a in old_config.get("integrations", {}).get("a2a_agents", []):
+                cp_name = (a2a.get("auth", {}) or {}).get("credential_provider_name")
+                if cp_name:
+                    old_cp_names.add(cp_name)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Validate and snapshot MCP servers
+    mcp_records: list[McpServer] = []
+    if request.mcp_servers:
+        mcp_records = db.query(McpServer).filter(McpServer.id.in_(request.mcp_servers)).all()
+        found_ids = {s.id for s in mcp_records}
+        missing = set(request.mcp_servers) - found_ids
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"MCP server IDs not found: {sorted(missing)}",
+            )
+
+    mcp_snapshots = [
+        {
+            "name": s.name,
+            "endpoint_url": s.endpoint_url,
+            "transport_type": s.transport_type,
+            "auth_type": s.auth_type,
+            "oauth2_well_known_url": s.oauth2_well_known_url,
+            "oauth2_client_id": s.oauth2_client_id,
+            "oauth2_client_secret": s.oauth2_client_secret,
+            "oauth2_scopes": s.oauth2_scopes,
+            "delegation_mode": (s.delegation_mode or "m2m"),
+            "obo_grant_type": s.obo_grant_type,
+            "oauth2_audience": s.oauth2_audience,
+            "api_key_header_name": s.api_key_header_name,
+            "supports_elicitation": s.supports_elicitation == "true",
+        }
+        for s in mcp_records
+    ]
+
+    # Validate and snapshot A2A agents
+    a2a_records: list[A2aAgentModel] = []
+    if request.a2a_agents:
+        a2a_records = db.query(A2aAgentModel).filter(A2aAgentModel.id.in_(request.a2a_agents)).all()
+        found_ids = {a.id for a in a2a_records}
+        missing = set(request.a2a_agents) - found_ids
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"A2A agent IDs not found: {sorted(missing)}",
+            )
+
+    a2a_snapshots = [
+        {
+            "name": a.name,
+            "base_url": a.base_url,
+            "auth_type": a.auth_type,
+            "oauth2_well_known_url": a.oauth2_well_known_url,
+            "oauth2_client_id": a.oauth2_client_id,
+            "oauth2_client_secret": a.oauth2_client_secret,
+            "oauth2_scopes": a.oauth2_scopes,
+            "delegation_mode": (a.delegation_mode or "m2m"),
+            "obo_grant_type": a.obo_grant_type,
+        }
+        for a in a2a_records
+    ]
+
+    # Validate and snapshot memory
+    memory_records: list[Memory] = []
+    if request.memory_ids:
+        memory_records = db.query(Memory).filter(Memory.id.in_(request.memory_ids)).all()
+        found_ids = {m.id for m in memory_records}
+        missing = set(request.memory_ids) - found_ids
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Memory IDs not found: {sorted(missing)}",
+            )
+
+    memory_snapshots = [
+        {"name": m.name, "memory_id": m.memory_id, "arn": m.arn}
+        for m in memory_records
+    ]
+
+    resolved_tags, tag_policy_dicts = _resolve_tags(db, request.tags)
+    system_prompt = _build_system_prompt(request)
+    model_max_tokens = next(
+        (m["max_tokens"] for m in SUPPORTED_MODELS if m["model_id"] == request.model_id),
+        4096,
+    )
+
+    agent.status = "UPDATING"
+    agent.deployment_status = "updating"
+    db.commit()
+    db.refresh(agent)
+
+    background_tasks.add_task(
+        _update_deploy_agent_background,
+        agent_id=agent_id,
+        request=request,
+        mcp_snapshots=mcp_snapshots,
+        a2a_snapshots=a2a_snapshots,
+        memory_snapshots=memory_snapshots,
+        resolved_tags=resolved_tags,
+        tag_policy_dicts=tag_policy_dicts,
+        system_prompt=system_prompt,
+        model_max_tokens=model_max_tokens,
+        old_cp_names=old_cp_names,
+        region=region,
+        account_id=account_id,
+    )
 
     return _agent_response(agent, db)
 

@@ -35,7 +35,7 @@ interface AgentListPageProps {
   viewMode: "cards" | "table";
   onViewModeChange: (mode: "cards" | "table") => void;
   onRegister: (arn: string, modelId?: string) => Promise<unknown>;
-  onDeploy?: (request: AgentDeployRequest) => Promise<unknown>;
+  onDeploy?: (request: AgentDeployRequest, existingAgentId?: number) => Promise<unknown>;
   onDeployHarness?: (request: AgentHarnessDeployRequest, existingAgentId?: number) => Promise<unknown>;
   onSelectAgent: (id: number) => void;
   onRefreshAgent: (id: number) => void;
@@ -44,6 +44,7 @@ interface AgentListPageProps {
   groupRestriction?: string;
   ownerRestriction?: string;
   deleteStartTimes?: Record<number, number>;
+  updateStartTimes?: Record<number, number>;
   userGroups?: string[];
 }
 
@@ -62,6 +63,7 @@ export function AgentListPage({
   groupRestriction,
   ownerRestriction,
   deleteStartTimes,
+  updateStartTimes,
   userGroups = [],
 }: AgentListPageProps) {
   const { timezone } = useTimezone();
@@ -140,11 +142,13 @@ export function AgentListPage({
 
   const handleDeploy = async (request: AgentDeployRequest) => {
     if (!onDeploy) return;
-    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'agent', 'deploy', request.name);
+    const action = exportAgentId ? "update_deploy" : "deploy";
+    if (user && browserSessionId) trackAction(user.username ?? user.sub, browserSessionId, 'agent', action, request.name);
     setShowAddForm(false);
     try {
-      await onDeploy(request);
-      toast.success("Agent deployment started");
+      await onDeploy(request, exportAgentId);
+      setExportAgentId(undefined);
+      toast.success(exportAgentId ? "Agent update started" : "Agent deployment started");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Deployment failed");
     }
@@ -386,6 +390,7 @@ export function AgentListPage({
                     readOnly={readOnly}
                     showOnCardKeys={effectiveShowOnCardKeys}
                     deleteStartTime={deleteStartTimes?.[agent.id]}
+                    updateStartTime={updateStartTimes?.[agent.id]}
                     userGroups={userGroups}
                     registryEnabled={registryEnabled}
                   />
