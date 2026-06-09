@@ -116,6 +116,8 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
   const [selectedRoleId, setSelectedRoleId] = useState<string>("");
   const [protocol] = useState("HTTP");
   const [networkMode, setNetworkMode] = useState("PUBLIC");
+  const [vpcSubnetIds, setVpcSubnetIds] = useState("");
+  const [vpcSecurityGroupIds, setVpcSecurityGroupIds] = useState("");
 
   // Security config state (pre-configured by Security Admin)
   const [selectedAuthConfigId, setSelectedAuthConfigId] = useState<string>("");
@@ -206,6 +208,11 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
         if (match) setSelectedRoleId(match.id.toString());
       }
       if (parsed.network_mode) setNetworkMode(parsed.network_mode as string);
+      if (parsed.vpc && typeof parsed.vpc === "object") {
+        const vpc = parsed.vpc as Record<string, unknown>;
+        if (Array.isArray(vpc.subnet_ids)) setVpcSubnetIds((vpc.subnet_ids as string[]).join(", "));
+        if (Array.isArray(vpc.security_group_ids)) setVpcSecurityGroupIds((vpc.security_group_ids as string[]).join(", "));
+      }
       if (parsed.authorizer) {
         const match = authConfigs.find((c) => c.name === parsed.authorizer || c.id.toString() === parsed.authorizer);
         if (match) setSelectedAuthConfigId(match.id.toString());
@@ -340,6 +347,8 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
           : undefined,
         role_arn: roleArn,
         network_mode: networkMode,
+        vpc_subnet_ids: networkMode === "VPC" ? vpcSubnetIds.split(",").map(s => s.trim()).filter(Boolean) : [],
+        vpc_security_group_ids: networkMode === "VPC" ? vpcSecurityGroupIds.split(",").map(s => s.trim()).filter(Boolean) : [],
         idle_timeout: idleTimeout ? parseInt(idleTimeout, 10) : null,
         max_lifetime: maxLifetime ? parseInt(maxLifetime, 10) : null,
         authorizer_type: authConfig?.authorizer_type ?? null,
@@ -398,6 +407,8 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
         role_arn: roleArn,
         protocol,
         network_mode: networkMode,
+        vpc_subnet_ids: networkMode === "VPC" ? vpcSubnetIds.split(",").map(s => s.trim()).filter(Boolean) : [],
+        vpc_security_group_ids: networkMode === "VPC" ? vpcSecurityGroupIds.split(",").map(s => s.trim()).filter(Boolean) : [],
         idle_timeout: idleTimeout ? parseInt(idleTimeout, 10) : defaults.idle_timeout_seconds,
         max_lifetime: maxLifetime ? parseInt(maxLifetime, 10) : defaults.max_lifetime_seconds,
         authorizer_type: authConfig?.authorizer_type ?? null,
@@ -512,6 +523,11 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                       if (match) setSelectedRoleId(match.id.toString());
                     }
                     if (parsed.network_mode) setNetworkMode(parsed.network_mode);
+                    if (parsed.vpc && typeof parsed.vpc === "object") {
+                      const vpc = parsed.vpc as Record<string, unknown>;
+                      if (Array.isArray(vpc.subnet_ids)) setVpcSubnetIds((vpc.subnet_ids as string[]).join(", "));
+                      if (Array.isArray(vpc.security_group_ids)) setVpcSecurityGroupIds((vpc.security_group_ids as string[]).join(", "));
+                    }
                     if (parsed.authorizer) {
                       const match = authConfigs.find((c) => c.name === parsed.authorizer || c.id.toString() === parsed.authorizer);
                       if (match) setSelectedAuthConfigId(match.id.toString());
@@ -588,6 +604,12 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                     result.allowed_models = selectedAllowedModelIds;
                   }
                   if (networkMode && networkMode !== "PUBLIC") result.network_mode = networkMode;
+                  if (networkMode === "VPC" && (vpcSubnetIds.trim() || vpcSecurityGroupIds.trim())) {
+                    const vpcObj: Record<string, string[]> = {};
+                    if (vpcSubnetIds.trim()) vpcObj.subnet_ids = vpcSubnetIds.split(",").map(s => s.trim()).filter(Boolean);
+                    if (vpcSecurityGroupIds.trim()) vpcObj.security_group_ids = vpcSecurityGroupIds.split(",").map(s => s.trim()).filter(Boolean);
+                    result.vpc = vpcObj;
+                  }
                   if (selectedRoleId) {
                     const role = managedRoles.find((r) => r.id.toString() === selectedRoleId);
                     if (role) result.role = role.role_name;
@@ -748,7 +770,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="PUBLIC">PUBLIC</SelectItem>
-                      <SelectItem value="VPC" disabled>VPC (coming soon)</SelectItem>
+                      <SelectItem value="VPC">VPC</SelectItem>
                     </SelectContent>
                   </Select>
                 </section>
@@ -765,6 +787,34 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                   />
                 </section>
               </div>
+
+              {/* VPC Configuration */}
+              {networkMode === "VPC" && (
+                <div className="grid grid-cols-2 gap-4">
+                  <section className="space-y-2">
+                    <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Subnet IDs</h4>
+                    <input
+                      type="text"
+                      className="w-full rounded-md border bg-background px-3 py-1.5 text-sm"
+                      placeholder="subnet-abc123, subnet-def456"
+                      value={vpcSubnetIds}
+                      onChange={e => setVpcSubnetIds(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">Comma-separated private subnet IDs for VPC egress.</p>
+                  </section>
+                  <section className="space-y-2">
+                    <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Security Group IDs</h4>
+                    <input
+                      type="text"
+                      className="w-full rounded-md border bg-background px-3 py-1.5 text-sm"
+                      placeholder="sg-abc123, sg-def456"
+                      value={vpcSecurityGroupIds}
+                      onChange={e => setVpcSecurityGroupIds(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">Comma-separated security group IDs for agent egress traffic.</p>
+                  </section>
+                </div>
+              )}
 
               {/* Allowed Models for Runtime Selection */}
               {modelId && models.length > 0 && (

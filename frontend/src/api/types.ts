@@ -44,6 +44,8 @@ export interface AgentResponse {
   registry_status: string | null;
   code_interpreter_id?: string | null;
   code_interpreter_status?: string | null;
+  vpc_subnet_ids: string[];
+  vpc_security_group_ids: string[];
 }
 
 export interface AgentHarnessDeployRequest {
@@ -57,6 +59,8 @@ export interface AgentHarnessDeployRequest {
   allowed_model_ids?: string[];
   role_arn: string;
   network_mode: string;
+  vpc_subnet_ids: string[];
+  vpc_security_group_ids: string[];
   idle_timeout: number | null;
   max_lifetime: number | null;
   authorizer_type: string | null;
@@ -92,6 +96,8 @@ export interface AgentDeployRequest {
   role_arn: string | null;
   protocol: string;
   network_mode: string;
+  vpc_subnet_ids: string[];
+  vpc_security_group_ids: string[];
   idle_timeout: number | null;
   max_lifetime: number | null;
   authorizer_type: string | null;
