@@ -206,8 +206,8 @@ ecs.deploy:
 			pEcsClusterArn=$(O_ECS_CLUSTER_ARN) \
 			pEcsClusterName=$(O_ECS_CLUSTER_NAME) \
 			pEcsSecurityGroupId=$(O_INFRA_ECS_SG_ID) \
-			pEcrKmsKeyArn=$(O_INFRA_ECR_KMS_KEY_ARN) \
-			pSecretsKmsKeyArn=$(O_RDS_SECRETS_KMS_KEY_ARN) \
+			pEcrKmsKeyArn=$(or $(O_INFRA_ECR_KMS_KEY_ARN),$(ECR_KMS_KEY_ARN)) \
+			pSecretsKmsKeyArn=$(or $(O_RDS_SECRETS_KMS_KEY_ARN),$(SECRETS_KMS_KEY_ARN)) \
 			pTargetGroupArn=$(O_INFRA_BACKEND_TG_ARN) \
 			pPrivateSubnetIds=$(P_ECS_PRIVATE_SUBNET_IDS) \
 			pImageUri=$(O_ECR_BACKEND_URI):$(IMAGE_TAG) \

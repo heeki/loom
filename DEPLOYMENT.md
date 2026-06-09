@@ -382,3 +382,79 @@ Replace the 4 NS values with the actual name servers from `oNameServers`. Once d
 If your domain's hosted zone is already in the deployment account, no delegation is needed — DNS resolution works directly.
 
 **Important:** If doing this in the console, ensure that each record is entered on a separate line, rather than as a comma-separated list. This will cause delegation and certificate validation to fail.
+
+## Cleanup
+
+Remove all stacks in reverse dependency order. Run from the relevant directory for each group.
+
+### Phase 3.3 — Remove ECS services
+
+```bash
+cd frontend && make ecs.delete
+cd backend && make ecs.delete
+```
+
+### Phase 3.2 — Remove backend and shared stacks
+
+```bash
+cd backend
+make ec2.delete    # EC2 bastion
+make rds.delete    # RDS PostgreSQL (~5 min) — data will be lost
+```
+
+```bash
+cd shared
+make ecs.delete      # ECS Fargate cluster
+make role.delete     # IAM execution roles (repeat for each prefix deployed)
+make infra.delete    # S3, ECR, ACM, ALB
+make cognito.delete  # Cognito User Pool
+make dns.delete      # Route 53 hosted zone
+```
+
+> **Note:** ECR repositories must be empty before the `loom-infra` stack can be deleted. Clear images first:
+> ```bash
+> aws ecr batch-delete-image --repository-name loom-frontend --image-ids "$(aws ecr list-images --repository-name loom-frontend --query 'imageIds' --output json)" --region us-east-1
+> aws ecr batch-delete-image --repository-name loom-backend --image-ids "$(aws ecr list-images --repository-name loom-backend --query 'imageIds' --output json)" --region us-east-1
+> ```
+
+> **Note:** S3 buckets (artifact bucket and logging bucket) must be emptied before the stack can delete them. The logging bucket is managed outside CloudFormation and must be deleted manually.
+
+### Phase 3.1 — Remove service-linked roles (optional)
+
+These are shared across all stacks in the account — only remove if no other services depend on them:
+
+```bash
+cd shared
+make agentcore.delete  # Bedrock AgentCore service-linked role
+make ecs.init.delete   # ECS service-linked role
+```
+
+### Phase 1 — Remove Cognito (local-only deployment)
+
+```bash
+cd shared
+make cognito.delete
+```
+
+### DNS delegation cleanup
+
+If you added NS delegation records in a parent account, remove them manually:
+
+```bash
+aws route53 change-resource-record-sets --hosted-zone-id <parent-hosted-zone-id> --profile <parent-account-profile> --change-batch '{
+  "Changes": [{
+    "Action": "DELETE",
+    "ResourceRecordSet": {
+      "Name": "loom.yourdomain.com",
+      "Type": "NS",
+      "TTL": 300,
+      "ResourceRecords": [
+        {"Value": "ns-XXXX.awsdns-XX.org"},
+        {"Value": "ns-XXXX.awsdns-XX.co.uk"},
+        {"Value": "ns-XXXX.awsdns-XX.com"},
+        {"Value": "ns-XXXX.awsdns-XX.net"}
+      ]
+    }
+  }]
+}'
+```
