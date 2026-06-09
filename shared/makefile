@@ -256,6 +256,50 @@ infra.delete:
 		--stack-name $(P_INFRA_STACK) \
 		--no-prompts
 
+# PrivateLink ingress (NLB + VPC Endpoint Service — deployed separately by networking team)
+privatelink: privatelink.package privatelink.deploy
+
+privatelink.package:
+	sam package \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_PRIVATELINK_TEMPLATE) \
+		--output-template-file $(P_PRIVATELINK_OUTPUT) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_PRIVATELINK_STACK)
+
+privatelink.deploy:
+	sam deploy \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_PRIVATELINK_OUTPUT) \
+		--stack-name $(P_PRIVATELINK_STACK) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_PRIVATELINK_STACK) \
+		--parameter-overrides \
+			pVpcId=$(P_INFRA_VPC_ID) \
+			pPrivateSubnetIds=$(P_PRIVATELINK_PRIVATE_SUBNET_IDS) \
+			pStackName=$(P_PRIVATELINK_STACK) \
+			pTagApplication=$(P_TAG_APPLICATION) \
+			pTagGroup=$(P_TAG_GROUP) \
+			pTagOwner=$(P_TAG_OWNER) \
+		--no-confirm-changeset
+
+privatelink.outputs:
+	@aws cloudformation describe-stacks \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_PRIVATELINK_STACK) \
+		--query 'Stacks[0].Outputs' \
+		--output json | jq .
+
+privatelink.delete:
+	sam delete \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_PRIVATELINK_STACK) \
+		--no-prompts
+
 # Bedrock AgentCore service-linked role (run once per account before first agent deployment)
 agentcore.init:
 	aws iam create-service-linked-role \
