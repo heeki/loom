@@ -319,7 +319,7 @@ Resources:
       Name: !Sub "${AWS::StackName}-fe-tg"
       VpcId: !Ref pVpcId
       Protocol: HTTP
-      Port: 80
+      Port: 8000
       TargetType: ip
       HealthCheckPath: /
       HealthCheckIntervalSeconds: 60

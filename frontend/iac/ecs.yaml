@@ -125,7 +125,7 @@ Resources:
           Image: !Ref pImageUri
           Essential: true
           PortMappings:
-            - ContainerPort: 80
+            - ContainerPort: 8000
               Protocol: tcp
           LogConfiguration:
             LogDriver: awslogs
@@ -160,7 +160,7 @@ Resources:
             - !Ref pEcsSecurityGroupId
       LoadBalancers:
         - ContainerName: frontend
-          ContainerPort: 80
+          ContainerPort: 8000
           TargetGroupArn: !Ref pTargetGroupArn
       Tags:
         - Key: loom:application
