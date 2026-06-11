@@ -1,5 +1,5 @@
 import { apiFetch } from "./client";
-import type { TagPolicy, TagPolicyCreateRequest, TagPolicyUpdateRequest, TagProfile, TagProfileCreateRequest } from "./types";
+import type { TagPolicy, TagPolicyCreateRequest, TagPolicyUpdateRequest, TagProfile, TagProfileCreateRequest, VpcConfig, VpcConfigCreateRequest, VpcConfigDetail } from "./types";
 
 // Site Settings API
 export interface SiteSetting {
@@ -102,4 +102,33 @@ export function updateEnabledModels(model_ids: string[]): Promise<EnabledModelsC
     method: "PUT",
     body: JSON.stringify({ model_ids }),
   });
+}
+
+// VPC Configuration API
+export function listVpcConfigs(): Promise<VpcConfig[]> {
+  return apiFetch<VpcConfig[]>("/api/settings/vpc-configs");
+}
+
+export function createVpcConfig(request: VpcConfigCreateRequest): Promise<VpcConfig> {
+  return apiFetch<VpcConfig>("/api/settings/vpc-configs", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export function updateVpcConfig(id: number, request: VpcConfigCreateRequest): Promise<VpcConfig> {
+  return apiFetch<VpcConfig>(`/api/settings/vpc-configs/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(request),
+  });
+}
+
+export function deleteVpcConfig(id: number): Promise<void> {
+  return apiFetch<void>(`/api/settings/vpc-configs/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export function getVpcConfigDetail(id: number): Promise<VpcConfigDetail> {
+  return apiFetch<VpcConfigDetail>(`/api/settings/vpc-configs/${id}/detail`);
 }

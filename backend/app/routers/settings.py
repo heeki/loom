@@ -13,6 +13,7 @@ from app.dependencies.auth import UserInfo, get_current_user, require_scopes
 from app.models.tag_policy import TagPolicy
 from app.models.tag_profile import TagProfile
 from app.models.site_setting import SiteSetting
+from app.models.vpc_config import VpcConfig
 
 logger = logging.getLogger(__name__)
 
@@ -494,3 +495,253 @@ def update_enabled_models(
         db.add(setting)
     db.commit()
     return EnabledModelsResponse(model_ids=request.model_ids, all_models=SUPPORTED_MODELS)
+
+
+# ---------------------------------------------------------------------------
+# VPC Configuration CRUD
+# ---------------------------------------------------------------------------
+class VpcConfigRequest(BaseModel):
+    """Request body for creating/updating a VPC configuration."""
+    name: str = Field(..., description="Friendly name for this VPC configuration")
+    description: str | None = Field(None, description="Optional description")
+    vpc_id: str = Field(..., description="VPC ID (vpc-xxxxxxxx)")
+    subnet_ids: list[str] = Field(..., description="Private subnet IDs")
+    sg_ids: list[str] = Field(..., description="Security group IDs")
+
+
+class VpcConfigResponse(BaseModel):
+    """Response model for a VPC configuration."""
+    id: int
+    name: str
+    description: str | None
+    vpc_id: str
+    subnet_ids: list[str]
+    sg_ids: list[str]
+    created_at: str | None
+    updated_at: str | None
+
+
+@router.get("/vpc-configs", response_model=list[VpcConfigResponse])
+def list_vpc_configs(
+    user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[VpcConfigResponse]:
+    """List all VPC configurations. Requires authentication (used in agent deploy form)."""
+    configs = db.query(VpcConfig).order_by(VpcConfig.name).all()
+    return [VpcConfigResponse(**c.to_dict()) for c in configs]
+
+
+@router.post("/vpc-configs", response_model=VpcConfigResponse, status_code=status.HTTP_201_CREATED)
+def create_vpc_config(
+    request: VpcConfigRequest,
+    user: UserInfo = Depends(require_scopes("settings:write")),
+    db: Session = Depends(get_db),
+) -> VpcConfigResponse:
+    """Create a new VPC configuration."""
+    existing = db.query(VpcConfig).filter(VpcConfig.name == request.name).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"VPC configuration with name '{request.name}' already exists",
+        )
+    config = VpcConfig(
+        name=request.name,
+        description=request.description,
+        vpc_id=request.vpc_id,
+    )
+    config.set_subnet_ids(request.subnet_ids)
+    config.set_sg_ids(request.sg_ids)
+    db.add(config)
+    db.commit()
+    db.refresh(config)
+    return VpcConfigResponse(**config.to_dict())
+
+
+@router.put("/vpc-configs/{config_id}", response_model=VpcConfigResponse)
+def update_vpc_config(
+    config_id: int,
+    request: VpcConfigRequest,
+    user: UserInfo = Depends(require_scopes("settings:write")),
+    db: Session = Depends(get_db),
+) -> VpcConfigResponse:
+    """Update an existing VPC configuration."""
+    config = db.query(VpcConfig).filter(VpcConfig.id == config_id).first()
+    if not config:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="VPC configuration not found")
+    if request.name != config.name:
+        conflict = db.query(VpcConfig).filter(VpcConfig.name == request.name).first()
+        if conflict:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"VPC configuration with name '{request.name}' already exists",
+            )
+    config.name = request.name
+    config.description = request.description
+    config.vpc_id = request.vpc_id
+    config.set_subnet_ids(request.subnet_ids)
+    config.set_sg_ids(request.sg_ids)
+    config.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(config)
+    return VpcConfigResponse(**config.to_dict())
+
+
+class VpcSubnetDetail(BaseModel):
+    """Enriched subnet info from EC2 DescribeSubnets."""
+    subnet_id: str
+    availability_zone: str | None
+    availability_zone_id: str | None
+    cidr_block: str | None
+    available_ips: int | None
+    name: str | None
+
+
+class VpcSgRuleDetail(BaseModel):
+    """A single inbound or outbound security group rule."""
+    protocol: str
+    from_port: int | None
+    to_port: int | None
+    cidr: str | None
+    source_sg_id: str | None
+    source_sg_name: str | None
+    description: str | None
+
+
+class VpcSgDetail(BaseModel):
+    """Enriched security group info from EC2 DescribeSecurityGroups."""
+    sg_id: str
+    name: str | None
+    ingress: list[VpcSgRuleDetail]
+    egress: list[VpcSgRuleDetail]
+
+
+class VpcConfigDetailResponse(BaseModel):
+    """Enriched VPC configuration with live EC2 metadata."""
+    id: int
+    name: str
+    description: str | None
+    vpc_id: str
+    subnets: list[VpcSubnetDetail]
+    security_groups: list[VpcSgDetail]
+
+
+def _parse_sg_rules(ip_permissions: list[dict]) -> list[VpcSgRuleDetail]:
+    rules: list[VpcSgRuleDetail] = []
+    for perm in ip_permissions:
+        protocol = perm.get("IpProtocol", "-1")
+        if protocol == "-1":
+            protocol = "All"
+        from_port = perm.get("FromPort")
+        to_port = perm.get("ToPort")
+        description_base = None
+
+        for ip_range in perm.get("IpRanges", []):
+            rules.append(VpcSgRuleDetail(
+                protocol=protocol,
+                from_port=from_port,
+                to_port=to_port,
+                cidr=ip_range.get("CidrIp"),
+                source_sg_id=None,
+                source_sg_name=None,
+                description=ip_range.get("Description") or description_base,
+            ))
+        for sg_ref in perm.get("UserIdGroupPairs", []):
+            rules.append(VpcSgRuleDetail(
+                protocol=protocol,
+                from_port=from_port,
+                to_port=to_port,
+                cidr=None,
+                source_sg_id=sg_ref.get("GroupId"),
+                source_sg_name=sg_ref.get("GroupName"),
+                description=sg_ref.get("Description") or description_base,
+            ))
+        if not perm.get("IpRanges") and not perm.get("UserIdGroupPairs"):
+            rules.append(VpcSgRuleDetail(
+                protocol=protocol,
+                from_port=from_port,
+                to_port=to_port,
+                cidr=None,
+                source_sg_id=None,
+                source_sg_name=None,
+                description=description_base,
+            ))
+    return rules
+
+
+@router.get("/vpc-configs/{config_id}/detail", response_model=VpcConfigDetailResponse)
+def get_vpc_config_detail(
+    config_id: int,
+    user: UserInfo = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> VpcConfigDetailResponse:
+    """Return a VPC configuration enriched with live EC2 subnet and security group metadata."""
+    import boto3
+    import os
+
+    config = db.query(VpcConfig).filter(VpcConfig.id == config_id).first()
+    if not config:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="VPC configuration not found")
+
+    region = os.getenv("AWS_REGION", "us-east-1")
+    ec2 = boto3.client("ec2", region_name=region)
+
+    subnet_ids = config.get_subnet_ids()
+    sg_ids = config.get_sg_ids()
+
+    subnets: list[VpcSubnetDetail] = []
+    if subnet_ids:
+        try:
+            resp = ec2.describe_subnets(SubnetIds=subnet_ids)
+            subnet_map = {s["SubnetId"]: s for s in resp.get("Subnets", [])}
+        except Exception:
+            subnet_map = {}
+        for sid in subnet_ids:
+            s = subnet_map.get(sid, {})
+            name_tag = next((t["Value"] for t in s.get("Tags", []) if t["Key"] == "Name"), None)
+            subnets.append(VpcSubnetDetail(
+                subnet_id=sid,
+                availability_zone=s.get("AvailabilityZone"),
+                availability_zone_id=s.get("AvailabilityZoneId"),
+                cidr_block=s.get("CidrBlock"),
+                available_ips=s.get("AvailableIpAddressCount"),
+                name=name_tag,
+            ))
+
+    security_groups: list[VpcSgDetail] = []
+    if sg_ids:
+        try:
+            resp = ec2.describe_security_groups(GroupIds=sg_ids)
+            sg_map = {g["GroupId"]: g for g in resp.get("SecurityGroups", [])}
+        except Exception:
+            sg_map = {}
+        for sgid in sg_ids:
+            g = sg_map.get(sgid, {})
+            security_groups.append(VpcSgDetail(
+                sg_id=sgid,
+                name=g.get("GroupName"),
+                ingress=_parse_sg_rules(g.get("IpPermissions", [])),
+                egress=_parse_sg_rules(g.get("IpPermissionsEgress", [])),
+            ))
+
+    return VpcConfigDetailResponse(
+        id=config.id,
+        name=config.name,
+        description=config.description,
+        vpc_id=config.vpc_id,
+        subnets=subnets,
+        security_groups=security_groups,
+    )
+
+
+@router.delete("/vpc-configs/{config_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_vpc_config(
+    config_id: int,
+    user: UserInfo = Depends(require_scopes("settings:write")),
+    db: Session = Depends(get_db),
+) -> None:
+    """Delete a VPC configuration."""
+    config = db.query(VpcConfig).filter(VpcConfig.id == config_id).first()
+    if not config:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="VPC configuration not found")
+    db.delete(config)
+    db.commit()

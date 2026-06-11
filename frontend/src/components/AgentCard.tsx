@@ -177,6 +177,11 @@ export function AgentCard({ agent, onSelect, onDelete, onEdit, readOnly, showOnC
             )}
           </div>
         )}
+        {agent.status_reason && (agent.status === "CREATE_FAILED" || agent.status === "UPDATE_FAILED" || agent.deployment_status === "failed") && (
+          <div className="text-[10px] text-destructive break-words">
+            {agent.status_reason}
+          </div>
+        )}
       </CardHeader>
       <CardContent className="space-y-3 text-xs text-muted-foreground">
         <div className="rounded border bg-input-bg p-3 space-y-0.5">

@@ -256,6 +256,101 @@ infra.delete:
 		--stack-name $(P_INFRA_STACK) \
 		--no-prompts
 
+# PrivateLink ingress (NLB + VPC Endpoint Service — deployed separately by networking team)
+privatelink: privatelink.package privatelink.deploy
+
+privatelink.package:
+	sam package \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_PRIVATELINK_TEMPLATE) \
+		--output-template-file $(P_PRIVATELINK_OUTPUT) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_PRIVATELINK_STACK)
+
+privatelink.deploy:
+	sam deploy \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_PRIVATELINK_OUTPUT) \
+		--stack-name $(P_PRIVATELINK_STACK) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_PRIVATELINK_STACK) \
+		--parameter-overrides \
+			pVpcId=$(P_INFRA_VPC_ID) \
+			pPrivateSubnetIds=$(P_PRIVATELINK_PRIVATE_SUBNET_IDS) \
+			pStackName=$(P_PRIVATELINK_STACK) \
+			pTagApplication=$(P_TAG_APPLICATION) \
+			pTagGroup=$(P_TAG_GROUP) \
+			pTagOwner=$(P_TAG_OWNER) \
+		--no-confirm-changeset
+
+privatelink.outputs:
+	@aws cloudformation describe-stacks \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_PRIVATELINK_STACK) \
+		--query 'Stacks[0].Outputs' \
+		--output json | jq .
+
+privatelink.delete:
+	sam delete \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_PRIVATELINK_STACK) \
+		--no-prompts
+
+# Agent security group (ingress rules for VPC-deployed AgentCore Runtime agents)
+security-group: security-group.package security-group.deploy
+
+security-group.package:
+	sam package \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_AGENT_SG_TEMPLATE) \
+		--output-template-file $(P_AGENT_SG_OUTPUT) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_AGENT_SG_STACK)
+
+security-group.deploy:
+	sam deploy \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--template-file $(P_AGENT_SG_OUTPUT) \
+		--stack-name $(P_AGENT_SG_STACK) \
+		--s3-bucket $(BUCKET) \
+		--s3-prefix $(P_AGENT_SG_STACK) \
+		--parameter-overrides \
+			pVpcId=$(P_INFRA_VPC_ID) \
+			pStackName=$(P_AGENT_SG_STACK) \
+			$(if $(P_AGENT_SG_HTTPS_CIDR),pAllowHttpsCidr=$(P_AGENT_SG_HTTPS_CIDR)) \
+			$(if $(P_AGENT_SG_HTTP_CIDR),pAllowHttpCidr=$(P_AGENT_SG_HTTP_CIDR)) \
+			$(if $(P_AGENT_SG_MCP_CIDR),pAllowMcpCidr=$(P_AGENT_SG_MCP_CIDR)) \
+			$(if $(P_AGENT_SG_A2A_CIDR),pAllowA2aCidr=$(P_AGENT_SG_A2A_CIDR)) \
+			$(if $(P_AGENT_SG_HTTPS_SOURCE_SG),pAllowHttpsFromSg=$(P_AGENT_SG_HTTPS_SOURCE_SG)) \
+			$(if $(P_AGENT_SG_HTTP_SOURCE_SG),pAllowHttpFromSg=$(P_AGENT_SG_HTTP_SOURCE_SG)) \
+			$(if $(P_AGENT_SG_MCP_SOURCE_SG),pAllowMcpFromSg=$(P_AGENT_SG_MCP_SOURCE_SG)) \
+			$(if $(P_AGENT_SG_A2A_SOURCE_SG),pAllowA2aFromSg=$(P_AGENT_SG_A2A_SOURCE_SG)) \
+			pTagApplication=$(P_TAG_APPLICATION) \
+			pTagGroup=$(P_TAG_GROUP) \
+			pTagOwner=$(P_TAG_OWNER) \
+		--no-confirm-changeset
+
+security-group.outputs:
+	@aws cloudformation describe-stacks \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_AGENT_SG_STACK) \
+		--query 'Stacks[0].Outputs' \
+		--output json | jq .
+
+security-group.delete:
+	sam delete \
+		--profile $(PROFILE) \
+		--region $(REGION) \
+		--stack-name $(P_AGENT_SG_STACK) \
+		--no-prompts
+
 # Bedrock AgentCore service-linked role (run once per account before first agent deployment)
 agentcore.init:
 	aws iam create-service-linked-role \

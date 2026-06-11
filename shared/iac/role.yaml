@@ -136,6 +136,7 @@ Resources:
                     - bedrock-agentcore:GetMemory
                     - bedrock-agentcore:GetMemoryRecord
                     - bedrock-agentcore:ListActors
+                    - bedrock-agentcore:ListEvents
                     - bedrock-agentcore:ListMemoryRecords
                     - bedrock-agentcore:ListSessions
                     - bedrock-agentcore:RetrieveMemoryRecords

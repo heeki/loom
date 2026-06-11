@@ -176,6 +176,8 @@ def create_runtime(
     role_arn: str,
     env_vars: dict[str, str],
     network_mode: str = "PUBLIC",
+    vpc_subnet_ids: list[str] | None = None,
+    vpc_security_group_ids: list[str] | None = None,
     protocol: str = "HTTP",
     lifecycle_config: dict | None = None,
     authorizer_config: dict | None = None,
@@ -193,6 +195,8 @@ def create_runtime(
         role_arn: IAM role ARN for execution
         env_vars: Environment variables to inject
         network_mode: Network mode (PUBLIC or VPC)
+        vpc_subnet_ids: Subnet IDs for VPC network mode
+        vpc_security_group_ids: Security group IDs for VPC network mode
         protocol: Server protocol (HTTP or MCP)
         lifecycle_config: Optional lifecycle configuration
         authorizer_config: Optional authorizer configuration
@@ -224,11 +228,18 @@ def create_runtime(
             }
         },
         "roleArn": role_arn,
-        "networkConfiguration": {"networkMode": network_mode},
         "protocolConfiguration": {"serverProtocol": protocol},
         "environmentVariables": env_vars,
         "tags": _merge_tags(extra=tags),
     }
+
+    network_config: dict[str, Any] = {"networkMode": network_mode}
+    if network_mode == "VPC" and (vpc_subnet_ids or vpc_security_group_ids):
+        network_config["networkModeConfig"] = {
+            "subnets": vpc_subnet_ids or [],
+            "securityGroups": vpc_security_group_ids or [],
+        }
+    params["networkConfiguration"] = network_config
 
     if lifecycle_config is not None:
         params["lifecycleConfiguration"] = lifecycle_config
@@ -353,6 +364,8 @@ def update_runtime(
     artifact_bucket: str | None = None,
     artifact_prefix: str | None = None,
     network_mode: str | None = None,
+    vpc_subnet_ids: list[str] | None = None,
+    vpc_security_group_ids: list[str] | None = None,
     lifecycle_config: dict | None = None,
     region: str = "us-east-1",
 ) -> dict[str, Any]:
@@ -401,7 +414,13 @@ def update_runtime(
             }
         }
     if network_mode is not None:
-        params["networkConfiguration"] = {"networkMode": network_mode}
+        network_config: dict[str, Any] = {"networkMode": network_mode}
+        if network_mode == "VPC" and (vpc_subnet_ids or vpc_security_group_ids):
+            network_config["networkModeConfig"] = {
+                "subnets": vpc_subnet_ids or [],
+                "securityGroups": vpc_security_group_ids or [],
+            }
+        params["networkConfiguration"] = network_config
     if lifecycle_config is not None:
         params["lifecycleConfiguration"] = lifecycle_config
 

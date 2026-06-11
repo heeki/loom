@@ -28,6 +28,7 @@ from app.models.invocation import Invocation
 from app.models.tag_policy import TagPolicy
 from app.models.tag_profile import TagProfile
 from app.models.managed_role import ManagedRole
+from app.models.vpc_config import VpcConfig
 from app.routers.utils import get_agent_or_404
 
 from app.services.agentcore import describe_runtime, list_runtime_endpoints
@@ -101,12 +102,12 @@ class AgentDeployRequest(BaseModel):
     role_arn: str | None = Field(None, description="Existing IAM role ARN or null to create new")
     protocol: str = Field(default="HTTP", description="HTTP, MCP, or A2A")
     network_mode: str = Field(default="PUBLIC", description="PUBLIC or VPC")
+    vpc_config_id: int | None = Field(None, description="VPC configuration ID (required when network_mode is VPC)")
     idle_timeout: int | None = Field(None, description="Idle runtime session timeout (seconds)")
     max_lifetime: int | None = Field(None, description="Max lifetime (seconds)")
     authorizer_type: str | None = Field(None, description="Authorizer type: 'cognito', 'entra_id', 'okta', or 'other'")
     authorizer_pool_id: str | None = Field(None, description="Cognito pool ID for authorizer (when type is 'cognito')")
     authorizer_discovery_url: str | None = Field(None, description="OIDC discovery URL (when type is 'other')")
-    authorizer_allowed_audience: list[str] = Field(default_factory=list, description="Allowed JWT audience values")
     authorizer_allowed_audience: list[str] = Field(default_factory=list, description="Allowed JWT audience values")
     authorizer_allowed_clients: list[str] = Field(default_factory=list, description="Allowed client IDs")
     authorizer_allowed_scopes: list[str] = Field(default_factory=list, description="Allowed OAuth scopes")
@@ -135,6 +136,7 @@ class AgentCreateRequest(BaseModel):
     role_arn: str | None = Field(None, description="Existing IAM role ARN or null to create new")
     protocol: str = Field(default="HTTP", description="HTTP, MCP, or A2A")
     network_mode: str = Field(default="PUBLIC", description="PUBLIC or VPC")
+    vpc_config_id: int | None = Field(None, description="VPC configuration ID (required when network_mode is VPC)")
     idle_timeout: int | None = Field(None, description="Idle runtime session timeout (seconds)")
     max_lifetime: int | None = Field(None, description="Max lifetime (seconds)")
     authorizer_type: str | None = Field(None, description="Authorizer type: 'cognito', 'entra_id', 'okta', or 'other'")
@@ -181,6 +183,7 @@ class AgentResponse(BaseModel):
     endpoint_status: str | None = None
     protocol: str | None = None
     network_mode: str | None = None
+    vpc_config_id: int | None = None
     tags: dict[str, str] = {}
     authorizer_config: dict | None = None
     model_id: str | None = None
@@ -198,6 +201,7 @@ class AgentResponse(BaseModel):
     a2a_names: list[str] = []
     code_interpreter_id: str | None = None
     code_interpreter_status: str | None = None
+    status_reason: str | None = None
 
 
 class ConfigEntryResponse(BaseModel):
@@ -823,6 +827,8 @@ def _deploy_agent(request: AgentCreateRequest, db: Session, background_tasks: Ba
         registered_at=datetime.utcnow(),
     )
     agent.set_allowed_model_ids(effective_allowed)
+    if request.network_mode == "VPC":
+        agent.vpc_config_id = request.vpc_config_id
     db.add(agent)
     db.commit()
     db.refresh(agent)
@@ -1259,12 +1265,15 @@ def _deploy_agent_background(
         db.commit()
 
         try:
+            vpc_cfg = db.query(VpcConfig).filter(VpcConfig.id == request.vpc_config_id).first() if request.network_mode == "VPC" and request.vpc_config_id else None
             response = create_runtime(
                 name=request.name,
                 description=request.description,
                 role_arn=execution_role_arn,
                 env_vars=env_vars,
                 network_mode=request.network_mode,
+                vpc_subnet_ids=vpc_cfg.get_subnet_ids() if vpc_cfg else None,
+                vpc_security_group_ids=vpc_cfg.get_sg_ids() if vpc_cfg else None,
                 protocol=request.protocol,
                 lifecycle_config=lifecycle_config,
                 authorizer_config=authorizer_config,
@@ -1614,6 +1623,7 @@ def _update_deploy_agent_background(
         db.commit()
 
         try:
+            vpc_cfg = db.query(VpcConfig).filter(VpcConfig.id == request.vpc_config_id).first() if request.network_mode == "VPC" and request.vpc_config_id else None
             response = update_runtime(
                 runtime_id=agent.runtime_id,
                 description=request.description,
@@ -1623,12 +1633,15 @@ def _update_deploy_agent_background(
                 artifact_bucket=artifact_bucket,
                 artifact_prefix=artifact_key,
                 network_mode=request.network_mode,
+                vpc_subnet_ids=vpc_cfg.get_subnet_ids() if vpc_cfg else None,
+                vpc_security_group_ids=vpc_cfg.get_sg_ids() if vpc_cfg else None,
                 lifecycle_config=lifecycle_config,
                 region=region,
             )
 
             agent.description = request.description or agent.description
             agent.network_mode = request.network_mode
+            agent.vpc_config_id = request.vpc_config_id if request.network_mode == "VPC" else None
             agent.deployment_status = "deployed"
             agent.status = response.get("status", "UPDATING")
             agent.deployed_at = datetime.utcnow()
@@ -1751,6 +1764,38 @@ def _deploy_harness(request: AgentCreateRequest, db: Session, background_tasks: 
 
     extra_harness_tools = request.harness_tools or []
 
+    # Snapshot memory data (first memory resource is passed to harness API)
+    memory_snapshots: list[dict[str, Any]] = []
+    if request.memory_ids:
+        memory_records = db.query(Memory).filter(Memory.id.in_(request.memory_ids)).all()
+        memory_snapshots = [
+            {"name": m.name, "memory_id": m.memory_id, "arn": m.arn}
+            for m in memory_records
+        ]
+
+    # Resolve VPC subnet/SG IDs for harness VPC networking
+    harness_vpc_subnet_ids: list[str] | None = None
+    harness_vpc_sg_ids: list[str] | None = None
+    if request.network_mode == "VPC" and request.vpc_config_id:
+        vpc_cfg = db.query(VpcConfig).filter(VpcConfig.id == request.vpc_config_id).first()
+        if vpc_cfg:
+            harness_vpc_subnet_ids = vpc_cfg.get_subnet_ids()
+            harness_vpc_sg_ids = vpc_cfg.get_sg_ids()
+
+    # Resolve Code Interpreter config for harness
+    harness_ci_config: dict[str, Any] | None = None
+    if request.code_interpreter_enabled:
+        ci_role_arn = ""
+        if request.code_interpreter_role_id:
+            ci_role = db.query(ManagedRole).filter(ManagedRole.id == request.code_interpreter_role_id).first()
+            if ci_role:
+                ci_role_arn = ci_role.role_arn
+        harness_ci_config = {
+            "region": (request.code_interpreter_region or "").strip(),
+            "network_mode": request.code_interpreter_network_mode or "SANDBOX",
+            "execution_role_arn": ci_role_arn,
+        }
+
     effective_allowed = request.allowed_model_ids if request.allowed_model_ids else [request.model_id]
     if request.model_id not in effective_allowed:
         effective_allowed = [request.model_id] + effective_allowed
@@ -1797,6 +1842,7 @@ def _deploy_harness(request: AgentCreateRequest, db: Session, background_tasks: 
         execution_role_arn=request.role_arn,
         protocol="HTTP",
         network_mode=request.network_mode,
+        vpc_config_id=request.vpc_config_id if request.network_mode == "VPC" else None,
         registered_at=datetime.utcnow(),
     )
     agent.set_allowed_model_ids(effective_allowed)
@@ -1830,16 +1876,20 @@ def _deploy_harness(request: AgentCreateRequest, db: Session, background_tasks: 
         model_id=request.model_id,
         system_prompt=system_prompt,
         mcp_snapshots=mcp_snapshots,
+        memory_snapshots=memory_snapshots,
         extra_harness_tools=extra_harness_tools,
         max_iterations=request.harness_max_iterations,
         max_tokens=request.harness_max_tokens,
         authorizer_config=authorizer_config,
         network_mode=request.network_mode,
+        vpc_subnet_ids=harness_vpc_subnet_ids,
+        vpc_security_group_ids=harness_vpc_sg_ids,
         idle_timeout=request.idle_timeout,
         max_lifetime=request.max_lifetime,
         resolved_tags=resolved_tags,
         region=region,
         account_id=account_id,
+        ci_config=harness_ci_config,
     )
 
     return response_data
@@ -1871,6 +1921,10 @@ def _deploy_harness_background(
     resolved_tags: dict[str, str],
     region: str,
     account_id: str,
+    memory_snapshots: list[dict[str, Any]] | None = None,
+    vpc_subnet_ids: list[str] | None = None,
+    vpc_security_group_ids: list[str] | None = None,
+    ci_config: dict[str, Any] | None = None,
 ) -> None:
     """Background task that creates credential providers and the harness in AWS."""
     db = SessionLocal()
@@ -1921,10 +1975,9 @@ def _deploy_harness_background(
                     db.commit()
                     return
 
-            # Only include non-auth MCP tools at deploy time; OAuth2 tools
-            # require a Bearer header and are injected at invocation time.
-            if server["auth_type"] != "oauth2":
-                harness_tools.append(_build_harness_tool_for_mcp(server))
+            # Register all MCP tools at deploy time; OAuth2 tokens are injected
+            # into remoteMcp.headers at invocation time.
+            harness_tools.append(_build_harness_tool_for_mcp(server))
 
             mcp_entry: dict[str, Any] = {
                 "name": server["name"],
@@ -1947,12 +2000,101 @@ def _deploy_harness_background(
 
         harness_tools.extend(extra_harness_tools)
 
+        # --- Step 2: Create Code Interpreter resource if requested ---
+        ci_arn: str | None = None
+        if ci_config and ci_config.get("execution_role_arn"):
+            agent.deployment_status = "creating_ci_resource"
+            db.commit()
+            try:
+                import boto3 as _boto3
+                ci_region = ci_config.get("region") or region
+                base_name = re.sub(r"_?code_interpreter$", "", name).strip("_")
+                raw_ci_name = f"loom_ci_{base_name}"
+                sanitized_ci_name = re.sub(r"[^a-zA-Z0-9_]", "_", raw_ci_name)[:48]
+                ci_net_mode = ci_config.get("network_mode") or "SANDBOX"
+                ci_boto = _boto3.client("bedrock-agentcore-control", region_name=ci_region)
+                # Reuse existing CI resource with this name if it already exists
+                ci_id: str | None = None
+                ci_arn_val: str | None = None
+                existing_cis = ci_boto.list_code_interpreters().get("codeInterpreterSummaries", [])
+                for existing_ci in existing_cis:
+                    if existing_ci.get("name") == sanitized_ci_name:
+                        ci_id = existing_ci["codeInterpreterId"]
+                        ci_arn_val = existing_ci["codeInterpreterArn"]
+                        logger.info("Reusing existing CI resource %s for harness agent %s", ci_id, agent_id)
+                        break
+                if not ci_id:
+                    ci_resp = ci_boto.create_code_interpreter(
+                        name=sanitized_ci_name,
+                        executionRoleArn=ci_config["execution_role_arn"],
+                        networkConfiguration={"networkMode": ci_net_mode},
+                    )
+                    ci_id = ci_resp["codeInterpreterId"]
+                    ci_arn_val = ci_resp["codeInterpreterArn"]
+                    logger.info("Created CI resource %s for harness agent %s", ci_id, agent_id)
+                ci_arn = ci_arn_val
+                agent.code_interpreter_id = ci_id
+                db.commit()
+                try:
+                    from app.services.observability import enable_code_interpreter_observability
+                    ci_arn_parts = ci_arn.split(":")
+                    ci_account_id = ci_arn_parts[4] if len(ci_arn_parts) >= 6 else account_id
+                    enable_code_interpreter_observability(
+                        ci_arn=ci_arn,
+                        ci_id=ci_id,
+                        account_id=ci_account_id,
+                        region=ci_region,
+                    )
+                except Exception as obs_err:
+                    logger.warning("Failed to enable CI observability for harness agent %s: %s", agent_id, obs_err)
+            except Exception as ci_err:
+                logger.error("Failed to create CI resource for harness agent %s: %s", agent_id, ci_err)
+                agent.status = "FAILED"
+                agent.deployment_status = "failed"
+                db.commit()
+                return
+
+        # Add code_interpreter tool to harness if CI resource was created
+        if ci_arn:
+            harness_tools.append({
+                "type": "agentcore_code_interpreter",
+                "name": "code_interpreter",
+                "config": {"agentCoreCodeInterpreter": {"codeInterpreterArn": ci_arn}},
+            })
+
         agent.deployment_status = "deploying"
         db.commit()
 
         # Build all MCP tools (for invocation-time injection with auth headers)
         all_mcp_tools = [_build_harness_tool_for_mcp(s) for s in mcp_snapshots]
         all_mcp_tools.extend(extra_harness_tools)
+
+        # Resolve memory: harness supports one memory resource.
+        # Fetch strategies from AWS to build retrievalConfig (required by CreateHarness).
+        memory_configs = []
+        primary_memory_arn = None
+        primary_memory_retrieval_config: dict[str, Any] | None = None
+        for m in (memory_snapshots or []):
+            try:
+                import boto3 as _boto3
+                mem_client = _boto3.client("bedrock-agentcore-control", region_name=region)
+                mem_resp = mem_client.get_memory(memoryId=m["memory_id"])
+                mem_obj = mem_resp.get("memory", {})
+                mem_status = mem_obj.get("status")
+                if mem_status not in (None, "DELETING", "FAILED"):
+                    retrieval_config: dict[str, Any] = {}
+                    for strategy in mem_obj.get("strategies", []):
+                        sid = strategy.get("strategyId")
+                        if sid and strategy.get("status") == "ACTIVE":
+                            retrieval_config[sid] = {"topK": 10, "strategyId": sid}
+                    memory_configs.append({"name": m["name"], "memory_id": m["memory_id"], "arn": m["arn"]})
+                    if not primary_memory_arn:
+                        primary_memory_arn = m["arn"]
+                        primary_memory_retrieval_config = retrieval_config or None
+                else:
+                    logger.warning("Memory %s has status %s, skipping", m["memory_id"], mem_status)
+            except Exception as mem_err:
+                logger.warning("Memory %s not found in AWS, skipping: %s", m["memory_id"], mem_err)
 
         # Build config JSON — deploy_tools go to create_harness, all tools
         # are stored for invocation-time injection with auth headers
@@ -1968,7 +2110,7 @@ def _deploy_harness_background(
             "integrations": {
                 "mcp_servers": mcp_server_configs,
                 "a2a_agents": [],
-                "memory": {"enabled": False, "resources": []},
+                "memory": {"enabled": len(memory_configs) > 0, "resources": memory_configs},
             },
         })
 
@@ -1983,6 +2125,19 @@ def _deploy_harness_background(
         db.commit()
 
 
+        # Delete any existing harness with the same name left over from a prior failed deploy.
+        try:
+            import boto3 as _boto3
+            _hc = _boto3.client("bedrock-agentcore-control", region_name=region)
+            existing_harnesses = _hc.list_harnesses().get("harnesses", [])
+            for _h in existing_harnesses:
+                if _h.get("harnessName") == name:
+                    logger.info("Deleting conflicting existing harness %s before create", _h["harnessId"])
+                    _hc.delete_harness(harnessId=_h["harnessId"])
+                    break
+        except Exception as _pre_err:
+            logger.warning("Pre-create harness conflict check failed: %s", _pre_err)
+
         response = create_harness_api(
             name=name,
             execution_role_arn=execution_role_arn,
@@ -1993,8 +2148,12 @@ def _deploy_harness_background(
             max_tokens=max_tokens,
             authorizer_config=authorizer_config,
             network_mode=network_mode,
+            vpc_subnet_ids=vpc_subnet_ids,
+            vpc_security_group_ids=vpc_security_group_ids,
             idle_timeout=idle_timeout,
             max_lifetime=max_lifetime,
+            memory_arn=primary_memory_arn,
+            memory_retrieval_config=primary_memory_retrieval_config,
             tags=resolved_tags if resolved_tags else None,
             region=region,
         )
@@ -2079,6 +2238,10 @@ def _update_harness_background(
     old_cp_names: set[str],
     region: str,
     account_id: str,
+    memory_snapshots: list[dict[str, Any]] | None = None,
+    vpc_subnet_ids: list[str] | None = None,
+    vpc_security_group_ids: list[str] | None = None,
+    ci_config: dict[str, Any] | None = None,
 ) -> None:
     """Background task that updates an existing harness via UpdateHarness API."""
     db = SessionLocal()
@@ -2121,8 +2284,7 @@ def _update_harness_background(
                         db.commit()
                         return
 
-            if server["auth_type"] != "oauth2":
-                harness_tools.append(_build_harness_tool_for_mcp(server))
+            harness_tools.append(_build_harness_tool_for_mcp(server))
 
             mcp_entry: dict[str, Any] = {
                 "name": server["name"],
@@ -2162,6 +2324,74 @@ def _update_harness_background(
         all_mcp_tools = [_build_harness_tool_for_mcp(s) for s in mcp_snapshots]
         all_mcp_tools.extend(extra_harness_tools)
 
+        memory_configs = []
+        primary_memory_arn = None
+        primary_memory_retrieval_config: dict[str, Any] | None = None
+        for m in (memory_snapshots or []):
+            try:
+                import boto3 as _boto3
+                mem_client = _boto3.client("bedrock-agentcore-control", region_name=region)
+                mem_resp = mem_client.get_memory(memoryId=m["memory_id"])
+                mem_obj = mem_resp.get("memory", {})
+                mem_status = mem_obj.get("status")
+                if mem_status not in (None, "DELETING", "FAILED"):
+                    retrieval_config: dict[str, Any] = {}
+                    for strategy in mem_obj.get("strategies", []):
+                        sid = strategy.get("strategyId")
+                        if sid and strategy.get("status") == "ACTIVE":
+                            retrieval_config[sid] = {"topK": 10, "strategyId": sid}
+                    memory_configs.append({"name": m["name"], "memory_id": m["memory_id"], "arn": m["arn"]})
+                    if not primary_memory_arn:
+                        primary_memory_arn = m["arn"]
+                        primary_memory_retrieval_config = retrieval_config or None
+                else:
+                    logger.warning("Memory %s has status %s, skipping", m["memory_id"], mem_status)
+            except Exception as mem_err:
+                logger.warning("Memory %s not found in AWS, skipping: %s", m["memory_id"], mem_err)
+
+        # Handle Code Interpreter: reuse existing resource or create new one
+        update_ci_arn: str | None = None
+        if ci_config and ci_config.get("execution_role_arn"):
+            existing_ci_id = ci_config.get("existing_id")
+            if existing_ci_id:
+                # Fetch ARN from existing resource
+                try:
+                    import boto3 as _boto3
+                    ci_region_upd = ci_config.get("region") or region
+                    ci_boto_upd = _boto3.client("bedrock-agentcore-control", region_name=ci_region_upd)
+                    ci_info = ci_boto_upd.get_code_interpreter(codeInterpreterId=existing_ci_id)
+                    update_ci_arn = ci_info.get("codeInterpreterArn")
+                except Exception as ci_get_err:
+                    logger.warning("Could not fetch existing CI ARN for harness update %s: %s", agent_id, ci_get_err)
+            if not update_ci_arn:
+                # Create a new CI resource
+                try:
+                    import boto3 as _boto3
+                    ci_region_upd = ci_config.get("region") or region
+                    base_name_upd = re.sub(r"_?code_interpreter$", "", name).strip("_")
+                    raw_ci_name_upd = f"loom_ci_{base_name_upd}"
+                    san_ci_name_upd = re.sub(r"[^a-zA-Z0-9_]", "_", raw_ci_name_upd)[:48]
+                    ci_net_upd = ci_config.get("network_mode") or "SANDBOX"
+                    ci_boto_upd = _boto3.client("bedrock-agentcore-control", region_name=ci_region_upd)
+                    ci_resp_upd = ci_boto_upd.create_code_interpreter(
+                        name=san_ci_name_upd,
+                        executionRoleArn=ci_config["execution_role_arn"],
+                        networkConfiguration={"networkMode": ci_net_upd},
+                    )
+                    update_ci_arn = ci_resp_upd["codeInterpreterArn"]
+                    agent.code_interpreter_id = ci_resp_upd["codeInterpreterId"]
+                    db.commit()
+                    logger.info("Created new CI resource %s for harness update %s", agent.code_interpreter_id, agent_id)
+                except Exception as ci_create_err:
+                    logger.warning("Failed to create CI resource for harness update %s: %s", agent_id, ci_create_err)
+
+        if update_ci_arn:
+            harness_tools.append({
+                "type": "agentcore_code_interpreter",
+                "name": "code_interpreter",
+                "config": {"agentCoreCodeInterpreter": {"codeInterpreterArn": update_ci_arn}},
+            })
+
         config_json = json.dumps({
             "system_prompt": system_prompt,
             "model_id": model_id,
@@ -2174,7 +2404,7 @@ def _update_harness_background(
             "integrations": {
                 "mcp_servers": mcp_server_configs,
                 "a2a_agents": [],
-                "memory": {"enabled": False, "resources": []},
+                "memory": {"enabled": len(memory_configs) > 0, "resources": memory_configs},
             },
         })
 
@@ -2197,8 +2427,12 @@ def _update_harness_background(
             max_tokens=max_tokens,
             authorizer_config=authorizer_config,
             network_mode=network_mode,
+            vpc_subnet_ids=vpc_subnet_ids,
+            vpc_security_group_ids=vpc_security_group_ids,
             idle_timeout=idle_timeout,
             max_lifetime=max_lifetime,
+            memory_arn=primary_memory_arn,
+            memory_retrieval_config=primary_memory_retrieval_config,
             region=region,
         )
 
@@ -2399,6 +2633,29 @@ def get_agent_status(agent_id: int, user: UserInfo = Depends(require_scopes("age
                 db.refresh(agent)
                 return _agent_response(agent, db)
 
+        # Auto-register in Agent Registry once harness is fully READY
+        if agent.deployment_status == "READY" and not agent.registry_record_id:
+            try:
+                from app.services.registry import get_registry_client
+                reg_client = get_registry_client()
+                if reg_client.registry_id:
+                    descriptors = reg_client.build_agent_descriptors(agent)
+                    reg_result = reg_client.create_record(
+                        name=agent.name or agent.harness_id,
+                        descriptor_type="A2A",
+                        descriptors=descriptors,
+                        record_version="1",
+                        description=agent.description,
+                    )
+                    reg_record_id = reg_result.get("recordId", "")
+                    if reg_record_id:
+                        rec = reg_client.wait_for_record(reg_record_id)
+                        agent.registry_record_id = reg_record_id
+                        agent.registry_status = rec.get("status", "DRAFT")
+                        logger.info("Auto-registered harness agent %s in registry: %s", agent.id, reg_record_id)
+            except Exception as reg_err:
+                logger.warning("Failed to auto-register harness agent %s in registry: %s", agent.id, reg_err)
+
         db.commit()
         db.refresh(agent)
         return _agent_response(agent, db)
@@ -2408,6 +2665,7 @@ def get_agent_status(agent_id: int, user: UserInfo = Depends(require_scopes("age
         try:
             rt = get_runtime(agent.runtime_id, agent.region)
             agent.status = rt.get("status", agent.status)
+            agent.status_reason = rt.get("failureReason")
             agent.arn = rt.get("agentRuntimeArn", agent.arn)
             agent.last_refreshed_at = datetime.utcnow()
         except Exception as e:
@@ -2610,6 +2868,22 @@ def delete_agent(
     # Delete custom Code Interpreter resource if one was created
     if _ci_id and _ci_region:
         _delete_code_interpreter(_ci_id, _ci_region)
+    elif agent.source == "harness" and agent.name:
+        # Fallback: no code_interpreter_id stored, but a CI may exist from a failed deploy.
+        # Reconstruct the expected name and look it up.
+        try:
+            import boto3 as _boto3
+            _fallback_region = _region
+            base_name = re.sub(r"_?code_interpreter$", "", agent.name).strip("_")
+            expected_ci_name = re.sub(r"[^a-zA-Z0-9_]", "_", f"loom_ci_{base_name}")[:48]
+            ci_client = _boto3.client("bedrock-agentcore-control", region_name=_fallback_region)
+            summaries = ci_client.list_code_interpreters().get("codeInterpreterSummaries", [])
+            for s in summaries:
+                if s.get("name") == expected_ci_name:
+                    _delete_code_interpreter(s["codeInterpreterId"], _fallback_region)
+                    break
+        except Exception as ci_scan_err:
+            logger.warning("Failed to scan/delete orphaned CI for harness %s: %s", agent.name, ci_scan_err)
 
     # Clean up credential providers
     for cp_name in cp_names:
@@ -2789,10 +3063,14 @@ def refresh_agent(agent_id: int, user: UserInfo = Depends(require_scopes("agent:
 
     agent.name = metadata.get("agentRuntimeName")
     agent.status = metadata.get("status")
+    agent.status_reason = metadata.get("failureReason")
     protocol_config = metadata.get("protocolConfiguration", {})
     agent.protocol = protocol_config.get("serverProtocol", agent.protocol or "HTTP")
     network_config = metadata.get("networkConfiguration", {})
     agent.network_mode = network_config.get("networkMode", agent.network_mode or "PUBLIC")
+    if agent.network_mode == "VPC":
+        agent.set_vpc_subnet_ids(network_config.get("vpcSubnetIds") or agent.get_vpc_subnet_ids() or None)
+        agent.set_vpc_security_group_ids(network_config.get("vpcSecurityGroupIds") or agent.get_vpc_security_group_ids() or None)
     if not agent.account_id:
         try:
             _, arn_account_id, _ = parse_arn(agent.arn)
@@ -3081,6 +3359,7 @@ def redeploy_harness_agent(
     agent.description = request.description or agent.description
     agent.execution_role_arn = request.role_arn or agent.execution_role_arn
     agent.network_mode = request.network_mode or agent.network_mode
+    agent.vpc_config_id = request.vpc_config_id if agent.network_mode == "VPC" else None
     agent.status = "UPDATING"
     agent.deployment_status = "updating"
 
@@ -3155,6 +3434,39 @@ def redeploy_harness_agent(
 
     extra_harness_tools = request.harness_tools or []
 
+    # Snapshot memory resources for update
+    update_memory_snapshots: list[dict[str, Any]] = []
+    if request.memory_ids:
+        mem_records = db.query(Memory).filter(Memory.id.in_(request.memory_ids)).all()
+        update_memory_snapshots = [
+            {"name": m.name, "memory_id": m.memory_id, "arn": m.arn}
+            for m in mem_records
+        ]
+
+    # Resolve VPC subnet/SG IDs for harness VPC networking
+    update_vpc_subnet_ids: list[str] | None = None
+    update_vpc_sg_ids: list[str] | None = None
+    if request.network_mode == "VPC" and request.vpc_config_id:
+        vpc_cfg = db.query(VpcConfig).filter(VpcConfig.id == request.vpc_config_id).first()
+        if vpc_cfg:
+            update_vpc_subnet_ids = vpc_cfg.get_subnet_ids()
+            update_vpc_sg_ids = vpc_cfg.get_sg_ids()
+
+    # Resolve Code Interpreter config for harness update
+    update_ci_config: dict[str, Any] | None = None
+    if request.code_interpreter_enabled:
+        ci_role_arn_update = ""
+        if request.code_interpreter_role_id:
+            ci_role_upd = db.query(ManagedRole).filter(ManagedRole.id == request.code_interpreter_role_id).first()
+            if ci_role_upd:
+                ci_role_arn_update = ci_role_upd.role_arn
+        update_ci_config = {
+            "region": (request.code_interpreter_region or "").strip(),
+            "network_mode": request.code_interpreter_network_mode or "SANDBOX",
+            "execution_role_arn": ci_role_arn_update,
+            "existing_id": agent.code_interpreter_id,
+        }
+
     background_tasks.add_task(
         _update_harness_background,
         agent_id=agent_id,
@@ -3164,17 +3476,21 @@ def redeploy_harness_agent(
         model_id=request.model_id,
         system_prompt=system_prompt,
         mcp_snapshots=mcp_snapshots,
+        memory_snapshots=update_memory_snapshots,
         extra_harness_tools=extra_harness_tools,
         max_iterations=request.harness_max_iterations,
         max_tokens=request.harness_max_tokens,
         authorizer_config=authorizer_config,
         network_mode=request.network_mode,
+        vpc_subnet_ids=update_vpc_subnet_ids,
+        vpc_security_group_ids=update_vpc_sg_ids,
         idle_timeout=request.idle_timeout,
         max_lifetime=request.max_lifetime,
         resolved_tags=resolved_tags,
         old_cp_names=old_cp_names,
         region=region,
         account_id=account_id,
+        ci_config=update_ci_config,
     )
 
     return _agent_response(agent, db)
@@ -3227,7 +3543,12 @@ def export_agent(agent_id: int, user: UserInfo = Depends(require_scopes("admin:w
         data["allowed_models"] = allowed
 
     if agent.network_mode and agent.network_mode != "PUBLIC":
-        data["network_mode"] = agent.network_mode
+        vpc_block: dict[str, Any] = {"mode": agent.network_mode}
+        if agent.network_mode == "VPC" and agent.vpc_config_id:
+            vpc_cfg = db.query(VpcConfig).filter(VpcConfig.id == agent.vpc_config_id).first()
+            if vpc_cfg:
+                vpc_block["config"] = vpc_cfg.name
+        data["vpc"] = vpc_block
 
     if agent.execution_role_arn:
         managed_role = db.query(ManagedRole).filter(ManagedRole.role_arn == agent.execution_role_arn).first()

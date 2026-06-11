@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -21,9 +21,95 @@ import { listA2aAgents } from "@/api/a2a";
 import { useAuth } from "@/contexts/AuthContext";
 import { listMemories } from "@/api/memories";
 import { ResourceTagFields } from "@/components/ResourceTagFields";
-import type { AgentDeployRequest, AgentHarnessDeployRequest, ModelOption, ManagedRole, AuthorizerConfigResponse, TagProfile, McpServer, A2aAgent, MemoryResponse } from "@/api/types";
+import type { AgentDeployRequest, AgentHarnessDeployRequest, ModelOption, ManagedRole, AuthorizerConfigResponse, TagProfile, McpServer, A2aAgent, MemoryResponse, VpcConfig, VpcConfigDetail } from "@/api/types";
 import { groupModels } from "@/lib/models";
 import { toast } from "sonner";
+
+function formatSgPort(r: { protocol: string; from_port: number | null; to_port: number | null }): string {
+  if (r.protocol === "All") return "All";
+  if (r.from_port === null && r.to_port === null) return "All";
+  if (r.from_port === r.to_port) return String(r.from_port);
+  return `${r.from_port}–${r.to_port}`;
+}
+
+function VpcDetailTables({ detail }: { detail: VpcConfigDetail }) {
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <p className="text-xs font-medium text-muted-foreground">Subnets ({detail.subnets.length})</p>
+        <table className="text-xs w-full border-collapse border border-border rounded">
+          <thead>
+            <tr className="bg-accent text-muted-foreground">
+              <th className="text-left font-medium px-2 py-1 border border-border">Subnet ID</th>
+              <th className="text-left font-medium px-2 py-1 border border-border">Availability Zone / ID</th>
+              <th className="text-left font-medium px-2 py-1 border border-border">CIDR</th>
+              <th className="text-left font-medium px-2 py-1 border border-border">Available IPs</th>
+            </tr>
+          </thead>
+          <tbody>
+            {detail.subnets.map((s) => (
+              <tr key={s.subnet_id} className="bg-background">
+                <td className="px-2 py-0.5 font-mono border border-border">
+                  {s.subnet_id}{s.name && <span className="ml-1 text-muted-foreground">({s.name})</span>}
+                </td>
+                <td className="px-2 py-0.5 font-mono border border-border">
+                  {s.availability_zone ?? "—"}
+                  {s.availability_zone_id && (
+                    <span className="ml-1 text-muted-foreground">({s.availability_zone_id})</span>
+                  )}
+                </td>
+                <td className="px-2 py-0.5 font-mono border border-border">{s.cidr_block ?? "—"}</td>
+                <td className="px-2 py-0.5 border border-border text-muted-foreground">{s.available_ips ?? "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {detail.security_groups.map((sg) => (
+        <div key={sg.sg_id} className="space-y-2">
+          <p className="text-xs font-medium text-muted-foreground">{sg.sg_id}{sg.name ? ` — ${sg.name}` : ""}</p>
+          {(["ingress", "egress"] as const).map((dir) => (
+            <div key={dir} className="space-y-1">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{dir === "ingress" ? "Inbound" : "Outbound"} rules</p>
+              <table className="text-xs w-full border-collapse border border-border rounded table-fixed">
+                <colgroup>
+                  <col className="w-20" />
+                  <col className="w-24" />
+                  <col className="w-[25%]" />
+                  <col />
+                </colgroup>
+                <thead>
+                  <tr className="bg-accent text-muted-foreground">
+                    <th className="text-left font-medium px-2 py-1 border border-border">Protocol</th>
+                    <th className="text-left font-medium px-2 py-1 border border-border">Port</th>
+                    <th className="text-left font-medium px-2 py-1 border border-border">Source / Destination</th>
+                    <th className="text-left font-medium px-2 py-1 border border-border">Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sg[dir].length === 0 ? (
+                    <tr className="bg-background">
+                      <td colSpan={4} className="px-2 py-1 border border-border text-muted-foreground italic">No rules</td>
+                    </tr>
+                  ) : sg[dir].map((r, i) => (
+                    <tr key={i} className="bg-background align-top">
+                      <td className="px-2 py-0.5 font-mono border border-border">{r.protocol}</td>
+                      <td className="px-2 py-0.5 font-mono border border-border">{formatSgPort(r)}</td>
+                      <td className="px-2 py-0.5 font-mono border border-border break-all">
+                        {r.cidr ?? (r.source_sg_id ? (r.source_sg_name ? `${r.source_sg_id} (${r.source_sg_name})` : r.source_sg_id) : "—")}
+                      </td>
+                      <td className="px-2 py-0.5 border border-border text-muted-foreground break-words">{r.description ?? ""}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function TagInput({
   values,
@@ -116,12 +202,16 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
   const [selectedRoleId, setSelectedRoleId] = useState<string>("");
   const [protocol] = useState("HTTP");
   const [networkMode, setNetworkMode] = useState("PUBLIC");
+  const [vpcConfigId, setVpcConfigId] = useState<string>("");
+  const [vpcConfigs, setVpcConfigs] = useState<VpcConfig[]>([]);
 
   // Security config state (pre-configured by Security Admin)
   const [selectedAuthConfigId, setSelectedAuthConfigId] = useState<string>("");
 
   // Permission request state
   const [showRolePerms, setShowRolePerms] = useState(false);
+  const [showVpcDetail, setShowVpcDetail] = useState(false);
+  const [vpcDetail, setVpcDetail] = useState<VpcConfigDetail | "loading" | null>(null);
   const [showPermRequest, setShowPermRequest] = useState(false);
   const [permActions, setPermActions] = useState<string[]>([]);
   const [permResources, setPermResources] = useState<string[]>([]);
@@ -171,6 +261,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
         securityApi.listManagedRoles().then(setManagedRoles).catch(() => {}),
         securityApi.listAuthorizerConfigs().then(setAuthConfigs).catch(() => {}),
         settingsApi.listTagProfiles().then(setTagProfiles).catch(() => {}),
+        settingsApi.listVpcConfigs().then(setVpcConfigs).catch(() => {}),
         listMcpServers().then(setMcpServers).catch(() => {}),
         listA2aAgents().then(setA2aAgents).catch(() => {}),
         listMemories().then(setMemories).catch(() => {}),
@@ -180,6 +271,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
 
   // Auto-populate form when editing an existing agent
   const [loadedAgentId, setLoadedAgentId] = useState<number | undefined>(undefined);
+  const pendingVpcConfigName = useRef<string | null>(null);
   useEffect(() => {
     if (!exportAgentId || !hasScope("admin:write")) return;
     if (exportAgentId === loadedAgentId) return;
@@ -205,7 +297,19 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
         const match = managedRoles.find((r) => r.role_name === parsed.role || r.role_arn === parsed.role);
         if (match) setSelectedRoleId(match.id.toString());
       }
-      if (parsed.network_mode) setNetworkMode(parsed.network_mode as string);
+      if (parsed.vpc && typeof parsed.vpc === "object") {
+        const vpc = parsed.vpc as Record<string, unknown>;
+        if (typeof vpc.mode === "string") setNetworkMode(vpc.mode);
+        if (typeof vpc.config === "string") {
+          const match = vpcConfigs.find((c) => c.name === vpc.config || c.id.toString() === vpc.config);
+          if (match) {
+            setVpcConfigId(match.id.toString());
+          } else {
+            // vpcConfigs may not be loaded yet — store name for deferred resolution
+            pendingVpcConfigName.current = vpc.config;
+          }
+        }
+      }
       if (parsed.authorizer) {
         const match = authConfigs.find((c) => c.name === parsed.authorizer || c.id.toString() === parsed.authorizer);
         if (match) setSelectedAuthConfigId(match.id.toString());
@@ -266,8 +370,20 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exportAgentId, models.length, dataLoaded]);
 
+  // Deferred VPC config resolution: if vpcConfigs wasn't loaded when the export ran,
+  // resolve the pending name once vpcConfigs becomes available.
+  useEffect(() => {
+    if (!pendingVpcConfigName.current || vpcConfigs.length === 0) return;
+    const match = vpcConfigs.find((c) => c.name === pendingVpcConfigName.current || c.id.toString() === pendingVpcConfigName.current);
+    if (match) {
+      setVpcConfigId(match.id.toString());
+      pendingVpcConfigName.current = null;
+    }
+  }, [vpcConfigs]);
+
   const selectedRole = managedRoles.find((r) => r.id.toString() === selectedRoleId);
   const selectedAuthConfig = authConfigs.find((c) => c.id.toString() === selectedAuthConfigId);
+  const selectedVpcConfig = vpcConfigs.find((c) => c.id.toString() === vpcConfigId);
 
   const validateName = (value: string) => {
     if (!value) {
@@ -340,6 +456,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
           : undefined,
         role_arn: roleArn,
         network_mode: networkMode,
+        vpc_config_id: networkMode === "VPC" && vpcConfigId ? parseInt(vpcConfigId, 10) : null,
         idle_timeout: idleTimeout ? parseInt(idleTimeout, 10) : null,
         max_lifetime: maxLifetime ? parseInt(maxLifetime, 10) : null,
         authorizer_type: authConfig?.authorizer_type ?? null,
@@ -351,11 +468,16 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
         authorizer_client_id: authConfig?.client_id ?? null,
         authorizer_client_secret: null,
         mcp_servers: selectedMcpServerIds,
+        memory_ids: selectedMemoryIds,
         tags: Object.fromEntries(
           Object.entries(tagValues).filter(([, v]) => v.trim() !== "")
         ),
         harness_max_iterations: harnessMaxIterations ? parseInt(harnessMaxIterations, 10) : null,
         harness_max_tokens: harnessMaxTokens ? parseInt(harnessMaxTokens, 10) : null,
+        code_interpreter_enabled: codeInterpreterEnabled,
+        code_interpreter_region: codeInterpreterRegion,
+        code_interpreter_network_mode: codeInterpreterNetworkMode,
+        code_interpreter_role_id: codeInterpreterRoleId ? parseInt(codeInterpreterRoleId) : null,
         harness_tools: enableHumanConfirmation ? [{
           name: "user_confirmation",
           type: "inline_function",
@@ -398,6 +520,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
         role_arn: roleArn,
         protocol,
         network_mode: networkMode,
+        vpc_config_id: networkMode === "VPC" && vpcConfigId ? parseInt(vpcConfigId, 10) : null,
         idle_timeout: idleTimeout ? parseInt(idleTimeout, 10) : defaults.idle_timeout_seconds,
         max_lifetime: maxLifetime ? parseInt(maxLifetime, 10) : defaults.max_lifetime_seconds,
         authorizer_type: authConfig?.authorizer_type ?? null,
@@ -511,7 +634,14 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                       const match = managedRoles.find((r) => r.role_name === parsed.role || r.role_arn === parsed.role);
                       if (match) setSelectedRoleId(match.id.toString());
                     }
-                    if (parsed.network_mode) setNetworkMode(parsed.network_mode);
+                    if (parsed.vpc && typeof parsed.vpc === "object") {
+                      const vpc = parsed.vpc as Record<string, unknown>;
+                      if (typeof vpc.mode === "string") setNetworkMode(vpc.mode);
+                      if (typeof vpc.config === "string") {
+                        const match = vpcConfigs.find((c) => c.name === vpc.config || c.id.toString() === vpc.config);
+                        if (match) setVpcConfigId(match.id.toString());
+                      }
+                    }
                     if (parsed.authorizer) {
                       const match = authConfigs.find((c) => c.name === parsed.authorizer || c.id.toString() === parsed.authorizer);
                       if (match) setSelectedAuthConfigId(match.id.toString());
@@ -587,7 +717,14 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                   if (selectedAllowedModelIds.length > 0) {
                     result.allowed_models = selectedAllowedModelIds;
                   }
-                  if (networkMode && networkMode !== "PUBLIC") result.network_mode = networkMode;
+                  if (networkMode && networkMode !== "PUBLIC") {
+                    const vpcBlock: Record<string, string> = { mode: networkMode };
+                    if (networkMode === "VPC" && vpcConfigId) {
+                      const cfg = vpcConfigs.find((c) => c.id.toString() === vpcConfigId);
+                      if (cfg) vpcBlock.config = cfg.name;
+                    }
+                    result.vpc = vpcBlock;
+                  }
                   if (selectedRoleId) {
                     const role = managedRoles.find((r) => r.id.toString() === selectedRoleId);
                     if (role) result.role = role.role_name;
@@ -748,7 +885,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="PUBLIC">PUBLIC</SelectItem>
-                      <SelectItem value="VPC" disabled>VPC (coming soon)</SelectItem>
+                      <SelectItem value="VPC">VPC</SelectItem>
                     </SelectContent>
                   </Select>
                 </section>
@@ -765,42 +902,6 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                   />
                 </section>
               </div>
-
-              {/* Allowed Models for Runtime Selection */}
-              {modelId && models.length > 0 && (
-                <section className="space-y-2">
-                  <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Allowed Models (runtime selection)</h4>
-                  <p className="text-xs text-muted-foreground">Users can choose from these models when invoking the agent. The deploy model is always included.</p>
-                  <div className="space-y-1.5">
-                    {groupModels(models).map(([group, groupedModels]) => (
-                      <div key={group} className="flex flex-wrap gap-x-4 gap-y-1 items-center">
-                        <span className="text-[10px] font-medium text-muted-foreground w-16 shrink-0">{group}</span>
-                        {groupedModels.map((m) => (
-                          <label key={m.model_id} className="flex items-center gap-2 text-xs cursor-pointer">
-                            <input
-                              type="checkbox"
-                              className="h-3.5 w-3.5 shrink-0"
-                              checked={m.model_id === modelId || selectedAllowedModelIds.includes(m.model_id)}
-                              disabled={m.model_id === modelId}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedAllowedModelIds((prev) => [...prev, m.model_id]);
-                                } else {
-                                  setSelectedAllowedModelIds((prev) => prev.filter((id) => id !== m.model_id));
-                                }
-                              }}
-                            />
-                            <span>{m.display_name}</span>
-                            {m.model_id === modelId && (
-                              <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded">default</span>
-                            )}
-                          </label>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              )}
 
               {/* IAM Role Permissions (read-only) */}
               {selectedRole && (
@@ -889,6 +990,97 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                       </Button>
                     </div>
                   )}
+                </section>
+              )}
+
+              {/* VPC Configuration */}
+              {networkMode === "VPC" && (
+                <section className="space-y-2">
+                  <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">VPC Configuration</h4>
+                  <SearchableSelect
+                    options={vpcConfigs.map((c) => ({ value: c.id.toString(), label: c.name, description: `${c.vpc_id} · ${c.subnet_ids.length} subnets · ${c.sg_ids.length} SGs` }))}
+                    value={vpcConfigId}
+                    onValueChange={(v) => {
+                      setVpcConfigId(v);
+                      setShowVpcDetail(false);
+                      setVpcDetail(null);
+                    }}
+                    placeholder="Select VPC configuration..."
+                  />
+                  {vpcConfigs.length === 0 && (
+                    <p className="text-xs text-muted-foreground">No VPC configurations available. Add one in Settings → Networking.</p>
+                  )}
+                  {selectedVpcConfig && (
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = !showVpcDetail;
+                          setShowVpcDetail(next);
+                          if (next && !vpcDetail) {
+                            setVpcDetail("loading");
+                            settingsApi.getVpcConfigDetail(selectedVpcConfig.id)
+                              .then(setVpcDetail)
+                              .catch(() => setVpcDetail(null));
+                          }
+                        }}
+                        className="flex items-center gap-1 text-xs font-medium text-muted-foreground uppercase tracking-wide hover:text-foreground"
+                      >
+                        {showVpcDetail ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                        VPC Details (read-only)
+                      </button>
+                      {showVpcDetail && (
+                        <div className="rounded border p-3 bg-muted/30 space-y-3">
+                          {vpcDetail === "loading" ? (
+                            <p className="text-xs text-muted-foreground">Loading…</p>
+                          ) : vpcDetail ? (
+                            <>
+                              <p className="text-xs text-muted-foreground font-mono">{vpcDetail.vpc_id}</p>
+                              <VpcDetailTables detail={vpcDetail} />
+                            </>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">Could not load VPC details.</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </section>
+              )}
+
+              {/* Allowed Models for Runtime Selection */}
+              {modelId && models.length > 0 && (
+                <section className="space-y-2">
+                  <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Allowed Models (runtime selection)</h4>
+                  <p className="text-xs text-muted-foreground">Users can choose from these models when invoking the agent. The deploy model is always included.</p>
+                  <div className="space-y-1.5">
+                    {groupModels(models).map(([group, groupedModels]) => (
+                      <div key={group} className="flex flex-wrap gap-x-4 gap-y-1 items-center">
+                        <span className="text-[10px] font-medium text-muted-foreground w-16 shrink-0">{group}</span>
+                        {groupedModels.map((m) => (
+                          <label key={m.model_id} className="flex items-center gap-2 text-xs cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="h-3.5 w-3.5 shrink-0"
+                              checked={m.model_id === modelId || selectedAllowedModelIds.includes(m.model_id)}
+                              disabled={m.model_id === modelId}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedAllowedModelIds((prev) => [...prev, m.model_id]);
+                                } else {
+                                  setSelectedAllowedModelIds((prev) => prev.filter((id) => id !== m.model_id));
+                                }
+                              }}
+                            />
+                            <span>{m.display_name}</span>
+                            {m.model_id === modelId && (
+                              <span className="text-[10px] text-muted-foreground bg-accent px-1 rounded">default</span>
+                            )}
+                          </label>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
                 </section>
               )}
 
@@ -1023,8 +1215,7 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
               <ResourceTagFields onChange={setTagValues} profileId={selectedTagProfileId} groupRestriction={groupRestriction} ownerRestriction={ownerRestriction} />
 
               {/* Integrations */}
-              {/* Memory Resources (Custom Agent only) */}
-              {deploymentType === "custom" && (
+              {/* Memory Resources */}
               <section className="space-y-3">
                 <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Memory Resources</h4>
                 <div className="space-y-1.5">
@@ -1056,7 +1247,6 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                   )}
                 </div>
               </section>
-              )}
 
               {/* MCP Servers */}
               <section className="space-y-3">
@@ -1149,7 +1339,6 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
               )}
 
               {/* Code Interpreter (Custom Agent only) */}
-              {deploymentType === "custom" && (
               <section className="space-y-3">
                 <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Code Interpreter</h4>
                 <label className="flex items-center gap-2 text-xs cursor-pointer">
@@ -1196,7 +1385,6 @@ export function AgentRegistrationForm({ mode, onRegister, onDeploy, onDeployHarn
                   </div>
                 )}
               </section>
-              )}
 
               <div className="space-y-1.5">
               <p className="text-[10px] text-muted-foreground italic">

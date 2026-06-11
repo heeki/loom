@@ -22,9 +22,13 @@ def create_harness(
     max_tokens: int | None = None,
     authorizer_config: dict[str, Any] | None = None,
     network_mode: str = "PUBLIC",
+    vpc_subnet_ids: list[str] | None = None,
+    vpc_security_group_ids: list[str] | None = None,
     idle_timeout: int | None = None,
     max_lifetime: int | None = None,
     tags: dict[str, str] | None = None,
+    memory_arn: str | None = None,
+    memory_retrieval_config: dict[str, Any] | None = None,
     region: str = "us-east-1",
 ) -> dict[str, Any]:
     """Create a new AgentCore Harness (managed agent loop).
@@ -70,8 +74,20 @@ def create_harness(
         if lifecycle_config:
             env_config["lifecycleConfiguration"] = lifecycle_config
         if network_mode != "PUBLIC":
-            env_config["networkConfiguration"] = {"networkMode": network_mode}
+            net_cfg: dict[str, Any] = {"networkMode": network_mode}
+            if network_mode == "VPC" and (vpc_subnet_ids or vpc_security_group_ids):
+                net_cfg["networkModeConfig"] = {
+                    "subnets": vpc_subnet_ids or [],
+                    "securityGroups": vpc_security_group_ids or [],
+                }
+            env_config["networkConfiguration"] = net_cfg
         params["environment"] = {"agentCoreRuntimeEnvironment": env_config}
+
+    if memory_arn:
+        mem_cfg: dict[str, Any] = {"arn": memory_arn}
+        if memory_retrieval_config:
+            mem_cfg["retrievalConfig"] = memory_retrieval_config
+        params["memory"] = {"agentCoreMemoryConfiguration": mem_cfg}
 
     if tags:
         params["tags"] = tags
@@ -102,8 +118,12 @@ def update_harness(
     max_tokens: int | None = None,
     authorizer_config: dict[str, Any] | None = None,
     network_mode: str | None = None,
+    vpc_subnet_ids: list[str] | None = None,
+    vpc_security_group_ids: list[str] | None = None,
     idle_timeout: int | None = None,
     max_lifetime: int | None = None,
+    memory_arn: str | None = None,
+    memory_retrieval_config: dict[str, Any] | None = None,
     region: str = "us-east-1",
 ) -> dict[str, Any]:
     """Update an existing AgentCore Harness."""
@@ -144,8 +164,20 @@ def update_harness(
         if lifecycle_config:
             env_config["lifecycleConfiguration"] = lifecycle_config
         if network_mode and network_mode != "PUBLIC":
-            env_config["networkConfiguration"] = {"networkMode": network_mode}
+            net_cfg: dict[str, Any] = {"networkMode": network_mode}
+            if network_mode == "VPC" and (vpc_subnet_ids or vpc_security_group_ids):
+                net_cfg["networkModeConfig"] = {
+                    "subnets": vpc_subnet_ids or [],
+                    "securityGroups": vpc_security_group_ids or [],
+                }
+            env_config["networkConfiguration"] = net_cfg
         params["environment"] = {"agentCoreRuntimeEnvironment": env_config}
+
+    if memory_arn is not None:
+        mem_cfg: dict[str, Any] = {"arn": memory_arn}
+        if memory_retrieval_config:
+            mem_cfg["retrievalConfig"] = memory_retrieval_config
+        params["memory"] = {"optionalValue": {"agentCoreMemoryConfiguration": mem_cfg}}
 
     response = client.update_harness(**params)
     result = response.get("harness", response)

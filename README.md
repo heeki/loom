@@ -11,6 +11,8 @@ Loom seamlessly weaves together agents, memory stores, MCP servers, and agent-to
 ### Agent Lifecycle
 - Deploy new agents or import existing AgentCore Runtime agents
 - Deploy managed agents via AgentCore Harness (no code required) with configurable model parameters, built-in tools (code interpreter, browser), and MCP server integration
+- **VPC-enabled agents:** deploy both custom and managed agents with VPC egress — configure subnets and security groups via named VPC config profiles for private access to VPC-internal resources
+- **PrivateLink ingress:** IaC template (`shared/iac/privatelink.yaml`) provisions an NLB and VPC Endpoint Service for invoking agents from within a VPC
 - SSE streaming invocation with real-time response display
 - Progressive deployment status tracking and async deletion
 - Cold-start latency measurement via CloudWatch log parsing

@@ -653,6 +653,21 @@ Agents support runtime model selection, allowing users to choose from a set of a
 - **Status polling:** CI status is surfaced via `code_interpreter_status` on `AgentResponse`. CI polling is skipped when the agent is in `DELETING` state. `ResourceNotFoundException` during CI poll is logged at DEBUG (expected post-deletion).
 - **Deployment phase label:** `creating_ci_resource` displays as "Building artifact & creating Code Interpreter" to reflect the parallel nature of the two operations.
 
+### Phase 31 — VPC-Enabled Agents *(Complete)*
+- **VPC configuration model:** `VpcConfig` ORM model with `name`, `vpc_id`, `subnet_ids` (JSON array), and `security_group_ids` (JSON array). Full CRUD API under `/api/vpc-configs`. Stored in the `vpc_configs` table; referenced by agents via `vpc_config_id` (INTEGER FK).
+- **VPC egress for deploy-type agents:** `AgentDeployRequest` accepts `network_mode` (`PUBLIC` or `VPC`) and `vpc_config_id`. When `network_mode=VPC`, the runtime is created with `networkConfiguration.networkMode=VPC` and the resolved subnet/SG IDs. `vpc_config_id` is persisted on the `Agent` record and included in `AgentResponse` for export/edit round-trips.
+- **VPC egress for harness agents:** `AgentHarnessDeployRequest` accepts `network_mode` and `vpc_config_id`. `create_harness` / `update_harness` accept optional `vpc_subnet_ids` and `vpc_security_group_ids` parameters passed through to the AgentCore Harness API when `network_mode=VPC`. `vpc_config_id` is persisted on the `Agent` record at harness creation time.
+- **PrivateLink ingress IaC:** `shared/iac/privatelink.yaml` SAM template creates the NLB, VPC Endpoint Service, and required security groups for PrivateLink-based agent invocation. Makefile targets: `privatelink`, `privatelink.delete`, `privatelink.describe`.
+- **Frontend VPC selector:** Network mode radio (PUBLIC/VPC) in the deploy form expands to show a VPC Config dropdown when VPC is selected. On agent edit, the previously-selected VPC config is pre-populated using a `useRef`-deferred effect that resolves the config name after the `vpcConfigs` list loads.
+- **Harness refinements (same branch):**
+  - All MCP tools (including OAuth2-authenticated) are included in the harness tool list; OAuth2 tokens are injected at invocation time via `remoteMcp.headers`.
+  - `actor_id` sanitized with regex `[^a-zA-Z0-9:_/\-] → _` to handle Okta email-format subs that contain `@` and `.`.
+  - Code Interpreter `ConflictException` handled by reusing existing CI resource by name (`list_code_interpreters` scan); orphaned CI resource deleted when harness is deleted.
+  - Memory `retrievalConfig` built from active strategies (`strategy.status == "ACTIVE"`) using `strategyId` as key; `get_memory` response unwrapped from nested `"memory"` key.
+  - `bedrock-agentcore:ListEvents` added to the memory policy in `shared/iac/role.yaml`.
+  - Harness `ConflictException` on create resolved by pre-deleting the existing harness with the same name before calling `create_harness`.
+  - Registry auto-registration for harness agents: harness status polling now includes the same auto-registration block as custom deploy-type agents — when deployment reaches READY and no `registry_record_id` exists, a DRAFT registry record is created.
+
 ### Phase 30 — Advanced Operations
 - Real-time metrics auto-refresh.
 - Multi-agent comparison views.
