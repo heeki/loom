@@ -44,8 +44,8 @@ export interface AgentResponse {
   registry_status: string | null;
   code_interpreter_id?: string | null;
   code_interpreter_status?: string | null;
-  vpc_subnet_ids: string[];
-  vpc_security_group_ids: string[];
+  vpc_config_id: number | null;
+  status_reason?: string | null;
 }
 
 export interface AgentHarnessDeployRequest {
@@ -59,8 +59,7 @@ export interface AgentHarnessDeployRequest {
   allowed_model_ids?: string[];
   role_arn: string;
   network_mode: string;
-  vpc_subnet_ids: string[];
-  vpc_security_group_ids: string[];
+  vpc_config_id: number | null;
   idle_timeout: number | null;
   max_lifetime: number | null;
   authorizer_type: string | null;
@@ -72,10 +71,15 @@ export interface AgentHarnessDeployRequest {
   authorizer_client_id: string | null;
   authorizer_client_secret: string | null;
   mcp_servers: number[];
+  memory_ids?: number[];
   tags?: Record<string, string>;
   harness_max_iterations: number | null;
   harness_max_tokens: number | null;
   harness_tools?: Record<string, unknown>[];
+  code_interpreter_enabled: boolean;
+  code_interpreter_region: string;
+  code_interpreter_network_mode: string;
+  code_interpreter_role_id: number | null;
 }
 
 export interface AgentRegisterRequest {
@@ -96,8 +100,7 @@ export interface AgentDeployRequest {
   role_arn: string | null;
   protocol: string;
   network_mode: string;
-  vpc_subnet_ids: string[];
-  vpc_security_group_ids: string[];
+  vpc_config_id: number | null;
   idle_timeout: number | null;
   max_lifetime: number | null;
   authorizer_type: string | null;
@@ -692,6 +695,61 @@ export interface TagProfile {
 export interface TagProfileCreateRequest {
   name: string;
   tags: Record<string, string>;
+}
+
+// VPC Configuration types
+export interface VpcConfig {
+  id: number;
+  name: string;
+  description: string | null;
+  vpc_id: string;
+  subnet_ids: string[];
+  sg_ids: string[];
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface VpcConfigCreateRequest {
+  name: string;
+  description?: string;
+  vpc_id: string;
+  subnet_ids: string[];
+  sg_ids: string[];
+}
+
+export interface VpcSubnetDetail {
+  subnet_id: string;
+  availability_zone: string | null;
+  availability_zone_id: string | null;
+  cidr_block: string | null;
+  available_ips: number | null;
+  name: string | null;
+}
+
+export interface VpcSgRuleDetail {
+  protocol: string;
+  from_port: number | null;
+  to_port: number | null;
+  cidr: string | null;
+  source_sg_id: string | null;
+  source_sg_name: string | null;
+  description: string | null;
+}
+
+export interface VpcSgDetail {
+  sg_id: string;
+  name: string | null;
+  ingress: VpcSgRuleDetail[];
+  egress: VpcSgRuleDetail[];
+}
+
+export interface VpcConfigDetail {
+  id: number;
+  name: string;
+  description: string | null;
+  vpc_id: string;
+  subnets: VpcSubnetDetail[];
+  security_groups: VpcSgDetail[];
 }
 
 export interface ConnectorInfo {

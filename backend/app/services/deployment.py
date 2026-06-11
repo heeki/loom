@@ -234,10 +234,11 @@ def create_runtime(
     }
 
     network_config: dict[str, Any] = {"networkMode": network_mode}
-    if network_mode == "VPC" and vpc_subnet_ids:
-        network_config["vpcSubnetIds"] = vpc_subnet_ids
-    if network_mode == "VPC" and vpc_security_group_ids:
-        network_config["vpcSecurityGroupIds"] = vpc_security_group_ids
+    if network_mode == "VPC" and (vpc_subnet_ids or vpc_security_group_ids):
+        network_config["networkModeConfig"] = {
+            "subnets": vpc_subnet_ids or [],
+            "securityGroups": vpc_security_group_ids or [],
+        }
     params["networkConfiguration"] = network_config
 
     if lifecycle_config is not None:
@@ -414,10 +415,11 @@ def update_runtime(
         }
     if network_mode is not None:
         network_config: dict[str, Any] = {"networkMode": network_mode}
-        if network_mode == "VPC" and vpc_subnet_ids:
-            network_config["vpcSubnetIds"] = vpc_subnet_ids
-        if network_mode == "VPC" and vpc_security_group_ids:
-            network_config["vpcSecurityGroupIds"] = vpc_security_group_ids
+        if network_mode == "VPC" and (vpc_subnet_ids or vpc_security_group_ids):
+            network_config["networkModeConfig"] = {
+                "subnets": vpc_subnet_ids or [],
+                "securityGroups": vpc_security_group_ids or [],
+            }
         params["networkConfiguration"] = network_config
     if lifecycle_config is not None:
         params["lifecycleConfiguration"] = lifecycle_config

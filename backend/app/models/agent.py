@@ -1,7 +1,7 @@
 """Agent ORM model for storing registered AgentCore Runtime metadata."""
 import json
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 from app.db import Base
 
@@ -52,8 +52,10 @@ class Agent(Base):
     allowed_model_ids = Column(Text, nullable=True)  # JSON array of allowed model IDs
     harness_id = Column(String, nullable=True)  # Harness ID for managed agent deployments
     code_interpreter_id = Column(String, nullable=True)
-    vpc_subnet_ids = Column(Text, nullable=True)      # JSON array of subnet IDs for VPC network mode
-    vpc_security_group_ids = Column(Text, nullable=True)  # JSON array of security group IDs for VPC network mode
+    vpc_subnet_ids = Column(Text, nullable=True)      # kept for migration; resolved via vpc_config_id at deploy time
+    vpc_security_group_ids = Column(Text, nullable=True)  # kept for migration; resolved via vpc_config_id at deploy time
+    vpc_config_id = Column(Integer, ForeignKey("vpc_configs.id"), nullable=True)
+    status_reason = Column(String, nullable=True)  # failureReason from AgentCore API on CREATE_FAILED/UPDATE_FAILED
 
     # Relationships
     sessions = relationship("InvocationSession", back_populates="agent", cascade="all, delete-orphan")
@@ -184,6 +186,6 @@ class Agent(Base):
             "allowed_model_ids": self.get_allowed_model_ids(),
             "harness_id": self.harness_id,
             "code_interpreter_id": self.code_interpreter_id,
-            "vpc_subnet_ids": self.get_vpc_subnet_ids(),
-            "vpc_security_group_ids": self.get_vpc_security_group_ids(),
+            "vpc_config_id": self.vpc_config_id,
+            "status_reason": self.status_reason,
         }

@@ -70,6 +70,24 @@ P_ECS_STACK=loom-ecs-cluster
 P_ECS_TEMPLATE=iac/ecs.yaml
 P_ECS_OUTPUT=iac/ecs_output.yaml
 
+# Agent security group stack configuration
+# Deploys a security group for VPC-mode AgentCore Runtime agents.
+# Use the output oSecurityGroupId when creating a VPC configuration in Loom Settings → Networking.
+# Leave ingress parameters empty to omit those rules (only set what you need).
+P_AGENT_SG_STACK=loom-agent-sg
+P_AGENT_SG_TEMPLATE=iac/security_group.yaml
+P_AGENT_SG_OUTPUT=iac/security_group_output.yaml
+# CIDR ingress — one CIDR per port (e.g. 10.0.0.0/8); leave empty to omit
+P_AGENT_SG_HTTPS_CIDR=
+P_AGENT_SG_HTTP_CIDR=
+P_AGENT_SG_MCP_CIDR=
+P_AGENT_SG_A2A_CIDR=
+# Security group ingress — one source SG ID per port; leave empty to omit
+P_AGENT_SG_HTTPS_SOURCE_SG=
+P_AGENT_SG_HTTP_SOURCE_SG=
+P_AGENT_SG_MCP_SOURCE_SG=
+P_AGENT_SG_A2A_SOURCE_SG=
+
 # Loom configurations
 P_LOOM_ARTIFACT_BUCKET=$(LOOM_ARTIFACT_BUCKET)
 

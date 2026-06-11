@@ -388,15 +388,13 @@ class TestAgentModelVpc(unittest.TestCase):
         agent.set_vpc_security_group_ids(["sg-abc"])
         self.assertEqual(agent.get_vpc_security_group_ids(), ["sg-abc"])
 
-    def test_to_dict_includes_vpc_fields(self) -> None:
+    def test_to_dict_includes_vpc_config_id(self) -> None:
         from app.models.agent import Agent
         agent = Agent(arn="a", runtime_id="r", region="us-east-1", account_id="123",
                       name="test", status="READY", registered_at=None)
-        agent.set_vpc_subnet_ids(["subnet-aaa"])
-        agent.set_vpc_security_group_ids(["sg-bbb"])
+        agent.vpc_config_id = 42
         d = agent.to_dict()
-        self.assertEqual(d["vpc_subnet_ids"], ["subnet-aaa"])
-        self.assertEqual(d["vpc_security_group_ids"], ["sg-bbb"])
+        self.assertEqual(d["vpc_config_id"], 42)
 
 
 class TestUpdateRuntime(unittest.TestCase):

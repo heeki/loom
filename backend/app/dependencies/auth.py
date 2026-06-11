@@ -114,8 +114,16 @@ class UserInfo:
 
     @property
     def actor_id(self) -> str:
-        """Return a provider:sub formatted actor ID safe for AWS APIs."""
-        return f"{self.idp_type}:{self.sub}" if self.sub else "loom-agent"
+        """Return a provider:sub formatted actor ID safe for AWS APIs.
+
+        AWS requires: [a-zA-Z0-9][a-zA-Z0-9-_/]*(?::[a-zA-Z0-9-_/]+)*
+        Characters outside that set (e.g. '@', '.') are replaced with '_'.
+        """
+        import re as _re
+        if not self.sub:
+            return "loom-agent"
+        raw = f"{self.idp_type}:{self.sub}"
+        return _re.sub(r"[^a-zA-Z0-9:_/\-]", "_", raw)
 
 
 # ---------------------------------------------------------------------------
