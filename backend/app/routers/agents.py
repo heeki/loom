@@ -2633,6 +2633,29 @@ def get_agent_status(agent_id: int, user: UserInfo = Depends(require_scopes("age
                 db.refresh(agent)
                 return _agent_response(agent, db)
 
+        # Auto-register in Agent Registry once harness is fully READY
+        if agent.deployment_status == "READY" and not agent.registry_record_id:
+            try:
+                from app.services.registry import get_registry_client
+                reg_client = get_registry_client()
+                if reg_client.registry_id:
+                    descriptors = reg_client.build_agent_descriptors(agent)
+                    reg_result = reg_client.create_record(
+                        name=agent.name or agent.harness_id,
+                        descriptor_type="A2A",
+                        descriptors=descriptors,
+                        record_version="1",
+                        description=agent.description,
+                    )
+                    reg_record_id = reg_result.get("recordId", "")
+                    if reg_record_id:
+                        rec = reg_client.wait_for_record(reg_record_id)
+                        agent.registry_record_id = reg_record_id
+                        agent.registry_status = rec.get("status", "DRAFT")
+                        logger.info("Auto-registered harness agent %s in registry: %s", agent.id, reg_record_id)
+            except Exception as reg_err:
+                logger.warning("Failed to auto-register harness agent %s in registry: %s", agent.id, reg_err)
+
         db.commit()
         db.refresh(agent)
         return _agent_response(agent, db)
