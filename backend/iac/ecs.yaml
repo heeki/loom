@@ -59,6 +59,22 @@ Parameters:
     Type: String
     Description: Agent Registry ID (from bedrock-agentcore-control list-registries)
     Default: ""
+  pLitellmProxyBaseUrl:
+    Type: String
+    Description: Agent Base URL of the deployed LiteLLM proxy — what deployed agents/harnesses call at runtime (leave empty to disable). Also used by the backend for its own model discovery when pLitellmDiscoveryBaseUrl is empty.
+    Default: ""
+  pLitellmDiscoveryBaseUrl:
+    Type: String
+    Description: Discovery Base URL — what the backend itself uses to list live models/pricing, if different from pLitellmProxyBaseUrl (e.g. reached via a different path than agents use). Leave empty to reuse pLitellmProxyBaseUrl.
+    Default: ""
+  pLitellmProxyApiKeySecretArn:
+    Type: String
+    Description: Secrets Manager ARN containing the LiteLLM proxy's master/virtual API key (plain string secret, leave empty to disable)
+    Default: ""
+  pLitellmProxyApiKeySecretKmsKeyArn:
+    Type: String
+    Description: ARN of the customer-managed KMS key that encrypts pLitellmProxyApiKeySecretArn, if any (leave empty if the secret uses the default aws/secretsmanager key)
+    Default: ""
   pEcrKmsKeyArn:
     Type: String
     Description: ARN of the KMS key used to encrypt ECR repositories (from infra stack output oEcrKmsKeyArn)
@@ -77,8 +93,54 @@ Parameters:
 
 Conditions:
   CognitoRegionEmpty: !Equals [!Ref pCognitoRegion, ""]
+  HasLitellmProxyApiKey: !Not [!Equals [!Ref pLitellmProxyApiKeySecretArn, ""]]
+  HasLitellmProxyApiKeySecretKmsKey: !Not [!Equals [!Ref pLitellmProxyApiKeySecretKmsKeyArn, ""]]
 
 Resources:
+  # ---------------------------------------------------------------------------
+  # KMS — CloudWatch Logs encryption key
+  # ---------------------------------------------------------------------------
+  LogsKmsKey:
+    Type: AWS::KMS::Key
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - EA017
+    Properties:
+      Description: !Sub "KMS key for ${AWS::StackName} backend CloudWatch Logs encryption"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowAccountAdmin
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+          - Sid: AllowCloudWatchLogsService
+            Effect: Allow
+            Principal:
+              Service: !Sub "logs.${AWS::Region}.amazonaws.com"
+            Action:
+              - kms:Encrypt*
+              - kms:Decrypt*
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:Describe*
+            Resource: "*"
+            Condition:
+              ArnLike:
+                kms:EncryptionContext:aws:logs:arn: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+      Tags:
+        - Key: loom:application
+          Value: !Ref pTagApplication
+        - Key: loom:group
+          Value: !Ref pTagGroup
+        - Key: loom:owner
+          Value: !Ref pTagOwner
+
   # ---------------------------------------------------------------------------
   # CloudWatch Log Group
   # ---------------------------------------------------------------------------
@@ -87,6 +149,7 @@ Resources:
     Properties:
       LogGroupName: !Sub "/ecs/${AWS::StackName}/backend"
       RetentionInDays: 30
+      KmsKeyId: !GetAtt LogsKmsKey.Arn
       Tags:
         - Key: loom:application
           Value: !Ref pTagApplication
@@ -144,7 +207,11 @@ Resources:
               - Effect: Allow
                 Action:
                   - secretsmanager:GetSecretValue
-                Resource: !Ref pDatabaseSecretArn
+                Resource: !If
+                  - HasLitellmProxyApiKey
+                  - - !Ref pDatabaseSecretArn
+                    - !Ref pLitellmProxyApiKeySecretArn
+                  - - !Ref pDatabaseSecretArn
         - PolicyName: EcrKmsPolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -161,7 +228,11 @@ Resources:
               - Effect: Allow
                 Action:
                   - kms:Decrypt
-                Resource: !Ref pSecretsKmsKeyArn
+                Resource: !If
+                  - HasLitellmProxyApiKeySecretKmsKey
+                  - - !Ref pSecretsKmsKeyArn
+                    - !Ref pLitellmProxyApiKeySecretKmsKeyArn
+                  - !Ref pSecretsKmsKeyArn
       Tags:
         - Key: loom:application
           Value: !Ref pTagApplication
@@ -396,11 +467,20 @@ Resources:
               Value: !Ref pAllowedOrigins
             - Name: LOOM_REGISTRY_ID
               Value: !Ref pRegistryId
+            - Name: LOOM_LITELLM_PROXY_BASE_URL
+              Value: !Ref pLitellmProxyBaseUrl
+            - Name: LOOM_LITELLM_DISCOVERY_BASE_URL
+              Value: !Ref pLitellmDiscoveryBaseUrl
             - Name: LOG_LEVEL
               Value: info
-          Secrets:
-            - Name: LOOM_DATABASE_URL
-              ValueFrom: !Sub "${pDatabaseSecretArn}:url::"
+          Secrets: !If
+            - HasLitellmProxyApiKey
+            - - Name: LOOM_DATABASE_URL
+                ValueFrom: !Sub "${pDatabaseSecretArn}:url::"
+              - Name: LOOM_LITELLM_PROXY_API_KEY
+                ValueFrom: !Ref pLitellmProxyApiKeySecretArn
+            - - Name: LOOM_DATABASE_URL
+                ValueFrom: !Sub "${pDatabaseSecretArn}:url::"
       Tags:
         - Key: loom:application
           Value: !Ref pTagApplication
