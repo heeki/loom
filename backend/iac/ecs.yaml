@@ -273,6 +273,13 @@ Resources:
                 Resource:
                   - arn:aws:bedrock:*:*:inference-profile/*
                   - arn:aws:bedrock:*::foundation-model/*
+              # List operations don't support resource-level scoping — used by
+              # model_catalog.py's live Bedrock availability/catalog discovery.
+              - Effect: Allow
+                Action:
+                  - bedrock:ListFoundationModels
+                  - bedrock:ListInferenceProfiles
+                Resource: "*"
         - PolicyName: BedrockAgentCorePolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -296,6 +303,37 @@ Resources:
                   - bedrock-agentcore-control:UpdateRegistryRecord
                   - bedrock-agentcore-control:DeleteRegistryRecord
                 Resource: !Sub "arn:aws:bedrock-agentcore-control:*:${AWS::AccountId}:registry/*"
+              # Agent runtime lifecycle management — resource ARNs use the base
+              # "bedrock-agentcore" namespace even though these actions are
+              # under "bedrock-agentcore-control" (see backend/SPECIFICATIONS.md
+              # runtime ARN format).
+              - Effect: Allow
+                Action:
+                  - bedrock-agentcore-control:CreateAgentRuntime
+                  - bedrock-agentcore-control:CreateAgentRuntimeEndpoint
+                  - bedrock-agentcore-control:GetAgentRuntime
+                  - bedrock-agentcore-control:GetAgentRuntimeEndpoint
+                  - bedrock-agentcore-control:UpdateAgentRuntime
+                  - bedrock-agentcore-control:UpdateAgentRuntimeEndpoint
+                  - bedrock-agentcore-control:DeleteAgentRuntime
+                  - bedrock-agentcore-control:DeleteAgentRuntimeEndpoint
+                Resource: !Sub "arn:aws:bedrock-agentcore:*:${AWS::AccountId}:runtime/*"
+        - PolicyName: BedrockAgentCoreServiceLinkedRolePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # VPC-mode agent runtimes trigger AWS to lazily create this
+              # service-linked role on first use per account — without this
+              # grant, CreateAgentRuntime fails with "Failed creating service
+              # linked role" before ever evaluating the action's own IAM
+              # permissions.
+              - Effect: Allow
+                Action:
+                  - iam:CreateServiceLinkedRole
+                Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/aws-service-role/network.bedrock-agentcore.amazonaws.com/AWSServiceRoleForBedrockAgentCoreNetwork"
+                Condition:
+                  StringEquals:
+                    iam:AWSServiceName: network.bedrock-agentcore.amazonaws.com
         - PolicyName: S3ArtifactPolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -329,6 +367,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                   - logs:DescribeLogGroups
@@ -338,6 +377,29 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:logs:*:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/*"
                   - !Sub "arn:aws:logs:*:${AWS::AccountId}:log-group:/aws/vendedlogs/bedrock-agentcore/*"
+              # CloudWatch Logs delivery pipeline — used by
+              # app/services/observability.py to route AgentCore Runtime and
+              # Code Interpreter vended logs into the log groups above.
+              - Effect: Allow
+                Action:
+                  - logs:PutDeliveryDestination
+                  - logs:DeleteDeliveryDestination
+                  - logs:PutDeliverySource
+                  - logs:DeleteDeliverySource
+                Resource:
+                  - !Sub "arn:aws:logs:*:${AWS::AccountId}:delivery-destination:loom-*"
+                  - !Sub "arn:aws:logs:*:${AWS::AccountId}:delivery-source:loom-*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateDelivery
+                  - logs:DeleteDelivery
+                Resource: !Sub "arn:aws:logs:*:${AWS::AccountId}:delivery:*"
+              # DescribeDeliveries is a list operation with no resource-level
+              # scoping support.
+              - Effect: Allow
+                Action:
+                  - logs:DescribeDeliveries
+                Resource: "*"
         - PolicyName: IamPassRolePolicy
           PolicyDocument:
             Version: "2012-10-17"
