@@ -27,6 +27,9 @@ Resources:
           Base: 1
         - CapacityProvider: FARGATE_SPOT
           Weight: 1
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
       Tags:
         - Key: loom:application
           Value: !Ref pTagApplication

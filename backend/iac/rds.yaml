@@ -83,6 +83,7 @@ Resources:
           FromPort: 5432
           ToPort: 5432
           CidrIp: !Ref pAllowedCidr
+          Description: Allow PostgreSQL access from ECS tasks
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-rds-sg"
@@ -164,6 +165,30 @@ Resources:
           Value: !Ref pTagOwner
 
   # ---------------------------------------------------------------------------
+  # RDS Enhanced Monitoring role
+  # ---------------------------------------------------------------------------
+  RdsMonitoringRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-monitoring-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: monitoring.rds.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole
+      Tags:
+        - Key: loom:application
+          Value: !Ref pTagApplication
+        - Key: loom:group
+          Value: !Ref pTagGroup
+        - Key: loom:owner
+          Value: !Ref pTagOwner
+
+  # ---------------------------------------------------------------------------
   # RDS Instance
   # ---------------------------------------------------------------------------
   RdsInstance:
@@ -188,6 +213,8 @@ Resources:
       BackupRetentionPeriod: 7
       DeletionProtection: false
       PubliclyAccessible: false
+      MonitoringInterval: 60
+      MonitoringRoleArn: !GetAtt RdsMonitoringRole.Arn
       Tags:
         - Key: loom:application
           Value: !Ref pTagApplication

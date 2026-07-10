@@ -280,6 +280,7 @@ privatelink.deploy:
 			pVpcId=$(P_INFRA_VPC_ID) \
 			pPrivateSubnetIds=$(P_PRIVATELINK_PRIVATE_SUBNET_IDS) \
 			pStackName=$(P_PRIVATELINK_STACK) \
+			pLoggingBucketName=$(P_LOOM_LOGGING_BUCKET) \
 			pTagApplication=$(P_TAG_APPLICATION) \
 			pTagGroup=$(P_TAG_GROUP) \
 			pTagOwner=$(P_TAG_OWNER) \
